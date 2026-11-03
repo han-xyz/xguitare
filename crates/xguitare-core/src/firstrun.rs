@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -6,6 +7,7 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use xguitare_dsp::synth_ir::default_cabinet;
 
 const DEFAULT_IR: &str = "default-cab.wav";
+const STAGING_SUFFIX: &str = ".xguitare-staging";
 const STARTER_PRESETS: [(&str, &str); 5] = [
     ("01-clean.toml", include_str!("../bank/01-clean.toml")),
     ("02-crunch.toml", include_str!("../bank/02-crunch.toml")),
@@ -23,7 +25,7 @@ pub struct Created {
     pub ir: bool,
 }
 
-/// Creates `bank_dir` with the starter Presets and the default cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `<bank_dir>.tmp` (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
+/// Creates `bank_dir` with the starter Presets and the default cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `.<bank name>.xguitare-staging` beside it (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
 pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Error> {
     if bank_dir.exists() {
         return Ok(Created {
@@ -53,17 +55,16 @@ pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Err
 }
 
 fn staging_dir(bank_dir: &Path) -> Result<PathBuf, io::Error> {
-    let mut name = bank_dir
-        .file_name()
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("bank dir {} has no final name", bank_dir.display()),
-            )
-        })?
-        .to_os_string();
-    name.push(".tmp");
-    Ok(bank_dir.with_file_name(name))
+    let name = bank_dir.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("bank dir {} has no final name", bank_dir.display()),
+        )
+    })?;
+    let mut staging = OsString::from(".");
+    staging.push(name);
+    staging.push(STAGING_SUFFIX);
+    Ok(bank_dir.with_file_name(staging))
 }
 
 fn write_ir(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), hound::Error> {

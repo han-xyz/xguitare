@@ -83,7 +83,7 @@ fn leaves_existing_bank_alone() {
 fn interrupted_first_run_is_retried() {
     let temp = temp_dir("interrupted");
     let dir = temp.0.join("bank");
-    let staging = temp.0.join("bank.tmp");
+    let staging = temp.0.join(".bank.xguitare-staging");
     fs::create_dir_all(&staging).unwrap();
     fs::write(staging.join("01-clean.toml"), "name = \"Half\"\n").unwrap();
     let created = ensure_bank(&dir, 48_000).unwrap();
@@ -120,6 +120,8 @@ fn trailing_slash_bank_dir_still_creates_bank() {
     let temp = temp_dir("trailing");
     let dir = temp.0.join("bank");
     let with_slash = PathBuf::from(format!("{}/", dir.display()));
+    let unrelated = temp.0.join("bank.tmp");
+    fs::create_dir_all(&unrelated).unwrap();
     let created = ensure_bank(&with_slash, 48_000).unwrap();
     assert_eq!(created.presets, 5);
     assert_eq!(Bank::load_dir(&dir).unwrap().entries.len(), 5);
@@ -128,5 +130,5 @@ fn trailing_slash_bank_dir_still_creates_bank() {
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     siblings.sort();
-    assert_eq!(siblings, ["bank"]);
+    assert_eq!(siblings, ["bank", "bank.tmp"]);
 }
