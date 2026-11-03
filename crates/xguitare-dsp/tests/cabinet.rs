@@ -143,3 +143,32 @@ fn throughput_report() {
         start.elapsed()
     );
 }
+
+#[test]
+fn short_block_matches_long_ir() {
+    let ir: Vec<f32> = noise(300, 23).iter().map(|h| h * 0.1).collect();
+    let input = noise(20 * BLOCK, 29);
+    let expected = direct_convolution(&input, &ir);
+    let (full, _) = run(&mut cabinet_rack(mono_ir(ir.clone())), &input, BLOCK);
+    assert_close(&full, &expected, 1e-4);
+
+    let mut rack = cabinet_rack(mono_ir(ir));
+    let mut left = vec![0.0; input.len()];
+    let mut right = vec![0.0; input.len()];
+    let sizes = [64, 32, 128, 96, 128, 16, 1, 127];
+    let mut start = 0;
+    for size in sizes.iter().cycle() {
+        if start == input.len() {
+            break;
+        }
+        let end = (start + size).min(input.len());
+        rack.process(
+            &input[start..end],
+            &mut left[start..end],
+            &mut right[start..end],
+        );
+        start = end;
+    }
+    assert_close(&left, &expected, 1e-4);
+    assert_close(&right, &expected, 1e-4);
+}
