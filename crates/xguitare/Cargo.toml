@@ -1,0 +1,10 @@
+[package]
+name = "xguitare"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+xguitare-core = { path = "../xguitare-core" }
+xguitare-dsp = { path = "../xguitare-dsp" }

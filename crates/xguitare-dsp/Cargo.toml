@@ -1,0 +1,9 @@
+[package]
+name = "xguitare-dsp"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dev-dependencies]
+assert_no_alloc = "1.1.2"
