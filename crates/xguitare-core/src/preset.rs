@@ -3,8 +3,10 @@ use std::fmt;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use xguitare_dsp::modules::cabinet::Cabinet;
 use xguitare_dsp::{AudioBuffers, Module, ModuleSpec, Rack, RackError};
 
+use crate::ir::load_ir;
 use crate::registry::ModuleRegistry;
 
 const CABINET_TYPE: &str = "cabinet";
@@ -44,7 +46,11 @@ pub enum PresetError {
 pub enum BuildError {
     UnknownModule(String),
     Layout(RackError),
-    Ir { id: String, source: std::io::Error },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildWarning {
+    Ir { id: String, error: String },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -124,14 +130,35 @@ impl Preset {
         &self,
         sample_rate: f32,
         max_frames: usize,
-        _bank_dir: &Path,
-    ) -> Result<Rack, BuildError> {
+        bank_dir: &Path,
+        ir_max_ms: f32,
+    ) -> Result<(Rack, Vec<BuildWarning>), BuildError> {
         let registry = ModuleRegistry::default();
         let mut modules = Vec::with_capacity(self.modules.len());
+        let mut warnings = Vec::new();
         for preset_module in &self.modules {
-            let mut module = registry
-                .construct(&preset_module.type_name)
-                .ok_or_else(|| BuildError::UnknownModule(preset_module.type_name.clone()))?;
+            let mut module: Box<dyn Module> = if preset_module.type_name == CABINET_TYPE {
+                let ir = match preset_module
+                    .ir
+                    .as_deref()
+                    .map(|file| load_ir(&bank_dir.join(file), sample_rate as u32, ir_max_ms))
+                {
+                    Some(Ok(ir)) => Some(ir),
+                    Some(Err(error)) => {
+                        warnings.push(BuildWarning::Ir {
+                            id: preset_module.id.clone(),
+                            error: error.to_string(),
+                        });
+                        None
+                    }
+                    None => None,
+                };
+                Box::new(Cabinet::new(ir))
+            } else {
+                registry
+                    .construct(&preset_module.type_name)
+                    .ok_or_else(|| BuildError::UnknownModule(preset_module.type_name.clone()))?
+            };
             for (idx, (_, value)) in preset_module.params.iter().enumerate() {
                 module.set_param(idx, *value);
             }
@@ -139,7 +166,7 @@ impl Preset {
         }
         let mut rack = Rack::new(modules).map_err(BuildError::Layout)?;
         rack.prepare(sample_rate, max_frames);
-        Ok(rack)
+        Ok((rack, warnings))
     }
 }
 
@@ -215,16 +242,16 @@ impl fmt::Display for BuildError {
                 write!(f, "unknown module type '{type_name}'")
             }
             BuildError::Layout(error) => error.fmt(f),
-            BuildError::Ir { id, source } => write!(f, "cabinet '{id}': {source}"),
         }
     }
 }
 
-impl std::error::Error for BuildError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl std::error::Error for BuildError {}
+
+impl fmt::Display for BuildWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BuildError::Ir { source, .. } => Some(source),
-            _ => None,
+            BuildWarning::Ir { id, error } => write!(f, "cabinet '{id}': {error}"),
         }
     }
 }

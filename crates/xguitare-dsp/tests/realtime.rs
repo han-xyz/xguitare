@@ -1,4 +1,5 @@
 use assert_no_alloc::*;
+use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{Drive, Gain, Gate, Module, Preamp, Rack, Tonestack};
 
 #[cfg(debug_assertions)]
@@ -66,4 +67,13 @@ fn tonestack_does_not_allocate() {
         Box::new(Tonestack::new()),
         &[(0, 70.0), (1, 30.0), (2, 90.0)],
     );
+}
+
+#[test]
+fn cabinet_does_not_allocate() {
+    let ir = CabinetIr {
+        left: (0..4800).map(|n| 0.9_f32.powi(n)).collect(),
+        right: Some(vec![0.5; 4800]),
+    };
+    assert_rack_does_not_allocate(Box::new(Cabinet::new(Some(ir))), &[(0, -6.0)]);
 }

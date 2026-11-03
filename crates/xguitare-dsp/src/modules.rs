@@ -1,3 +1,4 @@
+pub mod cabinet;
 pub mod drive;
 pub mod gain;
 pub mod gate;

@@ -1,6 +1,7 @@
 pub mod modules;
 pub mod oversample;
 mod rack;
+pub mod resample;
 pub mod smooth;
 
 pub use modules::drive::Drive;
