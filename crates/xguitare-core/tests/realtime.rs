@@ -52,5 +52,5 @@ fn rack_switcher_does_not_allocate() {
         }
     });
     drop(switcher);
-    control.drop_retired();
+    control.drain_from_audio();
 }

@@ -219,3 +219,14 @@ fn run_main_no_args_is_usage_error() {
     );
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn save_prints_path() {
+    let out = cli(
+        &["save"],
+        reply(r#"{"ok":true,"path":"/bank/01-clean.toml"}"#),
+    );
+    assert_eq!(out.requests, [Request::Save]);
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "saved /bank/01-clean.toml\n");
+}

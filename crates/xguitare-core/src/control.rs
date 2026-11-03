@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -16,7 +17,7 @@ use crate::preset::shortest_f64;
 use crate::{Bank, BankEntry, Config, ModuleRegistry, ParamAddress, Preset, PresetModule};
 use crate::{ResolveError, resolve};
 
-const ENGINE_BUSY: &str = "engine busy";
+pub(crate) const ENGINE_BUSY: &str = "engine busy";
 const NO_PRESET: &str = "no preset loaded";
 const NANOS_PER_MICRO: u64 = 1_000;
 
@@ -56,7 +57,7 @@ pub fn handle(state: &mut EngineState, req: Request) -> Response {
         Request::Load { preset } => load(state, &preset),
         Request::Set { param, value } => set(state, &param, value),
         Request::Get { param } => get(state, param.as_deref()),
-        Request::Save => Err("not implemented".to_string()),
+        Request::Save => save(state),
     };
     match result {
         Ok(payload) => Response::Ok(payload),
@@ -144,7 +145,7 @@ fn load(state: &mut EngineState, key: &str) -> Result<Value, String> {
     for warning in &warnings {
         warn!("{warning}");
     }
-    state.queues.drop_retired();
+    state.queues.drain_from_audio();
     state
         .queues
         .commands
@@ -180,6 +181,16 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
         "value": shortest_f64(applied),
         "clamped": clamped,
     }))
+}
+
+fn save(state: &EngineState) -> Result<Value, String> {
+    let (program, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
+    let file = state.bank.entries[*program].file();
+    let tmp = file.with_extension("toml.tmp");
+    fs::write(&tmp, preset.to_toml())
+        .and_then(|()| fs::rename(&tmp, file))
+        .map_err(|err| format!("cannot save {}: {err}", file.display()))?;
+    Ok(json!({"path": file.display().to_string()}))
 }
 
 fn get(state: &EngineState, key: Option<&str>) -> Result<Value, String> {

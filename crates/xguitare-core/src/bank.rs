@@ -43,6 +43,14 @@ impl Bank {
     }
 }
 
+impl BankEntry {
+    pub fn file(&self) -> &Path {
+        match self {
+            BankEntry::Valid { file, .. } | BankEntry::Invalid { file, .. } => file,
+        }
+    }
+}
+
 fn load_entry(file: PathBuf) -> BankEntry {
     let parsed = fs::read_to_string(&file)
         .map_err(|error| error.to_string())

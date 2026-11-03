@@ -6,6 +6,7 @@ pub mod engine;
 mod ir;
 mod preset;
 mod registry;
+pub mod watch;
 
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
 pub use bank::{Bank, BankEntry};

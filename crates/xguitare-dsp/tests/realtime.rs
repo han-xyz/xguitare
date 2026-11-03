@@ -1,5 +1,6 @@
 use assert_no_alloc::*;
 use xguitare_dsp::crossfade::Crossfader;
+use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{Delay, Drive, Gain, Gate, Module, Preamp, Rack, Reverb, Tonestack};
 
@@ -173,4 +174,16 @@ fn crossfade_step_does_not_allocate() {
         fader.start(960);
         while !fader.process(&mut old, &mut new, &input, &mut left, &mut right) {}
     });
+}
+
+#[test]
+fn midi_parse_does_not_allocate() {
+    let events: [&[u8]; 3] = [&[0xC0, 5], &[0x90, 60, 100], &[0xC0]];
+    let mut programs = [None; 3];
+    assert_no_alloc(|| {
+        for (program, bytes) in programs.iter_mut().zip(events) {
+            *program = program_change(bytes);
+        }
+    });
+    assert_eq!(programs, [Some(5), None, None]);
 }

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::control::{EngineState, Request, Response, handle, handle_line};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
-use xguitare_core::{Bank, BankEntry, Config};
+use xguitare_core::{Bank, BankEntry, Config, Preset};
 
 const QUEUE_CAPACITY: usize = 64;
 
@@ -306,4 +306,28 @@ fn malformed_json_is_error() {
         serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"status"}"#)).unwrap();
     assert_eq!(response["ok"], true);
     assert_eq!(response["preset"], "Clean");
+}
+
+#[test]
+fn save_writes_live_values_atomically() {
+    let (mut state, _audio) = state("save");
+    ok(handle(&mut state, set("gain.level", -6.0)));
+    let payload = ok(handle(&mut state, Request::Save));
+    let file = state.config.bank_dir.join("01-clean.toml");
+    assert_eq!(payload, json!({"path": file.display().to_string()}));
+    let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved.modules[0].params[0], ("level".to_string(), -6.0));
+    let leftovers: Vec<_> = fs::read_dir(&state.config.bank_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn save_without_preset_is_error() {
+    let (mut state, _audio) = state("save-without-preset");
+    state.active = None;
+    assert_eq!(error(handle(&mut state, Request::Save)), "no preset loaded");
 }

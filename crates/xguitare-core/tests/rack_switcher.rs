@@ -40,7 +40,7 @@ fn block(switcher: &mut RackSwitcher) -> [f32; BLOCK] {
 }
 
 fn swap(control: &mut EngineQueues, rack: Box<Rack>) {
-    control.drop_retired();
+    control.drain_from_audio();
     assert!(control.commands.push(Command::SwapRack(rack)).is_ok());
 }
 
@@ -49,7 +49,7 @@ fn swap_during_fade_retires_both() {
     let (mut switcher, mut control) = switcher(&[0.0]);
     swap(&mut control, gain_rack(&[-6.0]));
     block(&mut switcher);
-    assert_eq!(control.retired.slots(), 0);
+    assert_eq!(control.from_audio.slots(), 0);
     assert!(
         control
             .commands
@@ -57,7 +57,7 @@ fn swap_during_fade_retires_both() {
             .is_ok()
     );
     let out = block(&mut switcher);
-    assert_eq!(control.retired.slots(), 2);
+    assert_eq!(control.from_audio.slots(), 2);
     assert!((out[0] - 0.05).abs() < 1e-6, "{}", out[0]);
 }
 
@@ -81,7 +81,7 @@ fn set_param_goes_to_newest() {
     }
     let out = block(&mut switcher);
     assert!((out[0] - 0.05).abs() < 1e-4, "{}", out[0]);
-    assert_eq!(control.retired.slots(), 1);
+    assert_eq!(control.from_audio.slots(), 1);
 }
 
 #[test]
@@ -94,9 +94,9 @@ fn retired_capacity_never_exceeded() {
             swap(&mut control, gain_rack(&[round as f32]));
         }
         block(&mut switcher);
-        let retired = control.retired.slots();
+        let retired = control.from_audio.slots();
         assert!(
-            retired <= control.retired.buffer().capacity(),
+            retired <= control.from_audio.buffer().capacity(),
             "round {round}: {retired} retired"
         );
     }

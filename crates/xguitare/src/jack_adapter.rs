@@ -10,7 +10,7 @@ use jack::{
 use tracing::{error, info, warn};
 use xguitare_core::Ports;
 use xguitare_core::engine::{AudioQueues, AvailablePort, EngineShared, RackSwitcher, choose_ports};
-use xguitare_dsp::Rack;
+use xguitare_dsp::{Rack, midi};
 
 const CLIENT_NAME: &str = "xguitare";
 const AUDIO_PORT_TYPE: &str = "32 bit float mono audio";
@@ -56,7 +56,7 @@ pub fn start(
         input,
         out_l,
         out_r,
-        _midi_in: midi_in,
+        midi_in,
         shared: Arc::clone(&shared),
     };
     let notifications = Notifications {
@@ -170,7 +170,7 @@ struct Process {
     input: Port<AudioIn>,
     out_l: Port<AudioOut>,
     out_r: Port<AudioOut>,
-    _midi_in: Port<MidiIn>,
+    midi_in: Port<MidiIn>,
     shared: Arc<EngineShared>,
 }
 
@@ -180,6 +180,11 @@ impl ProcessHandler for Process {
         if !self.denormals_flushed {
             flush_denormals();
             self.denormals_flushed = true;
+        }
+        for event in self.midi_in.iter(ps) {
+            if let Some(program) = midi::program_change(event.bytes) {
+                self.switcher.push_program_change(program);
+            }
         }
         self.switcher.apply_commands();
         let input = self.input.as_slice(ps);
