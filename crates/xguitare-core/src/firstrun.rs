@@ -31,7 +31,7 @@ pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Err
             ir: false,
         });
     }
-    let staging = staging_dir(bank_dir);
+    let staging = staging_dir(bank_dir)?;
     if staging.exists() {
         fs::remove_dir_all(&staging)?;
     }
@@ -52,10 +52,18 @@ pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Err
     })
 }
 
-fn staging_dir(bank_dir: &Path) -> PathBuf {
-    let mut name = bank_dir.as_os_str().to_os_string();
+fn staging_dir(bank_dir: &Path) -> Result<PathBuf, io::Error> {
+    let mut name = bank_dir
+        .file_name()
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("bank dir {} has no final name", bank_dir.display()),
+            )
+        })?
+        .to_os_string();
     name.push(".tmp");
-    PathBuf::from(name)
+    Ok(bank_dir.with_file_name(name))
 }
 
 fn write_ir(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), hound::Error> {

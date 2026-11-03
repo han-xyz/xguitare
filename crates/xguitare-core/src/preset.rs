@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
-use std::path::{Component, Path};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use xguitare_dsp::modules::cabinet::Cabinet;
@@ -227,9 +227,11 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
 }
 
 fn is_inside_bank(ir: &str) -> bool {
-    Path::new(ir)
-        .components()
-        .all(|component| matches!(component, Component::Normal(_)))
+    // Checked on the text, not `Path::components`, which silently drops interior `.` and empty segments.
+    !ir.is_empty()
+        && ir
+            .split('/')
+            .all(|segment| !matches!(segment, "" | "." | ".."))
 }
 
 pub(crate) fn shortest_f64(value: f32) -> f64 {

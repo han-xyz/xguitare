@@ -228,7 +228,14 @@ fn ir_path_outside_bank_is_error() {
             "name = \"X\"\n[[module]]\ntype = \"cabinet\"\nid = \"cab\"\nir = \"{ir}\"\n"
         ))
     };
-    for ir in ["/etc/passwd", "../x.wav", "a/../b.wav", "./x.wav"] {
+    for ir in [
+        "/etc/passwd",
+        "../x.wav",
+        "a/../b.wav",
+        "./x.wav",
+        "irs/./cab.wav",
+        "",
+    ] {
         let error = cabinet(ir).unwrap_err();
         assert_eq!(
             error.to_string(),

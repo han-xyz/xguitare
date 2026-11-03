@@ -114,3 +114,19 @@ fn interrupted_first_run_is_retried() {
     let bank = Bank::load_dir(&dir).unwrap();
     assert!(matches!(&bank.entries[0], BankEntry::Valid { preset, .. } if preset.name == "Clean"));
 }
+
+#[test]
+fn trailing_slash_bank_dir_still_creates_bank() {
+    let temp = temp_dir("trailing");
+    let dir = temp.0.join("bank");
+    let with_slash = PathBuf::from(format!("{}/", dir.display()));
+    let created = ensure_bank(&with_slash, 48_000).unwrap();
+    assert_eq!(created.presets, 5);
+    assert_eq!(Bank::load_dir(&dir).unwrap().entries.len(), 5);
+    let mut siblings: Vec<String> = fs::read_dir(&temp.0)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    siblings.sort();
+    assert_eq!(siblings, ["bank"]);
+}
