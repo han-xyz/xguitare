@@ -1,0 +1,230 @@
+use std::collections::{BTreeMap, HashSet};
+use std::fmt;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+use xguitare_dsp::{AudioBuffers, Module, ModuleSpec, Rack, RackError};
+
+use crate::registry::ModuleRegistry;
+
+const CABINET_TYPE: &str = "cabinet";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preset {
+    pub name: String,
+    pub modules: Vec<PresetModule>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PresetModule {
+    pub id: String,
+    pub type_name: String,
+    pub ir: Option<String>,
+    pub params: Vec<(String, f32)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PresetError {
+    Syntax {
+        line: usize,
+        col: usize,
+        msg: String,
+    },
+    UnknownModule(String),
+    UnknownParam {
+        module: String,
+        param: String,
+    },
+    DuplicateId(String),
+    MissingIr(String),
+    Layout(String),
+}
+
+#[derive(Debug)]
+pub enum BuildError {
+    UnknownModule(String),
+    Layout(RackError),
+    Ir { id: String, source: std::io::Error },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PresetFile {
+    name: String,
+    #[serde(default)]
+    module: Vec<ModuleEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModuleEntry {
+    #[serde(rename = "type")]
+    type_name: String,
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ir: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    params: BTreeMap<String, f64>,
+}
+
+impl Preset {
+    pub fn parse(text: &str) -> Result<Preset, PresetError> {
+        let file: PresetFile = toml::from_str(text).map_err(|error| {
+            let (line, col) = crate::toml_position(text, &error);
+            PresetError::Syntax {
+                line,
+                col,
+                msg: error.message().to_string(),
+            }
+        })?;
+        let registry = ModuleRegistry::default();
+        let mut ids = HashSet::new();
+        let mut modules = Vec::with_capacity(file.module.len());
+        let mut probes: Vec<(String, Box<dyn Module>)> = Vec::new();
+        for entry in file.module {
+            let spec = registry
+                .spec(&entry.type_name)
+                .ok_or_else(|| PresetError::UnknownModule(entry.type_name.clone()))?;
+            let module = resolve_entry(entry, spec)?;
+            if !ids.insert(module.id.clone()) {
+                return Err(PresetError::DuplicateId(module.id));
+            }
+            probes.push((module.id.clone(), Box::new(LayoutProbe(spec))));
+            modules.push(module);
+        }
+        Rack::new(probes).map_err(|error| PresetError::Layout(error.to_string()))?;
+        Ok(Preset {
+            name: file.name,
+            modules,
+        })
+    }
+
+    pub fn to_toml(&self) -> String {
+        let file = PresetFile {
+            name: self.name.clone(),
+            module: self
+                .modules
+                .iter()
+                .map(|module| ModuleEntry {
+                    type_name: module.type_name.clone(),
+                    id: Some(module.id.clone()),
+                    ir: module.ir.clone(),
+                    params: module
+                        .params
+                        .iter()
+                        .map(|(name, value)| (name.clone(), f64::from(*value)))
+                        .collect(),
+                })
+                .collect(),
+        };
+        toml::to_string_pretty(&file).expect("a PresetFile always serialises to TOML")
+    }
+
+    pub fn build(
+        &self,
+        sample_rate: f32,
+        max_frames: usize,
+        _bank_dir: &Path,
+    ) -> Result<Rack, BuildError> {
+        let registry = ModuleRegistry::default();
+        let mut modules = Vec::with_capacity(self.modules.len());
+        for preset_module in &self.modules {
+            let mut module = registry
+                .construct(&preset_module.type_name)
+                .ok_or_else(|| BuildError::UnknownModule(preset_module.type_name.clone()))?;
+            for (idx, (_, value)) in preset_module.params.iter().enumerate() {
+                module.set_param(idx, *value);
+            }
+            modules.push((preset_module.id.clone(), module));
+        }
+        let mut rack = Rack::new(modules).map_err(BuildError::Layout)?;
+        rack.prepare(sample_rate, max_frames);
+        Ok(rack)
+    }
+}
+
+fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, PresetError> {
+    let id = entry.id.unwrap_or_else(|| entry.type_name.clone());
+    if let Some(param) = entry
+        .params
+        .keys()
+        .find(|name| !spec.params.iter().any(|p| p.name == name.as_str()))
+    {
+        return Err(PresetError::UnknownParam {
+            module: id,
+            param: param.clone(),
+        });
+    }
+    if entry.type_name == CABINET_TYPE && entry.ir.is_none() {
+        return Err(PresetError::MissingIr(id));
+    }
+    let params = spec
+        .params
+        .iter()
+        .map(|p| {
+            let value = entry.params.get(p.name).map_or(p.default, |v| *v as f32);
+            (p.name.to_string(), value)
+        })
+        .collect();
+    Ok(PresetModule {
+        id,
+        type_name: entry.type_name,
+        ir: entry.ir,
+        params,
+    })
+}
+
+struct LayoutProbe(&'static ModuleSpec);
+
+impl Module for LayoutProbe {
+    fn spec(&self) -> &'static ModuleSpec {
+        self.0
+    }
+    fn prepare(&mut self, _sample_rate: f32, _max_frames: usize) {}
+    fn reset(&mut self) {}
+    fn set_param(&mut self, _idx: usize, _value: f32) {}
+    fn param(&self, _idx: usize) -> f32 {
+        0.0
+    }
+    fn process(&mut self, _io: &mut AudioBuffers) {}
+}
+
+impl fmt::Display for PresetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PresetError::Syntax { line, col, msg } => write!(f, "line {line}:{col}: {msg}"),
+            PresetError::UnknownModule(type_name) => {
+                write!(f, "unknown module type '{type_name}'")
+            }
+            PresetError::UnknownParam { module, param } => {
+                write!(f, "module '{module}' has no parameter '{param}'")
+            }
+            PresetError::DuplicateId(id) => write!(f, "duplicate module id '{id}'"),
+            PresetError::MissingIr(id) => write!(f, "cabinet '{id}' has no ir"),
+            PresetError::Layout(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl std::error::Error for PresetError {}
+
+impl fmt::Display for BuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BuildError::UnknownModule(type_name) => {
+                write!(f, "unknown module type '{type_name}'")
+            }
+            BuildError::Layout(error) => error.fmt(f),
+            BuildError::Ir { id, source } => write!(f, "cabinet '{id}': {source}"),
+        }
+    }
+}
+
+impl std::error::Error for BuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            BuildError::Ir { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
