@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 use xguitare_dsp::modules::cabinet::Cabinet;
@@ -39,6 +39,7 @@ pub enum PresetError {
     },
     DuplicateId(String),
     MissingIr(String),
+    IrOutsideBank(String),
     NonFiniteParam {
         module: String,
         param: String,
@@ -203,6 +204,9 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
     if entry.type_name == CABINET_TYPE && entry.ir.is_none() {
         return Err(PresetError::MissingIr(id));
     }
+    if entry.ir.as_deref().is_some_and(|ir| !is_inside_bank(ir)) {
+        return Err(PresetError::IrOutsideBank(id));
+    }
     let params = spec
         .params
         .iter()
@@ -220,6 +224,12 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
         ir: entry.ir,
         params,
     })
+}
+
+fn is_inside_bank(ir: &str) -> bool {
+    Path::new(ir)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
 }
 
 pub(crate) fn shortest_f64(value: f32) -> f64 {
@@ -256,6 +266,10 @@ impl fmt::Display for PresetError {
             }
             PresetError::DuplicateId(id) => write!(f, "duplicate module id '{id}'"),
             PresetError::MissingIr(id) => write!(f, "cabinet '{id}' has no ir"),
+            PresetError::IrOutsideBank(id) => write!(
+                f,
+                "cabinet '{id}' ir must be a relative path inside the bank directory"
+            ),
             PresetError::NonFiniteParam { module, param } => {
                 write!(
                     f,

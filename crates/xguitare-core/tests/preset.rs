@@ -220,3 +220,22 @@ fn out_of_range_param_is_clamped() {
             .unwrap();
     assert_eq!(preset.modules[0].params, vec![("level".to_string(), 20.0)]);
 }
+
+#[test]
+fn ir_path_outside_bank_is_error() {
+    let cabinet = |ir: &str| {
+        Preset::parse(&format!(
+            "name = \"X\"\n[[module]]\ntype = \"cabinet\"\nid = \"cab\"\nir = \"{ir}\"\n"
+        ))
+    };
+    for ir in ["/etc/passwd", "../x.wav", "a/../b.wav", "./x.wav"] {
+        let error = cabinet(ir).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "cabinet 'cab' ir must be a relative path inside the bank directory",
+            "{ir}"
+        );
+    }
+    let preset = cabinet("irs/cab.wav").unwrap();
+    assert_eq!(preset.modules[0].ir.as_deref(), Some("irs/cab.wav"));
+}
