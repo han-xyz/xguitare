@@ -1,8 +1,6 @@
-use std::f32::consts::FRAC_PI_2;
-
 use crate::Rack;
 
-/// Equal-power crossfade from one Rack to another: the outgoing Rack's gain follows `cos(θ)` and the incoming one's `sin(θ)`, θ rising from 0 to π/2 over the fade.
+/// Linear (equal-gain) crossfade from one Rack to another: the incoming Rack's gain `t` rises from 0 to 1 over the fade and the outgoing one's is `1 - t`. Both Racks process the same guitar input, so their outputs are correlated and equal gain keeps the level flat where equal power would swell by 3 dB.
 pub struct Crossfader {
     new_l: Vec<f32>,
     new_r: Vec<f32>,
@@ -51,12 +49,12 @@ impl Crossfader {
         new.process(input, &mut self.new_l, &mut self.new_r);
         for i in 0..frames {
             let n = self.position + i;
-            let theta = if n >= self.length {
-                FRAC_PI_2
+            let new_gain = if n >= self.length {
+                1.0
             } else {
-                n as f32 / self.length as f32 * FRAC_PI_2
+                n as f32 / self.length as f32
             };
-            let (new_gain, old_gain) = theta.sin_cos();
+            let old_gain = 1.0 - new_gain;
             out_l[i] = out_l[i] * old_gain + self.new_l[i] * new_gain;
             out_r[i] = out_r[i] * old_gain + self.new_r[i] * new_gain;
         }

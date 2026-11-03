@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
+const SOCKET_DIR_MODE: u32 = 0o700;
 pub const AUTO_PORT: &str = "auto";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,10 +139,57 @@ impl Config {
     }
 }
 
+#[derive(Debug)]
+pub struct SocketDirError {
+    pub dir: PathBuf,
+    pub reason: String,
+}
+
+/// Checks that `dir`, the `/tmp` fallback socket directory, is a real directory owned by this user with mode 0700; a wrong mode on our own directory is tightened rather than refused.
+pub fn secure_socket_dir(dir: &Path) -> Result<(), SocketDirError> {
+    let refuse = |reason: String| SocketDirError {
+        dir: dir.to_path_buf(),
+        reason,
+    };
+    let meta = fs::symlink_metadata(dir).map_err(|err| refuse(err.to_string()))?;
+    if meta.file_type().is_symlink() {
+        return Err(refuse("it is a symlink".to_string()));
+    }
+    if !meta.is_dir() {
+        return Err(refuse("not a directory".to_string()));
+    }
+    let uid = current_uid().map_err(|err| refuse(err.to_string()))?;
+    if meta.uid() != uid {
+        return Err(refuse(format!("owned by uid {}, not {uid}", meta.uid())));
+    }
+    if meta.mode() & 0o777 != SOCKET_DIR_MODE {
+        fs::set_permissions(dir, fs::Permissions::from_mode(SOCKET_DIR_MODE))
+            .map_err(|err| refuse(err.to_string()))?;
+    }
+    Ok(())
+}
+
+fn current_uid() -> std::io::Result<u32> {
+    Ok(fs::metadata("/proc/self")?.uid())
+}
+
 fn fallback_runtime_dir() -> Result<PathBuf, ConfigError> {
-    let uid = fs::metadata("/proc/self").map_err(ConfigError::Uid)?.uid();
+    let uid = current_uid().map_err(ConfigError::Uid)?;
     Ok(PathBuf::from(format!("/tmp/xguitare-{uid}")))
 }
+
+impl fmt::Display for SocketDirError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "refusing socket directory {}: {}",
+            self.dir.display(),
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for SocketDirError {}
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

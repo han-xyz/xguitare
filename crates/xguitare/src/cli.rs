@@ -2,10 +2,13 @@ use std::fmt;
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use xguitare_core::control::{Request, Response, Value};
 
 use crate::{Cmd, parse};
+
+const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub trait Transport {
     fn request(&mut self, req: &Request) -> Result<Response, TransportError>;
@@ -14,6 +17,7 @@ pub trait Transport {
 #[derive(Debug)]
 pub enum TransportError {
     NotRunning(PathBuf),
+    NotResponding(PathBuf),
     Io(io::Error),
     Protocol(String),
 }
@@ -37,13 +41,13 @@ impl Transport for UnixSocketTransport {
             }
             _ => TransportError::Io(err),
         })?;
-        (&stream)
-            .write_all(format!("{}\n", req.to_line()).as_bytes())
-            .map_err(TransportError::Io)?;
-        let mut reply = String::new();
-        BufReader::new(&stream)
-            .read_line(&mut reply)
-            .map_err(TransportError::Io)?;
+        let exchanged = exchange(&stream, req);
+        let reply = exchanged.map_err(|err| match err.kind() {
+            ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                TransportError::NotResponding(self.path.clone())
+            }
+            _ => TransportError::Io(err),
+        })?;
         if reply.is_empty() {
             return Err(TransportError::Protocol(
                 "daemon closed the connection".to_string(),
@@ -51,6 +55,16 @@ impl Transport for UnixSocketTransport {
         }
         Response::from_line(&reply).map_err(|err| TransportError::Protocol(err.to_string()))
     }
+}
+
+fn exchange(stream: &UnixStream, req: &Request) -> io::Result<String> {
+    stream.set_read_timeout(Some(DAEMON_TIMEOUT))?;
+    stream.set_write_timeout(Some(DAEMON_TIMEOUT))?;
+    let mut writer = stream;
+    writer.write_all(format!("{}\n", req.to_line()).as_bytes())?;
+    let mut reply = String::new();
+    BufReader::new(stream).read_line(&mut reply)?;
+    Ok(reply)
 }
 
 /// Runs one client subcommand against the Daemon; returns the exit code (0 on success and `--help`, 1 after one `error: ...` line on `err`).
@@ -194,6 +208,9 @@ impl fmt::Display for TransportError {
         match self {
             TransportError::NotRunning(path) => {
                 write!(f, "daemon not running (socket {})", path.display())
+            }
+            TransportError::NotResponding(path) => {
+                write!(f, "daemon not responding (socket {})", path.display())
             }
             TransportError::Io(err) => write!(f, "control socket: {err}"),
             TransportError::Protocol(msg) => write!(f, "bad response from daemon: {msg}"),

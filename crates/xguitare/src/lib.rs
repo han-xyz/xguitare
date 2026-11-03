@@ -2,14 +2,14 @@ mod cli;
 mod daemon;
 mod jack_adapter;
 mod logging;
-mod socket_server;
+pub mod socket_server;
 
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use xguitare_core::Config;
+use xguitare_core::{Config, secure_socket_dir};
 
 pub use cli::{Transport, TransportError, UnixSocketTransport, run_cli};
 
@@ -67,16 +67,7 @@ where
                 .map(|()| 0)
                 .map_err(|err| err.to_string())
         }
-        _ => Config::load(cli.config.as_deref())
-            .map_err(|err| err.to_string())
-            .map(|config| {
-                let argv: Vec<String> = argv
-                    .iter()
-                    .map(|arg| arg.to_string_lossy().into_owned())
-                    .collect();
-                let mut transport = UnixSocketTransport::new(config.socket);
-                run_cli(&argv, &mut transport, &mut io::stdout(), &mut io::stderr())
-            }),
+        _ => run_client(&argv, cli.config.as_deref()),
     };
     match result {
         Ok(code) => code,
@@ -85,6 +76,28 @@ where
             1
         }
     }
+}
+
+fn run_client(argv: &[OsString], config_path: Option<&Path>) -> Result<i32, String> {
+    let config = Config::load(config_path).map_err(|err| err.to_string())?;
+    let fallback_dir = config
+        .socket
+        .parent()
+        .filter(|dir| config.socket_is_fallback && dir.symlink_metadata().is_ok());
+    if let Some(dir) = fallback_dir {
+        secure_socket_dir(dir).map_err(|err| err.to_string())?;
+    }
+    let argv: Vec<String> = argv
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let mut transport = UnixSocketTransport::new(config.socket);
+    Ok(run_cli(
+        &argv,
+        &mut transport,
+        &mut io::stdout(),
+        &mut io::stderr(),
+    ))
 }
 
 /// Parses `argv`; on `--help`/`--version` writes to `out` and returns `Err(0)`, on any other error writes its first line to `err` and returns `Err(1)`.

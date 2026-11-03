@@ -780,6 +780,7 @@ dependencies = [
 name = "xguitare-core"
 version = "0.1.0"
 dependencies = [
+ "assert_no_alloc",
  "directories",
  "hound",
  "rtrb",

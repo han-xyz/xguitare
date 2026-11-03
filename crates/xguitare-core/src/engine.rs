@@ -1,7 +1,9 @@
+use std::mem;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use xguitare_dsp::Rack;
+use xguitare_dsp::crossfade::Crossfader;
 
 use crate::{AUTO_PORT, Ports};
 
@@ -59,6 +61,85 @@ pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues) {
 impl EngineQueues {
     pub fn drop_retired(&mut self) {
         while self.retired.pop().is_ok() {}
+    }
+}
+
+/// The audio thread's Rack state: the current Rack, the one fading in, and the Commands that change them. Allocates and frees nothing after `new`; every Rack it lets go of leaves through `AudioQueues::retired`.
+pub struct RackSwitcher {
+    current: Box<Rack>,
+    incoming: Option<Box<Rack>>,
+    crossfader: Crossfader,
+    crossfade_frames: usize,
+    queues: AudioQueues,
+}
+
+impl RackSwitcher {
+    pub fn new(
+        rack: Box<Rack>,
+        max_frames: usize,
+        crossfade_frames: usize,
+        queues: AudioQueues,
+    ) -> RackSwitcher {
+        let mut crossfader = Crossfader::new();
+        crossfader.prepare(max_frames);
+        RackSwitcher {
+            current: rack,
+            incoming: None,
+            crossfader,
+            crossfade_frames,
+            queues,
+        }
+    }
+
+    pub fn apply_commands(&mut self) {
+        while let Ok(command) = self.queues.commands.pop() {
+            match command {
+                Command::SetParam {
+                    module,
+                    param,
+                    value,
+                } => {
+                    let newest = self.incoming.as_mut().unwrap_or(&mut self.current);
+                    newest.module_mut(module).set_param(param, value);
+                }
+                Command::SwapRack(new) => match self.incoming.take() {
+                    // A swap during a fade cuts straight to the newest Rack rather than queueing fades, so at most two Racks are ever live.
+                    Some(fading_in) => {
+                        let old = mem::replace(&mut self.current, new);
+                        self.retire(old);
+                        self.retire(fading_in);
+                    }
+                    None => {
+                        self.incoming = Some(new);
+                        self.crossfader.start(self.crossfade_frames);
+                    }
+                },
+            }
+        }
+    }
+
+    /// Runs one block of at most `max_frames` through the current Rack, or through both while a fade runs.
+    pub fn process(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
+        let Some(incoming) = self.incoming.as_mut() else {
+            self.current.process(input, out_l, out_r);
+            return;
+        };
+        let faded = self
+            .crossfader
+            .process(&mut self.current, incoming, input, out_l, out_r);
+        if let Some(new) = self.incoming.take_if(|_| faded) {
+            let old = mem::replace(&mut self.current, new);
+            self.retire(old);
+        }
+    }
+
+    fn retire(&mut self, rack: Box<Rack>) {
+        let pushed = self.queues.retired.push(Retired::Rack(rack));
+        debug_assert!(pushed.is_ok(), "retired queue full");
+        if let Err(unretired) = pushed {
+            // Leaking beats freeing on the audio thread; the queue sizing in engine_queues makes this unreachable.
+            mem::forget(unretired);
+        }
     }
 }
 

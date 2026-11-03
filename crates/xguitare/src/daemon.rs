@@ -10,7 +10,7 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::control::EngineState;
 use xguitare_core::engine::{EngineShared, engine_queues};
-use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset};
+use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
 
 use crate::jack_adapter::{self, JackError};
@@ -24,6 +24,7 @@ const QUEUE_CAPACITY: usize = 64;
 pub enum DaemonError {
     Config(ConfigError),
     Socket(SocketError),
+    SocketDir(SocketDirError),
     Jack(JackError),
     Signal(io::Error),
 }
@@ -32,6 +33,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let config = Config::load(config_path).map_err(DaemonError::Config)?;
     if config.socket_is_fallback {
         warn!("XDG_RUNTIME_DIR unset, using {}", config.socket.display());
+        socket_server::secure_fallback_dir(&config.socket).map_err(DaemonError::SocketDir)?;
     }
     let socket = socket_server::bind(&config.socket).map_err(DaemonError::Socket)?;
     let bank = load_bank(&config.bank_dir);
@@ -199,6 +201,7 @@ impl fmt::Display for DaemonError {
         match self {
             DaemonError::Config(err) => err.fmt(f),
             DaemonError::Socket(err) => err.fmt(f),
+            DaemonError::SocketDir(err) => err.fmt(f),
             DaemonError::Jack(err) => err.fmt(f),
             DaemonError::Signal(err) => write!(f, "cannot register signal handler: {err}"),
         }

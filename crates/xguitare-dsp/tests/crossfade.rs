@@ -1,10 +1,8 @@
 mod common;
 
-use common::{BLOCK, SAMPLE_RATE, db};
+use common::{BLOCK, SAMPLE_RATE, sine};
 use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::{Gain, Module, Rack};
-
-const SILENT_DB: f32 = -60.0;
 
 fn gain_rack(level_db: f32) -> Rack {
     let mut gain = Gain::new();
@@ -19,34 +17,23 @@ fn gain_rack(level_db: f32) -> Rack {
     rack
 }
 
-fn fade_gains(old_db: f32, new_db: f32, frames: usize) -> Vec<f32> {
-    let mut old = gain_rack(old_db);
-    let mut new = gain_rack(new_db);
+#[test]
+fn identical_racks_sum_to_input() {
+    let frames = 960;
+    let mut old = gain_rack(0.0);
+    let mut new = gain_rack(0.0);
     let mut fader = Crossfader::new();
     fader.prepare(BLOCK);
     fader.start(frames);
-    let input = [0.5; BLOCK];
+    let input = sine(0.8, 220.0, SAMPLE_RATE, 2 * frames);
     let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
-    let mut gains = Vec::new();
-    for _ in 0..frames.div_ceil(BLOCK) {
-        fader.process(&mut old, &mut new, &input, &mut left, &mut right);
-        gains.extend(left.iter().map(|s| s / 0.5));
+    for (block, chunk) in input.chunks(BLOCK).enumerate() {
+        fader.process(&mut old, &mut new, chunk, &mut left, &mut right);
+        for (i, (&x, &y)) in chunk.iter().zip(&left).enumerate() {
+            let n = block * BLOCK + i;
+            assert!((y - x).abs() < 1e-4, "frame {n}: {y} vs input {x}");
+        }
     }
-    gains.truncate(frames);
-    gains
-}
-
-#[test]
-fn equal_power() {
-    let frames = 960;
-    let old_gains = fade_gains(0.0, SILENT_DB, frames);
-    let new_gains = fade_gains(SILENT_DB, 0.0, frames);
-    for (n, (g_old, g_new)) in old_gains.iter().zip(&new_gains).enumerate() {
-        let power_db = 10.0 * (g_old * g_old + g_new * g_new).log10();
-        assert!(power_db.abs() < 0.1, "frame {n}: power {power_db} dB");
-    }
-    assert!(db(old_gains[0]) > -0.1 && new_gains[0] < 0.01);
-    assert!(db(new_gains[frames - 1]) > -0.1 && old_gains[frames - 1] < 0.01);
 }
 
 #[test]
