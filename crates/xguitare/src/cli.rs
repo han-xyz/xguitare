@@ -155,12 +155,15 @@ fn render_status(payload: &Value) -> String {
         "sample_rate",
         "buffer_size",
         "prepared_frames",
+        "revision",
+        "input_peak_db",
+        "output_peak_db",
         "xruns",
         "callback_max_us",
         "callback_last_us",
     ]
     .iter()
-    .map(|key| format!("{key}: {}\n", text(&payload[key])))
+    .map(|key| format!("{key}: {}\n", status_text(key, &payload[key])))
     .collect();
     lines.push_str("connections:\n");
     for connection in items(&payload["connections"]) {
@@ -171,6 +174,13 @@ fn render_status(payload: &Value) -> String {
         ));
     }
     lines
+}
+
+fn status_text(key: &str, value: &Value) -> String {
+    match value.as_f64() {
+        Some(db) if key.ends_with("_db") => format!("{db:.1}"),
+        _ => text(value),
+    }
 }
 
 fn render_list(payload: &Value) -> String {

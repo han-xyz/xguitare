@@ -46,6 +46,7 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
             }];
         }
     };
+    state.revision += 1;
     let mut actions = vec![Action::Reindex];
     let Some(active_file) = state.active.as_ref().map(|(file, _)| file.clone()) else {
         return actions;
@@ -111,6 +112,7 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
         return actions;
     }
     state.active = Some((file, preset));
+    state.revision += 1;
     actions.push(Action::Reload { program });
     actions
 }

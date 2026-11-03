@@ -1,7 +1,10 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use assert_no_alloc::*;
-use xguitare_core::engine::{Command, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, engine_queues};
+use xguitare_core::engine::{
+    Command, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak, engine_queues, raise_peak,
+};
 use xguitare_dsp::{Gain, Module, Rack};
 
 #[cfg(debug_assertions)]
@@ -120,4 +123,15 @@ fn oversize_then_swap_and_cut_does_not_allocate() {
     ));
     drop(switcher);
     control.drain_from_audio();
+}
+
+#[test]
+fn peak_update_does_not_allocate() {
+    let peak = AtomicU32::new(0);
+    let input = [0.25; BLOCK];
+    assert_no_alloc(|| {
+        for _ in 0..20 {
+            raise_peak(&peak, block_peak(&input));
+        }
+    });
 }

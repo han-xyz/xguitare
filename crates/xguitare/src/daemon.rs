@@ -81,6 +81,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         connections,
         sample_rate: shared.sample_rate.load(Ordering::Relaxed) as f32,
         max_frames: session.max_frames(),
+        revision: 1,
     }));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);
     let control = socket

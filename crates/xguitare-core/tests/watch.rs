@@ -39,6 +39,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         connections: Vec::new(),
         sample_rate: 48_000.0,
         max_frames: 128,
+        revision: 1,
     };
     (state, audio)
 }
@@ -221,4 +222,20 @@ fn changed_mtime_passes() {
         changed_paths(&previous, &current, &[file.clone(), added.clone()]),
         [file, added]
     );
+}
+
+#[test]
+fn reindex_and_reload_bump_revision() {
+    let (mut state, _audio) = state("revision");
+    let other = state.config.bank_dir.join("03-x.toml");
+    fs::write(&other, CLEAN.replace("Clean", "X")).unwrap();
+    assert_eq!(apply(&mut state, &[other]), [Action::Reindex]);
+    assert_eq!(state.revision, 2);
+    let file = active_file(&state);
+    fs::write(&file, CLEAN.replace("level = -3", "level = 2")).unwrap();
+    assert_eq!(
+        apply(&mut state, &[file]),
+        [Action::Reindex, Action::Reload { program: 0 }]
+    );
+    assert_eq!(state.revision, 4);
 }

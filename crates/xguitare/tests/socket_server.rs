@@ -46,6 +46,7 @@ fn server(test: &str) -> Server {
         connections: Vec::new(),
         sample_rate: 48_000.0,
         max_frames: 128,
+        revision: 1,
     };
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket

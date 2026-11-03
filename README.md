@@ -119,7 +119,7 @@ Hot reload: the Daemon watches the Bank directory. Saving the active Preset's fi
 
 Every subcommand except `run` sends one request to the running Daemon and exits 0 on success; on an error it prints one `error: ...` line to stderr and exits 1. `xguitare --help` lists them.
 
-`status` shows the active Preset, audio settings and port connections:
+`status` shows the active Preset, the Revision, input and output peaks since the last `status`, audio settings and port connections:
 
 ```console
 $ xguitare status
@@ -128,9 +128,12 @@ program: 0
 sample_rate: 48000
 buffer_size: 128
 prepared_frames: 128
+revision: 1
+input_peak_db: -102.2
+output_peak_db: -120.0
 xruns: 0
-callback_max_us: 92
-callback_last_us: 40
+callback_max_us: 1228
+callback_last_us: 764
 connections:
   Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare:in
   xguitare:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL

@@ -69,13 +69,13 @@ fn status_format() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","program":0,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}]}"#,
+            r#"{"ok":true,"preset":"Clean","program":0,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}]}"#,
         ),
     );
     assert_eq!(out.requests, [Request::Status]);
     assert_eq!(
         out.stdout,
-        "preset: Clean\nprogram: 0\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\n"
+        "preset: Clean\nprogram: 0\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\n"
     );
     let out = cli(
         &["status"],

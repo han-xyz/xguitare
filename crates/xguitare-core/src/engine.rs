@@ -16,6 +16,10 @@ pub struct EngineShared {
     pub buffer_size: AtomicU32,
     /// `max_frames` of the Rack the audio thread is running.
     pub running_frames: AtomicUsize,
+    /// f32 bits of the largest input |sample| since the last `take_peak`.
+    pub input_peak_bits: AtomicU32,
+    /// f32 bits of the largest |sample| over both outputs since the last `take_peak`.
+    pub output_peak_bits: AtomicU32,
 }
 
 pub enum Command {
@@ -49,6 +53,23 @@ const PROGRAM_CHANGE_SLOTS: usize = 16;
 
 /// PipeWire's default `clock.quantum-limit`: the largest block the switcher's own scratch is prepared for, so a swap to a Rack re-prepared for any quantum up to it never allocates on the audio thread.
 pub const SWITCHER_MAX_FRAMES: usize = 8192;
+
+/// The largest |sample| of `samples`, 0 for an empty slice.
+pub fn block_peak(samples: &[f32]) -> f32 {
+    samples
+        .iter()
+        .fold(0.0, |peak: f32, sample| peak.max(sample.abs()))
+}
+
+pub fn raise_peak(peak: &AtomicU32, value: f32) {
+    // Non-negative f32 bit patterns order like the floats, so an integer max on the bits is a float max.
+    peak.fetch_max(value.to_bits(), Ordering::Relaxed);
+}
+
+/// Reads the peak stored in `peak` and resets it to 0.
+pub fn take_peak(peak: &AtomicU32) -> f32 {
+    f32::from_bits(peak.swap(0, Ordering::Relaxed))
+}
 
 pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);

@@ -8,7 +8,7 @@ use xguitare_core::control::{
     EngineState, Reprepare, Request, Response, handle, handle_line, needs_reprepare, reprepare,
 };
 use xguitare_core::engine::{
-    AudioQueues, Command, EngineShared, SWITCHER_MAX_FRAMES, engine_queues,
+    AudioQueues, Command, EngineShared, SWITCHER_MAX_FRAMES, engine_queues, raise_peak,
 };
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Preset, PresetModule};
 
@@ -65,6 +65,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         connections: vec![("system:capture_1".to_string(), "xguitare:in".to_string())],
         sample_rate: 48_000.0,
         max_frames: 128,
+        revision: 1,
     };
     (state, audio, dir)
 }
@@ -119,6 +120,9 @@ fn status_reports_fields() {
             "sample_rate": 48000,
             "buffer_size": 128,
             "prepared_frames": 128,
+            "revision": 1,
+            "input_peak_db": -120.0,
+            "output_peak_db": -120.0,
             "xruns": 3,
             "callback_max_us": 250,
             "callback_last_us": 90,
@@ -530,4 +534,71 @@ fn quantum_above_limit_is_not_reprepared() {
     let status = ok(handle(&mut state, Request::Status));
     assert_eq!(status["buffer_size"], above);
     assert_eq!(status["prepared_frames"], 128);
+}
+
+fn revision(state: &mut EngineState) -> Value {
+    ok(handle(state, Request::Status))["revision"].clone()
+}
+
+#[test]
+fn status_has_revision_and_peaks() {
+    let (mut state, _audio, _dir) = state("status-revision-peaks");
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["revision"], 1);
+    assert_eq!(status["input_peak_db"], -120.0);
+    assert_eq!(status["output_peak_db"], -120.0);
+}
+
+#[test]
+fn status_reports_peaks_since_last_read() {
+    let (mut state, _audio, _dir) = state("status-peaks");
+    raise_peak(&state.shared.input_peak_bits, 0.5);
+    raise_peak(&state.shared.output_peak_bits, 1.0);
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["input_peak_db"], -6.0);
+    assert_eq!(status["output_peak_db"], 0.0);
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["input_peak_db"], -120.0);
+    assert_eq!(status["output_peak_db"], -120.0);
+}
+
+#[test]
+fn revision_increments_on_load_set_save() {
+    let (mut state, _audio, _dir) = state("revision-increments");
+    assert_eq!(revision(&mut state), 1);
+    ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "1".to_string(),
+        },
+    ));
+    assert_eq!(revision(&mut state), 2);
+    ok(handle(&mut state, set("gain.level", -6.0)));
+    assert_eq!(revision(&mut state), 3);
+    ok(handle(&mut state, Request::Save));
+    assert_eq!(revision(&mut state), 4);
+}
+
+#[test]
+fn revision_unchanged_on_failed_set() {
+    let (mut state, _audio, _dir) = state("revision-failed-set");
+    error(handle(&mut state, set("gain.nope", 1.0)));
+    assert_eq!(revision(&mut state), 1);
+}
+
+#[test]
+fn reprepare_bumps_revision() {
+    let (mut state, _audio, _dir) = state("reprepare-revision");
+    reprepare(&mut state, 256).unwrap();
+    assert_eq!(revision(&mut state), 2);
+    let file = active_file(&state).unwrap();
+    state.active = Some((
+        file,
+        Preset {
+            name: "Two Cabs".to_string(),
+            modules: vec![cabinet("cab1"), cabinet("cab2")],
+        },
+    ));
+    reprepare(&mut state, 512).unwrap();
+    assert_eq!(revision(&mut state), 3);
 }

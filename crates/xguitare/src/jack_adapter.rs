@@ -9,7 +9,9 @@ use jack::{
 };
 use tracing::{info, warn};
 use xguitare_core::Ports;
-use xguitare_core::engine::{AudioQueues, EngineShared, RackSwitcher, SWITCHER_MAX_FRAMES};
+use xguitare_core::engine::{
+    AudioQueues, EngineShared, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak, raise_peak,
+};
 use xguitare_core::ports::{AvailablePort, choose_ports};
 use xguitare_dsp::{Rack, midi};
 
@@ -192,6 +194,11 @@ impl ProcessHandler for Process {
         if !self.switcher.process(input, out_l, out_r) {
             self.shared.oversize_blocks.fetch_add(1, Ordering::Relaxed);
         }
+        raise_peak(&self.shared.input_peak_bits, block_peak(input));
+        raise_peak(
+            &self.shared.output_peak_bits,
+            block_peak(out_l).max(block_peak(out_r)),
+        );
         let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.shared
             .callback_ns_last

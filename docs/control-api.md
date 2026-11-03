@@ -32,7 +32,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":135,"callback_max_us":323,"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"preset":"Lead","prepared_frames":128,"program":2,"sample_rate":48000,"xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":741,"callback_max_us":1228,"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"input_peak_db":-103.8,"output_peak_db":-120.0,"prepared_frames":128,"preset":"Clean","program":0,"revision":2,"sample_rate":48000,"xruns":0}
 ```
 
 | Key | Value |
@@ -42,6 +42,9 @@ Response:
 | `sample_rate` | JACK sample rate in Hz. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set` and `save`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. |
+| `input_peak_db` | Largest input sample since the previous `status`, in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it. |
+| `output_peak_db` | As `input_peak_db`, over both outputs. |
 | `xruns` | Xruns since the Daemon started. |
 | `callback_max_us` | Longest audio callback so far, in µs. |
 | `callback_last_us` | Most recent audio callback, in µs. |

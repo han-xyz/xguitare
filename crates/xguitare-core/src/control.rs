@@ -11,7 +11,7 @@ use xguitare_dsp::{ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
-use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES};
+use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
 use crate::preset::shortest_f64;
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
@@ -22,6 +22,7 @@ const ENGINE_BUSY: &str = "engine busy";
 const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";
 const NANOS_PER_MICRO: u64 = 1_000;
+const SILENCE_DB: f32 = -120.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "lowercase")]
@@ -50,6 +51,8 @@ pub struct EngineState {
     pub connections: Vec<(String, String)>,
     pub sample_rate: f32,
     pub max_frames: usize,
+    /// Incremented on every change to the live Rack or the Bank; starts at 1.
+    pub revision: u64,
 }
 
 /// Handles one request; the build warnings of a `load` come back beside the Response for the caller to log.
@@ -125,6 +128,7 @@ pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare,
         ),
     };
     swap_rack(state, rack)?;
+    state.revision += 1;
     if let Reprepare::Passthrough { .. } = outcome {
         state.active = None;
     }
@@ -157,11 +161,19 @@ fn status(state: &EngineState) -> Value {
         "sample_rate": shared.sample_rate.load(Ordering::Relaxed),
         "buffer_size": shared.buffer_size.load(Ordering::Relaxed),
         "prepared_frames": state.max_frames,
+        "revision": state.revision,
+        "input_peak_db": peak_db(take_peak(&shared.input_peak_bits)),
+        "output_peak_db": peak_db(take_peak(&shared.output_peak_bits)),
         "xruns": shared.xruns.load(Ordering::Relaxed),
         "callback_max_us": shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "connections": connections,
     })
+}
+
+fn peak_db(peak: f32) -> f64 {
+    let db = (20.0 * f64::from(peak).log10()).max(f64::from(SILENCE_DB));
+    (db * 10.0).round() / 10.0
 }
 
 fn list(state: &EngineState) -> Value {
@@ -205,6 +217,7 @@ fn load(
         .map_err(|err| err.to_string())?;
     *warnings = build_warnings;
     swap_rack(state, rack)?;
+    state.revision += 1;
     let payload = json!({"program": program, "name": preset.name});
     state.active = Some((file, preset));
     Ok(payload)
@@ -246,6 +259,7 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
         })
         .map_err(|_| ENGINE_BUSY.to_string())?;
     preset.modules[module].params[param].1 = applied;
+    state.revision += 1;
     Ok(json!({
         "param": format!("{}.{}", address.module, address.param),
         "value": shortest_f64(applied),
@@ -253,7 +267,7 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
     }))
 }
 
-fn save(state: &EngineState) -> Result<Value, String> {
+fn save(state: &mut EngineState) -> Result<Value, String> {
     let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
     if state.bank.position(file).is_none() {
         return Err(ACTIVE_REMOVED.to_string());
@@ -265,7 +279,9 @@ fn save(state: &EngineState) -> Result<Value, String> {
             let _ = fs::remove_file(&tmp);
             format!("cannot save {}: {err}", file.display())
         })?;
-    Ok(json!({"path": file.display().to_string()}))
+    let payload = json!({"path": file.display().to_string()});
+    state.revision += 1;
+    Ok(payload)
 }
 
 fn get(state: &EngineState, key: Option<&str>) -> Result<Value, String> {
