@@ -95,11 +95,13 @@ fn omitted_params_take_defaults() {
 #[test]
 fn to_toml_round_trips() {
     let preset = Preset::parse(
-        "name = \"Crunch\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 2.5\n\
+        "name = \"Crunch\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 0.1\n\
          [[module]]\ntype = \"cabinet\"\nir = \"default-cab.wav\"\n",
     )
     .unwrap();
-    assert_eq!(Preset::parse(&preset.to_toml()).unwrap(), preset);
+    let text = preset.to_toml();
+    assert!(text.contains("level = 0.1\n"), "{text}");
+    assert_eq!(Preset::parse(&text).unwrap(), preset);
 }
 
 #[test]
@@ -182,4 +184,39 @@ fn layout_error_from_rack() {
         assert!(matches!(error, PresetError::Layout(_)), "{error:?}");
         assert_eq!(error.to_string(), expected);
     }
+}
+
+#[test]
+fn build_starts_at_preset_values() {
+    let preset = Preset::parse(
+        "name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 6.0206\n",
+    )
+    .unwrap();
+    let (mut rack, _) = preset.build(48_000.0, 128, Path::new("."), 100.0).unwrap();
+    let input: Vec<f32> = (0..128)
+        .map(|i| 0.25 * (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
+        .collect();
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    rack.process(&input, &mut left, &mut right);
+    let peak = |block: &[f32]| block.iter().fold(0.0_f32, |max, s| max.max(s.abs()));
+    let ratio = peak(&left) / peak(&input);
+    assert!((ratio - 2.0).abs() < 1e-3, "{ratio}");
+}
+
+#[test]
+fn non_finite_param_is_error() {
+    let message =
+        error("name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = nan\n");
+    assert_eq!(
+        message,
+        "module 'gain' parameter 'level' is not a finite number"
+    );
+}
+
+#[test]
+fn out_of_range_param_is_clamped() {
+    let preset =
+        Preset::parse("name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 100\n")
+            .unwrap();
+    assert_eq!(preset.modules[0].params, vec![("level".to_string(), 20.0)]);
 }

@@ -30,6 +30,7 @@ pub struct Ports {
 #[derive(Debug)]
 pub enum ConfigError {
     NoHomeDir,
+    Uid(std::io::Error),
     Syntax {
         path: PathBuf,
         line: usize,
@@ -66,7 +67,7 @@ impl Config {
         let dirs = ProjectDirs::from("", "", "xguitare").ok_or(ConfigError::NoHomeDir)?;
         let default_path = dirs.config_dir().join(CONFIG_FILE);
         let path = path.unwrap_or(&default_path);
-        let defaults = Config::default_for(&dirs);
+        let defaults = Config::default_for(&dirs)?;
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(defaults),
@@ -89,11 +90,12 @@ impl Config {
         Ok(defaults.overridden_by(file))
     }
 
-    fn default_for(dirs: &ProjectDirs) -> Config {
-        let socket_dir = dirs
-            .runtime_dir()
-            .map_or_else(fallback_runtime_dir, Path::to_path_buf);
-        Config {
+    fn default_for(dirs: &ProjectDirs) -> Result<Config, ConfigError> {
+        let socket_dir = match dirs.runtime_dir() {
+            Some(dir) => dir.to_path_buf(),
+            None => fallback_runtime_dir()?,
+        };
+        Ok(Config {
             bank_dir: dirs.config_dir().join("bank"),
             buffer_size: 128,
             crossfade_ms: 20.0,
@@ -104,7 +106,7 @@ impl Config {
                 output_left: "system:playback_1".to_string(),
                 output_right: "system:playback_2".to_string(),
             },
-        }
+        })
     }
 
     fn overridden_by(self, file: ConfigFile) -> Config {
@@ -127,9 +129,9 @@ impl Config {
     }
 }
 
-fn fallback_runtime_dir() -> PathBuf {
-    let uid = fs::metadata("/proc/self").map_or(0, |meta| meta.uid());
-    PathBuf::from(format!("/tmp/xguitare-{uid}"))
+fn fallback_runtime_dir() -> Result<PathBuf, ConfigError> {
+    let uid = fs::metadata("/proc/self").map_err(ConfigError::Uid)?.uid();
+    Ok(PathBuf::from(format!("/tmp/xguitare-{uid}")))
 }
 
 impl fmt::Display for ConfigError {
@@ -137,6 +139,9 @@ impl fmt::Display for ConfigError {
         match self {
             ConfigError::NoHomeDir => {
                 f.write_str("no home directory to derive the default config paths from")
+            }
+            ConfigError::Uid(error) => {
+                write!(f, "cannot determine uid for the socket fallback: {error}")
             }
             ConfigError::Syntax {
                 path,
@@ -152,7 +157,7 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ConfigError::Io { source, .. } => Some(source),
+            ConfigError::Io { source, .. } | ConfigError::Uid(source) => Some(source),
             _ => None,
         }
     }
