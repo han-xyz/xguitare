@@ -8,7 +8,12 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "xguitare", version, about = "Live guitar amp and effects rack")]
+#[command(
+    name = "xguitare",
+    version,
+    about = "Live guitar amp and effects rack",
+    arg_required_else_help = false
+)]
 struct Cli {
     #[arg(long)]
     config: Option<PathBuf>,
