@@ -37,6 +37,10 @@ pub enum PresetError {
     },
     DuplicateId(String),
     MissingIr(String),
+    NonFiniteParam {
+        module: String,
+        param: String,
+    },
     Layout(String),
 }
 
@@ -112,7 +116,7 @@ impl Preset {
                     params: module
                         .params
                         .iter()
-                        .map(|(name, value)| (name.clone(), f64::from(*value)))
+                        .map(|(name, value)| (name.clone(), shortest_f64(*value)))
                         .collect(),
                 })
                 .collect(),
@@ -135,6 +139,7 @@ impl Preset {
             for (idx, (_, value)) in preset_module.params.iter().enumerate() {
                 module.set_param(idx, *value);
             }
+            module.reset();
             modules.push((preset_module.id.clone(), module));
         }
         let mut rack = Rack::new(modules).map_err(BuildError::Layout)?;
@@ -155,6 +160,17 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
             param: param.clone(),
         });
     }
+    if let Some(param) = entry
+        .params
+        .iter()
+        .find(|(_, v)| !v.is_finite())
+        .map(|(name, _)| name)
+    {
+        return Err(PresetError::NonFiniteParam {
+            module: id,
+            param: param.clone(),
+        });
+    }
     if entry.type_name == CABINET_TYPE && entry.ir.is_none() {
         return Err(PresetError::MissingIr(id));
     }
@@ -162,7 +178,10 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
         .params
         .iter()
         .map(|p| {
-            let value = entry.params.get(p.name).map_or(p.default, |v| *v as f32);
+            let value = entry
+                .params
+                .get(p.name)
+                .map_or(p.default, |v| (*v as f32).clamp(p.min, p.max));
             (p.name.to_string(), value)
         })
         .collect();
@@ -172,6 +191,13 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
         ir: entry.ir,
         params,
     })
+}
+
+fn shortest_f64(value: f32) -> f64 {
+    value
+        .to_string()
+        .parse()
+        .expect("an f32's Display text is a valid f64")
 }
 
 struct LayoutProbe(&'static ModuleSpec);
@@ -201,6 +227,12 @@ impl fmt::Display for PresetError {
             }
             PresetError::DuplicateId(id) => write!(f, "duplicate module id '{id}'"),
             PresetError::MissingIr(id) => write!(f, "cabinet '{id}' has no ir"),
+            PresetError::NonFiniteParam { module, param } => {
+                write!(
+                    f,
+                    "module '{module}' parameter '{param}' is not a finite number"
+                )
+            }
             PresetError::Layout(msg) => f.write_str(msg),
         }
     }
