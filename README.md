@@ -99,7 +99,7 @@ mix = 10
 
 - Each `[[module]]` is one Module of the Rack, in signal order. `type` is required. `id` is optional and defaults to the type; give one when a Preset has two Modules of the same type (ids must be unique). The CLI addresses Parameters as `<id>.<param>`.
 - Omitted Parameters take their defaults; values outside a Parameter's range are clamped.
-- `cabinet` needs `ir`: a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo) relative to the Bank directory. The path must stay inside the Bank directory: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay` and `reverb` come after it and every other Module before it.
+- `cabinet` needs `ir`: a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo) relative to the Bank directory. The path must stay inside the Bank directory: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
 
 Modules and Parameters (`min..max default unit`):
 
@@ -112,6 +112,8 @@ Modules and Parameters (`min..max default unit`):
 | `tonestack` | `bass`, `middle`, `treble` 0..100 50 % |
 | `cabinet` | `level` −20..20 0 dB |
 | `delay` | `time` 10..2000 400 ms, `feedback` 0..95 35 %, `mix` 0..100 25 %, `pingpong` 0..1 0 |
+| `chorus` | `rate` 0.1..5 1 Hz, `depth` 0..100 50 %, `mix` 0..100 40 % |
+| `flanger` | `rate` 0.05..5 0.3 Hz, `depth` 0..100 60 %, `feedback` −95..95 50 %, `mix` 0..100 50 % |
 | `reverb` | `size` 0..100 50 %, `damping` 0..100 50 %, `mix` 0..100 20 %, `width` 0..100 100 % |
 | `gain` | `level` −60..20 0 dB |
 

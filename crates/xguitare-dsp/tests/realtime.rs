@@ -2,7 +2,9 @@ use assert_no_alloc::*;
 use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
-use xguitare_dsp::{Compressor, Delay, Drive, Gain, Gate, Module, Preamp, Rack, Reverb, Tonestack};
+use xguitare_dsp::{
+    Chorus, Compressor, Delay, Drive, Flanger, Gain, Gate, Module, Preamp, Rack, Reverb, Tonestack,
+};
 
 #[cfg(debug_assertions)]
 #[global_allocator]
@@ -116,6 +118,22 @@ fn delay_does_not_allocate() {
     assert_after_cabinet_does_not_allocate(
         Box::new(Delay::new()),
         &[(0, 120.0), (1, 60.0), (2, 50.0), (3, 1.0)],
+    );
+}
+
+#[test]
+fn chorus_does_not_allocate() {
+    assert_after_cabinet_does_not_allocate(
+        Box::new(Chorus::new()),
+        &[(0, 3.0), (1, 80.0), (2, 60.0)],
+    );
+}
+
+#[test]
+fn flanger_does_not_allocate() {
+    assert_after_cabinet_does_not_allocate(
+        Box::new(Flanger::new()),
+        &[(0, 2.0), (1, 90.0), (2, -70.0), (3, 60.0)],
     );
 }
 

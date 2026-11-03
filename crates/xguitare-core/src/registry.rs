@@ -1,6 +1,7 @@
 use xguitare_dsp::modules::cabinet::Cabinet;
 use xguitare_dsp::{
-    Compressor, Delay, Drive, Gain, Gate, Module, ModuleSpec, Preamp, Reverb, Tonestack,
+    Chorus, Compressor, Delay, Drive, Flanger, Gain, Gate, Module, ModuleSpec, Preamp, Reverb,
+    Tonestack,
 };
 
 struct Entry {
@@ -47,6 +48,14 @@ impl Default for ModuleRegistry {
                 Entry {
                     spec: Delay::new().spec(),
                     construct: Some(|| Box::new(Delay::new())),
+                },
+                Entry {
+                    spec: Chorus::new().spec(),
+                    construct: Some(|| Box::new(Chorus::new())),
+                },
+                Entry {
+                    spec: Flanger::new().spec(),
+                    construct: Some(|| Box::new(Flanger::new())),
                 },
                 Entry {
                     spec: Reverb::new().spec(),

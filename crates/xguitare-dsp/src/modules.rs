@@ -1,7 +1,9 @@
 pub mod cabinet;
+pub mod chorus;
 pub mod compressor;
 pub mod delay;
 pub mod drive;
+pub mod flanger;
 pub mod gain;
 pub mod gate;
 pub mod preamp;

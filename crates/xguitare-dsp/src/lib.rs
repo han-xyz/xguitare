@@ -1,5 +1,6 @@
 pub mod crossfade;
 pub mod midi;
+pub mod modulated_delay;
 pub mod modules;
 pub mod oversample;
 mod rack;
@@ -7,9 +8,11 @@ pub mod resample;
 pub mod smooth;
 pub mod synth_ir;
 
+pub use modules::chorus::Chorus;
 pub use modules::compressor::Compressor;
 pub use modules::delay::Delay;
 pub use modules::drive::Drive;
+pub use modules::flanger::Flanger;
 pub use modules::gain::Gain;
 pub use modules::gate::Gate;
 pub use modules::preamp::Preamp;

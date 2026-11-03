@@ -3,6 +3,7 @@
 
 use std::f64::consts::TAU;
 
+use xguitare_dsp::modules::cabinet::Cabinet;
 use xguitare_dsp::{AudioBuffers, Module, Rack};
 
 pub const SAMPLE_RATE: f32 = 48_000.0;
@@ -45,6 +46,32 @@ pub fn rack_with(module: Box<dyn Module>) -> Rack {
         Rack::new(vec![(module.spec().type_name.to_string(), module)]).expect("valid layout");
     rack.prepare(SAMPLE_RATE, BLOCK);
     rack
+}
+
+pub fn rack_after_cabinet(module: Box<dyn Module>) -> Rack {
+    let mut rack = Rack::new(vec![
+        (
+            "cabinet".to_string(),
+            Box::new(Cabinet::new(None)) as Box<dyn Module>,
+        ),
+        (module.spec().type_name.to_string(), module),
+    ])
+    .expect("valid layout");
+    rack.prepare(SAMPLE_RATE, BLOCK);
+    rack
+}
+
+pub fn run_rack_stereo(rack: &mut Rack, input: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let mut left = vec![0.0; input.len()];
+    let mut right = vec![0.0; input.len()];
+    for ((block, l), r) in input
+        .chunks(BLOCK)
+        .zip(left.chunks_mut(BLOCK))
+        .zip(right.chunks_mut(BLOCK))
+    {
+        rack.process(block, l, r);
+    }
+    (left, right)
 }
 
 pub fn run(rack: &mut Rack, input: &[f32]) -> Vec<f32> {
