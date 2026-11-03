@@ -91,6 +91,15 @@ fn idle_connection_does_not_block_others() {
 }
 
 #[test]
+fn idle_client_stays_connected() {
+    let server = server("idle-stays");
+    let stream = UnixStream::connect(&server.path).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    let reply = request(&stream, r#"{"cmd":"status"}"#);
+    assert!(reply.starts_with("{\"ok\":true,"), "{reply}");
+}
+
+#[test]
 fn stop_removes_socket_file() {
     let mut server = server("stop");
     assert!(server.path.exists());
