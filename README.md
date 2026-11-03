@@ -9,6 +9,7 @@ One guitar in, stereo out. A Daemon runs the audio; the `xguitare` CLI talks to 
 
 - Linux with PipeWire and `pipewire-jack` (the JACK client library PipeWire provides). xguitare is a JACK client and never starts a JACK server itself.
 - A Rust toolchain, Rust 1.95 or newer (eframe 0.37, which `xguitare-gui` uses, needs 1.95), e.g. from [rustup](https://rustup.rs). The Daemon and CLI alone (`cargo install --path crates/xguitare`) build with Rust 1.88 or newer.
+- For `xguitare-gui` on Linux: on Arch `libxkbcommon libxcb openssl` plus a Vulkan or OpenGL driver (wgpu picks one); on Debian/Ubuntu `libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev`. The Daemon and CLI need none of these.
 
 ## Install
 
