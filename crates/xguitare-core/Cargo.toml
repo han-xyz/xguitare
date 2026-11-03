@@ -17,4 +17,3 @@ tracing = "0.1.44"
 
 [dev-dependencies]
 assert_no_alloc = "1.1.2"
-hound = "3.5.1"

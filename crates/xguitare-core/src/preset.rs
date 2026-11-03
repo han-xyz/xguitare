@@ -49,7 +49,6 @@ pub enum PresetError {
 
 #[derive(Debug)]
 pub enum BuildError {
-    UnknownModule(String),
     Layout(RackError),
 }
 
@@ -162,7 +161,7 @@ impl Preset {
             } else {
                 registry
                     .construct(&preset_module.type_name)
-                    .ok_or_else(|| BuildError::UnknownModule(preset_module.type_name.clone()))?
+                    .expect("a parsed Preset names only registered module types")
             };
             for (idx, (_, value)) in preset_module.params.iter().enumerate() {
                 module.set_param(idx, *value);
@@ -288,9 +287,6 @@ impl std::error::Error for PresetError {}
 impl fmt::Display for BuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BuildError::UnknownModule(type_name) => {
-                write!(f, "unknown module type '{type_name}'")
-            }
             BuildError::Layout(error) => error.fmt(f),
         }
     }

@@ -9,7 +9,6 @@ pub struct Rack {
     left: Vec<f32>,
     right: Vec<f32>,
     max_frames: usize,
-    sample_rate: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,12 +39,10 @@ impl Rack {
             left: Vec::new(),
             right: Vec::new(),
             max_frames: 0,
-            sample_rate: 0.0,
         })
     }
 
     pub fn prepare(&mut self, sample_rate: f32, max_frames: usize) {
-        self.sample_rate = sample_rate;
         self.max_frames = max_frames;
         self.mono = vec![0.0; max_frames];
         self.left = vec![0.0; max_frames];
@@ -88,10 +85,6 @@ impl Rack {
 
     pub fn module_mut(&mut self, idx: usize) -> &mut dyn Module {
         self.modules[idx].1.as_mut()
-    }
-
-    pub fn sample_rate(&self) -> f32 {
-        self.sample_rate
     }
 }
 
