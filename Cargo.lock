@@ -261,7 +261,6 @@ dependencies = [
  "jack-sys",
  "lazy_static",
  "libc",
- "log",
 ]
 
 [[package]]
