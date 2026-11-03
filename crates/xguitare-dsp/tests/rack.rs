@@ -142,7 +142,7 @@ fn two_cabinets_is_error() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "exceed max_frames")]
 #[cfg(debug_assertions)]
 fn process_more_than_max_frames_panics() {
     let mut rack = gain_rack();

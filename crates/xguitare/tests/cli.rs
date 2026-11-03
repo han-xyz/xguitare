@@ -246,3 +246,18 @@ fn control_chars_in_names_are_replaced() {
     );
     assert_eq!(out.stderr, "error: no preset 'x\u{fffd}[2J\u{fffd}'\n");
 }
+
+#[test]
+fn run_main_missing_args_names_them() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_xguitare"))
+        .arg("set")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    assert!(
+        stderr.contains("<PARAM>") && stderr.contains("<VALUE>"),
+        "{stderr}"
+    );
+}

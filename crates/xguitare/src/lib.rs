@@ -111,7 +111,15 @@ where
         let written = if error.exit_code() == 0 {
             write!(out, "{rendered}").map(|()| 0)
         } else {
-            writeln!(err, "{}", rendered.lines().next().unwrap_or_default()).map(|()| 1)
+            let message = rendered
+                .lines()
+                .take_while(|line| !line.starts_with("Usage:"))
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join("; ")
+                .replace(":; ", ": ");
+            writeln!(err, "{message}").map(|()| 1)
         };
         written.unwrap_or(1)
     })
