@@ -185,7 +185,12 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
 
 fn save(state: &EngineState) -> Result<Value, String> {
     let (program, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
-    let file = state.bank.entries[*program].file();
+    let file = state
+        .bank
+        .entries
+        .get(*program)
+        .ok_or("active preset file is gone")?
+        .file();
     let tmp = file.with_extension("toml.tmp");
     fs::write(&tmp, preset.to_toml())
         .and_then(|()| fs::rename(&tmp, file))
