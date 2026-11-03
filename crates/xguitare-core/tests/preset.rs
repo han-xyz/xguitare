@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use xguitare_core::{Preset, PresetModule};
+use xguitare_core::{BuildWarning, Preset, PresetModule};
 
 fn error(text: &str) -> String {
     Preset::parse(text).unwrap_err().to_string()
@@ -74,9 +74,29 @@ fn build_gain_preset_runs() {
     let preset =
         Preset::parse("name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = -6\n")
             .unwrap();
-    let mut rack = preset.build(48_000.0, 128, Path::new(".")).unwrap();
+    let (mut rack, warnings) = preset.build(48_000.0, 128, Path::new("."), 100.0).unwrap();
+    assert!(warnings.is_empty());
     let input = [0.5; 128];
     let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
     rack.process(&input, &mut left, &mut right);
     assert!(left[0] < 0.5 && left[0] > 0.0);
+}
+
+#[test]
+fn missing_ir_builds_passthrough_with_warning() {
+    let preset = Preset::parse(
+        "name = \"X\"\n[[module]]\ntype = \"cabinet\"\nid = \"cab\"\nir = \"absent.wav\"\n",
+    )
+    .unwrap();
+    let bank_dir = std::env::temp_dir().join(format!("xguitare-preset-{}-ir", std::process::id()));
+    let (mut rack, warnings) = preset.build(48_000.0, 128, &bank_dir, 100.0).unwrap();
+    assert_eq!(warnings.len(), 1);
+    let BuildWarning::Ir { id, error } = &warnings[0];
+    assert_eq!(id, "cab");
+    assert!(error.contains("absent.wav"), "{error}");
+    let input: Vec<f32> = (0..128).map(|n| n as f32 / 128.0).collect();
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    rack.process(&input, &mut left, &mut right);
+    assert_eq!(left.as_slice(), input.as_slice());
+    assert_eq!(right.as_slice(), input.as_slice());
 }

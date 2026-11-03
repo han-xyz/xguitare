@@ -10,3 +10,7 @@ xguitare-dsp = { path = "../xguitare-dsp" }
 directories = "6.0.0"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
+hound = "3.5.1"
+
+[dev-dependencies]
+hound = "3.5.1"

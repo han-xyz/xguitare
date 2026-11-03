@@ -1,5 +1,6 @@
 pub mod modules;
 mod rack;
+pub mod resample;
 
 pub use modules::gain::Gain;
 pub use rack::{Rack, RackError};

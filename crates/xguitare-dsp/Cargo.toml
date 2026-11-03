@@ -7,3 +7,6 @@ version.workspace = true
 
 [dev-dependencies]
 assert_no_alloc = "1.1.2"
+
+[dependencies]
+realfft = "3.5.1"
