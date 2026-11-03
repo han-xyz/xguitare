@@ -73,7 +73,7 @@ pub enum ConfigError {
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     bank_dir: Option<PathBuf>,
-    #[serde(default, deserialize_with = "bank_kind")]
+    #[serde(default, deserialize_with = "deserialize_bank_kind")]
     bank_kind: Option<BankKind>,
     buffer_size: Option<u32>,
     crossfade_ms: Option<f32>,
@@ -82,7 +82,9 @@ struct ConfigFile {
     ports: Option<PortsFile>,
 }
 
-fn bank_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<BankKind>, D::Error> {
+fn deserialize_bank_kind<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BankKind>, D::Error> {
     BankKind::deserialize(deserializer)
         .map(Some)
         .map_err(|_| serde::de::Error::custom("bank_kind must be guitar or bass"))

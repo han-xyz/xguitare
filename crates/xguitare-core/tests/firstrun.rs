@@ -107,6 +107,16 @@ fn bass_bank_seeds_five_presets_and_ir() {
             "Primus Flange"
         ]
     );
+    let samples: Vec<f32> = hound::WavReader::open(dir.join("bass-cab.wav"))
+        .unwrap()
+        .samples::<f32>()
+        .map(Result::unwrap)
+        .collect();
+    let expected = xguitare_dsp::synth_ir::bass_cabinet(48_000);
+    assert_eq!(samples.len(), expected.len());
+    for (got, want) in samples.iter().zip(&expected) {
+        assert!((got - want).abs() < 1e-6);
+    }
 }
 
 #[test]

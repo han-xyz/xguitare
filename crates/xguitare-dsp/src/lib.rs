@@ -1,6 +1,6 @@
 pub mod crossfade;
 pub mod midi;
-pub mod modulated_delay;
+pub(crate) mod modulated_delay;
 pub mod modules;
 pub mod oversample;
 mod rack;

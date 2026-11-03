@@ -70,11 +70,13 @@ fn bank_kind_bass_parses() {
 fn bank_kind_unknown_is_error() {
     let path = config_file("kind-unknown", "bank_kind = \"cello\"\n");
     let message = Config::load(Some(&path)).unwrap_err().to_string();
-    assert!(
-        message.starts_with(&format!("{}: line 1:", path.display())),
-        "{message}"
+    assert_eq!(
+        message,
+        format!(
+            "{}: line 1:13: bank_kind must be guitar or bass",
+            path.display()
+        )
     );
-    assert!(message.contains("bank_kind"), "{message}");
 }
 
 fn socket_dir(test: &str, mode: u32) -> PathBuf {

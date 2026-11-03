@@ -59,9 +59,3 @@ impl ModulatedDelay {
         delayed
     }
 }
-
-impl Default for ModulatedDelay {
-    fn default() -> ModulatedDelay {
-        ModulatedDelay::new()
-    }
-}
