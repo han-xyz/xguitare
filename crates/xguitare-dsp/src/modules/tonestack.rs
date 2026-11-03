@@ -24,6 +24,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "middle",
@@ -31,6 +32,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "treble",
@@ -38,6 +40,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
     ],
 };

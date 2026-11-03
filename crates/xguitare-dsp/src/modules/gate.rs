@@ -17,6 +17,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 0.0,
             default: -60.0,
             unit: Unit::Db,
+            integer: false,
         },
         ParamSpec {
             name: "attack",
@@ -24,6 +25,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 50.0,
             default: 1.0,
             unit: Unit::Ms,
+            integer: false,
         },
         ParamSpec {
             name: "release",
@@ -31,6 +33,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 1000.0,
             default: 100.0,
             unit: Unit::Ms,
+            integer: false,
         },
         ParamSpec {
             name: "hysteresis",
@@ -38,6 +41,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 20.0,
             default: 6.0,
             unit: Unit::Db,
+            integer: false,
         },
     ],
 };

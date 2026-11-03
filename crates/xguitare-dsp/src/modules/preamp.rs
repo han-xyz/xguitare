@@ -24,6 +24,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 40.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "bias",
@@ -31,6 +32,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 1.0,
             default: 0.0,
             unit: Unit::Linear,
+            integer: false,
         },
         ParamSpec {
             name: "master",
@@ -38,6 +40,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 0.0,
             default: -12.0,
             unit: Unit::Db,
+            integer: false,
         },
         ParamSpec {
             name: "stages",
@@ -45,6 +48,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: MAX_STAGES as f32,
             default: 3.0,
             unit: Unit::Linear,
+            integer: true,
         },
     ],
 };

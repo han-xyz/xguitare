@@ -18,6 +18,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 2000.0,
             default: 400.0,
             unit: Unit::Ms,
+            integer: false,
         },
         ParamSpec {
             name: "feedback",
@@ -25,6 +26,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 95.0,
             default: 35.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "mix",
@@ -32,6 +34,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 25.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "pingpong",
@@ -39,6 +42,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 1.0,
             default: 0.0,
             unit: Unit::Linear,
+            integer: true,
         },
     ],
 };

@@ -288,7 +288,7 @@ fn set_without_preset() {
 #[test]
 fn get_all_and_one() {
     let (mut state, _audio, _dir) = state("get");
-    let expected = json!({"module": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0});
+    let expected = json!({"module": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "integer": false});
     let all = ok(handle(&mut state, Request::Get { param: None }));
     assert_eq!(all, json!({"params": [expected]}));
     let module = ok(handle(
@@ -313,6 +313,44 @@ fn get_all_and_one() {
             }
         )),
         "no module 'delay'"
+    );
+}
+
+#[test]
+fn get_carries_integer() {
+    let (mut state, _audio, dir) = state("integer");
+    fs::write(
+        dir.0.join("04-hot.toml"),
+        "name = \"Hot\"\n[[module]]\ntype = \"preamp\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&dir.0).unwrap();
+    ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "Hot".to_string(),
+        },
+    ));
+    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let integer: Vec<(&str, bool)> = all["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|param| {
+            (
+                param["param"].as_str().unwrap(),
+                param["integer"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        integer,
+        [
+            ("gain", false),
+            ("bias", false),
+            ("master", false),
+            ("stages", true)
+        ]
     );
 }
 

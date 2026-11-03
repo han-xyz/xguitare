@@ -17,6 +17,7 @@ static SPEC: ModuleSpec = ModuleSpec {
         max: 20.0,
         default: 0.0,
         unit: Unit::Db,
+        integer: false,
     }],
 };
 

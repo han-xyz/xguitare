@@ -39,6 +39,7 @@ pub struct ParamSpec {
     pub max: f32,
     pub default: f32,
     pub unit: Unit,
+    pub integer: bool,
 }
 
 #[derive(Debug)]

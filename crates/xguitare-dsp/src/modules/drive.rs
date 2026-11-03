@@ -21,6 +21,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "tone",
@@ -28,6 +29,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "level",
@@ -35,6 +37,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 10.0,
             default: 0.0,
             unit: Unit::Db,
+            integer: false,
         },
     ],
 };

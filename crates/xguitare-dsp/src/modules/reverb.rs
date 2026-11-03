@@ -24,6 +24,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "damping",
@@ -31,6 +32,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 50.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "mix",
@@ -38,6 +40,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 20.0,
             unit: Unit::Percent,
+            integer: false,
         },
         ParamSpec {
             name: "width",
@@ -45,6 +48,7 @@ static SPEC: ModuleSpec = ModuleSpec {
             max: 100.0,
             default: 100.0,
             unit: Unit::Percent,
+            integer: false,
         },
     ],
 };
