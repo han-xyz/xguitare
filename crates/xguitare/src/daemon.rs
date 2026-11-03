@@ -14,7 +14,7 @@ use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
-use xguitare_core::control::{EngineState, Request, Response, handle};
+use xguitare_core::control::{EngineState, Request, Response, handle, needs_reprepare, reprepare};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
@@ -84,13 +84,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let control = socket
         .spawn(Arc::clone(&state), Arc::clone(&stop))
         .map_err(DaemonError::Socket)?;
-    watch_until_stopped(
-        &stop,
-        &shared,
-        &state,
-        &mut bank_watch,
-        session.max_frames(),
-    );
+    watch_until_stopped(&stop, &shared, &state, &mut bank_watch);
     if control.join().is_err() {
         error!("control thread panicked");
     }
@@ -333,7 +327,6 @@ fn watch_until_stopped(
     shared: &EngineShared,
     state: &Mutex<EngineState>,
     bank_watch: &mut BankWatch,
-    max_frames: usize,
 ) {
     let mut reported_xruns = 0;
     let mut reported_oversize = 0;
@@ -360,14 +353,31 @@ fn watch_until_stopped(
             warn!("buffer size changed to {buffer_size}");
             reported_buffer_size = buffer_size;
         }
+        let mut state = state_guard(state);
         let oversize = shared.oversize_blocks.load(Ordering::Relaxed);
         if oversize > reported_oversize {
             warn!(
-                "{} oversize blocks dropped: quantum {buffer_size} > prepared {max_frames}; restart or force the quantum",
-                oversize - reported_oversize
+                "{} oversize blocks dropped: quantum {buffer_size} > prepared {}; re-preparing",
+                oversize - reported_oversize,
+                state.max_frames
             );
             reported_oversize = oversize;
         }
+        if needs_reprepare(state.max_frames, buffer_size) {
+            reprepare_rack(&mut state, buffer_size);
+        }
+    }
+}
+
+fn reprepare_rack(state: &mut EngineState, buffer_size: u32) {
+    match reprepare(state, buffer_size) {
+        Ok(warnings) => {
+            for warning in &warnings {
+                warn!("{warning}");
+            }
+            info!("re-prepared rack for {buffer_size} frames");
+        }
+        Err(err) => warn!("cannot re-prepare rack for {buffer_size} frames: {err}; retrying"),
     }
 }
 

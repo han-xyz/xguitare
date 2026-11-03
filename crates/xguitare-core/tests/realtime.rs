@@ -1,5 +1,5 @@
 use assert_no_alloc::*;
-use xguitare_core::engine::{Command, RackSwitcher, engine_queues};
+use xguitare_core::engine::{Command, RackSwitcher, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_dsp::{Gain, Module, Rack};
 
 #[cfg(debug_assertions)]
@@ -9,12 +9,16 @@ static A: AllocDisabler = AllocDisabler;
 const BLOCK: usize = 128;
 
 fn gain_rack() -> Box<Rack> {
+    sized_gain_rack(BLOCK)
+}
+
+fn sized_gain_rack(max_frames: usize) -> Box<Rack> {
     let mut rack = Rack::new(vec![(
         "gain".to_string(),
         Box::new(Gain::new()) as Box<dyn Module>,
     )])
     .expect("valid layout");
-    rack.prepare(48_000.0, BLOCK);
+    rack.prepare(48_000.0, max_frames);
     Box::new(rack)
 }
 
@@ -50,6 +54,34 @@ fn rack_switcher_does_not_allocate() {
             switcher.push_program_change(3);
             switcher.apply_commands();
             switcher.process(&input, &mut left, &mut right);
+        }
+    });
+    drop(switcher);
+    control.drain_from_audio();
+}
+
+#[test]
+fn rack_switcher_at_quantum_limit_does_not_allocate() {
+    let (mut control, audio) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(
+        sized_gain_rack(SWITCHER_MAX_FRAMES),
+        SWITCHER_MAX_FRAMES,
+        960,
+        audio,
+    );
+    assert!(
+        control
+            .commands
+            .push(Command::SwapRack(sized_gain_rack(SWITCHER_MAX_FRAMES)))
+            .is_ok()
+    );
+    let input = vec![0.25; SWITCHER_MAX_FRAMES];
+    let mut left = vec![0.0; SWITCHER_MAX_FRAMES];
+    let mut right = vec![0.0; SWITCHER_MAX_FRAMES];
+    assert_no_alloc(|| {
+        for _ in 0..20 {
+            switcher.apply_commands();
+            assert!(switcher.process(&input, &mut left, &mut right));
         }
     });
     drop(switcher);

@@ -151,3 +151,11 @@ fn process_more_than_max_frames_panics() {
     let mut right = [0.0; BLOCK + 1];
     rack.process(&input, &mut left, &mut right);
 }
+
+#[test]
+fn max_frames_accessor() {
+    let mut rack = Rack::new(Vec::new()).expect("valid layout");
+    rack.prepare(SAMPLE_RATE, 256);
+    assert_eq!(rack.max_frames(), 256);
+    assert_eq!(gain_rack().max_frames(), BLOCK);
+}

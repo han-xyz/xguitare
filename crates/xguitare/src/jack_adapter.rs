@@ -7,9 +7,9 @@ use jack::{
     AsyncClient, AudioIn, AudioOut, Client, ClientOptions, Control, Frames, MidiIn,
     NotificationHandler, Port, PortFlags, PortSpec, ProcessHandler, ProcessScope,
 };
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use xguitare_core::Ports;
-use xguitare_core::engine::{AudioQueues, EngineShared, RackSwitcher};
+use xguitare_core::engine::{AudioQueues, EngineShared, RackSwitcher, SWITCHER_MAX_FRAMES};
 use xguitare_core::ports::{AvailablePort, choose_ports};
 use xguitare_dsp::{Rack, midi};
 
@@ -51,8 +51,7 @@ pub fn start(
     let rack = Box::new(build_rack(sample_rate, max_frames));
     let crossfade_frames = (crossfade_ms * sample_rate / 1000.0) as usize;
     let process = Process {
-        switcher: RackSwitcher::new(rack, max_frames, crossfade_frames, queues),
-        max_frames,
+        switcher: RackSwitcher::new(rack, SWITCHER_MAX_FRAMES, crossfade_frames, queues),
         input,
         out_l,
         out_r,
@@ -75,10 +74,8 @@ pub fn start(
             "buffer size is {effective}, wanted {buffer_size}; force it with: pw-metadata -n settings 0 clock.force-quantum {buffer_size}"
         );
     }
-    if effective as usize > max_frames {
-        error!(
-            "buffer size {effective} exceeds prepared {max_frames}; output is silent until restart; force it with: pw-metadata -n settings 0 clock.force-quantum {buffer_size}"
-        );
+    if effective as usize != max_frames {
+        info!("buffer size {effective} differs from prepared {max_frames}; re-preparing");
     }
     Ok(Session { client, max_frames })
 }
@@ -165,7 +162,6 @@ impl NotificationHandler for Notifications {
 
 struct Process {
     switcher: RackSwitcher,
-    max_frames: usize,
     input: Port<AudioIn>,
     out_l: Port<AudioOut>,
     out_r: Port<AudioOut>,
@@ -186,13 +182,9 @@ impl ProcessHandler for Process {
         let input = self.input.as_slice(ps);
         let out_l = self.out_l.as_mut_slice(ps);
         let out_r = self.out_r.as_mut_slice(ps);
-        if input.len() > self.max_frames {
-            // The Rack's scratch buffers hold max_frames; PipeWire can raise the quantum after prepare, and resizing here would allocate.
-            out_l.fill(0.0);
-            out_r.fill(0.0);
+        // PipeWire can raise the quantum past the size the Rack was prepared for, and resizing here would allocate: the switcher writes silence until the control thread swaps in a Rack re-prepared for the quantum.
+        if !self.switcher.process(input, out_l, out_r) {
             self.shared.oversize_blocks.fetch_add(1, Ordering::Relaxed);
-        } else {
-            self.switcher.process(input, out_l, out_r);
         }
         let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.shared

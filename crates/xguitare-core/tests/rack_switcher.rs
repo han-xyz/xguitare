@@ -1,4 +1,6 @@
-use xguitare_core::engine::{Command, EngineQueues, RackSwitcher, engine_queues};
+use xguitare_core::engine::{
+    Command, EngineQueues, RackSwitcher, SWITCHER_MAX_FRAMES, engine_queues,
+};
 use xguitare_dsp::{Gain, Module, Rack};
 
 const BLOCK: usize = 128;
@@ -6,6 +8,10 @@ const FADE: usize = 960;
 const CAPACITY: usize = 64;
 
 fn gain_rack(levels_db: &[f32]) -> Box<Rack> {
+    sized_gain_rack(levels_db, BLOCK)
+}
+
+fn sized_gain_rack(levels_db: &[f32], max_frames: usize) -> Box<Rack> {
     let modules = levels_db
         .iter()
         .enumerate()
@@ -16,7 +22,7 @@ fn gain_rack(levels_db: &[f32]) -> Box<Rack> {
         })
         .collect();
     let mut rack = Rack::new(modules).expect("valid layout");
-    rack.prepare(48_000.0, BLOCK);
+    rack.prepare(48_000.0, max_frames);
     for idx in 0..levels_db.len() {
         rack.module_mut(idx).reset();
     }
@@ -100,4 +106,21 @@ fn retired_capacity_never_exceeded() {
             "round {round}: {retired} retired"
         );
     }
+}
+
+#[test]
+fn swap_to_larger_rack_during_oversize_period() {
+    const LARGER: usize = 2 * BLOCK;
+    let (mut control, audio) = engine_queues(CAPACITY);
+    let mut switcher = RackSwitcher::new(gain_rack(&[0.0]), SWITCHER_MAX_FRAMES, FADE, audio);
+    let input = [0.5; LARGER];
+    let (mut left, mut right) = ([1.0; LARGER], [1.0; LARGER]);
+    switcher.apply_commands();
+    assert!(!switcher.process(&input, &mut left, &mut right));
+    assert!(left.iter().chain(&right).all(|&sample| sample == 0.0));
+    swap(&mut control, sized_gain_rack(&[0.0], LARGER));
+    switcher.apply_commands();
+    assert!(switcher.process(&input, &mut left, &mut right));
+    assert!(left[LARGER - 1] > 0.4, "{}", left[LARGER - 1]);
+    assert!(right[LARGER - 1] > 0.4, "{}", right[LARGER - 1]);
 }

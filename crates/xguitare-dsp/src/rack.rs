@@ -79,6 +79,10 @@ impl Rack {
         out_r[..frames].copy_from_slice(right);
     }
 
+    pub fn max_frames(&self) -> usize {
+        self.max_frames
+    }
+
     pub fn modules(&self) -> &[(String, Box<dyn Module>)] {
         &self.modules
     }

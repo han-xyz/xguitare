@@ -44,6 +44,9 @@ pub struct AudioQueues {
 
 const PROGRAM_CHANGE_SLOTS: usize = 16;
 
+/// PipeWire's default `clock.quantum-limit`: the largest block the switcher's own scratch is prepared for, so a swap to a Rack re-prepared for any quantum up to it never allocates on the audio thread.
+pub const SWITCHER_MAX_FRAMES: usize = 8192;
+
 pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);
     // At most every queued SwapRack plus the current and the fading-in Rack, minus the one left current, can be retired between two drains, and `control::handle` drains before each SwapRack push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
@@ -83,6 +86,7 @@ pub struct RackSwitcher {
     current: Box<Rack>,
     incoming: Option<Box<Rack>>,
     crossfader: Crossfader,
+    max_frames: usize,
     crossfade_frames: usize,
     queues: AudioQueues,
     reserved_slots: usize,
@@ -102,6 +106,7 @@ impl RackSwitcher {
             current: rack,
             incoming: None,
             crossfader,
+            max_frames,
             crossfade_frames,
             queues,
             reserved_slots,
@@ -135,11 +140,28 @@ impl RackSwitcher {
         }
     }
 
-    /// Runs one block of at most `max_frames` through the current Rack, or through both while a fade runs.
-    pub fn process(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
+    /// Runs one block through the current Rack, or through both while a fade runs; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for.
+    pub fn process(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
+        let frames = input.len();
+        if frames > self.current.max_frames()
+            && let Some(new) = self.incoming.take_if(|new| frames <= new.max_frames())
+        {
+            // The current Rack has been silent at this block size, so there is nothing to fade from.
+            let old = mem::replace(&mut self.current, new);
+            self.retire(old);
+        }
+        let fits = |rack: &Rack| frames <= rack.max_frames();
+        if frames > self.max_frames
+            || !fits(&self.current)
+            || self.incoming.as_deref().is_some_and(|new| !fits(new))
+        {
+            out_l.fill(0.0);
+            out_r.fill(0.0);
+            return false;
+        }
         let Some(incoming) = self.incoming.as_mut() else {
             self.current.process(input, out_l, out_r);
-            return;
+            return true;
         };
         let faded = self
             .crossfader
@@ -148,6 +170,7 @@ impl RackSwitcher {
             let old = mem::replace(&mut self.current, new);
             self.retire(old);
         }
+        true
     }
 
     /// Hands a MIDI program change to the control thread, or drops it when only the slots reserved for retired Racks are free.

@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use serde_json::{Value, json};
-use xguitare_core::control::{EngineState, Request, Response, handle, handle_line};
+use xguitare_core::control::{
+    EngineState, Request, Response, handle, handle_line, needs_reprepare, reprepare,
+};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Preset};
 
@@ -106,6 +108,7 @@ fn status_reports_fields() {
             "program": 0,
             "sample_rate": 48000,
             "buffer_size": 128,
+            "prepared_frames": 128,
             "xruns": 3,
             "callback_max_us": 250,
             "callback_last_us": 90,
@@ -414,4 +417,58 @@ fn failed_save_leaves_no_tmp() {
     let message = error(handle(&mut state, Request::Save));
     assert!(message.starts_with("cannot save"), "{message}");
     assert!(tmp_files(&state.config.bank_dir).is_empty());
+}
+
+#[test]
+fn needs_reprepare_when_sizes_differ() {
+    assert!(needs_reprepare(128, 256));
+    assert!(needs_reprepare(512, 128));
+    assert!(!needs_reprepare(128, 128));
+}
+
+#[test]
+fn reprepare_swaps_in_active_preset_at_new_size() {
+    let (mut state, mut audio) = state("reprepare");
+    let warnings = reprepare(&mut state, 256).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
+        panic!("expected SwapRack");
+    };
+    assert_eq!(rack.max_frames(), 256);
+    assert_eq!(rack.modules()[0].0, "gain");
+}
+
+#[test]
+fn reprepare_without_preset_swaps_in_passthrough() {
+    let (mut state, mut audio) = state("reprepare-passthrough");
+    state.active = None;
+    reprepare(&mut state, 512).unwrap();
+    let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
+        panic!("expected SwapRack");
+    };
+    assert_eq!(rack.max_frames(), 512);
+    assert!(rack.modules().is_empty());
+}
+
+#[test]
+fn reprepare_with_full_queue_is_engine_busy() {
+    let (mut state, _audio) = state("reprepare-busy");
+    for _ in 0..QUEUE_CAPACITY {
+        ok(handle(&mut state, set("gain.level", 1.0)));
+    }
+    assert_eq!(reprepare(&mut state, 256).unwrap_err(), "engine busy");
+    assert_eq!(
+        ok(handle(&mut state, Request::Status))["prepared_frames"],
+        128
+    );
+}
+
+#[test]
+fn status_reports_prepared_frames() {
+    let (mut state, _audio) = state("status-prepared");
+    reprepare(&mut state, 256).unwrap();
+    assert_eq!(
+        ok(handle(&mut state, Request::Status))["prepared_frames"],
+        256
+    );
 }

@@ -127,6 +127,7 @@ preset: Clean
 program: 0
 sample_rate: 48000
 buffer_size: 128
+prepared_frames: 128
 xruns: 0
 callback_max_us: 92
 callback_last_us: 40
@@ -235,11 +236,13 @@ If `$XDG_RUNTIME_DIR` is unset, the socket defaults to `/tmp/xguitare-<uid>/xgui
 **Latency or buffer size.** The Daemon asks for `buffer_size` frames per period, but PipeWire may run a larger quantum. `xguitare status` shows the `buffer_size` in effect, and the Daemon warns at start:
 
 ```text
-2026-11-03T12:52:17.159269Z  WARN xguitare::jack_adapter: buffer size is 256, wanted 128; force it with: pw-metadata -n settings 0 clock.force-quantum 128
-2026-11-03T12:52:17.159271Z ERROR xguitare::jack_adapter: buffer size 256 exceeds prepared 128; output is silent until restart; force it with: pw-metadata -n settings 0 clock.force-quantum 128
+2026-11-03T15:49:51.117134Z  WARN xguitare::jack_adapter: buffer size is 256, wanted 128; force it with: pw-metadata -n settings 0 clock.force-quantum 128
+2026-11-03T15:49:51.117138Z  INFO xguitare::jack_adapter: buffer size 256 differs from prepared 128; re-preparing
+2026-11-03T15:49:52.118188Z  WARN xguitare::daemon: 186 oversize blocks dropped: quantum 256 > prepared 128; re-preparing
+2026-11-03T15:49:52.119717Z  INFO xguitare::daemon: re-prepared rack for 256 frames
 ```
 
-The Rack is prepared for the buffer size JACK reports before the Daemon activates its client. When the quantum in effect is larger than that, output is silent: the `ERROR` line above at start, or `oversize blocks dropped` when the quantum grows later. With PipeWire this happens at start too when the quantum was already forced larger, as in the lines above (forced to 256, `buffer_size = 128`). Force the quantum for the whole PipeWire graph, restart the Daemon, and undo it with `0` when you are done playing:
+The Rack is prepared for the buffer size JACK reports before the Daemon activates its client. When the quantum in effect differs, at start or later, the Daemon rebuilds the Rack for the new size within a second and logs `re-prepared rack for N frames`; `xguitare status` shows that size as `prepared_frames`. Sound continues with no restart, after at most a second of silence when the quantum grew (logged as `oversize blocks dropped`). To get the latency of `buffer_size`, force the quantum for the whole PipeWire graph, and undo it with `0` when you are done playing:
 
 ```sh
 pw-metadata -n settings 0 clock.force-quantum 128

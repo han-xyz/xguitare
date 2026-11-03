@@ -7,7 +7,7 @@ use serde::de::{Deserializer, Error as _};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, json};
-use xguitare_dsp::{ParamSpec, Unit};
+use xguitare_dsp::{ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
@@ -85,6 +85,34 @@ pub fn handle_line(state: &mut EngineState, line: &str) -> (String, Vec<BuildWar
     (line, warnings)
 }
 
+/// Whether the Rack prepared for `prepared` frames must be rebuilt for the quantum in effect: larger blocks would be silent, smaller ones would waste work on oversized FFTs.
+pub fn needs_reprepare(prepared: usize, buffer_size: u32) -> bool {
+    prepared != buffer_size as usize
+}
+
+/// Rebuilds the active Preset's Rack, or the empty passthrough Rack when none is active, for `buffer_size` frames and pushes it as a `SwapRack`; the build warnings come back for the caller to log.
+pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Vec<BuildWarning>, String> {
+    let max_frames = buffer_size as usize;
+    let (rack, warnings) = match &state.active {
+        Some((_, preset)) => preset
+            .build(
+                state.sample_rate,
+                max_frames,
+                &state.config.bank_dir,
+                state.config.ir_max_ms,
+            )
+            .map_err(|err| err.to_string())?,
+        None => {
+            let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
+            rack.prepare(state.sample_rate, max_frames);
+            (rack, Vec::new())
+        }
+    };
+    swap_rack(state, rack)?;
+    state.max_frames = max_frames;
+    Ok(warnings)
+}
+
 impl Request {
     pub fn to_line(&self) -> String {
         serde_json::to_string(self).expect("a Request always serialises to JSON")
@@ -109,6 +137,7 @@ fn status(state: &EngineState) -> Value {
         "program": active_program(state),
         "sample_rate": shared.sample_rate.load(Ordering::Relaxed),
         "buffer_size": shared.buffer_size.load(Ordering::Relaxed),
+        "prepared_frames": state.max_frames,
         "xruns": shared.xruns.load(Ordering::Relaxed),
         "callback_max_us": shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
@@ -156,15 +185,19 @@ fn load(
         )
         .map_err(|err| err.to_string())?;
     *warnings = build_warnings;
+    swap_rack(state, rack)?;
+    let payload = json!({"program": program, "name": preset.name});
+    state.active = Some((file, preset));
+    Ok(payload)
+}
+
+fn swap_rack(state: &mut EngineState, rack: Rack) -> Result<(), String> {
     state.queues.drain_from_audio();
     state
         .queues
         .commands
         .push(Command::SwapRack(Box::new(rack)))
-        .map_err(|_| ENGINE_BUSY.to_string())?;
-    let payload = json!({"program": program, "name": preset.name});
-    state.active = Some((file, preset));
-    Ok(payload)
+        .map_err(|_| ENGINE_BUSY.to_string())
 }
 
 fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, String> {

@@ -154,6 +154,7 @@ fn render_status(payload: &Value) -> String {
         "program",
         "sample_rate",
         "buffer_size",
+        "prepared_frames",
         "xruns",
         "callback_max_us",
         "callback_last_us",
