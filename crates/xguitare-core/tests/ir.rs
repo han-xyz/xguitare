@@ -6,11 +6,25 @@ use xguitare_core::{IrError, load_ir};
 
 const RAMP_LEN: usize = 100;
 
-fn temp_dir(test: &str) -> PathBuf {
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn join(&self, file: &str) -> PathBuf {
+        self.0.join(file)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(test: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("xguitare-ir-{}-{test}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
 }
 
 fn ramp() -> Vec<f32> {
@@ -61,7 +75,8 @@ fn assert_ramp(samples: &[f32]) {
 }
 
 fn loads_int(test: &str, bits: u16) {
-    let path = temp_dir(test).join("ir.wav");
+    let dir = temp_dir(test);
+    let path = dir.join("ir.wav");
     write_int(&path, spec(1, 48_000, bits, SampleFormat::Int), &ramp());
     let ir = load_ir(&path, 48_000, 1000.0).unwrap();
     assert_ramp(&ir.left);
@@ -85,7 +100,8 @@ fn loads_pcm32() {
 
 #[test]
 fn loads_float32() {
-    let path = temp_dir("float32").join("ir.wav");
+    let dir = temp_dir("float32");
+    let path = dir.join("ir.wav");
     write_float(&path, spec(1, 48_000, 32, SampleFormat::Float), &ramp());
     let ir = load_ir(&path, 48_000, 1000.0).unwrap();
     assert_ramp(&ir.left);
@@ -93,7 +109,8 @@ fn loads_float32() {
 
 #[test]
 fn loads_stereo() {
-    let path = temp_dir("stereo").join("ir.wav");
+    let dir = temp_dir("stereo");
+    let path = dir.join("ir.wav");
     let interleaved: Vec<f32> = ramp().iter().flat_map(|s| [*s, -*s]).collect();
     write_float(
         &path,
@@ -109,7 +126,8 @@ fn loads_stereo() {
 
 #[test]
 fn resamples_to_engine_rate() {
-    let path = temp_dir("resample").join("ir.wav");
+    let dir = temp_dir("resample");
+    let path = dir.join("ir.wav");
     write_float(&path, spec(1, 44_100, 32, SampleFormat::Float), &ramp());
     let ir = load_ir(&path, 48_000, 1000.0).unwrap();
     assert_eq!(ir.left.len(), 109);
@@ -117,7 +135,8 @@ fn resamples_to_engine_rate() {
 
 #[test]
 fn truncates_to_max_ms() {
-    let path = temp_dir("truncate").join("ir.wav");
+    let dir = temp_dir("truncate");
+    let path = dir.join("ir.wav");
     write_float(
         &path,
         spec(1, 48_000, 32, SampleFormat::Float),
@@ -129,7 +148,8 @@ fn truncates_to_max_ms() {
 
 #[test]
 fn unsupported_8_bit() {
-    let path = temp_dir("pcm8").join("ir.wav");
+    let dir = temp_dir("pcm8");
+    let path = dir.join("ir.wav");
     write_int(&path, spec(1, 48_000, 8, SampleFormat::Int), &ramp());
     let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
     assert!(matches!(error, IrError::Unsupported { .. }), "{error}");
@@ -141,7 +161,8 @@ fn unsupported_8_bit() {
 
 #[test]
 fn missing_file_is_io() {
-    let path = temp_dir("missing").join("absent.wav");
+    let dir = temp_dir("missing");
+    let path = dir.join("absent.wav");
     let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
     assert!(matches!(error, IrError::Io { .. }), "{error}");
     assert!(
@@ -154,11 +175,25 @@ fn missing_file_is_io() {
 
 #[test]
 fn three_channels_unsupported() {
-    let path = temp_dir("three").join("ir.wav");
+    let dir = temp_dir("three");
+    let path = dir.join("ir.wav");
     write_float(&path, spec(3, 48_000, 32, SampleFormat::Float), &[0.1; 30]);
     let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
     assert_eq!(
         error.to_string(),
         format!("{}: unsupported wav format: 3 channels", path.display())
+    );
+}
+
+#[test]
+fn empty_file_is_error() {
+    let dir = temp_dir("empty");
+    let path = dir.join("ir.wav");
+    write_float(&path, spec(1, 48_000, 32, SampleFormat::Float), &[]);
+    let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
+    assert!(matches!(error, IrError::Decode { .. }), "{error}");
+    assert_eq!(
+        error.to_string(),
+        format!("{}: empty impulse response", path.display())
     );
 }

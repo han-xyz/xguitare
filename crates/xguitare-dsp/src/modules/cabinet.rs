@@ -161,7 +161,7 @@ impl Convolver {
             input.len(),
             self.block
         );
-        // A block shorter than `block` fills the current partition in place with its unfilled tail zero; the output stays exact at the cost of one FFT pair per call.
+        // A short block fills the current partition in place, unfilled tail zero, so the output stays exact; each segment costs one forward FFT plus one inverse FFT per channel, and a call straddling a partition boundary is two segments.
         let mut done = 0;
         while done < input.len() {
             let frames = (input.len() - done).min(self.block - self.fill);

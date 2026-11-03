@@ -5,6 +5,8 @@ use hound::{SampleFormat, WavReader};
 use xguitare_dsp::modules::cabinet::CabinetIr;
 use xguitare_dsp::resample::resample_offline;
 
+const EMPTY_IR: &str = "empty impulse response";
+
 #[derive(Debug)]
 pub enum IrError {
     Io {
@@ -47,27 +49,35 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
             return Err(IrError::unsupported(path, format!("{bits}-bit {format}")));
         }
     };
+    let file_max_len = (spec.sample_rate as f32 * max_ms / 1000.0).ceil() as usize;
     let max_len = (engine_rate as f32 * max_ms / 1000.0) as usize;
-    let fit = |channel: Vec<f32>| {
+    let fit = |mut channel: Vec<f32>| {
+        channel.truncate(file_max_len);
         let mut channel = if spec.sample_rate == engine_rate {
             channel
         } else {
             resample_offline(&channel, spec.sample_rate, engine_rate)
         };
         channel.truncate(max_len);
-        channel
+        if channel.is_empty() {
+            return Err(IrError::Decode {
+                path: path.to_path_buf(),
+                detail: EMPTY_IR.to_string(),
+            });
+        }
+        Ok(channel)
     };
     match spec.channels {
         1 => Ok(CabinetIr {
-            left: fit(samples),
+            left: fit(samples)?,
             right: None,
         }),
         2 => {
             let left = samples.iter().step_by(2).copied().collect();
             let right = samples.iter().skip(1).step_by(2).copied().collect();
             Ok(CabinetIr {
-                left: fit(left),
-                right: Some(fit(right)),
+                left: fit(left)?,
+                right: Some(fit(right)?),
             })
         }
         n => Err(IrError::unsupported(path, format!("{n} channels"))),
