@@ -8,13 +8,12 @@ use jack::{
     NotificationHandler, Port, PortFlags, PortSpec, ProcessHandler, ProcessScope,
 };
 use tracing::{info, warn};
-use xguitare_core::Ports;
 use xguitare_core::engine::{EngineShared, choose_ports};
+use xguitare_core::{AUTO_PORT, Ports};
 use xguitare_dsp::Rack;
 
 const CLIENT_NAME: &str = "xguitare";
 const AUDIO_PORT_TYPE: &str = "32 bit float mono audio";
-const SYSTEM_PREFIX: &str = "system:";
 
 #[derive(Debug)]
 pub enum JackError {
@@ -76,29 +75,33 @@ pub fn start(
 impl Session {
     pub fn connect(&self, ports: &Ports) {
         let client = self.client.as_client();
-        let capture = system_ports(client, PortFlags::IS_OUTPUT);
-        let playback = system_ports(client, PortFlags::IS_INPUT);
+        let capture = physical_ports(client, PortFlags::IS_OUTPUT);
+        let playback = physical_ports(client, PortFlags::IS_INPUT);
         let choice = choose_ports(&capture, &playback, ports);
         let own = |port: &str| format!("{}:{port}", client.name());
         let links = [
-            (&ports.input, choice.input.map(|src| (src, own("in")))),
+            ("in", &ports.input, choice.input.map(|src| (src, own("in")))),
             (
+                "out_l",
                 &ports.output_left,
                 choice.output_left.map(|dst| (own("out_l"), dst)),
             ),
             (
+                "out_r",
                 &ports.output_right,
                 choice.output_right.map(|dst| (own("out_r"), dst)),
             ),
         ];
-        for (configured, link) in links {
+        for (port, configured, link) in links {
             match link {
                 Some((src, dst)) => match client.connect_ports_by_name(&src, &dst) {
                     Ok(()) => info!("connected {src} -> {dst}"),
                     Err(err) => warn!("cannot connect {src} -> {dst}: {err}"),
                 },
-                None if configured.is_empty() => {}
-                None => warn!("port '{configured}' not found, not connecting"),
+                None if configured == AUTO_PORT => {
+                    warn!("no physical port for '{port}', not connecting")
+                }
+                None => {}
             }
         }
     }
@@ -121,12 +124,14 @@ fn register<PS: PortSpec>(
         .map_err(|err| JackError::RegisterPort(name, err))
 }
 
-fn system_ports(client: &Client, flags: PortFlags) -> Vec<String> {
-    client
-        .ports(None, Some(AUDIO_PORT_TYPE), flags)
-        .into_iter()
-        .filter(|name| name.starts_with(SYSTEM_PREFIX))
-        .collect()
+fn physical_ports(client: &Client, direction: PortFlags) -> Vec<String> {
+    let mut names = client.ports(
+        None,
+        Some(AUDIO_PORT_TYPE),
+        direction | PortFlags::IS_PHYSICAL,
+    );
+    names.sort();
+    names
 }
 
 struct Notifications {

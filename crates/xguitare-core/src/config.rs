@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
+pub const AUTO_PORT: &str = "auto";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
@@ -102,9 +103,9 @@ impl Config {
             ir_max_ms: 100.0,
             socket: socket_dir.join(SOCKET_FILE),
             ports: Ports {
-                input: "system:capture_1".to_string(),
-                output_left: "system:playback_1".to_string(),
-                output_right: "system:playback_2".to_string(),
+                input: AUTO_PORT.to_string(),
+                output_left: AUTO_PORT.to_string(),
+                output_right: AUTO_PORT.to_string(),
             },
         })
     }

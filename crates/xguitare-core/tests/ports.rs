@@ -14,23 +14,19 @@ fn ports(input: &str, output_left: &str, output_right: &str) -> Ports {
 }
 
 fn capture() -> Vec<String> {
-    names(&["system:capture_1", "system:capture_2"])
+    names(&["card:capture_FL", "card:capture_FR"])
 }
 
 fn playback() -> Vec<String> {
-    names(&["system:playback_1", "system:playback_2"])
+    names(&["card:playback_FL", "card:playback_FR"])
 }
 
 #[test]
 fn choose_ports_defaults() {
-    let choice = choose_ports(
-        &capture(),
-        &playback(),
-        &ports("system:capture_1", "system:playback_1", "system:playback_2"),
-    );
-    assert_eq!(choice.input.as_deref(), Some("system:capture_1"));
-    assert_eq!(choice.output_left.as_deref(), Some("system:playback_1"));
-    assert_eq!(choice.output_right.as_deref(), Some("system:playback_2"));
+    let choice = choose_ports(&capture(), &playback(), &ports("auto", "auto", "auto"));
+    assert_eq!(choice.input.as_deref(), Some("card:capture_FL"));
+    assert_eq!(choice.output_left.as_deref(), Some("card:playback_FL"));
+    assert_eq!(choice.output_right.as_deref(), Some("card:playback_FR"));
 }
 
 #[test]
@@ -38,20 +34,18 @@ fn choose_ports_config_override() {
     let choice = choose_ports(
         &capture(),
         &playback(),
-        &ports("system:capture_2", "system:playback_1", "system:playback_2"),
+        &ports("other:out", "card:playback_FR", "auto"),
     );
-    assert_eq!(choice.input.as_deref(), Some("system:capture_2"));
+    assert_eq!(choice.input.as_deref(), Some("other:out"));
+    assert_eq!(choice.output_left.as_deref(), Some("card:playback_FR"));
+    assert_eq!(choice.output_right.as_deref(), Some("card:playback_FR"));
 }
 
 #[test]
 fn choose_ports_missing_is_none() {
-    let choice = choose_ports(
-        &capture(),
-        &playback(),
-        &ports("system:capture_9", "system:playback_1", "system:playback_7"),
-    );
+    let choice = choose_ports(&[], &[], &ports("auto", "auto", "auto"));
     assert_eq!(choice.input, None);
-    assert_eq!(choice.output_left.as_deref(), Some("system:playback_1"));
+    assert_eq!(choice.output_left, None);
     assert_eq!(choice.output_right, None);
 }
 
@@ -60,5 +54,28 @@ fn choose_ports_empty_means_none() {
     let choice = choose_ports(&capture(), &playback(), &ports("", "", ""));
     assert_eq!(choice.input, None);
     assert_eq!(choice.output_left, None);
+    assert_eq!(choice.output_right, None);
+}
+
+#[test]
+fn choose_ports_auto_picks_first_physical() {
+    let choice = choose_ports(
+        &names(&["a:capture_1", "b:capture_1"]),
+        &playback(),
+        &ports("auto", "auto", ""),
+    );
+    assert_eq!(choice.input.as_deref(), Some("a:capture_1"));
+    assert_eq!(choice.output_left.as_deref(), Some("card:playback_FL"));
+    assert_eq!(choice.output_right, None);
+}
+
+#[test]
+fn choose_ports_auto_single_playback_warns() {
+    let choice = choose_ports(
+        &capture(),
+        &names(&["card:playback_MONO"]),
+        &ports("auto", "auto", "auto"),
+    );
+    assert_eq!(choice.output_left.as_deref(), Some("card:playback_MONO"));
     assert_eq!(choice.output_right, None);
 }

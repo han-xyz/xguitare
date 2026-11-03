@@ -7,7 +7,7 @@ mod registry;
 
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
 pub use bank::{Bank, BankEntry};
-pub use config::{Config, ConfigError, Ports};
+pub use config::{AUTO_PORT, Config, ConfigError, Ports};
 pub use preset::{BuildError, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
 

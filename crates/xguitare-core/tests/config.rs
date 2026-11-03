@@ -18,9 +18,9 @@ fn defaults_when_missing() {
     assert_eq!(config.buffer_size, 128);
     assert_eq!(config.crossfade_ms, 20.0);
     assert_eq!(config.ir_max_ms, 100.0);
-    assert_eq!(config.ports.input, "system:capture_1");
-    assert_eq!(config.ports.output_left, "system:playback_1");
-    assert_eq!(config.ports.output_right, "system:playback_2");
+    assert_eq!(config.ports.input, "auto");
+    assert_eq!(config.ports.output_left, "auto");
+    assert_eq!(config.ports.output_right, "auto");
     assert!(config.bank_dir.ends_with("xguitare/bank"));
     assert!(config.socket.ends_with("xguitare.sock"));
 }
@@ -55,5 +55,5 @@ fn partial_file_fills_defaults() {
     assert_eq!(config.bank_dir, defaults.bank_dir);
     assert_eq!(config.socket, defaults.socket);
     assert_eq!(config.crossfade_ms, 20.0);
-    assert_eq!(config.ports.input, "system:capture_1");
+    assert_eq!(config.ports.input, "auto");
 }

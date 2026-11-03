@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU32, AtomicU64};
 
-use crate::Ports;
+use crate::{AUTO_PORT, Ports};
 
 #[derive(Debug, Default)]
 pub struct EngineShared {
@@ -19,21 +19,23 @@ pub struct PortChoice {
     pub output_right: Option<String>,
 }
 
+/// Resolves each configured port: `"auto"` takes the nth port of the physical list (input and left the first, right the second), `""` means do not connect, any other name is used verbatim.
 pub fn choose_ports(
     available_capture: &[String],
     available_playback: &[String],
     ports: &Ports,
 ) -> PortChoice {
     PortChoice {
-        input: find(available_capture, &ports.input),
-        output_left: find(available_playback, &ports.output_left),
-        output_right: find(available_playback, &ports.output_right),
+        input: resolve(available_capture, 0, &ports.input),
+        output_left: resolve(available_playback, 0, &ports.output_left),
+        output_right: resolve(available_playback, 1, &ports.output_right),
     }
 }
 
-fn find(available: &[String], configured: &str) -> Option<String> {
-    available
-        .iter()
-        .find(|name| !configured.is_empty() && name.as_str() == configured)
-        .cloned()
+fn resolve(physical: &[String], auto_index: usize, configured: &str) -> Option<String> {
+    match configured {
+        "" => None,
+        AUTO_PORT => physical.get(auto_index).cloned(),
+        name => Some(name.to_string()),
+    }
 }
