@@ -109,7 +109,7 @@ fn removed_active_file_keeps_rack_and_clears_program() {
     let loud_text = fs::read_to_string(&loud).unwrap();
     fs::remove_file(&file).unwrap();
     assert_eq!(
-        apply(&mut state, &[file.clone()]),
+        apply(&mut state, std::slice::from_ref(&file)),
         [
             Action::Reindex,
             Action::Warn(format!(
