@@ -1,5 +1,7 @@
 # xguitare
 
+![CI](https://github.com/han-xyz/xguitare/actions/workflows/ci.yml/badge.svg)
+
 Low-latency guitar amp and effects rack for Linux, headless first.
 Rust, JACK API (runs natively on PipeWire via pipewire-jack), own DSP, TOML presets.
 
