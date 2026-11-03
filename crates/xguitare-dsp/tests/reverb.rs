@@ -1,12 +1,26 @@
 mod common;
 
-use common::{SAMPLE_RATE, frames, noise, prepared, run_stereo, sine};
+use common::{SAMPLE_RATE, db, frames, noise, prepared, rms, run_stereo, sine};
 use xguitare_dsp::modules::reverb::Reverb;
 
 const SIZE: usize = 0;
 const DAMPING: usize = 1;
 const MIX: usize = 2;
 const WIDTH: usize = 3;
+
+#[test]
+fn tail_decays() {
+    let mut reverb = prepared(Reverb::new(), &[(SIZE, 50.0), (MIX, 100.0)]);
+    let mut left = vec![0.0; frames(10_000.0)];
+    left[0] = 1.0;
+    let mut right = left.clone();
+    run_stereo(&mut reverb, &mut left, &mut right);
+    let window = frames(100.0);
+    let head = db(rms(&left[..window]));
+    let tail = db(rms(&left[left.len() - window..]));
+    assert!(head > -45.0, "first 100 ms at {head} dBFS");
+    assert!(tail < -60.0, "last 100 ms at {tail} dBFS");
+}
 
 #[test]
 fn mix_zero_is_identity() {
