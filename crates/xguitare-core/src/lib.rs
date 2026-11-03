@@ -1,6 +1,7 @@
 mod address;
 mod bank;
 mod config;
+pub mod control;
 pub mod engine;
 mod ir;
 mod preset;

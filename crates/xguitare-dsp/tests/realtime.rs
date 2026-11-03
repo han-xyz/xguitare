@@ -1,4 +1,5 @@
 use assert_no_alloc::*;
+use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{Delay, Drive, Gain, Gate, Module, Preamp, Rack, Reverb, Tonestack};
 
@@ -148,5 +149,28 @@ fn full_chain_does_not_allocate() {
         for _ in 0..100 {
             rack.process(&input, &mut left, &mut right);
         }
+    });
+}
+
+#[test]
+fn crossfade_step_does_not_allocate() {
+    let gain_rack = || {
+        let mut rack = Rack::new(vec![(
+            "gain".to_string(),
+            Box::new(Gain::new()) as Box<dyn Module>,
+        )])
+        .expect("valid layout");
+        rack.prepare(48_000.0, BLOCK);
+        rack
+    };
+    let (mut old, mut new) = (gain_rack(), gain_rack());
+    let mut fader = Crossfader::new();
+    fader.prepare(BLOCK);
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        fader.start(960);
+        while !fader.process(&mut old, &mut new, &input, &mut left, &mut right) {}
     });
 }

@@ -1,5 +1,8 @@
 use std::sync::atomic::{AtomicU32, AtomicU64};
 
+use rtrb::{Consumer, Producer, RingBuffer};
+use xguitare_dsp::Rack;
+
 use crate::{AUTO_PORT, Ports};
 
 #[derive(Debug, Default)]
@@ -10,6 +13,53 @@ pub struct EngineShared {
     pub callback_ns_last: AtomicU64,
     pub sample_rate: AtomicU32,
     pub buffer_size: AtomicU32,
+}
+
+pub enum Command {
+    SwapRack(Box<Rack>),
+    SetParam {
+        module: usize,
+        param: usize,
+        value: f32,
+    },
+}
+
+pub enum Retired {
+    Rack(Box<Rack>),
+}
+
+/// The control side of the queues between the control thread and the audio thread.
+pub struct EngineQueues {
+    pub commands: Producer<Command>,
+    pub retired: Consumer<Retired>,
+}
+
+/// The audio side: the audio thread pops `commands` and hands every Rack it lets go of back through `retired`, so no Rack is freed on the audio thread.
+pub struct AudioQueues {
+    pub commands: Consumer<Command>,
+    pub retired: Producer<Retired>,
+}
+
+pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues) {
+    let (commands_tx, commands_rx) = RingBuffer::new(capacity);
+    // At most every queued SwapRack plus the current and the fading-in Rack, minus the one left current, can be retired between two drains, and `control::handle` drains before each SwapRack push; so the audio thread never finds `retired` full.
+    let (retired_tx, retired_rx) = RingBuffer::new(capacity + 2);
+    (
+        EngineQueues {
+            commands: commands_tx,
+            retired: retired_rx,
+        },
+        AudioQueues {
+            commands: commands_rx,
+            retired: retired_tx,
+        },
+    )
+}
+
+impl EngineQueues {
+    pub fn drop_retired(&mut self) {
+        while self.retired.pop().is_ok() {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

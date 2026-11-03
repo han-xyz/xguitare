@@ -1,3 +1,4 @@
+pub mod crossfade;
 pub mod modules;
 pub mod oversample;
 mod rack;

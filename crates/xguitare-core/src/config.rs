@@ -18,6 +18,8 @@ pub struct Config {
     pub crossfade_ms: f32,
     pub ir_max_ms: f32,
     pub socket: PathBuf,
+    /// True when `$XDG_RUNTIME_DIR` is unset and `socket` is the `/tmp/xguitare-<uid>` fallback.
+    pub socket_is_fallback: bool,
     pub ports: Ports,
 }
 
@@ -96,9 +98,9 @@ impl Config {
     }
 
     fn default_for(dirs: &ProjectDirs) -> Result<Config, ConfigError> {
-        let socket_dir = match dirs.runtime_dir() {
-            Some(dir) => dir.to_path_buf(),
-            None => fallback_runtime_dir()?,
+        let (socket_dir, socket_is_fallback) = match dirs.runtime_dir() {
+            Some(dir) => (dir.to_path_buf(), false),
+            None => (fallback_runtime_dir()?, true),
         };
         Ok(Config {
             bank_dir: dirs.config_dir().join("bank"),
@@ -106,6 +108,7 @@ impl Config {
             crossfade_ms: 20.0,
             ir_max_ms: 100.0,
             socket: socket_dir.join(SOCKET_FILE),
+            socket_is_fallback,
             ports: Ports {
                 input: AUTO_PORT.to_string(),
                 output_left: AUTO_PORT.to_string(),
@@ -128,6 +131,7 @@ impl Config {
             buffer_size: file.buffer_size.unwrap_or(self.buffer_size),
             crossfade_ms: file.crossfade_ms.unwrap_or(self.crossfade_ms),
             ir_max_ms: file.ir_max_ms.unwrap_or(self.ir_max_ms),
+            socket_is_fallback: self.socket_is_fallback && file.socket.is_none(),
             socket: file.socket.unwrap_or(self.socket),
             ports,
         }

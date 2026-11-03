@@ -222,7 +222,7 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
     })
 }
 
-fn shortest_f64(value: f32) -> f64 {
+pub(crate) fn shortest_f64(value: f32) -> f64 {
     value
         .to_string()
         .parse()

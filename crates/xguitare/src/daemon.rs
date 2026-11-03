@@ -1,105 +1,144 @@
 use std::fmt;
 use std::io::{self, ErrorKind};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
-use xguitare_core::engine::EngineShared;
+use xguitare_core::control::EngineState;
+use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset};
 use xguitare_dsp::Rack;
 
 use crate::jack_adapter::{self, JackError};
+use crate::socket_server::{self, SocketError};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const POLLS_PER_REPORT: u32 = 10;
+const QUEUE_CAPACITY: usize = 64;
 
 #[derive(Debug)]
 pub enum DaemonError {
     Config(ConfigError),
+    Socket(SocketError),
     Jack(JackError),
     Signal(io::Error),
 }
 
 pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let config = Config::load(config_path).map_err(DaemonError::Config)?;
-    let preset = first_preset(&config.bank_dir);
+    if config.socket_is_fallback {
+        warn!("XDG_RUNTIME_DIR unset, using {}", config.socket.display());
+    }
+    let socket = socket_server::bind(&config.socket).map_err(DaemonError::Socket)?;
+    let bank = load_bank(&config.bank_dir);
+    let preset = first_preset(&bank);
     let stop = register_stop_signals()?;
     let shared = Arc::new(EngineShared::default());
+    let (queues, audio_queues) = engine_queues(QUEUE_CAPACITY);
+    let mut active = None;
     let session = jack_adapter::start(
         config.buffer_size,
+        config.crossfade_ms,
         |sample_rate, max_frames| {
-            build_rack(
-                preset.as_ref(),
-                sample_rate,
-                max_frames,
-                &config.bank_dir,
-                config.ir_max_ms,
-            )
+            let built = preset
+                .as_ref()
+                .and_then(|preset| build_rack(preset, sample_rate, max_frames, &config));
+            if built.is_some() {
+                active = preset.map(|preset| (0, preset));
+            }
+            built.unwrap_or_else(|| passthrough_rack(sample_rate, max_frames))
         },
         Arc::clone(&shared),
+        audio_queues,
     )
     .map_err(DaemonError::Jack)?;
-    session.connect(&config.ports);
-    watch_until_stopped(&stop, &shared, session.max_frames());
+    let connections = session.connect(&config.ports);
+    let state = Arc::new(Mutex::new(EngineState {
+        bank,
+        active,
+        shared: Arc::clone(&shared),
+        queues,
+        config,
+        connections,
+        sample_rate: shared.sample_rate.load(Ordering::Relaxed) as f32,
+        max_frames: session.max_frames(),
+    }));
+    let control = socket
+        .spawn(Arc::clone(&state), Arc::clone(&stop))
+        .map_err(DaemonError::Socket)?;
+    watch_until_stopped(&stop, &shared, &state, session.max_frames());
+    if control.join().is_err() {
+        error!("control thread panicked");
+    }
     session.stop().map_err(DaemonError::Jack)?;
     info!("stopped");
     Ok(())
 }
 
-fn first_preset(bank_dir: &Path) -> Option<Preset> {
-    let bank = match Bank::load_dir(bank_dir) {
-        Ok(bank) => bank,
+fn load_bank(bank_dir: &Path) -> Bank {
+    let entries = match Bank::load_dir(bank_dir) {
+        Ok(bank) => return bank,
         Err(err) if err.kind() == ErrorKind::NotFound => {
             warn!(
                 "bank dir {} missing, running passthrough",
                 bank_dir.display()
             );
-            return None;
+            Vec::new()
         }
         Err(err) => {
             warn!(
                 "cannot read bank dir {}: {err}, running passthrough",
                 bank_dir.display()
             );
-            return None;
+            Vec::new()
         }
     };
-    match bank.entries.into_iter().next() {
+    Bank {
+        dir: bank_dir.to_path_buf(),
+        entries,
+    }
+}
+
+fn first_preset(bank: &Bank) -> Option<Preset> {
+    match bank.entries.first() {
         None => {
-            warn!("bank {} is empty, running passthrough", bank_dir.display());
+            warn!("bank {} is empty, running passthrough", bank.dir.display());
             None
         }
         Some(BankEntry::Invalid { file, error }) => {
             error!("preset {}: {error}, running passthrough", file.display());
             None
         }
-        Some(BankEntry::Valid { preset, .. }) => Some(preset),
+        Some(BankEntry::Valid { preset, .. }) => Some(preset.clone()),
     }
 }
 
 fn build_rack(
-    preset: Option<&Preset>,
+    preset: &Preset,
     sample_rate: f32,
     max_frames: usize,
-    bank_dir: &Path,
-    ir_max_ms: f32,
-) -> Rack {
-    if let Some(preset) = preset {
-        match preset.build(sample_rate, max_frames, bank_dir, ir_max_ms) {
-            Ok((rack, warnings)) => {
-                for warning in &warnings {
-                    warn!("{warning}");
-                }
-                info!("loaded 0 {}", preset.name);
-                return rack;
+    config: &Config,
+) -> Option<Rack> {
+    match preset.build(sample_rate, max_frames, &config.bank_dir, config.ir_max_ms) {
+        Ok((rack, warnings)) => {
+            for warning in &warnings {
+                warn!("{warning}");
             }
-            Err(err) => error!("preset '{}': {err}, running passthrough", preset.name),
+            info!("loaded 0 {}", preset.name);
+            Some(rack)
+        }
+        Err(err) => {
+            error!("preset '{}': {err}, running passthrough", preset.name);
+            None
         }
     }
+}
+
+fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
     let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
     rack.prepare(sample_rate, max_frames);
     rack
@@ -113,13 +152,23 @@ fn register_stop_signals() -> Result<Arc<AtomicBool>, DaemonError> {
     Ok(stop)
 }
 
-fn watch_until_stopped(stop: &AtomicBool, shared: &EngineShared, max_frames: usize) {
+fn watch_until_stopped(
+    stop: &AtomicBool,
+    shared: &EngineShared,
+    state: &Mutex<EngineState>,
+    max_frames: usize,
+) {
     let mut reported_xruns = 0;
     let mut reported_oversize = 0;
     let mut reported_buffer_size = shared.buffer_size.load(Ordering::Relaxed);
     let mut polls = 0;
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(POLL_INTERVAL);
+        state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .queues
+            .drop_retired();
         polls += 1;
         if polls % POLLS_PER_REPORT != 0 {
             continue;
@@ -149,6 +198,7 @@ impl fmt::Display for DaemonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DaemonError::Config(err) => err.fmt(f),
+            DaemonError::Socket(err) => err.fmt(f),
             DaemonError::Jack(err) => err.fmt(f),
             DaemonError::Signal(err) => write!(f, "cannot register signal handler: {err}"),
         }

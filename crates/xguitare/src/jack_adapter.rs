@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -9,8 +10,11 @@ use jack::{
 };
 use tracing::{error, info, warn};
 use xguitare_core::Ports;
-use xguitare_core::engine::{AvailablePort, EngineShared, choose_ports};
+use xguitare_core::engine::{
+    AudioQueues, AvailablePort, Command, EngineShared, Retired, choose_ports,
+};
 use xguitare_dsp::Rack;
+use xguitare_dsp::crossfade::Crossfader;
 
 const CLIENT_NAME: &str = "xguitare";
 const AUDIO_PORT_TYPE: &str = "32 bit float mono audio";
@@ -28,11 +32,13 @@ pub struct Session {
     max_frames: usize,
 }
 
-/// Opens the JACK client, requests `buffer_size`, builds the Rack with the effective sample rate and buffer size, and activates it.
+/// Opens the JACK client, requests `buffer_size`, builds the Rack with the effective sample rate and buffer size, and activates it; the audio thread then takes Commands from `queues`.
 pub fn start(
     buffer_size: u32,
+    crossfade_ms: f32,
     build_rack: impl FnOnce(f32, usize) -> Rack,
     shared: Arc<EngineShared>,
+    queues: AudioQueues,
 ) -> Result<Session, JackError> {
     let (client, _status) =
         Client::new(CLIENT_NAME, ClientOptions::NO_START_SERVER).map_err(JackError::Connect)?;
@@ -44,9 +50,17 @@ pub fn start(
         warn!("cannot set buffer size {buffer_size}: {err}");
     }
     let max_frames = (buffer_size as usize).max(client.buffer_size() as usize);
-    let rack = build_rack(client.sample_rate() as f32, max_frames);
+    let sample_rate = client.sample_rate() as f32;
+    let rack = Box::new(build_rack(sample_rate, max_frames));
+    let mut crossfader = Crossfader::new();
+    crossfader.prepare(max_frames);
     let process = Process {
-        rack,
+        current: rack,
+        incoming: None,
+        crossfader,
+        crossfade_frames: (crossfade_ms * sample_rate / 1000.0) as usize,
+        queues,
+        denormals_flushed: false,
         max_frames,
         input,
         out_l,
@@ -83,7 +97,8 @@ impl Session {
         self.max_frames
     }
 
-    pub fn connect(&self, ports: &Ports) {
+    /// Connects the Daemon's ports per `ports` and returns the `(from, to)` pairs that succeeded.
+    pub fn connect(&self, ports: &Ports) -> Vec<(String, String)> {
         let client = self.client.as_client();
         let capture = foreign_audio_ports(client, PortFlags::IS_OUTPUT);
         let playback = foreign_audio_ports(client, PortFlags::IS_INPUT);
@@ -97,12 +112,17 @@ impl Session {
             choice.output_left.map(|dst| (own("out_l"), dst)),
             choice.output_right.map(|dst| (own("out_r"), dst)),
         ];
+        let mut connected = Vec::new();
         for (src, dst) in links.into_iter().flatten() {
             match client.connect_ports_by_name(&src, &dst) {
-                Ok(()) => info!("connected {src} -> {dst}"),
+                Ok(()) => {
+                    info!("connected {src} -> {dst}");
+                    connected.push((src, dst));
+                }
                 Err(err) => warn!("cannot connect {src} -> {dst}: {err}"),
             }
         }
+        connected
     }
 
     pub fn stop(self) -> Result<(), JackError> {
@@ -153,7 +173,12 @@ impl NotificationHandler for Notifications {
 }
 
 struct Process {
-    rack: Rack,
+    current: Box<Rack>,
+    incoming: Option<Box<Rack>>,
+    crossfader: Crossfader,
+    crossfade_frames: usize,
+    queues: AudioQueues,
+    denormals_flushed: bool,
     max_frames: usize,
     input: Port<AudioIn>,
     out_l: Port<AudioOut>,
@@ -165,6 +190,11 @@ struct Process {
 impl ProcessHandler for Process {
     fn process(&mut self, _: &Client, ps: &ProcessScope) -> Control {
         let start = Instant::now();
+        if !self.denormals_flushed {
+            flush_denormals();
+            self.denormals_flushed = true;
+        }
+        self.apply_commands();
         let input = self.input.as_slice(ps);
         let out_l = self.out_l.as_mut_slice(ps);
         let out_r = self.out_r.as_mut_slice(ps);
@@ -173,8 +203,16 @@ impl ProcessHandler for Process {
             out_l.fill(0.0);
             out_r.fill(0.0);
             self.shared.oversize_blocks.fetch_add(1, Ordering::Relaxed);
+        } else if let Some(incoming) = self.incoming.as_mut() {
+            let faded = self
+                .crossfader
+                .process(&mut self.current, incoming, input, out_l, out_r);
+            if let Some(new) = self.incoming.take_if(|_| faded) {
+                let old = mem::replace(&mut self.current, new);
+                retire(&mut self.queues, old);
+            }
         } else {
-            self.rack.process(input, out_l, out_r);
+            self.current.process(input, out_l, out_r);
         }
         let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.shared
@@ -189,6 +227,58 @@ impl ProcessHandler for Process {
     fn buffer_size(&mut self, _: &Client, size: Frames) -> Control {
         self.shared.buffer_size.store(size, Ordering::Relaxed);
         Control::Continue
+    }
+}
+
+impl Process {
+    fn apply_commands(&mut self) {
+        while let Ok(command) = self.queues.commands.pop() {
+            match command {
+                Command::SetParam {
+                    module,
+                    param,
+                    value,
+                } => {
+                    let newest = self.incoming.as_mut().unwrap_or(&mut self.current);
+                    newest.module_mut(module).set_param(param, value);
+                }
+                Command::SwapRack(new) => match self.incoming.take() {
+                    // A swap during a fade cuts straight to the newest Rack rather than queueing fades, so at most two Racks are ever live.
+                    Some(fading_in) => {
+                        let old = mem::replace(&mut self.current, new);
+                        retire(&mut self.queues, old);
+                        retire(&mut self.queues, fading_in);
+                    }
+                    None => {
+                        self.incoming = Some(new);
+                        self.crossfader.start(self.crossfade_frames);
+                    }
+                },
+            }
+        }
+    }
+}
+
+fn retire(queues: &mut AudioQueues, rack: Box<Rack>) {
+    let pushed = queues.retired.push(Retired::Rack(rack));
+    debug_assert!(pushed.is_ok(), "retired queue full");
+    if let Err(unretired) = pushed {
+        // Leaking beats freeing on the audio thread; the queue sizing in engine_queues makes this unreachable.
+        mem::forget(unretired);
+    }
+}
+
+fn flush_denormals() {
+    // FTZ (0x8000) and DAZ (0x0040): recursive filter tails decay into subnormals, which cost 10-100x per operation.
+    #[cfg(target_arch = "x86_64")]
+    #[expect(
+        deprecated,
+        reason = "the brief's (D29) intrinsics; std deprecates them in favour of inline asm with the same effect"
+    )]
+    // SAFETY: changes only this thread's MXCSR.
+    unsafe {
+        use core::arch::x86_64::{_mm_getcsr, _mm_setcsr};
+        _mm_setcsr(_mm_getcsr() | 0x8040);
     }
 }
 

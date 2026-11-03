@@ -1,4 +1,196 @@
-use xguitare::run_main;
+use std::collections::VecDeque;
+use std::path::PathBuf;
+
+use xguitare::{Transport, TransportError, run_cli, run_main};
+use xguitare_core::control::{Request, Response};
+
+struct Canned {
+    replies: VecDeque<Result<Response, TransportError>>,
+    requests: Vec<Request>,
+}
+
+impl Transport for Canned {
+    fn request(&mut self, req: &Request) -> Result<Response, TransportError> {
+        self.requests.push(req.clone());
+        self.replies
+            .pop_front()
+            .expect("one canned reply per request")
+    }
+}
+
+struct Outcome {
+    code: i32,
+    stdout: String,
+    stderr: String,
+    requests: Vec<Request>,
+}
+
+fn cli(argv: &[&str], reply: Result<Response, TransportError>) -> Outcome {
+    let argv: Vec<String> = std::iter::once("xguitare")
+        .chain(argv.iter().copied())
+        .map(String::from)
+        .collect();
+    let mut transport = Canned {
+        replies: VecDeque::from([reply]),
+        requests: Vec::new(),
+    };
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = run_cli(&argv, &mut transport, &mut stdout, &mut stderr);
+    Outcome {
+        code,
+        stdout: String::from_utf8(stdout).unwrap(),
+        stderr: String::from_utf8(stderr).unwrap(),
+        requests: transport.requests,
+    }
+}
+
+fn reply(line: &str) -> Result<Response, TransportError> {
+    Ok(Response::from_line(line).unwrap())
+}
+
+#[test]
+fn list_format() {
+    let out = cli(
+        &["list"],
+        reply(
+            r#"{"ok":true,"active":0,"entries":[{"program":0,"name":"Clean","valid":true},{"program":1,"name":"Loud","valid":true},{"program":12,"name":"13-broken","valid":false,"error":"line 1:8: invalid string"}]}"#,
+        ),
+    );
+    assert_eq!(out.requests, [Request::List]);
+    assert_eq!(
+        out.stdout,
+        " 0* Clean\n 1  Loud\n12! 13-broken (line 1:8: invalid string)\n"
+    );
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn status_format() {
+    let out = cli(
+        &["status"],
+        reply(
+            r#"{"ok":true,"preset":"Clean","program":0,"sample_rate":48000,"buffer_size":128,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}]}"#,
+        ),
+    );
+    assert_eq!(out.requests, [Request::Status]);
+    assert_eq!(
+        out.stdout,
+        "preset: Clean\nprogram: 0\nsample_rate: 48000\nbuffer_size: 128\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\n"
+    );
+    let out = cli(
+        &["status"],
+        reply(
+            r#"{"ok":true,"preset":null,"program":null,"sample_rate":48000,"buffer_size":128,"xruns":0,"callback_max_us":0,"callback_last_us":0,"connections":[]}"#,
+        ),
+    );
+    assert!(
+        out.stdout.starts_with("preset: -\nprogram: -\n"),
+        "{}",
+        out.stdout
+    );
+    assert!(out.stdout.ends_with("connections:\n"), "{}", out.stdout);
+}
+
+#[test]
+fn get_format() {
+    let out = cli(
+        &["get", "gain"],
+        reply(
+            r#"{"ok":true,"params":[{"module":"gain","param":"level","value":-3.5,"unit":"dB","min":-60.0,"max":20.0},{"module":"delay","param":"mix","value":25.0,"unit":"%","min":0.0,"max":100.0},{"module":"preamp","param":"bright","value":1.0,"unit":"","min":0.0,"max":1.0}]}"#,
+        ),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Get {
+            param: Some("gain".to_string())
+        }]
+    );
+    assert_eq!(
+        out.stdout,
+        "gain.level = -3.5 dB\ndelay.mix = 25 %\npreamp.bright = 1\n"
+    );
+    let out = cli(&["get"], reply(r#"{"ok":true,"params":[]}"#));
+    assert_eq!(out.requests, [Request::Get { param: None }]);
+}
+
+#[test]
+fn set_prints_clamped() {
+    let out = cli(
+        &["set", "gain.level", "50"],
+        reply(r#"{"ok":true,"param":"gain.level","value":20.0,"clamped":true}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Set {
+            param: "gain.level".to_string(),
+            value: 50.0
+        }]
+    );
+    assert_eq!(out.stdout, "gain.level = 20 (clamped)\n");
+    let out = cli(
+        &["set", "gain.level", "-6"],
+        reply(r#"{"ok":true,"param":"gain.level","value":-6.0,"clamped":false}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Set {
+            param: "gain.level".to_string(),
+            value: -6.0
+        }]
+    );
+    assert_eq!(out.stdout, "gain.level = -6\n");
+}
+
+#[test]
+fn set_non_numeric_value() {
+    let out = cli(&["set", "gain.level", "loud"], reply(r#"{"ok":true}"#));
+    assert_eq!(out.code, 1);
+    assert_eq!(out.stderr, "error: value must be a number\n");
+    assert!(out.requests.is_empty());
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn load_prints() {
+    let out = cli(
+        &["load", "Loud"],
+        reply(r#"{"ok":true,"program":1,"name":"Loud"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Load {
+            preset: "Loud".to_string()
+        }]
+    );
+    assert_eq!(out.stdout, "loaded 1 Loud\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn error_response_exit_1() {
+    let out = cli(
+        &["set", "drive.gain", "1"],
+        reply(r#"{"ok":false,"error":"no module 'drive'"}"#),
+    );
+    assert_eq!(out.code, 1);
+    assert_eq!(out.stderr, "error: no module 'drive'\n");
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn daemon_not_running() {
+    let out = cli(
+        &["status"],
+        Err(TransportError::NotRunning(PathBuf::from(
+            "/run/user/1000/xguitare.sock",
+        ))),
+    );
+    assert_eq!(out.code, 1);
+    assert_eq!(
+        out.stderr,
+        "error: daemon not running (socket /run/user/1000/xguitare.sock)\n"
+    );
+}
 
 #[test]
 fn run_main_usage_error_exit_1() {

@@ -1,0 +1,309 @@
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
+use serde_json::{Value, json};
+use xguitare_core::control::{EngineState, Request, Response, handle, handle_line};
+use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
+use xguitare_core::{Bank, BankEntry, Config};
+
+const QUEUE_CAPACITY: usize = 64;
+
+fn bank_dir(test: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("xguitare-control-{}-{test}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("01-clean.toml"),
+        "name = \"Clean\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = -3\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("02-loud.toml"),
+        "name = \"Loud\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 6\n",
+    )
+    .unwrap();
+    fs::write(dir.join("03-broken.toml"), "name = \n").unwrap();
+    dir
+}
+
+fn state(test: &str) -> (EngineState, AudioQueues) {
+    let dir = bank_dir(test);
+    let bank = Bank::load_dir(&dir).unwrap();
+    let BankEntry::Valid { preset, .. } = &bank.entries[0] else {
+        panic!("01-clean.toml should be valid");
+    };
+    let active = Some((0, preset.clone()));
+    let shared = Arc::new(EngineShared::default());
+    shared.sample_rate.store(48_000, Ordering::Relaxed);
+    shared.buffer_size.store(128, Ordering::Relaxed);
+    shared.xruns.store(3, Ordering::Relaxed);
+    shared.callback_ns_max.store(250_000, Ordering::Relaxed);
+    shared.callback_ns_last.store(90_000, Ordering::Relaxed);
+    let mut config = Config::load(Some(&dir.join("absent.toml"))).unwrap();
+    config.bank_dir = dir;
+    let (queues, audio) = engine_queues(QUEUE_CAPACITY);
+    let state = EngineState {
+        bank,
+        active,
+        shared,
+        queues,
+        config,
+        connections: vec![("system:capture_1".to_string(), "xguitare:in".to_string())],
+        sample_rate: 48_000.0,
+        max_frames: 128,
+    };
+    (state, audio)
+}
+
+fn ok(response: Response) -> Value {
+    match response {
+        Response::Ok(payload) => payload,
+        Response::Err { error } => panic!("expected ok, got error {error}"),
+    }
+}
+
+fn error(response: Response) -> String {
+    match response {
+        Response::Err { error } => error,
+        Response::Ok(payload) => panic!("expected error, got {payload}"),
+    }
+}
+
+fn set(param: &str, value: f64) -> Request {
+    Request::Set {
+        param: param.to_string(),
+        value,
+    }
+}
+
+#[test]
+fn status_reports_fields() {
+    let (mut state, _audio) = state("status");
+    let payload = ok(handle(&mut state, Request::Status));
+    assert_eq!(
+        payload,
+        json!({
+            "preset": "Clean",
+            "program": 0,
+            "sample_rate": 48000,
+            "buffer_size": 128,
+            "xruns": 3,
+            "callback_max_us": 250,
+            "callback_last_us": 90,
+            "connections": [{"from": "system:capture_1", "to": "xguitare:in"}],
+        })
+    );
+}
+
+#[test]
+fn list_marks_active_and_invalid() {
+    let (mut state, _audio) = state("list");
+    let payload = ok(handle(&mut state, Request::List));
+    assert_eq!(payload["active"], 0);
+    let entries = payload["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    assert_eq!(
+        entries[1],
+        json!({"program": 1, "name": "Loud", "valid": true})
+    );
+    assert_eq!(entries[2]["name"], "03-broken");
+    assert_eq!(entries[2]["valid"], false);
+    assert!(
+        entries[2]["error"].as_str().unwrap().starts_with("line 1:"),
+        "{}",
+        entries[2]
+    );
+}
+
+#[test]
+fn load_by_name_and_number() {
+    let (mut state, mut audio) = state("load");
+    let payload = ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "Loud".to_string(),
+        },
+    ));
+    assert_eq!(payload, json!({"program": 1, "name": "Loud"}));
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SwapRack(rack)) if rack.modules()[0].1.param(0) == 6.0
+    ));
+    let payload = ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "0".to_string(),
+        },
+    ));
+    assert_eq!(payload, json!({"program": 0, "name": "Clean"}));
+    assert!(matches!(audio.commands.pop(), Ok(Command::SwapRack(_))));
+    assert_eq!(state.active.as_ref().map(|(program, _)| *program), Some(0));
+}
+
+#[test]
+fn load_invalid_entry_is_error() {
+    let (mut state, audio) = state("load-invalid");
+    let message = error(handle(
+        &mut state,
+        Request::Load {
+            preset: "2".to_string(),
+        },
+    ));
+    assert!(message.starts_with("line 1:"), "{message}");
+    assert!(audio.commands.is_empty());
+    assert_eq!(state.active.as_ref().map(|(program, _)| *program), Some(0));
+}
+
+#[test]
+fn set_clamps_and_reports() {
+    let (mut state, mut audio) = state("set");
+    let payload = ok(handle(&mut state, set("gain.level", 50.0)));
+    assert_eq!(
+        payload,
+        json!({"param": "gain.level", "value": 20.0, "clamped": true})
+    );
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SetParam { module: 0, param: 0, value }) if value == 20.0
+    ));
+    let (_, preset) = state.active.as_ref().unwrap();
+    assert_eq!(preset.modules[0].params[0].1, 20.0);
+    let payload = ok(handle(&mut state, set("gain.level", -6.0)));
+    assert_eq!(payload["clamped"], false);
+}
+
+#[test]
+fn set_non_finite_is_error() {
+    let (mut state, audio) = state("set-non-finite");
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            error(handle(&mut state, set("gain.level", value))),
+            "value must be a finite number"
+        );
+    }
+    assert!(audio.commands.is_empty());
+}
+
+#[test]
+fn set_unknown_module() {
+    let (mut state, _audio) = state("set-unknown-module");
+    assert_eq!(
+        error(handle(&mut state, set("drive.gain", 1.0))),
+        "no module 'drive'"
+    );
+}
+
+#[test]
+fn set_unknown_param() {
+    let (mut state, _audio) = state("set-unknown-param");
+    assert_eq!(
+        error(handle(&mut state, set("gain.drive", 1.0))),
+        "module 'gain' has no parameter 'drive'"
+    );
+}
+
+#[test]
+fn set_bad_address() {
+    let (mut state, _audio) = state("set-bad-address");
+    assert_eq!(
+        error(handle(&mut state, set("gain", 1.0))),
+        "expected <module>.<param>, got 'gain'"
+    );
+}
+
+#[test]
+fn set_without_preset() {
+    let (mut state, _audio) = state("set-without-preset");
+    state.active = None;
+    assert_eq!(
+        error(handle(&mut state, set("gain.level", 1.0))),
+        "no preset loaded"
+    );
+}
+
+#[test]
+fn get_all_and_one() {
+    let (mut state, _audio) = state("get");
+    let expected = json!({"module": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0});
+    let all = ok(handle(&mut state, Request::Get { param: None }));
+    assert_eq!(all, json!({"params": [expected]}));
+    let module = ok(handle(
+        &mut state,
+        Request::Get {
+            param: Some("gain".to_string()),
+        },
+    ));
+    assert_eq!(module, all);
+    let one = ok(handle(
+        &mut state,
+        Request::Get {
+            param: Some("gain.level".to_string()),
+        },
+    ));
+    assert_eq!(one, all);
+    assert_eq!(
+        error(handle(
+            &mut state,
+            Request::Get {
+                param: Some("delay".to_string())
+            }
+        )),
+        "no module 'delay'"
+    );
+}
+
+#[test]
+fn queue_full_is_engine_busy() {
+    let (mut state, audio) = state("busy");
+    for _ in 0..QUEUE_CAPACITY {
+        ok(handle(&mut state, set("gain.level", 1.0)));
+    }
+    assert_eq!(
+        error(handle(&mut state, set("gain.level", 2.0))),
+        "engine busy"
+    );
+    assert_eq!(
+        error(handle(
+            &mut state,
+            Request::Load {
+                preset: "1".to_string()
+            }
+        )),
+        "engine busy"
+    );
+    assert_eq!(state.active.as_ref().map(|(program, _)| *program), Some(0));
+    assert_eq!(audio.commands.slots(), QUEUE_CAPACITY);
+}
+
+#[test]
+fn unknown_cmd_is_error() {
+    let (mut state, _audio) = state("unknown-cmd");
+    let response: Value =
+        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"bogus"}"#)).unwrap();
+    assert_eq!(response["ok"], false);
+    let message = response["error"].as_str().unwrap();
+    assert!(
+        message.starts_with("invalid request: unknown variant `bogus`"),
+        "{message}"
+    );
+}
+
+#[test]
+fn malformed_json_is_error() {
+    let (mut state, _audio) = state("malformed");
+    let response: Value = serde_json::from_str(&handle_line(&mut state, "{\"cmd\":")).unwrap();
+    assert_eq!(response["ok"], false);
+    assert!(
+        response["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("invalid request: "),
+        "{response}"
+    );
+    let response: Value =
+        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"status"}"#)).unwrap();
+    assert_eq!(response["ok"], true);
+    assert_eq!(response["preset"], "Clean");
+}
