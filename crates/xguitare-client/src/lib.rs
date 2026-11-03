@@ -74,12 +74,6 @@ impl Connection {
     }
 }
 
-impl Transport for Connection {
-    fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
-        Connection::request(self, req)
-    }
-}
-
 fn check_socket_dir(config: &Config) -> Result<(), ClientError> {
     let fallback_dir = config
         .socket

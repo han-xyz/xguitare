@@ -37,7 +37,7 @@ The long-running process that owns the Engine, the audio client and the Control 
 _Avoid_: server, service, host
 
 **Control API**:
-The protocol a client (CLI, later GUI) uses to inspect and change the Daemon's Preset and Parameters.
+The protocol a client (the CLI, `xguitare-gui`, or a script) uses to inspect and change the Daemon's Preset and Parameters.
 _Avoid_: RPC, IPC, socket API, remote
 
 **Revision**:

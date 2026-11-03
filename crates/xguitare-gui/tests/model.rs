@@ -7,7 +7,7 @@ use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_gui::model::{
     BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, Throttle, bank_rows,
-    counts_toward_spawn, key_to_command, meter_fraction, param_rows, peak_fraction,
+    counts_toward_spawn, failed_set, key_to_command, meter_fraction, param_rows, peak_fraction,
     refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
 
@@ -393,4 +393,58 @@ fn unit_suffix_table() {
         .map(unit_suffix)
         .collect();
     assert_eq!(suffixes, [" dB", " ms", " Hz", " %", ""]);
+}
+
+#[test]
+fn throttle_flushes_pending_without_new_drag() {
+    let start = Instant::now();
+    let at = |ms: u64| start + Duration::from_millis(ms);
+    let mut throttle = Throttle::default();
+    throttle.on_drag("preamp.gain", 10.0, at(0));
+    assert_eq!(throttle.on_drag("preamp.gain", 13.0, at(10)), None);
+    assert!(throttle.tick(at(20)).is_empty());
+    assert_eq!(
+        throttle.tick(at(31)),
+        [Command::Set {
+            param: "preamp.gain".to_string(),
+            value: 13.0
+        }]
+    );
+    assert!(throttle.tick(at(70)).is_empty());
+}
+
+#[test]
+fn hold_cleared_when_param_gone() {
+    let now = Instant::now();
+    let mut throttle = Throttle::default();
+    throttle.on_drag("preamp.gain", 10.0, now);
+    throttle.on_drag("delay.time", 300.0, now);
+    throttle.retain(|address| address == "delay.time");
+    assert!(!throttle.hold_local("preamp.gain", 9));
+    assert!(throttle.hold_local("delay.time", 9));
+}
+
+#[test]
+fn hold_cleared_on_set_error() {
+    let mut throttle = Throttle::default();
+    throttle.on_drag("preamp.gain", 10.0, Instant::now());
+    throttle.on_release("preamp.gain", 12.0, 7);
+    let set = Request::Set {
+        param: "preamp.gain".to_string(),
+        value: 12.0,
+    };
+    let busy = Ok(Response::Err {
+        error: "engine busy".to_string(),
+    });
+    let failed = failed_set(&set, &busy).unwrap();
+    assert_eq!(failed, "preamp.gain");
+    throttle.forget(&failed);
+    assert!(!throttle.hold_local("preamp.gain", 7));
+    let gone = Err(ClientError::NotRunning(PathBuf::from("/tmp/xgv/x.sock")));
+    assert_eq!(failed_set(&set, &gone).as_deref(), Some("preamp.gain"));
+    let applied = Ok(Response::Ok(
+        json!({"param": "preamp.gain", "value": 12.0, "clamped": false}),
+    ));
+    assert_eq!(failed_set(&set, &applied), None);
+    assert_eq!(failed_set(&Request::Save, &busy), None);
 }

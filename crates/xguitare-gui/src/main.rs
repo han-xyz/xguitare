@@ -1,5 +1,4 @@
 mod app;
-mod client;
 mod widgets;
 
 use std::path::PathBuf;

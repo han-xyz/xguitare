@@ -29,6 +29,7 @@ pub struct Snapshot {
     pub bank: Option<Value>,
     pub params: Option<Value>,
     pub last_message: Option<(String, Instant)>,
+    pub failed_set: Option<(String, Instant)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,10 +215,18 @@ pub fn unit_suffix(unit: &str) -> &'static str {
 #[derive(Debug, Default)]
 struct Drag {
     last_sent: Option<Instant>,
+    pending: Option<f64>,
     released_at: Option<u64>,
 }
 
-/// Per Parameter address: while dragged, a `set` at most every [`SET_INTERVAL`]; the slider keeps its local value until a snapshot newer than the release Revision arrives.
+impl Drag {
+    fn is_due(&self, now: Instant) -> bool {
+        self.last_sent
+            .is_none_or(|sent| now.duration_since(sent) >= SET_INTERVAL)
+    }
+}
+
+/// Per Parameter address: while dragged, a `set` at most every [`SET_INTERVAL`], a throttled value sent by [`Throttle::tick`] once the interval has passed; the slider keeps its local value until a snapshot newer than the release Revision arrives.
 #[derive(Debug, Default)]
 pub struct Throttle {
     drags: HashMap<String, Drag>,
@@ -227,19 +236,37 @@ impl Throttle {
     pub fn on_drag(&mut self, address: &str, value: f64, now: Instant) -> Option<Command> {
         let drag = self.drags.entry(address.to_string()).or_default();
         drag.released_at = None;
-        if drag
-            .last_sent
-            .is_some_and(|sent| now.duration_since(sent) < SET_INTERVAL)
-        {
+        if !drag.is_due(now) {
+            drag.pending = Some(value);
             return None;
         }
         drag.last_sent = Some(now);
+        drag.pending = None;
         Some(set_command(address, value))
+    }
+
+    pub fn tick(&mut self, now: Instant) -> Vec<Command> {
+        let mut due = Vec::new();
+        for (address, drag) in &mut self.drags {
+            if !drag.is_due(now) {
+                continue;
+            }
+            if let Some(value) = drag.pending.take() {
+                drag.last_sent = Some(now);
+                due.push(set_command(address, value));
+            }
+        }
+        due
+    }
+
+    pub fn has_pending(&self) -> bool {
+        self.drags.values().any(|drag| drag.pending.is_some())
     }
 
     pub fn on_release(&mut self, address: &str, value: f64, revision: u64) -> Command {
         let drag = self.drags.entry(address.to_string()).or_default();
         drag.last_sent = None;
+        drag.pending = None;
         drag.released_at = Some(revision);
         set_command(address, value)
     }
@@ -249,6 +276,14 @@ impl Throttle {
             drag.released_at
                 .is_none_or(|released| revision_now <= released)
         })
+    }
+
+    pub fn forget(&mut self, address: &str) {
+        self.drags.remove(address);
+    }
+
+    pub fn retain(&mut self, is_present: impl Fn(&str) -> bool) {
+        self.drags.retain(|address, _| is_present(address));
     }
 }
 
@@ -287,5 +322,14 @@ pub fn response_text(req: &Request, response: Result<Response, ClientError>) -> 
         (_, Ok(Response::Ok(_))) => None,
         (_, Ok(Response::Err { error })) => Some(format!("error: {error}")),
         (_, Err(err)) => Some(format!("error: {err}")),
+    }
+}
+
+/// The address of a `set` that the Daemon refused or that never reached it.
+pub fn failed_set(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {
+    match (req, response) {
+        (_, Ok(Response::Ok(_))) => None,
+        (Request::Set { param, .. }, _) => Some(param.clone()),
+        _ => None,
     }
 }

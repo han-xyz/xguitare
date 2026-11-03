@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,14 +9,16 @@ use std::time::Instant;
 use egui::{
     Button, CentralPanel, CollapsingHeader, Event, Key, Modifiers, Panel, ScrollArea, Slider, Ui,
 };
+use serde_json::Value;
 use tracing::error;
 use xguitare_core::Config;
+use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
-    BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, Snapshot, Throttle,
-    bank_rows, key_to_command, link_text, param_rows, peak_fraction, status_line, unit_suffix,
+    BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, SET_INTERVAL, Snapshot,
+    Throttle, bank_rows, key_to_command, link_text, param_rows, peak_fraction, status_line,
+    unit_suffix,
 };
 
-use crate::client::{self, TICK};
 use crate::widgets;
 
 const NO_PRESET: &str = "no preset";
@@ -52,7 +54,9 @@ impl App {
         stop: Arc<AtomicBool>,
     ) -> App {
         let (commands, snapshots, client) =
-            client::spawn(config, config_path, Arc::clone(&stop), ctx);
+            client::spawn(config, config_path, Arc::clone(&stop), move || {
+                ctx.request_repaint()
+            });
         App {
             commands,
             snapshots,
@@ -65,6 +69,7 @@ impl App {
                 bank: None,
                 params: None,
                 last_message: None,
+                failed_set: None,
             },
             stop,
             throttle: Throttle::default(),
@@ -72,6 +77,37 @@ impl App {
             feedback: Feedback::default(),
         }
     }
+}
+
+impl App {
+    fn release_stale_holds(&mut self, snapshot: &Snapshot) {
+        if snapshot.failed_set != self.snapshot.failed_set
+            && let Some((address, _)) = &snapshot.failed_set
+        {
+            self.throttle.forget(address);
+        }
+        if active_preset(snapshot) != active_preset(&self.snapshot) {
+            self.throttle = Throttle::default();
+            return;
+        }
+        let present: HashSet<String> = snapshot
+            .params
+            .as_ref()
+            .map(param_rows)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(_, rows)| rows.into_iter().map(|row| row.address))
+            .collect();
+        self.throttle.retain(|address| present.contains(address));
+    }
+}
+
+fn active_preset(snapshot: &Snapshot) -> (Option<&Value>, Option<&Value>) {
+    let status = snapshot.status.as_ref();
+    (
+        status.map(|status| &status["preset"]),
+        status.map(|status| &status["program"]),
+    )
 }
 
 impl eframe::App for App {
@@ -85,6 +121,7 @@ impl eframe::App for App {
             {
                 self.feedback.show(text.clone(), *at);
             }
+            self.release_stale_holds(&snapshot);
             self.snapshot = snapshot;
         }
     }
@@ -101,6 +138,7 @@ impl eframe::App for App {
             .into_iter()
             .filter_map(|key| key_to_command(key, &rows))
             .collect();
+        commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| status_bar(ui, snapshot, &self.feedback, now));
         Panel::left("bank")
             .exact_size(BANK_WIDTH)
@@ -119,6 +157,9 @@ impl eframe::App for App {
             let _ = self.commands.send(command);
         }
         ui.ctx().request_repaint_after(TICK);
+        if self.throttle.has_pending() {
+            ui.ctx().request_repaint_after(SET_INTERVAL);
+        }
     }
 
     fn on_exit(&mut self) {
@@ -132,8 +173,11 @@ impl eframe::App for App {
     }
 }
 
-/// Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
+/// No shortcut while a widget takes typing, e.g. a slider's value field. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
+    if ui.ctx().egui_wants_keyboard_input() {
+        return Vec::new();
+    }
     ui.input_mut(|input| {
         let mut keys: Vec<KeyEvent> = input
             .events

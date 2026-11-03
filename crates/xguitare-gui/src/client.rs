@@ -5,19 +5,19 @@ use std::path::PathBuf;
 use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::model::{
+    Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, refresh_decision,
+    requests_until_quit, response_text, spawn_policy,
+};
 use serde_json::Value;
 use tracing::{info, warn};
 use xguitare_client::{ClientError, Connection};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
-use xguitare_gui::model::{
-    Command, Link, Snapshot, bank_rows, counts_toward_spawn, refresh_decision, requests_until_quit,
-    response_text, spawn_policy,
-};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -27,12 +27,12 @@ pub fn spawn(
     config: Config,
     config_path: Option<PathBuf>,
     stop: Arc<AtomicBool>,
-    ctx: egui::Context,
+    repaint: impl Fn() + Send + 'static,
 ) -> (Sender<Command>, Receiver<Snapshot>, JoinHandle<()>) {
     let (command_tx, command_rx) = mpsc::channel();
     let (snapshot_tx, snapshot_rx) = mpsc::channel();
     let handle = thread::spawn(move || {
-        Client::new(config, config_path, stop).run(&command_rx, &snapshot_tx, &ctx);
+        Client::new(config, config_path, stop).run(&command_rx, &snapshot_tx, &repaint);
     });
     (command_tx, snapshot_rx, handle)
 }
@@ -70,6 +70,7 @@ impl Client {
                 bank: None,
                 params: None,
                 last_message: None,
+                failed_set: None,
             },
         }
     }
@@ -78,26 +79,52 @@ impl Client {
         mut self,
         commands: &Receiver<Command>,
         snapshots: &Sender<Snapshot>,
-        ctx: &egui::Context,
+        repaint: &impl Fn(),
     ) {
         let mut sent: Option<Snapshot> = None;
-        while !self.stop.load(Ordering::Relaxed) && self.handle_commands(commands) {
-            self.poll(Instant::now());
-            if sent.as_ref() != Some(&self.snapshot) {
-                if snapshots.send(self.snapshot.clone()).is_err() {
-                    break;
-                }
-                ctx.request_repaint();
-                sent = Some(self.snapshot.clone());
+        let mut next_poll = Instant::now();
+        while !self.stop.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_poll {
+                self.poll(now);
+                next_poll = now + TICK;
             }
-            thread::sleep(TICK);
+            if !self.publish(&mut sent, snapshots, repaint) {
+                break;
+            }
+            let first =
+                match commands.recv_timeout(next_poll.saturating_duration_since(Instant::now())) {
+                    Ok(command) => command,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+            if !self.handle_commands(first, commands) {
+                break;
+            }
         }
         self.stop_daemon();
-        ctx.request_repaint();
+        repaint();
     }
 
-    fn handle_commands(&mut self, commands: &Receiver<Command>) -> bool {
-        let mut queued = Vec::new();
+    fn publish(
+        &self,
+        sent: &mut Option<Snapshot>,
+        snapshots: &Sender<Snapshot>,
+        repaint: &impl Fn(),
+    ) -> bool {
+        if sent.as_ref() == Some(&self.snapshot) {
+            return true;
+        }
+        if snapshots.send(self.snapshot.clone()).is_err() {
+            return false;
+        }
+        repaint();
+        *sent = Some(self.snapshot.clone());
+        true
+    }
+
+    fn handle_commands(&mut self, first: Command, commands: &Receiver<Command>) -> bool {
+        let mut queued = vec![first];
         let ui_gone = loop {
             match commands.try_recv() {
                 Ok(command) => queued.push(command),
@@ -107,7 +134,11 @@ impl Client {
         };
         let (requests, quit) = requests_until_quit(queued);
         for req in requests {
-            if let Some(text) = response_text(&req, self.request(&req)) {
+            let response = self.request(&req);
+            if let Some(param) = failed_set(&req, &response) {
+                self.snapshot.failed_set = Some((param, Instant::now()));
+            }
+            if let Some(text) = response_text(&req, response) {
                 self.snapshot.last_message = Some((text, Instant::now()));
             }
         }
