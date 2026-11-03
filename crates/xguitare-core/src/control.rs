@@ -11,7 +11,7 @@ use xguitare_dsp::{ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
-use crate::engine::{Command, EngineQueues, EngineShared};
+use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES};
 use crate::preset::shortest_f64;
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
@@ -85,9 +85,10 @@ pub fn handle_line(state: &mut EngineState, line: &str) -> (String, Vec<BuildWar
     (line, warnings)
 }
 
-/// Whether the Rack prepared for `prepared` frames must be rebuilt for the quantum in effect: larger blocks would be silent, smaller ones would waste work on oversized FFTs.
+/// Whether the Rack prepared for `prepared` frames must be rebuilt for the quantum in effect: larger blocks would be silent, smaller ones would waste work on oversized FFTs. Never above `SWITCHER_MAX_FRAMES`, which the audio thread cannot run whatever the Rack.
 pub fn needs_reprepare(prepared: usize, buffer_size: u32) -> bool {
-    prepared != buffer_size as usize
+    let frames = buffer_size as usize;
+    prepared != frames && frames <= SWITCHER_MAX_FRAMES
 }
 
 /// What `reprepare` swapped in, for the caller to log.
@@ -209,7 +210,8 @@ fn load(
     Ok(payload)
 }
 
-fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
+/// The empty Rack, which sends the input to both outputs unchanged.
+pub fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
     let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
     rack.prepare(sample_rate, max_frames);
     rack

@@ -15,9 +15,9 @@ use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, handle, needs_reprepare, reprepare,
+    EngineState, Reprepare, Request, Response, handle, needs_reprepare, passthrough_rack, reprepare,
 };
-use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
@@ -165,12 +165,6 @@ fn build_rack(
             None
         }
     }
-}
-
-fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
-    let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
-    rack.prepare(sample_rate, max_frames);
-    rack
 }
 
 fn register_stop_signals() -> Result<Arc<AtomicBool>, DaemonError> {
@@ -332,6 +326,7 @@ fn watch_until_stopped(
 ) {
     let mut reported_xruns = 0;
     let mut reported_oversize = 0;
+    let mut reported_over_limit = None;
     let mut reported_buffer_size = shared.buffer_size.load(Ordering::Relaxed);
     let mut polls = 0;
     while !stop.load(Ordering::Relaxed) {
@@ -356,16 +351,26 @@ fn watch_until_stopped(
             reported_buffer_size = buffer_size;
         }
         let mut state = state_guard(state);
+        let reprepares = needs_reprepare(state.max_frames, buffer_size);
         let oversize = shared.oversize_blocks.load(Ordering::Relaxed);
         if oversize > reported_oversize {
             warn!(
-                "{} oversize blocks dropped: quantum {buffer_size} > prepared {}; re-preparing",
+                "{} oversize blocks dropped: quantum {buffer_size}, rack running at {} frames{}",
                 oversize - reported_oversize,
-                state.max_frames
+                shared.running_frames.load(Ordering::Relaxed),
+                if reprepares { "; re-preparing" } else { "" }
             );
             reported_oversize = oversize;
         }
-        if needs_reprepare(state.max_frames, buffer_size) {
+        if buffer_size as usize <= SWITCHER_MAX_FRAMES {
+            reported_over_limit = None;
+        } else if reported_over_limit != Some(buffer_size) {
+            error!(
+                "quantum {buffer_size} exceeds the switcher limit {SWITCHER_MAX_FRAMES}; output is silent until the quantum is lowered"
+            );
+            reported_over_limit = Some(buffer_size);
+        }
+        if reprepares {
             reprepare_rack(&mut state, buffer_size);
         }
     }

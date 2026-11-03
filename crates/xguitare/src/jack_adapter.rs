@@ -51,7 +51,13 @@ pub fn start(
     let rack = Box::new(build_rack(sample_rate, max_frames));
     let crossfade_frames = (crossfade_ms * sample_rate / 1000.0) as usize;
     let process = Process {
-        switcher: RackSwitcher::new(rack, SWITCHER_MAX_FRAMES, crossfade_frames, queues),
+        switcher: RackSwitcher::new(
+            rack,
+            SWITCHER_MAX_FRAMES,
+            crossfade_frames,
+            queues,
+            Arc::clone(&shared),
+        ),
         input,
         out_l,
         out_r,

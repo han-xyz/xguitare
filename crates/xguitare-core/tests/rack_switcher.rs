@@ -1,5 +1,9 @@
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
 use xguitare_core::engine::{
-    Command, EngineQueues, RackSwitcher, SWITCHER_MAX_FRAMES, engine_queues,
+    Command, EngineQueues, EngineShared, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES,
+    engine_queues,
 };
 use xguitare_dsp::{Gain, Module, Rack};
 
@@ -32,7 +36,7 @@ fn sized_gain_rack(levels_db: &[f32], max_frames: usize) -> Box<Rack> {
 fn switcher(levels_db: &[f32]) -> (RackSwitcher, EngineQueues) {
     let (control, audio) = engine_queues(CAPACITY);
     (
-        RackSwitcher::new(gain_rack(levels_db), BLOCK, FADE, audio),
+        RackSwitcher::new(gain_rack(levels_db), BLOCK, FADE, audio, Arc::default()),
         control,
     )
 }
@@ -112,7 +116,15 @@ fn retired_capacity_never_exceeded() {
 fn swap_to_larger_rack_during_oversize_period() {
     const LARGER: usize = 2 * BLOCK;
     let (mut control, audio) = engine_queues(CAPACITY);
-    let mut switcher = RackSwitcher::new(gain_rack(&[0.0]), SWITCHER_MAX_FRAMES, FADE, audio);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(
+        gain_rack(&[0.0]),
+        SWITCHER_MAX_FRAMES,
+        FADE,
+        audio,
+        Arc::clone(&shared),
+    );
+    assert_eq!(shared.running_frames.load(Ordering::Relaxed), BLOCK);
     let input = [0.5; LARGER];
     let (mut left, mut right) = ([1.0; LARGER], [1.0; LARGER]);
     switcher.apply_commands();
@@ -123,4 +135,9 @@ fn swap_to_larger_rack_during_oversize_period() {
     assert!(switcher.process(&input, &mut left, &mut right));
     assert!(left[LARGER - 1] > 0.4, "{}", left[LARGER - 1]);
     assert!(right[LARGER - 1] > 0.4, "{}", right[LARGER - 1]);
+    assert_eq!(shared.running_frames.load(Ordering::Relaxed), LARGER);
+    assert!(matches!(
+        control.from_audio.pop(),
+        Ok(FromAudio::Retired(_))
+    ));
 }

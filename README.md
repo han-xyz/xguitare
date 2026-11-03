@@ -236,10 +236,10 @@ If `$XDG_RUNTIME_DIR` is unset, the socket defaults to `/tmp/xguitare-<uid>/xgui
 **Latency or buffer size.** The Daemon asks for `buffer_size` frames per period, but PipeWire may run a larger quantum. `xguitare status` shows the `buffer_size` in effect, and the Daemon warns at start:
 
 ```text
-2026-11-03T15:49:51.117134Z  WARN xguitare::jack_adapter: buffer size is 256, wanted 128; force it with: pw-metadata -n settings 0 clock.force-quantum 128
-2026-11-03T15:49:51.117138Z  INFO xguitare::jack_adapter: buffer size 256 differs from prepared 128; re-preparing
-2026-11-03T15:49:52.118188Z  WARN xguitare::daemon: 186 oversize blocks dropped: quantum 256 > prepared 128; re-preparing
-2026-11-03T15:49:52.119717Z  INFO xguitare::daemon: re-prepared rack for 256 frames
+2026-11-03T15:58:05.926714Z  WARN xguitare::jack_adapter: buffer size is 256, wanted 128; force it with: pw-metadata -n settings 0 clock.force-quantum 128
+2026-11-03T15:58:05.926719Z  INFO xguitare::jack_adapter: buffer size 256 differs from prepared 128; re-preparing
+2026-11-03T15:58:06.928152Z  WARN xguitare::daemon: 186 oversize blocks dropped: quantum 256, rack running at 128 frames; re-preparing
+2026-11-03T15:58:06.929391Z  INFO xguitare::daemon: re-prepared rack for 256 frames
 ```
 
 The Rack is prepared for the buffer size JACK reports before the Daemon activates its client. When the quantum in effect differs, at start or later, the Daemon rebuilds the Rack for the new size within a second and logs `re-prepared rack for N frames`; `xguitare status` shows that size as `prepared_frames`. Sound continues with no restart, after at most a second of silence when the quantum grew (logged as `oversize blocks dropped`). To get the latency of `buffer_size`, force the quantum for the whole PipeWire graph, and undo it with `0` when you are done playing:
@@ -249,7 +249,7 @@ pw-metadata -n settings 0 clock.force-quantum 128
 pw-metadata -n settings 0 clock.force-quantum 0
 ```
 
-**Clicks and dropouts (xruns).** `xguitare status` counts them in `xruns`, and the Daemon logs `xruns: N (+n)` at most once a second. `callback_max_us` is the longest audio callback so far; at 128 frames and 48 kHz a period is 2666 µs, and a callback near that is too slow. Use a larger buffer: set `buffer_size = 256` in the config, force the quantum to 256 with the command above, and restart the Daemon. Closing other audio-heavy programs or using a Preset with fewer Modules also helps.
+**Clicks and dropouts (xruns).** `xguitare status` counts them in `xruns`, and the Daemon logs `xruns: N (+n)` at most once a second. `callback_max_us` is the longest audio callback so far; at 128 frames and 48 kHz a period is 2666 µs, and a callback near that is too slow. Use a larger buffer: force the quantum to 256 with the command above; the Daemon re-prepares within a second. Set `buffer_size = 256` in the config so the next start asks for it. Closing other audio-heavy programs or using a Preset with fewer Modules also helps.
 
 **`error: daemon already running at /run/user/1000/xguitare/xguitare.sock`.** `xguitare run` found another Daemon answering on the socket. Stop that one (Ctrl-C in its terminal, or `pkill -x xguitare`), or use it with the CLI. A socket file left by a crashed Daemon is removed automatically.
 

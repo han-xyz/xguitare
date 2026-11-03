@@ -1,5 +1,6 @@
 use std::mem;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use xguitare_dsp::Rack;
@@ -13,6 +14,8 @@ pub struct EngineShared {
     pub callback_ns_last: AtomicU64,
     pub sample_rate: AtomicU32,
     pub buffer_size: AtomicU32,
+    /// `max_frames` of the Rack the audio thread is running.
+    pub running_frames: AtomicUsize,
 }
 
 pub enum Command {
@@ -90,6 +93,7 @@ pub struct RackSwitcher {
     crossfade_frames: usize,
     queues: AudioQueues,
     reserved_slots: usize,
+    shared: Arc<EngineShared>,
 }
 
 impl RackSwitcher {
@@ -98,10 +102,14 @@ impl RackSwitcher {
         max_frames: usize,
         crossfade_frames: usize,
         queues: AudioQueues,
+        shared: Arc<EngineShared>,
     ) -> RackSwitcher {
         let mut crossfader = Crossfader::new();
         crossfader.prepare(max_frames);
         let reserved_slots = queues.from_audio.buffer().capacity() - PROGRAM_CHANGE_SLOTS;
+        shared
+            .running_frames
+            .store(rack.max_frames(), Ordering::Relaxed);
         RackSwitcher {
             current: rack,
             incoming: None,
@@ -110,6 +118,7 @@ impl RackSwitcher {
             crossfade_frames,
             queues,
             reserved_slots,
+            shared,
         }
     }
 
@@ -127,7 +136,7 @@ impl RackSwitcher {
                 Command::SwapRack(new) => match self.incoming.take() {
                     // A swap during a fade cuts straight to the newest Rack rather than queueing fades, so at most two Racks are ever live.
                     Some(fading_in) => {
-                        let old = mem::replace(&mut self.current, new);
+                        let old = self.make_current(new);
                         self.retire(old);
                         self.retire(fading_in);
                     }
@@ -147,7 +156,7 @@ impl RackSwitcher {
             && let Some(new) = self.incoming.take_if(|new| frames <= new.max_frames())
         {
             // The current Rack has been silent at this block size, so there is nothing to fade from.
-            let old = mem::replace(&mut self.current, new);
+            let old = self.make_current(new);
             self.retire(old);
         }
         let fits = |rack: &Rack| frames <= rack.max_frames();
@@ -167,7 +176,7 @@ impl RackSwitcher {
             .crossfader
             .process(&mut self.current, incoming, input, out_l, out_r);
         if let Some(new) = self.incoming.take_if(|_| faded) {
-            let old = mem::replace(&mut self.current, new);
+            let old = self.make_current(new);
             self.retire(old);
         }
         true
@@ -182,6 +191,13 @@ impl RackSwitcher {
                 .push(FromAudio::ProgramChange(program));
             debug_assert!(pushed.is_ok(), "from_audio queue full");
         }
+    }
+
+    fn make_current(&mut self, rack: Box<Rack>) -> Box<Rack> {
+        self.shared
+            .running_frames
+            .store(rack.max_frames(), Ordering::Relaxed);
+        mem::replace(&mut self.current, rack)
     }
 
     fn retire(&mut self, rack: Box<Rack>) {

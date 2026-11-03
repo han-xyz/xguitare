@@ -7,12 +7,22 @@ use serde_json::{Value, json};
 use xguitare_core::control::{
     EngineState, Reprepare, Request, Response, handle, handle_line, needs_reprepare, reprepare,
 };
-use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
-use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Preset};
+use xguitare_core::engine::{
+    AudioQueues, Command, EngineShared, SWITCHER_MAX_FRAMES, engine_queues,
+};
+use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Preset, PresetModule};
 
 const QUEUE_CAPACITY: usize = 64;
 
-fn bank_dir(test: &str) -> PathBuf {
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn bank_dir(test: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("xguitare-control-{}-{test}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -27,12 +37,12 @@ fn bank_dir(test: &str) -> PathBuf {
     )
     .unwrap();
     fs::write(dir.join("03-broken.toml"), "name = \n").unwrap();
-    dir
+    TempDir(dir)
 }
 
-fn state(test: &str) -> (EngineState, AudioQueues) {
+fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     let dir = bank_dir(test);
-    let bank = Bank::load_dir(&dir).unwrap();
+    let bank = Bank::load_dir(&dir.0).unwrap();
     let BankEntry::Valid { file, preset } = &bank.entries[0] else {
         panic!("01-clean.toml should be valid");
     };
@@ -43,8 +53,8 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
     shared.xruns.store(3, Ordering::Relaxed);
     shared.callback_ns_max.store(250_000, Ordering::Relaxed);
     shared.callback_ns_last.store(90_000, Ordering::Relaxed);
-    let mut config = Config::load(Some(&dir.join("absent.toml"))).unwrap();
-    config.bank_dir = dir;
+    let mut config = Config::load(Some(&dir.0.join("absent.toml"))).unwrap();
+    config.bank_dir = dir.0.clone();
     let (queues, audio) = engine_queues(QUEUE_CAPACITY);
     let state = EngineState {
         bank,
@@ -56,7 +66,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         sample_rate: 48_000.0,
         max_frames: 128,
     };
-    (state, audio)
+    (state, audio, dir)
 }
 
 fn active_file(state: &EngineState) -> Option<PathBuf> {
@@ -99,7 +109,7 @@ fn set(param: &str, value: f64) -> Request {
 
 #[test]
 fn status_reports_fields() {
-    let (mut state, _audio) = state("status");
+    let (mut state, _audio, _dir) = state("status");
     let payload = ok(handle(&mut state, Request::Status));
     assert_eq!(
         payload,
@@ -119,7 +129,7 @@ fn status_reports_fields() {
 
 #[test]
 fn list_marks_active_and_invalid() {
-    let (mut state, _audio) = state("list");
+    let (mut state, _audio, _dir) = state("list");
     let payload = ok(handle(&mut state, Request::List));
     assert_eq!(payload["active"], 0);
     let entries = payload["entries"].as_array().unwrap();
@@ -139,7 +149,7 @@ fn list_marks_active_and_invalid() {
 
 #[test]
 fn load_returns_build_warnings() {
-    let (mut state, _audio) = state("load-warnings");
+    let (mut state, _audio, _dir) = state("load-warnings");
     fs::write(
         state.config.bank_dir.join("04-cab.toml"),
         "name = \"Cab\"\n[[module]]\ntype = \"cabinet\"\nir = \"missing.wav\"\n",
@@ -161,7 +171,7 @@ fn load_returns_build_warnings() {
 
 #[test]
 fn load_by_name_and_number() {
-    let (mut state, mut audio) = state("load");
+    let (mut state, mut audio, _dir) = state("load");
     let payload = ok(handle(
         &mut state,
         Request::Load {
@@ -189,7 +199,7 @@ fn load_by_name_and_number() {
 
 #[test]
 fn load_invalid_entry_is_error() {
-    let (mut state, audio) = state("load-invalid");
+    let (mut state, audio, _dir) = state("load-invalid");
     let message = error(handle(
         &mut state,
         Request::Load {
@@ -206,7 +216,7 @@ fn load_invalid_entry_is_error() {
 
 #[test]
 fn set_clamps_and_reports() {
-    let (mut state, mut audio) = state("set");
+    let (mut state, mut audio, _dir) = state("set");
     let payload = ok(handle(&mut state, set("gain.level", 50.0)));
     assert_eq!(
         payload,
@@ -224,7 +234,7 @@ fn set_clamps_and_reports() {
 
 #[test]
 fn set_non_finite_is_error() {
-    let (mut state, audio) = state("set-non-finite");
+    let (mut state, audio, _dir) = state("set-non-finite");
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
             error(handle(&mut state, set("gain.level", value))),
@@ -236,7 +246,7 @@ fn set_non_finite_is_error() {
 
 #[test]
 fn set_unknown_module() {
-    let (mut state, _audio) = state("set-unknown-module");
+    let (mut state, _audio, _dir) = state("set-unknown-module");
     assert_eq!(
         error(handle(&mut state, set("drive.gain", 1.0))),
         "no module 'drive'"
@@ -245,7 +255,7 @@ fn set_unknown_module() {
 
 #[test]
 fn set_unknown_param() {
-    let (mut state, _audio) = state("set-unknown-param");
+    let (mut state, _audio, _dir) = state("set-unknown-param");
     assert_eq!(
         error(handle(&mut state, set("gain.drive", 1.0))),
         "module 'gain' has no parameter 'drive'"
@@ -254,7 +264,7 @@ fn set_unknown_param() {
 
 #[test]
 fn set_bad_address() {
-    let (mut state, _audio) = state("set-bad-address");
+    let (mut state, _audio, _dir) = state("set-bad-address");
     assert_eq!(
         error(handle(&mut state, set("gain", 1.0))),
         "expected <module>.<param>, got 'gain'"
@@ -263,7 +273,7 @@ fn set_bad_address() {
 
 #[test]
 fn set_without_preset() {
-    let (mut state, _audio) = state("set-without-preset");
+    let (mut state, _audio, _dir) = state("set-without-preset");
     state.active = None;
     assert_eq!(
         error(handle(&mut state, set("gain.level", 1.0))),
@@ -273,7 +283,7 @@ fn set_without_preset() {
 
 #[test]
 fn get_all_and_one() {
-    let (mut state, _audio) = state("get");
+    let (mut state, _audio, _dir) = state("get");
     let expected = json!({"module": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0});
     let all = ok(handle(&mut state, Request::Get { param: None }));
     assert_eq!(all, json!({"params": [expected]}));
@@ -304,7 +314,7 @@ fn get_all_and_one() {
 
 #[test]
 fn queue_full_is_engine_busy() {
-    let (mut state, audio) = state("busy");
+    let (mut state, audio, _dir) = state("busy");
     for _ in 0..QUEUE_CAPACITY {
         ok(handle(&mut state, set("gain.level", 1.0)));
     }
@@ -330,7 +340,7 @@ fn queue_full_is_engine_busy() {
 
 #[test]
 fn unknown_cmd_is_error() {
-    let (mut state, _audio) = state("unknown-cmd");
+    let (mut state, _audio, _dir) = state("unknown-cmd");
     let response: Value =
         serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"bogus"}"#).0).unwrap();
     assert_eq!(response["ok"], false);
@@ -343,7 +353,7 @@ fn unknown_cmd_is_error() {
 
 #[test]
 fn malformed_json_is_error() {
-    let (mut state, _audio) = state("malformed");
+    let (mut state, _audio, _dir) = state("malformed");
     let response: Value = serde_json::from_str(&handle_line(&mut state, "{\"cmd\":").0).unwrap();
     assert_eq!(response["ok"], false);
     assert!(
@@ -361,7 +371,7 @@ fn malformed_json_is_error() {
 
 #[test]
 fn save_writes_live_values_atomically() {
-    let (mut state, _audio) = state("save");
+    let (mut state, _audio, _dir) = state("save");
     ok(handle(&mut state, set("gain.level", -6.0)));
     let payload = ok(handle(&mut state, Request::Save));
     let file = state.config.bank_dir.join("01-clean.toml");
@@ -374,14 +384,14 @@ fn save_writes_live_values_atomically() {
 
 #[test]
 fn save_without_preset_is_error() {
-    let (mut state, _audio) = state("save-without-preset");
+    let (mut state, _audio, _dir) = state("save-without-preset");
     state.active = None;
     assert_eq!(error(handle(&mut state, Request::Save)), "no preset loaded");
 }
 
 #[test]
 fn save_after_active_removed_is_error() {
-    let (mut state, _audio) = state("save-after-removal");
+    let (mut state, _audio, _dir) = state("save-after-removal");
     remove_active_file_and_reindex(&mut state);
     let loud = fs::read_to_string(state.config.bank_dir.join("02-loud.toml")).unwrap();
     assert_eq!(
@@ -398,7 +408,7 @@ fn save_after_active_removed_is_error() {
 
 #[test]
 fn status_program_null_after_removal() {
-    let (mut state, _audio) = state("status-after-removal");
+    let (mut state, _audio, _dir) = state("status-after-removal");
     remove_active_file_and_reindex(&mut state);
     let status = ok(handle(&mut state, Request::Status));
     assert_eq!(status["program"], Value::Null);
@@ -409,7 +419,7 @@ fn status_program_null_after_removal() {
 
 #[test]
 fn failed_save_leaves_no_tmp() {
-    let (mut state, _audio) = state("save-fails");
+    let (mut state, _audio, _dir) = state("save-fails");
     let target = state.config.bank_dir.join("01-clean.toml");
     fs::remove_file(&target).unwrap();
     fs::create_dir(&target).unwrap();
@@ -428,7 +438,7 @@ fn needs_reprepare_when_sizes_differ() {
 
 #[test]
 fn reprepare_swaps_in_active_preset_at_new_size() {
-    let (mut state, mut audio) = state("reprepare");
+    let (mut state, mut audio, _dir) = state("reprepare");
     assert_eq!(
         reprepare(&mut state, 256).unwrap(),
         Reprepare::Built(Vec::new())
@@ -442,7 +452,7 @@ fn reprepare_swaps_in_active_preset_at_new_size() {
 
 #[test]
 fn reprepare_without_preset_swaps_in_passthrough() {
-    let (mut state, mut audio) = state("reprepare-passthrough");
+    let (mut state, mut audio, _dir) = state("reprepare-passthrough");
     state.active = None;
     reprepare(&mut state, 512).unwrap();
     let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
@@ -454,7 +464,7 @@ fn reprepare_without_preset_swaps_in_passthrough() {
 
 #[test]
 fn reprepare_with_full_queue_is_engine_busy() {
-    let (mut state, _audio) = state("reprepare-busy");
+    let (mut state, _audio, _dir) = state("reprepare-busy");
     for _ in 0..QUEUE_CAPACITY {
         ok(handle(&mut state, set("gain.level", 1.0)));
     }
@@ -467,10 +477,57 @@ fn reprepare_with_full_queue_is_engine_busy() {
 
 #[test]
 fn status_reports_prepared_frames() {
-    let (mut state, _audio) = state("status-prepared");
+    let (mut state, _audio, _dir) = state("status-prepared");
     reprepare(&mut state, 256).unwrap();
     assert_eq!(
         ok(handle(&mut state, Request::Status))["prepared_frames"],
         256
     );
+}
+
+fn cabinet(id: &str) -> PresetModule {
+    PresetModule {
+        id: id.to_string(),
+        type_name: "cabinet".to_string(),
+        ir: None,
+        params: Vec::new(),
+    }
+}
+
+#[test]
+fn build_failure_falls_back_to_passthrough() {
+    let (mut state, mut audio, _dir) = state("reprepare-fallback");
+    let file = active_file(&state).unwrap();
+    let preset = Preset {
+        name: "Two Cabs".to_string(),
+        modules: vec![cabinet("cab1"), cabinet("cab2")],
+    };
+    state.active = Some((file, preset));
+    assert_eq!(
+        reprepare(&mut state, 256).unwrap(),
+        Reprepare::Passthrough {
+            preset: "Two Cabs".to_string(),
+            error: "more than one cabinet".to_string(),
+        }
+    );
+    let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
+        panic!("expected SwapRack");
+    };
+    assert_eq!(rack.max_frames(), 256);
+    assert!(rack.modules().is_empty());
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["preset"], Value::Null);
+    assert_eq!(status["prepared_frames"], 256);
+}
+
+#[test]
+fn quantum_above_limit_is_not_reprepared() {
+    let (mut state, _audio, _dir) = state("reprepare-above-limit");
+    let above = SWITCHER_MAX_FRAMES as u32 + 1;
+    assert!(!needs_reprepare(128, above));
+    assert!(needs_reprepare(128, SWITCHER_MAX_FRAMES as u32));
+    state.shared.buffer_size.store(above, Ordering::Relaxed);
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["buffer_size"], above);
+    assert_eq!(status["prepared_frames"], 128);
 }

@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use assert_no_alloc::*;
-use xguitare_core::engine::{Command, RackSwitcher, SWITCHER_MAX_FRAMES, engine_queues};
+use xguitare_core::engine::{Command, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_dsp::{Gain, Module, Rack};
 
 #[cfg(debug_assertions)]
@@ -25,7 +27,7 @@ fn sized_gain_rack(max_frames: usize) -> Box<Rack> {
 #[test]
 fn rack_switcher_does_not_allocate() {
     let (mut control, audio) = engine_queues(64);
-    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, 960, audio);
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, 960, audio, Arc::default());
     for _ in 0..2 {
         assert!(
             control
@@ -68,6 +70,7 @@ fn rack_switcher_at_quantum_limit_does_not_allocate() {
         SWITCHER_MAX_FRAMES,
         960,
         audio,
+        Arc::default(),
     );
     assert!(
         control
@@ -84,6 +87,37 @@ fn rack_switcher_at_quantum_limit_does_not_allocate() {
             assert!(switcher.process(&input, &mut left, &mut right));
         }
     });
+    drop(switcher);
+    control.drain_from_audio();
+}
+
+#[test]
+fn oversize_then_swap_and_cut_does_not_allocate() {
+    const LARGER: usize = 2 * BLOCK;
+    let (mut control, audio) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(
+        sized_gain_rack(BLOCK),
+        SWITCHER_MAX_FRAMES,
+        960,
+        audio,
+        Arc::default(),
+    );
+    let larger = sized_gain_rack(LARGER);
+    let input = [0.25; LARGER];
+    let mut left = [0.0; LARGER];
+    let mut right = [0.0; LARGER];
+    let processed = assert_no_alloc(|| {
+        switcher.apply_commands();
+        let silent = !switcher.process(&input, &mut left, &mut right);
+        assert!(control.commands.push(Command::SwapRack(larger)).is_ok());
+        switcher.apply_commands();
+        silent && switcher.process(&input, &mut left, &mut right)
+    });
+    assert!(processed);
+    assert!(matches!(
+        control.from_audio.pop(),
+        Ok(FromAudio::Retired(_))
+    ));
     drop(switcher);
     control.drain_from_audio();
 }
