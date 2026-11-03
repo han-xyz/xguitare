@@ -973,8 +973,16 @@ dependencies = [
  "signal-hook",
  "tracing",
  "tracing-subscriber",
+ "xguitare-client",
  "xguitare-core",
  "xguitare-dsp",
+]
+
+[[package]]
+name = "xguitare-client"
+version = "0.1.0"
+dependencies = [
+ "xguitare-core",
 ]
 
 [[package]]

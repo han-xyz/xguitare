@@ -13,5 +13,6 @@ notify-debouncer-mini = "0.7.0"
 signal-hook = "0.4.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+xguitare-client = { path = "../xguitare-client" }
 xguitare-core = { path = "../xguitare-core" }
 xguitare-dsp = { path = "../xguitare-dsp" }

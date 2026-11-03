@@ -1,71 +1,9 @@
-use std::fmt;
-use std::io::{self, BufRead, BufReader, ErrorKind, Write};
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::io::Write;
 
+use xguitare_client::Transport;
 use xguitare_core::control::{Request, Response, Value};
 
 use crate::{Cmd, parse};
-
-const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
-
-pub trait Transport {
-    fn request(&mut self, req: &Request) -> Result<Response, TransportError>;
-}
-
-#[derive(Debug)]
-pub enum TransportError {
-    NotRunning(PathBuf),
-    NotResponding(PathBuf),
-    Io(io::Error),
-    Protocol(String),
-}
-
-/// Connects to the Daemon's socket once per request: one request line out, one response line back.
-pub struct UnixSocketTransport {
-    path: PathBuf,
-}
-
-impl UnixSocketTransport {
-    pub fn new(path: PathBuf) -> Self {
-        UnixSocketTransport { path }
-    }
-}
-
-impl Transport for UnixSocketTransport {
-    fn request(&mut self, req: &Request) -> Result<Response, TransportError> {
-        let stream = UnixStream::connect(&self.path).map_err(|err| match err.kind() {
-            ErrorKind::NotFound | ErrorKind::ConnectionRefused => {
-                TransportError::NotRunning(self.path.clone())
-            }
-            _ => TransportError::Io(err),
-        })?;
-        let exchanged = exchange(&stream, req);
-        let reply = exchanged.map_err(|err| match err.kind() {
-            ErrorKind::WouldBlock | ErrorKind::TimedOut => {
-                TransportError::NotResponding(self.path.clone())
-            }
-            _ => TransportError::Io(err),
-        })?;
-        if reply.is_empty() {
-            return Err(TransportError::Protocol(
-                "daemon closed the connection".to_string(),
-            ));
-        }
-        Response::from_line(&reply).map_err(|err| TransportError::Protocol(err.to_string()))
-    }
-}
-
-fn exchange(stream: &UnixStream, req: &Request) -> io::Result<String> {
-    stream.set_read_timeout(Some(DAEMON_TIMEOUT))?;
-    stream.set_write_timeout(Some(DAEMON_TIMEOUT))?;
-    let mut writer = stream;
-    writer.write_all(format!("{}\n", req.to_line()).as_bytes())?;
-    let mut reply = String::new();
-    BufReader::new(stream).read_line(&mut reply)?;
-    Ok(reply)
-}
 
 /// Runs one client subcommand against the Daemon; returns the exit code (0 on success and `--help`, 1 after one `error: ...` line on `err`).
 pub fn run_cli(
@@ -226,20 +164,3 @@ fn without_control_chars(text: &str) -> String {
         })
         .collect()
 }
-
-impl fmt::Display for TransportError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TransportError::NotRunning(path) => {
-                write!(f, "daemon not running (socket {})", path.display())
-            }
-            TransportError::NotResponding(path) => {
-                write!(f, "daemon not responding (socket {})", path.display())
-            }
-            TransportError::Io(err) => write!(f, "control socket: {err}"),
-            TransportError::Protocol(msg) => write!(f, "bad response from daemon: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for TransportError {}

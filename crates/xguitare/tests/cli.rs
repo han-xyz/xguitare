@@ -1,16 +1,17 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
-use xguitare::{Transport, TransportError, run_cli, run_main};
+use xguitare::{run_cli, run_main};
+use xguitare_client::{ClientError, Transport};
 use xguitare_core::control::{Request, Response};
 
 struct Canned {
-    replies: VecDeque<Result<Response, TransportError>>,
+    replies: VecDeque<Result<Response, ClientError>>,
     requests: Vec<Request>,
 }
 
 impl Transport for Canned {
-    fn request(&mut self, req: &Request) -> Result<Response, TransportError> {
+    fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
         self.requests.push(req.clone());
         self.replies
             .pop_front()
@@ -25,7 +26,7 @@ struct Outcome {
     requests: Vec<Request>,
 }
 
-fn cli(argv: &[&str], reply: Result<Response, TransportError>) -> Outcome {
+fn cli(argv: &[&str], reply: Result<Response, ClientError>) -> Outcome {
     let argv: Vec<String> = std::iter::once("xguitare")
         .chain(argv.iter().copied())
         .map(String::from)
@@ -44,7 +45,7 @@ fn cli(argv: &[&str], reply: Result<Response, TransportError>) -> Outcome {
     }
 }
 
-fn reply(line: &str) -> Result<Response, TransportError> {
+fn reply(line: &str) -> Result<Response, ClientError> {
     Ok(Response::from_line(line).unwrap())
 }
 
@@ -181,7 +182,7 @@ fn error_response_exit_1() {
 fn daemon_not_running() {
     let out = cli(
         &["status"],
-        Err(TransportError::NotRunning(PathBuf::from(
+        Err(ClientError::NotRunning(PathBuf::from(
             "/run/user/1000/xguitare.sock",
         ))),
     );

@@ -9,9 +9,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use xguitare_core::{Config, secure_socket_dir};
+use xguitare_client::UnixSocketTransport;
+use xguitare_core::Config;
 
-pub use cli::{Transport, TransportError, UnixSocketTransport, run_cli};
+pub use cli::run_cli;
 
 #[derive(Parser)]
 #[command(
@@ -80,18 +81,11 @@ where
 
 fn run_client(argv: &[OsString], config_path: Option<&Path>) -> Result<i32, String> {
     let config = Config::load(config_path).map_err(|err| err.to_string())?;
-    let fallback_dir = config
-        .socket
-        .parent()
-        .filter(|dir| config.socket_is_fallback && dir.symlink_metadata().is_ok());
-    if let Some(dir) = fallback_dir {
-        secure_socket_dir(dir).map_err(|err| err.to_string())?;
-    }
+    let mut transport = UnixSocketTransport::from_config(&config).map_err(|err| err.to_string())?;
     let argv: Vec<String> = argv
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
-    let mut transport = UnixSocketTransport::new(config.socket);
     Ok(run_cli(
         &argv,
         &mut transport,
