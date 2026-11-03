@@ -140,3 +140,14 @@ fn two_cabinets_is_error() {
     ]);
     assert_eq!(error.to_string(), "more than one cabinet");
 }
+
+#[test]
+#[should_panic]
+#[cfg(debug_assertions)]
+fn process_more_than_max_frames_panics() {
+    let mut rack = gain_rack();
+    let input = [0.0; BLOCK + 1];
+    let mut left = [0.0; BLOCK + 1];
+    let mut right = [0.0; BLOCK + 1];
+    rack.process(&input, &mut left, &mut right);
+}

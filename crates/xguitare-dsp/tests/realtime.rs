@@ -121,12 +121,16 @@ fn reverb_does_not_allocate() {
 
 #[test]
 fn full_chain_does_not_allocate() {
+    let ir = CabinetIr {
+        left: (0..4800).map(|n| 0.9_f32.powi(n)).collect(),
+        right: Some(vec![0.5; 4800]),
+    };
     let modules: Vec<Box<dyn Module>> = vec![
         Box::new(Gate::new()),
         Box::new(Drive::new()),
         Box::new(Preamp::new()),
         Box::new(Tonestack::new()),
-        Box::new(Cabinet::new(None)),
+        Box::new(Cabinet::new(Some(ir))),
         Box::new(Delay::new()),
         Box::new(Reverb::new()),
     ];
