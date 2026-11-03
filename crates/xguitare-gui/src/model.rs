@@ -12,6 +12,7 @@ pub const METER_FLOOR_DB: f64 = -60.0;
 pub const METER_RED_DB: f64 = -6.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);
 pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
+pub const INVALID_PRESET: &str = "invalid preset";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -46,42 +47,60 @@ pub struct BankRow {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct KeyModifiers {
+    pub ctrl: bool,
+    pub alt: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KeyEvent {
-    Digit(u8),
+    Digit(u8, KeyModifiers),
     CtrlS,
 }
 
-pub fn bank_rows(list_payload: &Value) -> Vec<BankRow> {
+/// The Bank rows of a `list` payload, and how many entries were skipped for lacking an integer `program`.
+pub fn bank_rows(list_payload: &Value) -> (Vec<BankRow>, usize) {
     let active = list_payload["active"].as_u64();
-    let Some(entries) = list_payload["entries"].as_array() else {
-        return Vec::new();
-    };
-    entries
+    let entries = list_payload["entries"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let rows: Vec<BankRow> = entries
         .iter()
-        .map(|entry| {
-            let program = entry["program"].as_u64().unwrap_or_default();
+        .filter_map(|entry| {
+            let program = entry["program"].as_u64()?;
             let valid = entry["valid"].as_bool().unwrap_or_default();
-            BankRow {
+            Some(BankRow {
                 program: program as usize,
                 name: entry["name"].as_str().unwrap_or_default().to_string(),
                 active: active == Some(program),
-                error: (!valid).then(|| entry["error"].as_str().unwrap_or_default().to_string()),
-            }
+                error: (!valid).then(|| {
+                    entry["error"]
+                        .as_str()
+                        .unwrap_or(INVALID_PRESET)
+                        .to_string()
+                }),
+            })
         })
-        .collect()
+        .collect();
+    let skipped = entries.len() - rows.len();
+    (rows, skipped)
 }
 
 pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
     match key {
         KeyEvent::CtrlS => Some(Command::Save),
-        KeyEvent::Digit(digit @ 1..=9) => {
+        KeyEvent::Digit(_, KeyModifiers { ctrl: true, .. } | KeyModifiers { alt: true, .. }) => {
+            None
+        }
+        KeyEvent::Digit(digit @ 1..=9, _) => {
             let program = usize::from(digit - 1);
             rows.iter()
                 .find(|row| row.program == program && row.error.is_none())
                 .map(|row| Command::Load(row.program.to_string()))
         }
-        KeyEvent::Digit(_) => None,
+        KeyEvent::Digit(..) => None,
     }
 }
 
@@ -258,13 +277,15 @@ impl Feedback {
     }
 }
 
-pub fn response_text(req: &Request, response: Result<Response, ClientError>) -> String {
+/// The status bar message for a command's response: a saved path or an error; other successes are silent.
+pub fn response_text(req: &Request, response: Result<Response, ClientError>) -> Option<String> {
     match (req, response) {
-        (Request::Save, Ok(Response::Ok(payload))) => {
-            format!("saved {}", payload["path"].as_str().unwrap_or_default())
-        }
-        (_, Ok(Response::Ok(payload))) => payload.to_string(),
-        (_, Ok(Response::Err { error })) => format!("error: {error}"),
-        (_, Err(err)) => format!("error: {err}"),
+        (Request::Save, Ok(Response::Ok(payload))) => Some(format!(
+            "saved {}",
+            payload["path"].as_str().unwrap_or_default()
+        )),
+        (_, Ok(Response::Ok(_))) => None,
+        (_, Ok(Response::Err { error })) => Some(format!("error: {error}")),
+        (_, Err(err)) => Some(format!("error: {err}")),
     }
 }

@@ -6,12 +6,14 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{Button, CentralPanel, CollapsingHeader, Key, Modifiers, Panel, ScrollArea, Slider, Ui};
+use egui::{
+    Button, CentralPanel, CollapsingHeader, Event, Key, Modifiers, Panel, ScrollArea, Slider, Ui,
+};
 use tracing::error;
 use xguitare_core::Config;
 use xguitare_gui::model::{
-    BankRow, Command, Feedback, KeyEvent, Link, ParamRow, Snapshot, Throttle, bank_rows,
-    key_to_command, link_text, param_rows, peak_fraction, status_line, unit_suffix,
+    BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, Snapshot, Throttle,
+    bank_rows, key_to_command, link_text, param_rows, peak_fraction, status_line, unit_suffix,
 };
 
 use crate::client::{self, TICK};
@@ -90,7 +92,11 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let snapshot = &self.snapshot;
         let now = Instant::now();
-        let rows = snapshot.bank.as_ref().map(bank_rows).unwrap_or_default();
+        let rows = snapshot
+            .bank
+            .as_ref()
+            .map(|list| bank_rows(list).0)
+            .unwrap_or_default();
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
             .filter_map(|key| key_to_command(key, &rows))
@@ -126,13 +132,32 @@ impl eframe::App for App {
     }
 }
 
-/// Ctrl+S matches the key event's own modifiers: an injected or fast press releases Ctrl within the same frame.
+/// Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
     ui.input_mut(|input| {
-        let mut keys: Vec<KeyEvent> = (1..)
-            .zip(DIGIT_KEYS)
-            .filter(|(_, key)| input.key_pressed(*key))
-            .map(|(digit, _)| KeyEvent::Digit(digit))
+        let mut keys: Vec<KeyEvent> = input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => (1..)
+                    .zip(DIGIT_KEYS)
+                    .find(|(_, digit_key)| digit_key == key)
+                    .map(|(digit, _)| {
+                        KeyEvent::Digit(
+                            digit,
+                            KeyModifiers {
+                                ctrl: modifiers.ctrl,
+                                alt: modifiers.alt,
+                            },
+                        )
+                    }),
+                _ => None,
+            })
             .collect();
         if input.consume_key(Modifiers::COMMAND, Key::S) {
             keys.push(KeyEvent::CtrlS);

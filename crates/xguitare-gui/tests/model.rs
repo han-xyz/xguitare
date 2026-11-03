@@ -6,9 +6,9 @@ use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_gui::model::{
-    BankRow, Command, Feedback, KeyEvent, Link, ParamRow, Throttle, bank_rows, counts_toward_spawn,
-    key_to_command, meter_fraction, param_rows, peak_fraction, refresh_decision,
-    requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
+    BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, Throttle, bank_rows,
+    counts_toward_spawn, key_to_command, meter_fraction, param_rows, peak_fraction,
+    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
 
 #[test]
@@ -149,7 +149,7 @@ fn starter_list() -> serde_json::Value {
 
 #[test]
 fn bank_rows_marks_active_and_invalid() {
-    let rows = bank_rows(&starter_list());
+    let rows = bank_rows(&starter_list()).0;
     let row = |program: usize, name: &str, active: bool, error: Option<&str>| BankRow {
         program,
         name: name.to_string(),
@@ -172,23 +172,32 @@ fn bank_rows_marks_active_and_invalid() {
     );
     let no_active =
         json!({"active": null, "entries": [{"program": 0, "name": "Clean", "valid": true}]});
-    assert!(!bank_rows(&no_active)[0].active);
+    assert!(!bank_rows(&no_active).0[0].active);
 }
 
 #[test]
 fn key_digit_loads_program_only_when_valid() {
-    let rows = bank_rows(&starter_list());
+    let rows = bank_rows(&starter_list()).0;
     assert_eq!(
-        key_to_command(KeyEvent::Digit(3), &rows),
+        key_to_command(KeyEvent::Digit(3, KeyModifiers::default()), &rows),
         Some(Command::Load("2".to_string()))
     );
     assert_eq!(
-        key_to_command(KeyEvent::Digit(1), &rows),
+        key_to_command(KeyEvent::Digit(1, KeyModifiers::default()), &rows),
         Some(Command::Load("0".to_string()))
     );
-    assert_eq!(key_to_command(KeyEvent::Digit(4), &rows), None);
-    assert_eq!(key_to_command(KeyEvent::Digit(5), &rows), None);
-    assert_eq!(key_to_command(KeyEvent::Digit(0), &rows), None);
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(4, KeyModifiers::default()), &rows),
+        None
+    );
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(5, KeyModifiers::default()), &rows),
+        None
+    );
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(0, KeyModifiers::default()), &rows),
+        None
+    );
 }
 
 #[test]
@@ -312,22 +321,68 @@ fn feedback_expires_after_3s() {
 }
 
 #[test]
-fn save_response_text() {
+fn feedback_only_save_and_errors() {
+    let saved = Ok(Response::Ok(json!({"path": "/bank/01-clean.toml"})));
     assert_eq!(
-        response_text(
-            &Request::Save,
-            Ok(Response::Ok(json!({"path": "/bank/01-clean.toml"})))
-        ),
-        "saved /bank/01-clean.toml"
+        response_text(&Request::Save, saved).as_deref(),
+        Some("saved /bank/01-clean.toml")
     );
+    let busy = Ok(Response::Err {
+        error: "engine busy".to_string(),
+    });
+    let set = Request::Set {
+        param: "preamp.gain".to_string(),
+        value: 42.0,
+    };
     assert_eq!(
-        response_text(
-            &Request::Save,
-            Ok(Response::Err {
-                error: "no preset loaded".to_string()
-            })
-        ),
-        "error: no preset loaded"
+        response_text(&set, busy).as_deref(),
+        Some("error: engine busy")
+    );
+    let gone = Err(ClientError::NotRunning(PathBuf::from("/tmp/xgv/x.sock")));
+    assert!(response_text(&Request::Save, gone).is_some_and(|text| text.starts_with("error: ")));
+    let applied = Ok(Response::Ok(
+        json!({"param": "preamp.gain", "value": 42.0, "clamped": false}),
+    ));
+    assert_eq!(response_text(&set, applied), None);
+    let loaded = Ok(Response::Ok(json!({"program": 1, "name": "Crunch"})));
+    let load = Request::Load {
+        preset: "1".to_string(),
+    };
+    assert_eq!(response_text(&load, loaded), None);
+}
+
+#[test]
+fn bank_rows_rejects_malformed() {
+    let list = json!({"active": 0, "entries": [
+        {"program": 0, "name": "Clean", "valid": true},
+        {"name": "No program", "valid": true},
+        {"program": 1.5, "name": "Half", "valid": true},
+        {"program": "2", "name": "Text", "valid": true},
+        {"program": 3, "name": "05-bad", "valid": false},
+    ]});
+    let (rows, skipped) = bank_rows(&list);
+    assert_eq!(skipped, 3);
+    let programs: Vec<usize> = rows.iter().map(|row| row.program).collect();
+    assert_eq!(programs, [0, 3]);
+    assert_eq!(rows[1].error.as_deref(), Some("invalid preset"));
+}
+
+#[test]
+fn digits_ignored_with_modifiers() {
+    let rows = bank_rows(&starter_list()).0;
+    let ctrl = KeyModifiers {
+        ctrl: true,
+        alt: false,
+    };
+    let alt = KeyModifiers {
+        ctrl: false,
+        alt: true,
+    };
+    assert_eq!(key_to_command(KeyEvent::Digit(1, ctrl), &rows), None);
+    assert_eq!(key_to_command(KeyEvent::Digit(1, alt), &rows), None);
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(1, KeyModifiers::default()), &rows),
+        Some(Command::Load("0".to_string()))
     );
 }
 

@@ -15,7 +15,7 @@ use xguitare_client::{ClientError, Connection};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 use xguitare_gui::model::{
-    Command, Link, Snapshot, counts_toward_spawn, refresh_decision, requests_until_quit,
+    Command, Link, Snapshot, bank_rows, counts_toward_spawn, refresh_decision, requests_until_quit,
     response_text, spawn_policy,
 };
 
@@ -107,8 +107,9 @@ impl Client {
         };
         let (requests, quit) = requests_until_quit(queued);
         for req in requests {
-            let text = response_text(&req, self.request(&req));
-            self.snapshot.last_message = Some((text, Instant::now()));
+            if let Some(text) = response_text(&req, self.request(&req)) {
+                self.snapshot.last_message = Some((text, Instant::now()));
+            }
         }
         !quit && !ui_gone
     }
@@ -166,6 +167,12 @@ impl Client {
 
     fn refresh(&mut self, revision: u64) {
         self.snapshot.bank = self.payload(&Request::List);
+        if let Some(list) = &self.snapshot.bank {
+            let (_, skipped) = bank_rows(list);
+            if skipped > 0 {
+                warn!("list: skipped {skipped} entries without an integer program");
+            }
+        }
         self.snapshot.params = self.payload(&Request::Get { param: None });
         if self.connection.is_none() {
             return;
