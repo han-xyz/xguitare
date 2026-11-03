@@ -1,8 +1,17 @@
 use xguitare_core::Ports;
-use xguitare_core::engine::choose_ports;
+use xguitare_core::engine::{AvailablePort, choose_ports};
 
-fn names(list: &[&str]) -> Vec<String> {
-    list.iter().map(|name| name.to_string()).collect()
+fn available(list: &[&str], is_physical: bool) -> Vec<AvailablePort> {
+    list.iter()
+        .map(|name| AvailablePort {
+            name: name.to_string(),
+            is_physical,
+        })
+        .collect()
+}
+
+fn names(list: &[&str]) -> Vec<AvailablePort> {
+    available(list, true)
 }
 
 fn ports(input: &str, output_left: &str, output_right: &str) -> Ports {
@@ -13,11 +22,11 @@ fn ports(input: &str, output_left: &str, output_right: &str) -> Ports {
     }
 }
 
-fn capture() -> Vec<String> {
+fn capture() -> Vec<AvailablePort> {
     names(&["card:capture_FR", "card:capture_FL"])
 }
 
-fn playback() -> Vec<String> {
+fn playback() -> Vec<AvailablePort> {
     names(&["card:playback_FR", "card:playback_FL"])
 }
 
@@ -108,4 +117,14 @@ fn choose_ports_empty_means_none() {
     assert_eq!(choice.output_left, None);
     assert_eq!(choice.output_right, None);
     assert!(choice.warnings.is_empty(), "{:?}", choice.warnings);
+}
+
+#[test]
+fn choose_ports_pattern_matches_non_physical() {
+    let mut capture = names(&["Scarlett 0:capture_AUX0"]);
+    capture.extend(available(&["Scarlett Input 1:capture_FL"], false));
+    let choice = choose_ports(&capture, &playback(), &ports("Scarlett*capture_FL", "", ""));
+    assert_eq!(choice.input.as_deref(), Some("Scarlett Input 1:capture_FL"));
+    let auto = choose_ports(&capture, &playback(), &ports("auto", "", ""));
+    assert_eq!(auto.input.as_deref(), Some("Scarlett 0:capture_AUX0"));
 }

@@ -13,6 +13,12 @@ pub struct EngineShared {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvailablePort {
+    pub name: String,
+    pub is_physical: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortChoice {
     pub input: Option<String>,
     pub output_left: Option<String>,
@@ -22,18 +28,20 @@ pub struct PortChoice {
 
 const WILDCARD: char = '*';
 
-/// Resolves each configured port against the physical capture and playback ports (see `Ports` for the three forms); every port left unconnected for a reason the user can fix adds a line to `warnings`.
+/// Resolves each configured port against the available capture and playback ports (see `Ports` for the three forms: "auto" looks at physical ports only, a pattern at all of them); every port left unconnected for a reason the user can fix adds a line to `warnings`.
 pub fn choose_ports(
-    available_capture: &[String],
-    available_playback: &[String],
+    available_capture: &[AvailablePort],
+    available_playback: &[AvailablePort],
     ports: &Ports,
 ) -> PortChoice {
-    let capture = sorted(available_capture);
-    let playback = sorted(available_playback);
+    let capture = sorted_names(available_capture, false);
+    let playback = sorted_names(available_playback, false);
+    let physical_capture = sorted_names(available_capture, true);
+    let physical_playback = sorted_names(available_playback, true);
     let mut warnings = Vec::new();
 
     let input = match ports.input.as_str() {
-        AUTO_PORT => auto_device(&capture, "capture", "ports.input", &mut warnings)
+        AUTO_PORT => auto_device(&physical_capture, "capture", "ports.input", &mut warnings)
             .and_then(|device| device.first().cloned()),
         pattern => first_match(&capture, pattern, &mut warnings),
     };
@@ -50,7 +58,7 @@ pub fn choose_ports(
         None
     } else {
         auto_device(
-            &playback,
+            &physical_playback,
             "playback",
             &auto_outputs.join(", "),
             &mut warnings,
@@ -85,8 +93,12 @@ pub fn choose_ports(
     }
 }
 
-fn sorted(names: &[String]) -> Vec<String> {
-    let mut names = names.to_vec();
+fn sorted_names(available: &[AvailablePort], physical_only: bool) -> Vec<String> {
+    let mut names: Vec<String> = available
+        .iter()
+        .filter(|port| port.is_physical || !physical_only)
+        .map(|port| port.name.clone())
+        .collect();
     names.sort();
     names
 }

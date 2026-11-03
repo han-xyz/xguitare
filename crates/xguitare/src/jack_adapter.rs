@@ -9,7 +9,7 @@ use jack::{
 };
 use tracing::{info, warn};
 use xguitare_core::Ports;
-use xguitare_core::engine::{EngineShared, choose_ports};
+use xguitare_core::engine::{AvailablePort, EngineShared, choose_ports};
 use xguitare_dsp::Rack;
 
 const CLIENT_NAME: &str = "xguitare";
@@ -75,8 +75,8 @@ pub fn start(
 impl Session {
     pub fn connect(&self, ports: &Ports) {
         let client = self.client.as_client();
-        let capture = physical_ports(client, PortFlags::IS_OUTPUT);
-        let playback = physical_ports(client, PortFlags::IS_INPUT);
+        let capture = audio_ports(client, PortFlags::IS_OUTPUT);
+        let playback = audio_ports(client, PortFlags::IS_INPUT);
         let choice = choose_ports(&capture, &playback, ports);
         for warning in &choice.warnings {
             warn!("{warning}");
@@ -113,12 +113,20 @@ fn register<PS: PortSpec>(
         .map_err(|err| JackError::RegisterPort(name, err))
 }
 
-fn physical_ports(client: &Client, direction: PortFlags) -> Vec<String> {
-    client.ports(
+fn audio_ports(client: &Client, direction: PortFlags) -> Vec<AvailablePort> {
+    let physical = client.ports(
         None,
         Some(AUDIO_PORT_TYPE),
         direction | PortFlags::IS_PHYSICAL,
-    )
+    );
+    client
+        .ports(None, Some(AUDIO_PORT_TYPE), direction)
+        .into_iter()
+        .map(|name| AvailablePort {
+            is_physical: physical.contains(&name),
+            name,
+        })
+        .collect()
 }
 
 struct Notifications {

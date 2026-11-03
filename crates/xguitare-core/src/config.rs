@@ -22,9 +22,9 @@ pub struct Config {
 }
 
 /// JACK ports the Daemon connects to `in`, `out_l` and `out_r`. Each value is one of:
-/// `"auto"`: the only physical device's first port (`output_right`: its second); several devices connect nothing and warn with their port names.
+/// `"auto"`: among physical ports only, the only device's first port (`output_right`: its second); several devices connect nothing and warn with their port names.
 /// `""`: do not connect.
-/// A pattern: an exact port name, or with `*` matching any run of characters (e.g. `"Scarlett*capture_FL"`); the first match in sorted order wins.
+/// A pattern: an exact port name, or with `*` matching any run of characters (e.g. `"Scarlett*capture_FL"`), matched against every audio port of that direction, physical or not (PipeWire split nodes, other apps); the first match in sorted order wins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ports {
     pub input: String,
