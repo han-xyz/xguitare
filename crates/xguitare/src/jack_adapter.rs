@@ -52,7 +52,6 @@ pub fn start(
     let crossfade_frames = (crossfade_ms * sample_rate / 1000.0) as usize;
     let process = Process {
         switcher: RackSwitcher::new(rack, max_frames, crossfade_frames, queues),
-        denormals_flushed: false,
         max_frames,
         input,
         out_l,
@@ -166,7 +165,6 @@ impl NotificationHandler for Notifications {
 
 struct Process {
     switcher: RackSwitcher,
-    denormals_flushed: bool,
     max_frames: usize,
     input: Port<AudioIn>,
     out_l: Port<AudioOut>,
@@ -178,10 +176,7 @@ struct Process {
 impl ProcessHandler for Process {
     fn process(&mut self, _: &Client, ps: &ProcessScope) -> Control {
         let start = Instant::now();
-        if !self.denormals_flushed {
-            flush_denormals();
-            self.denormals_flushed = true;
-        }
+        flush_denormals();
         for event in self.midi_in.iter(ps) {
             if let Some(program) = midi::program_change(event.bytes) {
                 self.switcher.push_program_change(program);
@@ -220,12 +215,15 @@ fn flush_denormals() {
     #[cfg(target_arch = "x86_64")]
     #[expect(
         deprecated,
-        reason = "the brief's (D29) intrinsics; std deprecates them in favour of inline asm with the same effect"
+        reason = "_mm_getcsr/_mm_setcsr are deprecated in favour of inline asm that does the same"
     )]
     // SAFETY: changes only this thread's MXCSR.
     unsafe {
         use core::arch::x86_64::{_mm_getcsr, _mm_setcsr};
-        _mm_setcsr(_mm_getcsr() | 0x8040);
+        let csr = _mm_getcsr();
+        if csr & 0x8040 != 0x8040 {
+            _mm_setcsr(csr | 0x8040);
+        }
     }
 }
 
