@@ -3,6 +3,7 @@ mod bank;
 mod config;
 pub mod control;
 pub mod engine;
+pub mod firstrun;
 mod ir;
 mod preset;
 mod registry;

@@ -1,0 +1,44 @@
+name = "Crunch"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -65
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 35
+tone = 55
+level = 0
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 45
+master = -12
+stages = 3
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 50
+middle = 45
+treble = 55
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[[module]]
+type = "delay"
+[module.params]
+time = 320
+feedback = 25
+mix = 12
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 35
+mix = 10

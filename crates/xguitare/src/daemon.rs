@@ -16,6 +16,7 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::control::{EngineState, Request, Response, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
@@ -27,6 +28,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const POLLS_PER_REPORT: u32 = 10;
 const QUEUE_CAPACITY: usize = 64;
 const DEBOUNCE: Duration = Duration::from_millis(150);
+const STARTER_IR_RATE: u32 = 48_000;
 
 #[derive(Debug)]
 pub enum DaemonError {
@@ -44,6 +46,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         socket_server::secure_fallback_dir(&config.socket).map_err(DaemonError::SocketDir)?;
     }
     let socket = socket_server::bind(&config.socket).map_err(DaemonError::Socket)?;
+    create_starter_bank(&config.bank_dir);
     let bank = load_bank(&config.bank_dir);
     let preset = first_preset(&bank);
     let stop = register_stop_signals()?;
@@ -94,6 +97,19 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     session.stop().map_err(DaemonError::Jack)?;
     info!("stopped");
     Ok(())
+}
+
+fn create_starter_bank(bank_dir: &Path) {
+    match ensure_bank(bank_dir, STARTER_IR_RATE) {
+        Ok(created) if created.presets > 0 => {
+            info!("created starter bank in {}", bank_dir.display());
+        }
+        Ok(_) => {}
+        Err(err) => warn!(
+            "cannot create starter bank in {}: {err}",
+            bank_dir.display()
+        ),
+    }
 }
 
 fn load_bank(bank_dir: &Path) -> Bank {

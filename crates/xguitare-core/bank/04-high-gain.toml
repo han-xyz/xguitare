@@ -1,0 +1,39 @@
+name = "High Gain"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -50
+release = 60
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 50
+tone = 45
+level = 0
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 90
+bias = 0.1
+master = -16
+stages = 4
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 60
+middle = 35
+treble = 60
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 8

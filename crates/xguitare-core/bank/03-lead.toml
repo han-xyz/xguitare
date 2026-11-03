@@ -1,0 +1,45 @@
+name = "Lead"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -60
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 60
+tone = 60
+level = 2
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 70
+bias = 0.2
+master = -14
+stages = 3
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 45
+middle = 60
+treble = 55
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[[module]]
+type = "delay"
+[module.params]
+time = 380
+feedback = 35
+mix = 20
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 50
+mix = 15
