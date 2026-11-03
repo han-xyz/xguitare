@@ -107,3 +107,18 @@ fn stop_removes_socket_file() {
     server.thread.take().unwrap().join().unwrap();
     assert!(!server.path.exists());
 }
+
+#[test]
+fn regular_file_at_socket_path_is_refused_and_kept() {
+    let dir = PathBuf::from(format!("/tmp/xguitare-srv-{}-file", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.sock");
+    fs::write(&path, "mine").unwrap();
+    let error = bind(&path).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!("socket path {} exists and is not a socket", path.display())
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
+    fs::remove_dir_all(&dir).unwrap();
+}

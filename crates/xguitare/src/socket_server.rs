@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fs::{self, DirBuilder};
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +23,7 @@ const SOCKET_DIR_MODE: u32 = 0o700;
 #[derive(Debug)]
 pub enum SocketError {
     AlreadyRunning(PathBuf),
+    NotASocket(PathBuf),
     Bind(PathBuf, io::Error),
     Spawn(io::Error),
 }
@@ -43,14 +44,21 @@ pub fn secure_fallback_dir(socket: &Path) -> Result<(), SocketDirError> {
     secure_socket_dir(dir)
 }
 
-/// Binds the Control API socket at `path`, refusing when a Daemon already answers there and replacing a stale file.
+/// Binds the Control API socket at `path`, refusing when a Daemon already answers there or the path is not a socket, and replacing a stale socket.
 pub fn bind(path: &Path) -> Result<ControlSocket, SocketError> {
     let bind_error = |err| SocketError::Bind(path.to_path_buf(), err);
-    if path.exists() {
-        if UnixStream::connect(path).is_ok() {
-            return Err(SocketError::AlreadyRunning(path.to_path_buf()));
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_socket() => {
+            return Err(SocketError::NotASocket(path.to_path_buf()));
         }
-        fs::remove_file(path).map_err(bind_error)?;
+        Ok(_) => {
+            if UnixStream::connect(path).is_ok() {
+                return Err(SocketError::AlreadyRunning(path.to_path_buf()));
+            }
+            fs::remove_file(path).map_err(bind_error)?;
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => return Err(bind_error(err)),
     }
     if let Some(dir) = path.parent() {
         create_socket_dir(dir).map_err(bind_error)?;
@@ -171,6 +179,13 @@ impl fmt::Display for SocketError {
         match self {
             SocketError::AlreadyRunning(path) => {
                 write!(f, "daemon already running at {}", path.display())
+            }
+            SocketError::NotASocket(path) => {
+                write!(
+                    f,
+                    "socket path {} exists and is not a socket",
+                    path.display()
+                )
             }
             SocketError::Bind(path, err) => {
                 write!(f, "cannot bind control socket {}: {err}", path.display())
