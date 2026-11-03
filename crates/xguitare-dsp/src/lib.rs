@@ -1,7 +1,10 @@
 pub mod modules;
+pub mod oversample;
 mod rack;
 
+pub use modules::drive::Drive;
 pub use modules::gain::Gain;
+pub use modules::gate::Gate;
 pub use rack::{Rack, RackError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

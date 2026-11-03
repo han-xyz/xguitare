@@ -1,5 +1,5 @@
 use assert_no_alloc::*;
-use xguitare_dsp::{Gain, Module, Rack};
+use xguitare_dsp::{Drive, Gain, Gate, Module, Rack};
 
 #[cfg(debug_assertions)]
 #[global_allocator]
@@ -24,4 +24,28 @@ fn gain_rack_process_does_not_allocate() {
             rack.process(&input, &mut left, &mut right);
         }
     });
+}
+
+fn assert_rack_does_not_allocate(module: Box<dyn Module>, param: usize, value: f32) {
+    let mut rack = Rack::new(vec![("module".to_string(), module)]).expect("valid layout");
+    rack.prepare(48_000.0, BLOCK);
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        rack.module_mut(0).set_param(param, value);
+        for _ in 0..100 {
+            rack.process(&input, &mut left, &mut right);
+        }
+    });
+}
+
+#[test]
+fn gate_does_not_allocate() {
+    assert_rack_does_not_allocate(Box::new(Gate::new()), 0, -40.0);
+}
+
+#[test]
+fn drive_does_not_allocate() {
+    assert_rack_does_not_allocate(Box::new(Drive::new()), 0, 80.0);
 }

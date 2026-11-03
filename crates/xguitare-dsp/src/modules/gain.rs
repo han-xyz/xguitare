@@ -1,3 +1,4 @@
+use super::db_to_linear;
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const LEVEL: usize = 0;
@@ -71,8 +72,4 @@ impl Module for Gain {
             *sample *= self.current;
         }
     }
-}
-
-fn db_to_linear(db: f32) -> f32 {
-    10.0_f32.powf(db / 20.0)
 }
