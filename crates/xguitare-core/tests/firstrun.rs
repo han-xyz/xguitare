@@ -78,3 +78,39 @@ fn leaves_existing_bank_alone() {
     assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
     assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), modified);
 }
+
+#[test]
+fn interrupted_first_run_is_retried() {
+    let temp = temp_dir("interrupted");
+    let dir = temp.0.join("bank");
+    let staging = temp.0.join("bank.tmp");
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("01-clean.toml"), "name = \"Half\"\n").unwrap();
+    let created = ensure_bank(&dir, 48_000).unwrap();
+    assert_eq!(
+        created,
+        Created {
+            presets: 5,
+            ir: true
+        }
+    );
+    let mut files: Vec<String> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            "01-clean.toml",
+            "02-crunch.toml",
+            "03-lead.toml",
+            "04-high-gain.toml",
+            "05-bass.toml",
+            "default-cab.wav"
+        ]
+    );
+    assert!(!staging.exists());
+    let bank = Bank::load_dir(&dir).unwrap();
+    assert!(matches!(&bank.entries[0], BankEntry::Valid { preset, .. } if preset.name == "Clean"));
+}

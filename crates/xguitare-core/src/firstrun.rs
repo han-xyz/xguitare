@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use xguitare_dsp::synth_ir::default_cabinet;
@@ -23,7 +23,7 @@ pub struct Created {
     pub ir: bool,
 }
 
-/// Creates `bank_dir` with the starter Presets and the default cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros.
+/// Creates `bank_dir` with the starter Presets and the default cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `<bank_dir>.tmp` (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
 pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Error> {
     if bank_dir.exists() {
         return Ok(Created {
@@ -31,20 +31,31 @@ pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Err
             ir: false,
         });
     }
-    fs::create_dir_all(bank_dir)?;
+    let staging = staging_dir(bank_dir);
+    if staging.exists() {
+        fs::remove_dir_all(&staging)?;
+    }
+    fs::create_dir_all(&staging)?;
     for (file, text) in STARTER_PRESETS {
-        fs::write(bank_dir.join(file), text)?;
+        fs::write(staging.join(file), text)?;
     }
     write_ir(
-        &bank_dir.join(DEFAULT_IR),
+        &staging.join(DEFAULT_IR),
         &default_cabinet(sample_rate),
         sample_rate,
     )
     .map_err(io::Error::other)?;
+    fs::rename(&staging, bank_dir)?;
     Ok(Created {
         presets: STARTER_PRESETS.len(),
         ir: true,
     })
+}
+
+fn staging_dir(bank_dir: &Path) -> PathBuf {
+    let mut name = bank_dir.as_os_str().to_os_string();
+    name.push(".tmp");
+    PathBuf::from(name)
 }
 
 fn write_ir(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), hound::Error> {
