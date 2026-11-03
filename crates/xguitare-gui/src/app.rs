@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -5,13 +6,12 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{Button, CentralPanel, Key, Panel, Ui};
-use serde_json::Value;
+use egui::{Button, CentralPanel, CollapsingHeader, Key, Modifiers, Panel, ScrollArea, Slider, Ui};
 use tracing::error;
 use xguitare_core::Config;
 use xguitare_gui::model::{
-    BankRow, Command, KeyEvent, Link, Snapshot, bank_rows, key_to_command, link_text,
-    peak_fraction, status_line,
+    BankRow, Command, Feedback, KeyEvent, Link, ParamRow, Snapshot, Throttle, bank_rows,
+    key_to_command, link_text, param_rows, peak_fraction, status_line, unit_suffix,
 };
 
 use crate::client::{self, TICK};
@@ -37,6 +37,9 @@ pub struct App {
     client: Option<JoinHandle<()>>,
     snapshot: Snapshot,
     stop: Arc<AtomicBool>,
+    throttle: Throttle,
+    locals: HashMap<String, f64>,
+    feedback: Feedback,
 }
 
 impl App {
@@ -62,6 +65,9 @@ impl App {
                 last_message: None,
             },
             stop,
+            throttle: Throttle::default(),
+            locals: HashMap::new(),
+            feedback: Feedback::default(),
         }
     }
 }
@@ -72,22 +78,36 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if let Some(snapshot) = self.snapshots.try_iter().last() {
+            if snapshot.last_message != self.snapshot.last_message
+                && let Some((text, at)) = &snapshot.last_message
+            {
+                self.feedback.show(text.clone(), *at);
+            }
             self.snapshot = snapshot;
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let snapshot = &self.snapshot;
+        let now = Instant::now();
         let rows = snapshot.bank.as_ref().map(bank_rows).unwrap_or_default();
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
             .filter_map(|key| key_to_command(key, &rows))
             .collect();
-        Panel::bottom("status").show(ui, |ui| status_bar(ui, snapshot, Instant::now()));
+        Panel::bottom("status").show(ui, |ui| status_bar(ui, snapshot, &self.feedback, now));
         Panel::left("bank")
             .exact_size(BANK_WIDTH)
             .show(ui, |ui| commands.extend(bank_panel(ui, &rows)));
-        CentralPanel::default().show(ui, |ui| preset_panel(ui, snapshot));
+        let mut sliders = Sliders {
+            throttle: &mut self.throttle,
+            locals: &mut self.locals,
+            revision: revision(snapshot),
+            now,
+        };
+        CentralPanel::default().show(ui, |ui| {
+            commands.extend(preset_panel(ui, snapshot, &mut sliders))
+        });
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
             let _ = self.commands.send(command);
@@ -106,14 +126,15 @@ impl eframe::App for App {
     }
 }
 
+/// Ctrl+S matches the key event's own modifiers: an injected or fast press releases Ctrl within the same frame.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
-    ui.input(|input| {
+    ui.input_mut(|input| {
         let mut keys: Vec<KeyEvent> = (1..)
             .zip(DIGIT_KEYS)
             .filter(|(_, key)| input.key_pressed(*key))
             .map(|(digit, _)| KeyEvent::Digit(digit))
             .collect();
-        if input.modifiers.command && input.key_pressed(Key::S) {
+        if input.consume_key(Modifiers::COMMAND, Key::S) {
             keys.push(KeyEvent::CtrlS);
         }
         keys
@@ -139,33 +160,81 @@ fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     clicked
 }
 
-fn preset_panel(ui: &mut Ui, snapshot: &Snapshot) {
+struct Sliders<'a> {
+    throttle: &'a mut Throttle,
+    locals: &'a mut HashMap<String, f64>,
+    revision: u64,
+    now: Instant,
+}
+
+fn revision(snapshot: &Snapshot) -> u64 {
+    snapshot
+        .status
+        .as_ref()
+        .and_then(|status| status["revision"].as_u64())
+        .unwrap_or_default()
+}
+
+fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, sliders: &mut Sliders) -> Vec<Command> {
+    let mut commands = Vec::new();
     let preset = snapshot
         .status
         .as_ref()
         .and_then(|status| status["preset"].as_str());
-    ui.label(preset.unwrap_or(NO_PRESET));
-    if let Some(params) = &snapshot.params {
-        for module in module_ids(params) {
-            ui.label(module);
+    ui.horizontal(|ui| {
+        if ui.button("Save").clicked() {
+            commands.push(Command::Save);
         }
+        ui.label(preset.unwrap_or(NO_PRESET));
+    });
+    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
+    ScrollArea::vertical().show(ui, |ui| {
+        for (module, rows) in &modules {
+            CollapsingHeader::new(module)
+                .default_open(true)
+                .show(ui, |ui| {
+                    commands.extend(rows.iter().filter_map(|row| param_slider(ui, row, sliders)));
+                });
+        }
+    });
+    commands
+}
+
+/// A click or key press changes the value without a drag, so it is sent as a final value.
+fn param_slider(ui: &mut Ui, row: &ParamRow, sliders: &mut Sliders) -> Option<Command> {
+    let held = sliders.throttle.hold_local(&row.address, sliders.revision);
+    let mut value = match sliders.locals.get(&row.address) {
+        Some(local) if held => *local,
+        _ => row.value,
+    };
+    let mut slider = Slider::new(&mut value, row.min..=row.max)
+        .text(&row.param)
+        .suffix(unit_suffix(&row.unit));
+    if row.integer {
+        slider = slider.integer();
     }
+    let response = ui.add(slider);
+    if !response.changed() && !response.drag_stopped() {
+        return None;
+    }
+    sliders.locals.insert(row.address.clone(), value);
+    if response.dragged() {
+        return sliders.throttle.on_drag(&row.address, value, sliders.now);
+    }
+    Some(
+        sliders
+            .throttle
+            .on_release(&row.address, value, sliders.revision),
+    )
 }
 
-fn module_ids(params: &Value) -> Vec<&str> {
-    let mut ids: Vec<&str> = params["params"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|param| param["module"].as_str())
-        .collect();
-    ids.dedup();
-    ids
-}
-
-fn status_bar(ui: &mut Ui, snapshot: &Snapshot, now: Instant) {
+fn status_bar(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instant) {
     ui.horizontal(|ui| {
         ui.label(link_text(&snapshot.link, now));
+        if let Some(text) = feedback.text(now) {
+            ui.separator();
+            ui.label(text);
+        }
         let Some(status) = &snapshot.status else {
             return;
         };

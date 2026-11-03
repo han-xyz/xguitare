@@ -16,7 +16,7 @@ use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 use xguitare_gui::model::{
     Command, Link, Snapshot, counts_toward_spawn, refresh_decision, requests_until_quit,
-    spawn_policy,
+    response_text, spawn_policy,
 };
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -107,11 +107,7 @@ impl Client {
         };
         let (requests, quit) = requests_until_quit(queued);
         for req in requests {
-            let text = match self.request(&req) {
-                Ok(Response::Ok(payload)) => payload.to_string(),
-                Ok(Response::Err { error }) => format!("error: {error}"),
-                Err(err) => format!("error: {err}"),
-            };
+            let text = response_text(&req, self.request(&req));
             self.snapshot.last_message = Some((text, Instant::now()));
         }
         !quit && !ui_gone

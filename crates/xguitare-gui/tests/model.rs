@@ -4,10 +4,11 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use xguitare_client::ClientError;
 use xguitare_core::control::Request;
+use xguitare_core::control::Response;
 use xguitare_gui::model::{
-    BankRow, Command, KeyEvent, Link, bank_rows, counts_toward_spawn, key_to_command,
-    meter_fraction, peak_fraction, refresh_decision, requests_until_quit, spawn_policy,
-    status_line,
+    BankRow, Command, Feedback, KeyEvent, Link, ParamRow, Throttle, bank_rows, counts_toward_spawn,
+    key_to_command, meter_fraction, param_rows, peak_fraction, refresh_decision,
+    requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
 
 #[test]
@@ -193,4 +194,148 @@ fn key_digit_loads_program_only_when_valid() {
 #[test]
 fn key_ctrl_s_is_save() {
     assert_eq!(key_to_command(KeyEvent::CtrlS, &[]), Some(Command::Save));
+}
+
+fn two_module_get() -> serde_json::Value {
+    json!({"params": [
+        {"module": "preamp", "param": "gain", "value": 40.0, "unit": "%", "min": 0.0, "max": 100.0, "integer": false},
+        {"module": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
+        {"module": "delay", "param": "time", "value": 350.0, "unit": "ms", "min": 1.0, "max": 2000.0, "integer": false},
+        {"module": "delay", "param": "pingpong", "value": 0.0, "unit": "", "min": 0.0, "max": 1.0, "integer": true},
+    ]})
+}
+
+#[test]
+fn param_rows_in_rack_order_with_units() {
+    let row =
+        |module: &str, param: &str, value: f64, min: f64, max: f64, unit: &str, integer: bool| {
+            ParamRow {
+                address: format!("{module}.{param}"),
+                module: module.to_string(),
+                param: param.to_string(),
+                value,
+                min,
+                max,
+                unit: unit.to_string(),
+                integer,
+            }
+        };
+    assert_eq!(
+        param_rows(&two_module_get()),
+        vec![
+            (
+                "preamp".to_string(),
+                vec![
+                    row("preamp", "gain", 40.0, 0.0, 100.0, "%", false),
+                    row("preamp", "stages", 3.0, 1.0, 4.0, "", true),
+                ]
+            ),
+            (
+                "delay".to_string(),
+                vec![
+                    row("delay", "time", 350.0, 1.0, 2000.0, "ms", false),
+                    row("delay", "pingpong", 0.0, 0.0, 1.0, "", true),
+                ]
+            ),
+        ]
+    );
+    assert!(param_rows(&json!({})).is_empty());
+}
+
+#[test]
+fn integer_flag_from_payload() {
+    let bias = json!({"params": [
+        {"module": "preamp", "param": "bias", "value": 0.0, "unit": "", "min": -1.0, "max": 1.0, "integer": false},
+        {"module": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
+    ]});
+    let flags: Vec<bool> = param_rows(&bias)[0]
+        .1
+        .iter()
+        .map(|row| row.integer)
+        .collect();
+    assert_eq!(flags, [false, true]);
+}
+
+#[test]
+fn throttle_sends_at_most_every_30ms_and_final() {
+    let start = Instant::now();
+    let at = |ms: u64| start + Duration::from_millis(ms);
+    let set = |value: f64| Command::Set {
+        param: "preamp.gain".to_string(),
+        value,
+    };
+    let mut throttle = Throttle::default();
+    assert_eq!(
+        throttle.on_drag("preamp.gain", 10.0, at(0)),
+        Some(set(10.0))
+    );
+    assert_eq!(throttle.on_drag("preamp.gain", 11.0, at(10)), None);
+    assert_eq!(throttle.on_drag("preamp.gain", 12.0, at(20)), None);
+    assert_eq!(
+        throttle.on_drag("preamp.gain", 13.0, at(35)),
+        Some(set(13.0))
+    );
+    assert_eq!(
+        throttle.on_drag("delay.time", 5.0, at(36)),
+        Some(Command::Set {
+            param: "delay.time".to_string(),
+            value: 5.0,
+        })
+    );
+    assert_eq!(throttle.on_release("preamp.gain", 14.0, 7), set(14.0));
+}
+
+#[test]
+fn hold_local_until_newer_revision() {
+    let now = Instant::now();
+    let mut throttle = Throttle::default();
+    assert!(!throttle.hold_local("preamp.gain", 5));
+    throttle.on_drag("preamp.gain", 10.0, now);
+    assert!(throttle.hold_local("preamp.gain", 6));
+    throttle.on_release("preamp.gain", 12.0, 7);
+    assert!(throttle.hold_local("preamp.gain", 7));
+    assert!(!throttle.hold_local("preamp.gain", 8));
+    assert!(!throttle.hold_local("delay.time", 7));
+}
+
+#[test]
+fn feedback_expires_after_3s() {
+    let now = Instant::now();
+    let mut feedback = Feedback::default();
+    assert_eq!(feedback.text(now), None);
+    feedback.show("saved /bank/01-clean.toml".to_string(), now);
+    assert_eq!(
+        feedback.text(now + Duration::from_millis(2_999)),
+        Some("saved /bank/01-clean.toml")
+    );
+    assert_eq!(feedback.text(now + Duration::from_secs(3)), None);
+}
+
+#[test]
+fn save_response_text() {
+    assert_eq!(
+        response_text(
+            &Request::Save,
+            Ok(Response::Ok(json!({"path": "/bank/01-clean.toml"})))
+        ),
+        "saved /bank/01-clean.toml"
+    );
+    assert_eq!(
+        response_text(
+            &Request::Save,
+            Ok(Response::Err {
+                error: "no preset loaded".to_string()
+            })
+        ),
+        "error: no preset loaded"
+    );
+}
+
+#[test]
+fn unit_suffix_table() {
+    let suffixes: Vec<&str> = ["dB", "ms", "Hz", "%", ""]
+        .into_iter()
+        .map(unit_suffix)
+        .collect();
+    assert_eq!(suffixes, [" dB", " ms", " Hz", " %", ""]);
 }

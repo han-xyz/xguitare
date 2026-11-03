@@ -1,14 +1,17 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use xguitare_client::ClientError;
-use xguitare_core::control::Request;
+use xguitare_core::control::{Request, Response};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
 pub const SILENCE_DB: f64 = -120.0;
 pub const METER_FLOOR_DB: f64 = -60.0;
 pub const METER_RED_DB: f64 = -6.0;
+pub const SET_INTERVAL: Duration = Duration::from_millis(30);
+pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -141,4 +144,127 @@ pub fn link_text(link: &Link, now: Instant) -> String {
 
 fn seconds_since(since: Instant, now: Instant) -> u64 {
     now.saturating_duration_since(since).as_secs()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamRow {
+    pub address: String,
+    pub module: String,
+    pub param: String,
+    pub value: f64,
+    pub min: f64,
+    pub max: f64,
+    pub unit: String,
+    pub integer: bool,
+}
+
+/// Groups the `get` payload's `params` per Module, keeping Rack order.
+pub fn param_rows(get_payload: &Value) -> Vec<(String, Vec<ParamRow>)> {
+    let mut modules: Vec<(String, Vec<ParamRow>)> = Vec::new();
+    for param in get_payload["params"].as_array().into_iter().flatten() {
+        let module = param["module"].as_str().unwrap_or_default().to_string();
+        let name = param["param"].as_str().unwrap_or_default().to_string();
+        let row = ParamRow {
+            address: format!("{module}.{name}"),
+            module: module.clone(),
+            param: name,
+            value: param["value"].as_f64().unwrap_or_default(),
+            min: param["min"].as_f64().unwrap_or_default(),
+            max: param["max"].as_f64().unwrap_or_default(),
+            unit: param["unit"].as_str().unwrap_or_default().to_string(),
+            integer: param["integer"].as_bool().unwrap_or_default(),
+        };
+        match modules.last_mut() {
+            Some((id, rows)) if *id == module => rows.push(row),
+            _ => modules.push((module, vec![row])),
+        }
+    }
+    modules
+}
+
+pub fn unit_suffix(unit: &str) -> &'static str {
+    match unit {
+        "dB" => " dB",
+        "ms" => " ms",
+        "Hz" => " Hz",
+        "%" => " %",
+        _ => "",
+    }
+}
+
+#[derive(Debug, Default)]
+struct Drag {
+    last_sent: Option<Instant>,
+    released_at: Option<u64>,
+}
+
+/// Per Parameter address: while dragged, a `set` at most every [`SET_INTERVAL`]; the slider keeps its local value until a snapshot newer than the release Revision arrives.
+#[derive(Debug, Default)]
+pub struct Throttle {
+    drags: HashMap<String, Drag>,
+}
+
+impl Throttle {
+    pub fn on_drag(&mut self, address: &str, value: f64, now: Instant) -> Option<Command> {
+        let drag = self.drags.entry(address.to_string()).or_default();
+        drag.released_at = None;
+        if drag
+            .last_sent
+            .is_some_and(|sent| now.duration_since(sent) < SET_INTERVAL)
+        {
+            return None;
+        }
+        drag.last_sent = Some(now);
+        Some(set_command(address, value))
+    }
+
+    pub fn on_release(&mut self, address: &str, value: f64, revision: u64) -> Command {
+        let drag = self.drags.entry(address.to_string()).or_default();
+        drag.last_sent = None;
+        drag.released_at = Some(revision);
+        set_command(address, value)
+    }
+
+    pub fn hold_local(&self, address: &str, revision_now: u64) -> bool {
+        self.drags.get(address).is_some_and(|drag| {
+            drag.released_at
+                .is_none_or(|released| revision_now <= released)
+        })
+    }
+}
+
+fn set_command(address: &str, value: f64) -> Command {
+    Command::Set {
+        param: address.to_string(),
+        value,
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Feedback {
+    message: Option<(String, Instant)>,
+}
+
+impl Feedback {
+    pub fn show(&mut self, text: String, at: Instant) {
+        self.message = Some((text, at));
+    }
+
+    pub fn text(&self, now: Instant) -> Option<&str> {
+        self.message
+            .as_ref()
+            .filter(|(_, at)| now.saturating_duration_since(*at) < FEEDBACK_FOR)
+            .map(|(text, _)| text.as_str())
+    }
+}
+
+pub fn response_text(req: &Request, response: Result<Response, ClientError>) -> String {
+    match (req, response) {
+        (Request::Save, Ok(Response::Ok(payload))) => {
+            format!("saved {}", payload["path"].as_str().unwrap_or_default())
+        }
+        (_, Ok(Response::Ok(payload))) => payload.to_string(),
+        (_, Ok(Response::Err { error })) => format!("error: {error}"),
+        (_, Err(err)) => format!("error: {err}"),
+    }
 }
