@@ -1,6 +1,10 @@
 use std::env;
+use std::io;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command as Process, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -10,22 +14,24 @@ use tracing::{info, warn};
 use xguitare_client::{ClientError, Connection};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
-use xguitare_gui::model::{Command, Link, Snapshot, refresh_decision, spawn_policy};
+use xguitare_gui::model::{
+    Command, Link, Snapshot, counts_toward_spawn, refresh_decision, spawn_policy,
+};
 
 pub const TICK: Duration = Duration::from_millis(50);
-const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(5);
-const DAEMON_BINARY: &str = "xguitare";
+const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+const DAEMON_EXECUTABLE: &str = "xguitare";
 
-/// Starts the client thread; it polls the Daemon every 50 ms until it receives `Command::Quit` or the sender is dropped, then stops a Daemon it started.
 pub fn spawn(
     config: Config,
     config_path: Option<PathBuf>,
+    stop: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> (Sender<Command>, Receiver<Snapshot>, JoinHandle<()>) {
     let (command_tx, command_rx) = mpsc::channel();
     let (snapshot_tx, snapshot_rx) = mpsc::channel();
     let handle = thread::spawn(move || {
-        Client::new(config, config_path).run(&command_rx, &snapshot_tx, &ctx);
+        Client::new(config, config_path, stop).run(&command_rx, &snapshot_tx, &ctx);
     });
     (command_tx, snapshot_rx, handle)
 }
@@ -33,7 +39,9 @@ pub fn spawn(
 struct Client {
     config: Config,
     config_path: Option<PathBuf>,
+    stop: Arc<AtomicBool>,
     connection: Option<Connection>,
+    last_ignored_error: Option<String>,
     failures: u32,
     last_spawn: Option<Instant>,
     daemon: Option<Child>,
@@ -42,11 +50,13 @@ struct Client {
 }
 
 impl Client {
-    fn new(config: Config, config_path: Option<PathBuf>) -> Client {
+    fn new(config: Config, config_path: Option<PathBuf>, stop: Arc<AtomicBool>) -> Client {
         Client {
             config,
             config_path,
+            stop,
             connection: None,
+            last_ignored_error: None,
             failures: 0,
             last_spawn: None,
             daemon: None,
@@ -70,7 +80,7 @@ impl Client {
         ctx: &egui::Context,
     ) {
         let mut sent: Option<Snapshot> = None;
-        while self.handle_commands(commands) {
+        while !self.stop.load(Ordering::Relaxed) && self.handle_commands(commands) {
             self.poll(Instant::now());
             if sent.as_ref() != Some(&self.snapshot) {
                 if snapshots.send(self.snapshot.clone()).is_err() {
@@ -82,19 +92,22 @@ impl Client {
             thread::sleep(TICK);
         }
         self.stop_daemon();
+        ctx.request_repaint();
     }
 
-    /// Sends every queued command; false once `Quit` arrives or the UI is gone.
     fn handle_commands(&mut self, commands: &Receiver<Command>) -> bool {
+        let mut requests = Vec::new();
         loop {
-            let command = match commands.try_recv() {
-                Ok(command) => command,
-                Err(TryRecvError::Empty) => return true,
+            match commands.try_recv() {
+                Ok(command) => match request_for(command) {
+                    Some(req) => requests.push(req),
+                    None => return false,
+                },
+                Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return false,
-            };
-            let Some(req) = request_for(command) else {
-                return false;
-            };
+            }
+        }
+        for req in requests {
             let text = match self.request(&req) {
                 Ok(Response::Ok(payload)) => payload.to_string(),
                 Ok(Response::Err { error }) => format!("error: {error}"),
@@ -102,6 +115,7 @@ impl Client {
             };
             self.snapshot.last_message = Some((text, Instant::now()));
         }
+        true
     }
 
     fn poll(&mut self, now: Instant) {
@@ -122,12 +136,21 @@ impl Client {
         let err = match Connection::connect(&self.config) {
             Ok(connection) => {
                 self.connection = Some(connection);
+                self.last_ignored_error = None;
                 return;
             }
             Err(err) => err,
         };
+        self.reap_daemon(now);
+        if !counts_toward_spawn(&err) {
+            let text = err.to_string();
+            if self.last_ignored_error.as_ref() != Some(&text) {
+                warn!("cannot connect: {text}");
+                self.last_ignored_error = Some(text);
+            }
+            return;
+        }
         self.failures += 1;
-        self.reap_daemon();
         if self.daemon.is_none() && spawn_policy(self.failures, self.last_spawn, now) {
             self.spawn_daemon(&err, now);
         }
@@ -165,7 +188,6 @@ impl Client {
         }
     }
 
-    /// Any error drops the connection; the next tick reconnects.
     fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
         let connection = self
             .connection
@@ -190,8 +212,8 @@ impl Client {
 
     fn spawn_daemon(&mut self, reason: &ClientError, now: Instant) {
         self.last_spawn = Some(now);
-        let program = daemon_program();
-        let mut process = Process::new(&program);
+        let executable = daemon_executable();
+        let mut process = Process::new(&executable);
         if let Some(path) = &self.config_path {
             process.arg("--config").arg(path);
         }
@@ -200,34 +222,41 @@ impl Client {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
+        // SAFETY: prctl is async-signal-safe and touches only the forked child. The signal fires when this (client) thread exits, which happens only after stop_daemon.
+        unsafe {
+            process.pre_exec(|| {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
         match process.spawn() {
             Ok(child) => {
                 info!(
                     "starting daemon {} (pid {}): {reason}",
-                    program.display(),
+                    executable.display(),
                     child.id()
                 );
                 self.daemon = Some(child);
                 self.snapshot.link = Link::Starting { since: now };
             }
-            Err(err) => warn!("cannot start daemon {}: {err}", program.display()),
+            Err(err) => warn!("cannot start daemon {}: {err}", executable.display()),
         }
     }
 
-    fn reap_daemon(&mut self) {
+    fn reap_daemon(&mut self, now: Instant) {
         let Some(child) = &mut self.daemon else {
             return;
         };
         match child.try_wait() {
-            Ok(None) => {}
-            Ok(Some(status)) => {
-                warn!("daemon exited: {status}");
-                self.daemon = None;
-            }
-            Err(err) => {
-                warn!("daemon state unknown: {err}");
-                self.daemon = None;
-            }
+            Ok(None) => return,
+            Ok(Some(status)) => warn!("daemon exited: {status}"),
+            Err(err) => warn!("daemon state unknown: {err}"),
+        }
+        self.daemon = None;
+        if matches!(self.snapshot.link, Link::Starting { .. }) {
+            self.snapshot.link = Link::Disconnected { since: now };
         }
     }
 
@@ -237,11 +266,9 @@ impl Client {
             return;
         };
         info!("stopping daemon (pid {})", child.id());
-        let signalled = Process::new("kill")
-            .args(["-TERM", &child.id().to_string()])
-            .status();
-        if !matches!(signalled, Ok(status) if status.success()) {
-            warn!("SIGTERM to daemon failed: {signalled:?}");
+        // SAFETY: the pid is our own child, not yet reaped, so it cannot have been reused.
+        if unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) } == -1 {
+            warn!("SIGTERM to daemon failed: {}", io::Error::last_os_error());
         }
         let deadline = Instant::now() + DAEMON_STOP_TIMEOUT;
         while Instant::now() < deadline {
@@ -273,11 +300,10 @@ fn request_for(command: Command) -> Option<Request> {
     }
 }
 
-/// The `xguitare` binary beside this one (a cargo build or an install prefix), else the one on `PATH`.
-fn daemon_program() -> PathBuf {
+fn daemon_executable() -> PathBuf {
     env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(DAEMON_BINARY)))
+        .and_then(|exe| exe.parent().map(|dir| dir.join(DAEMON_EXECUTABLE)))
         .filter(|path| path.exists())
-        .unwrap_or_else(|| PathBuf::from(DAEMON_BINARY))
+        .unwrap_or_else(|| PathBuf::from(DAEMON_EXECUTABLE))
 }

@@ -4830,6 +4830,7 @@ dependencies = [
  "clap",
  "eframe",
  "egui",
+ "libc",
  "serde_json",
  "signal-hook",
  "tracing",

@@ -1,8 +1,11 @@
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
+use xguitare_client::ClientError;
 use xguitare_gui::model::{
-    Link, link_text, meter_fraction, peak_fraction, refresh_decision, spawn_policy, status_line,
+    Link, counts_toward_spawn, meter_fraction, peak_fraction, refresh_decision, spawn_policy,
+    status_line,
 };
 
 #[test]
@@ -17,6 +20,18 @@ fn spawn_policy_three_failures_then_backoff() {
         now
     ));
     assert!(spawn_policy(4, Some(now - Duration::from_secs(5)), now));
+}
+
+#[test]
+fn spawn_policy_ignores_live_daemon_errors() {
+    let socket = PathBuf::from("/run/user/1000/xguitare/xguitare.sock");
+    assert!(counts_toward_spawn(&ClientError::NotRunning(
+        socket.clone()
+    )));
+    assert!(!counts_toward_spawn(&ClientError::NotResponding(socket)));
+    assert!(!counts_toward_spawn(&ClientError::InsecureSocketDir(
+        "socket directory /tmp/xguitare-1000 is owned by another user".to_string()
+    )));
 }
 
 #[test]
@@ -65,16 +80,19 @@ fn status_line_format() {
 }
 
 #[test]
-fn link_text_shows_state_and_seconds() {
+fn link_text() {
     let now = Instant::now();
     let since = now - Duration::from_millis(12_400);
-    assert_eq!(link_text(&Link::Connected, now), "connected");
     assert_eq!(
-        link_text(&Link::Disconnected { since }, now),
+        xguitare_gui::model::link_text(&Link::Connected, now),
+        "connected"
+    );
+    assert_eq!(
+        xguitare_gui::model::link_text(&Link::Disconnected { since }, now),
         "disconnected 12s"
     );
     assert_eq!(
-        link_text(
+        xguitare_gui::model::link_text(
             &Link::Starting {
                 since: now - Duration::from_secs(3)
             },

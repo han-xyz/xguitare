@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use xguitare_client::ClientError;
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
@@ -38,11 +39,15 @@ pub fn spawn_policy(failures: u32, last_spawn: Option<Instant>, now: Instant) ->
         && last_spawn.is_none_or(|spawned| now.duration_since(spawned) >= SPAWN_BACKOFF)
 }
 
+/// Only a missing socket counts: a Daemon that does not answer may still be alive, and an insecure socket directory fails a spawned Daemon too.
+pub fn counts_toward_spawn(err: &ClientError) -> bool {
+    matches!(err, ClientError::NotRunning(_))
+}
+
 pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {
     last_seen != Some(revision)
 }
 
-/// Maps −60..0 dB to 0..1, clamped.
 pub fn meter_fraction(db: f64) -> f32 {
     ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0) as f32
 }

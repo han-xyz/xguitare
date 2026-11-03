@@ -199,6 +199,19 @@ fn run_main_usage_error_exit_1() {
 }
 
 #[test]
+fn run_main_missing_config_is_error() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_xguitare"))
+        .args(["--config", "/nonexistent/x.toml", "status"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "error: /nonexistent/x.toml: not found\n"
+    );
+}
+
+#[test]
 fn run_main_help_exit_0() {
     assert_eq!(run_main(["xguitare", "--help"]), 0);
 }

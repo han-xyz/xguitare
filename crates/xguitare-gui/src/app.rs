@@ -30,7 +30,8 @@ impl App {
         config_path: Option<PathBuf>,
         stop: Arc<AtomicBool>,
     ) -> App {
-        let (commands, snapshots, client) = client::spawn(config, config_path, ctx);
+        let (commands, snapshots, client) =
+            client::spawn(config, config_path, Arc::clone(&stop), ctx);
         App {
             commands,
             snapshots,

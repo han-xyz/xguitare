@@ -3,7 +3,6 @@ use xguitare_gui::model::{METER_RED_DB, meter_fraction};
 
 const METER_SIZE: Vec2 = Vec2::new(120.0, 12.0);
 
-/// A horizontal bar filled to `fraction`: green up to the −6 dB mark, red above, on grey.
 pub fn meter(ui: &mut Ui, label: &str, fraction: f32) {
     ui.label(label);
     let (rect, _) = ui.allocate_exact_size(METER_SIZE, Sense::hover());
