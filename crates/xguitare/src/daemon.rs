@@ -20,7 +20,7 @@ use xguitare_core::control::{
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
-use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
+use xguitare_core::{Bank, BankEntry, BankKind, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
 
 use crate::jack_adapter::{self, JackError};
@@ -48,7 +48,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         socket_server::secure_fallback_dir(&config.socket).map_err(DaemonError::SocketDir)?;
     }
     let socket = socket_server::bind(&config.socket).map_err(DaemonError::Socket)?;
-    create_starter_bank(&config.bank_dir);
+    create_starter_bank(&config.bank_dir, config.bank_kind);
     let bank = load_bank(&config.bank_dir);
     let preset = first_preset(&bank);
     let stop = register_stop_signals()?;
@@ -96,10 +96,10 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     Ok(())
 }
 
-fn create_starter_bank(bank_dir: &Path) {
-    match ensure_bank(bank_dir, STARTER_IR_RATE) {
+fn create_starter_bank(bank_dir: &Path, kind: BankKind) {
+    match ensure_bank(bank_dir, kind, STARTER_IR_RATE) {
         Ok(created) if created.presets > 0 => {
-            info!("created starter bank in {}", bank_dir.display());
+            info!("created starter bank ({kind}) in {}", bank_dir.display());
         }
         Ok(_) => {}
         Err(err) => warn!(

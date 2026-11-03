@@ -1,0 +1,38 @@
+name = "Blues"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -65
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -24
+ratio = 2
+attack = 15
+release = 150
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 20
+master = -8
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 60
+middle = 45
+treble = 40
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 20
+mix = 10

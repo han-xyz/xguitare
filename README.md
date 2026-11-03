@@ -30,7 +30,7 @@ xguitare run
 The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first start with the config shown under [Config](#config) logs (your home directory in place of `/home/you`):
 
 ```text
-2026-11-03T12:52:12.034094Z  INFO xguitare::daemon: created starter bank in /home/you/.config/xguitare/bank
+2026-11-03T12:52:12.034094Z  INFO xguitare::daemon: created starter bank (guitar) in /home/you/.config/xguitare/bank
 2026-11-03T12:52:12.034221Z  INFO jack_sys: Loading jack from libjack.so.0.
 2026-11-03T12:52:12.036502Z  INFO xguitare::daemon: loaded 0 Clean
 2026-11-03T12:52:12.040213Z  INFO xguitare::jack_adapter: jack client active: sample_rate=48000 buffer_size=128
@@ -39,7 +39,7 @@ The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first s
 2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
-- `created starter bank in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with five starter Presets (Clean, Crunch, Lead, High Gain, Bass) and the cabinet IR `default-cab.wav`. An existing Bank directory is never touched.
+- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with five starter Presets (Clean, Crunch, Lead, High Gain, Bass) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
 - `loaded 0 Clean`: the Daemon starts on the Bank's first Preset (program 0).
 - `jack client active`: the sample rate and the buffer size the audio server actually granted.
 - `connected a -> b`: one line per port connection made from the `[ports]` config. Without a `[ports]` section and with more than one sound card, the Daemon connects nothing and warns with the candidate port names (`several capture devices; pick one in config ports.input: ...`).
@@ -120,6 +120,17 @@ Modules and Parameters (`min..max default unit`):
 Bank numbering: every `*.toml` file in the Bank directory, sorted by file name, numbered from 0. That number is the program number for `load` and for MIDI; prefix file names with `01-`, `02-`, ... to fix the order. A file that does not parse keeps its number and shows in `list` with `!` and the error.
 
 Hot reload: the Daemon watches the Bank directory. Saving the active Preset's file in an editor switches to the new version with a short crossfade; if the file no longer parses, the Daemon logs the error and keeps playing the old version. Adding, removing or renaming files renumbers the Bank.
+
+### Bass
+
+Set `bank_kind = "bass"` in the config to start from a bass Bank. It is seeded only when `bank_dir` does not exist yet, so point `bank_dir` at a separate directory, for example `~/.config/xguitare/bank-bass`:
+
+```toml
+bank_kind = "bass"
+bank_dir = "/home/you/.config/xguitare/bank-bass"
+```
+
+The first run creates five Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange) and the bass cabinet IR `bass-cab.wav`.
 
 ## CLI
 
@@ -235,6 +246,7 @@ Optional file: `~/.config/xguitare/config.toml` (`$XDG_CONFIG_HOME/xguitare/conf
 
 ```toml
 bank_dir = "/home/you/.config/xguitare/bank"   # default: <config dir>/bank
+bank_kind = "guitar"                           # starter Bank for a missing bank_dir: "guitar" or "bass"
 buffer_size = 128                              # frames per JACK period requested at start, 1 to 8192
 crossfade_ms = 20                              # Preset switch crossfade
 ir_max_ms = 100                                # cabinet IRs are cut to this length

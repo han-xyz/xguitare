@@ -1,0 +1,33 @@
+name = "Primus Flange"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -24
+ratio = 4
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 25
+master = -8
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 60
+middle = 50
+treble = 50
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[[module]]
+type = "flanger"
+[module.params]
+rate = 0.3
+depth = 60
+feedback = 60
+mix = 50

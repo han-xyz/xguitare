@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
-use xguitare_core::{Config, secure_socket_dir};
+use xguitare_core::{BankKind, Config, secure_socket_dir};
 
 fn config_file(test: &str, contents: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("xguitare-config-{}-{test}", std::process::id()));
@@ -52,6 +52,29 @@ fn partial_file_fills_defaults() {
     assert_eq!(config.socket, defaults.socket);
     assert_eq!(config.crossfade_ms, 20.0);
     assert_eq!(config.ports.input, "auto");
+}
+
+#[test]
+fn bank_kind_defaults_to_guitar() {
+    let config = Config::load(Some(&config_file("kind-default", ""))).unwrap();
+    assert_eq!(config.bank_kind, BankKind::Guitar);
+}
+
+#[test]
+fn bank_kind_bass_parses() {
+    let path = config_file("kind-bass", "bank_kind = \"bass\"\n");
+    assert_eq!(Config::load(Some(&path)).unwrap().bank_kind, BankKind::Bass);
+}
+
+#[test]
+fn bank_kind_unknown_is_error() {
+    let path = config_file("kind-unknown", "bank_kind = \"cello\"\n");
+    let message = Config::load(Some(&path)).unwrap_err().to_string();
+    assert!(
+        message.starts_with(&format!("{}: line 1:", path.display())),
+        "{message}"
+    );
+    assert!(message.contains("bank_kind"), "{message}");
 }
 
 fn socket_dir(test: &str, mode: u32) -> PathBuf {

@@ -1,0 +1,31 @@
+name = "Primus Fuzz"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -45
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 85
+tone = 40
+level = 0
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 60
+master = -14
+stages = 3
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 70
+middle = 35
+treble = 45
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"

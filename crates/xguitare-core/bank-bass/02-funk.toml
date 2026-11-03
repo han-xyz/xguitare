@@ -1,0 +1,35 @@
+name = "Funk"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -24
+ratio = 6
+attack = 5
+release = 80
+makeup = 3
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 15
+master = -8
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 55
+middle = 60
+treble = 55
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[[module]]
+type = "chorus"
+[module.params]
+rate = 0.8
+depth = 40
+mix = 20

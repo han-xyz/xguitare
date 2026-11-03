@@ -5,7 +5,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::engine::SWITCHER_MAX_FRAMES;
 
@@ -17,6 +17,7 @@ pub const AUTO_PORT: &str = "auto";
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub bank_dir: PathBuf,
+    pub bank_kind: BankKind,
     pub buffer_size: u32,
     pub crossfade_ms: f32,
     pub ir_max_ms: f32,
@@ -35,6 +36,15 @@ pub struct Ports {
     pub input: String,
     pub output_left: String,
     pub output_right: String,
+}
+
+/// Which starter Bank the first run seeds into a missing `bank_dir`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BankKind {
+    #[default]
+    Guitar,
+    Bass,
 }
 
 #[derive(Debug)]
@@ -63,11 +73,19 @@ pub enum ConfigError {
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     bank_dir: Option<PathBuf>,
+    #[serde(default, deserialize_with = "bank_kind")]
+    bank_kind: Option<BankKind>,
     buffer_size: Option<u32>,
     crossfade_ms: Option<f32>,
     ir_max_ms: Option<f32>,
     socket: Option<PathBuf>,
     ports: Option<PortsFile>,
+}
+
+fn bank_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<BankKind>, D::Error> {
+    BankKind::deserialize(deserializer)
+        .map(Some)
+        .map_err(|_| serde::de::Error::custom("bank_kind must be guitar or bass"))
 }
 
 #[derive(Deserialize)]
@@ -127,6 +145,7 @@ impl Config {
         };
         Ok(Config {
             bank_dir: dirs.config_dir().join("bank"),
+            bank_kind: BankKind::default(),
             buffer_size: 128,
             crossfade_ms: 20.0,
             ir_max_ms: 100.0,
@@ -151,6 +170,7 @@ impl Config {
         };
         Config {
             bank_dir: file.bank_dir.unwrap_or(self.bank_dir),
+            bank_kind: file.bank_kind.unwrap_or(self.bank_kind),
             buffer_size: file.buffer_size.unwrap_or(self.buffer_size),
             crossfade_ms: file.crossfade_ms.unwrap_or(self.crossfade_ms),
             ir_max_ms: file.ir_max_ms.unwrap_or(self.ir_max_ms),
@@ -198,6 +218,15 @@ fn current_uid() -> std::io::Result<u32> {
 fn fallback_runtime_dir() -> Result<PathBuf, ConfigError> {
     let uid = current_uid().map_err(ConfigError::Uid)?;
     Ok(PathBuf::from(format!("/tmp/xguitare-{uid}")))
+}
+
+impl fmt::Display for BankKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            BankKind::Guitar => "guitar",
+            BankKind::Bass => "bass",
+        })
+    }
 }
 
 impl fmt::Display for SocketDirError {

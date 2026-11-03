@@ -1,0 +1,36 @@
+name = "Primus Slap"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -24
+ratio = 8
+attack = 2
+release = 60
+makeup = 3
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 30
+bias = 0.3
+master = -10
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 65
+middle = 40
+treble = 60
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[[module]]
+type = "delay"
+[module.params]
+time = 90
+feedback = 10
+mix = 15

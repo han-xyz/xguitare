@@ -4,9 +4,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use xguitare_dsp::synth_ir::default_cabinet;
+use xguitare_dsp::synth_ir::{bass_cabinet, default_cabinet};
+
+use crate::BankKind;
 
 const DEFAULT_IR: &str = "default-cab.wav";
+const BASS_IR: &str = "bass-cab.wav";
 const STAGING_SUFFIX: &str = ".xguitare-staging";
 const STARTER_PRESETS: [(&str, &str); 5] = [
     ("01-clean.toml", include_str!("../bank/01-clean.toml")),
@@ -18,6 +21,22 @@ const STARTER_PRESETS: [(&str, &str); 5] = [
     ),
     ("05-bass.toml", include_str!("../bank/05-bass.toml")),
 ];
+const BASS_PRESETS: [(&str, &str); 5] = [
+    ("01-blues.toml", include_str!("../bank-bass/01-blues.toml")),
+    ("02-funk.toml", include_str!("../bank-bass/02-funk.toml")),
+    (
+        "03-primus-slap.toml",
+        include_str!("../bank-bass/03-primus-slap.toml"),
+    ),
+    (
+        "04-primus-fuzz.toml",
+        include_str!("../bank-bass/04-primus-fuzz.toml"),
+    ),
+    (
+        "05-primus-flange.toml",
+        include_str!("../bank-bass/05-primus-flange.toml"),
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Created {
@@ -25,8 +44,12 @@ pub struct Created {
     pub ir: bool,
 }
 
-/// Creates `bank_dir` with the starter Presets and the default cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `.<bank name>.xguitare-staging` beside it (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
-pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Error> {
+/// Creates `bank_dir` with the starter Presets of `kind` and their cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `.<bank name>.xguitare-staging` beside it (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
+pub fn ensure_bank(
+    bank_dir: &Path,
+    kind: BankKind,
+    sample_rate: u32,
+) -> Result<Created, io::Error> {
     if bank_dir.exists() {
         return Ok(Created {
             presets: 0,
@@ -38,18 +61,17 @@ pub fn ensure_bank(bank_dir: &Path, sample_rate: u32) -> Result<Created, io::Err
         fs::remove_dir_all(&staging)?;
     }
     fs::create_dir_all(&staging)?;
-    for (file, text) in STARTER_PRESETS {
+    let (presets, ir_file, ir) = match kind {
+        BankKind::Guitar => (STARTER_PRESETS, DEFAULT_IR, default_cabinet(sample_rate)),
+        BankKind::Bass => (BASS_PRESETS, BASS_IR, bass_cabinet(sample_rate)),
+    };
+    for (file, text) in presets {
         fs::write(staging.join(file), text)?;
     }
-    write_ir(
-        &staging.join(DEFAULT_IR),
-        &default_cabinet(sample_rate),
-        sample_rate,
-    )
-    .map_err(io::Error::other)?;
+    write_ir(&staging.join(ir_file), &ir, sample_rate).map_err(io::Error::other)?;
     fs::rename(&staging, bank_dir)?;
     Ok(Created {
-        presets: STARTER_PRESETS.len(),
+        presets: presets.len(),
         ir: true,
     })
 }

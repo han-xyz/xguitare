@@ -1,36 +1,65 @@
 use std::f64::consts::PI;
 
-const LENGTH_S: f64 = 0.1;
-const DECAY_TO_MINUS_60_DB_S: f64 = 0.08;
-const LOW_CUT_HZ: f64 = 80.0;
-const HIGH_CUT_HZ: f64 = 5_000.0;
 const BUTTERWORTH_4_Q: [f64; 2] = [0.541_196_1, 1.306_563];
-const RESONANCES_HZ: [f64; 2] = [120.0, 2_500.0];
 const RESONANCE_GAIN_DB: f64 = 6.0;
 const RESONANCE_Q: f64 = 2.0;
 const PEAK_DBFS: f64 = -3.0;
 const SEED: u32 = 0x5EED_CAB1;
 
+const GUITAR: Shape = Shape {
+    length_s: 0.1,
+    decay_to_minus_60_db_s: 0.08,
+    low_cut_hz: 80.0,
+    high_cut_hz: 5_000.0,
+    resonances_hz: [120.0, 2_500.0],
+};
+
+const BASS: Shape = Shape {
+    length_s: 0.12,
+    decay_to_minus_60_db_s: 0.1,
+    low_cut_hz: 40.0,
+    high_cut_hz: 3_000.0,
+    resonances_hz: [60.0, 1_200.0],
+};
+
 /// Returns the synthesized default cabinet IR at `sample_rate`: 100 ms mono, peak at −3 dBFS, the same samples on every call.
 pub fn default_cabinet(sample_rate: u32) -> Vec<f32> {
+    synthesize(&GUITAR, sample_rate)
+}
+
+/// Returns the synthesized bass cabinet IR at `sample_rate`: 120 ms mono, band-passed 40 Hz..3 kHz, peak at −3 dBFS, the same samples on every call.
+pub fn bass_cabinet(sample_rate: u32) -> Vec<f32> {
+    synthesize(&BASS, sample_rate)
+}
+
+struct Shape {
+    length_s: f64,
+    decay_to_minus_60_db_s: f64,
+    low_cut_hz: f64,
+    high_cut_hz: f64,
+    resonances_hz: [f64; 2],
+}
+
+fn synthesize(shape: &Shape, sample_rate: u32) -> Vec<f32> {
     let rate = f64::from(sample_rate);
-    let frames = (LENGTH_S * rate).round() as usize;
-    // Band-pass 80 Hz..5 kHz as a 4th-order Butterworth high-pass and low-pass, each two RBJ cookbook biquads with the Butterworth pole Qs.
+    let frames = (shape.length_s * rate).round() as usize;
+    // Band-pass as a 4th-order Butterworth high-pass and low-pass, each two RBJ cookbook biquads with the Butterworth pole Qs.
     let mut filters: Vec<Biquad> = BUTTERWORTH_4_Q
         .iter()
         .flat_map(|&q| {
             [
-                Biquad::high_pass(LOW_CUT_HZ, q, rate),
-                Biquad::low_pass(HIGH_CUT_HZ, q, rate),
+                Biquad::high_pass(shape.low_cut_hz, q, rate),
+                Biquad::low_pass(shape.high_cut_hz, q, rate),
             ]
         })
         .collect();
     filters.extend(
-        RESONANCES_HZ
+        shape
+            .resonances_hz
             .iter()
             .map(|&freq| Biquad::peaking(freq, RESONANCE_Q, RESONANCE_GAIN_DB, rate)),
     );
-    let decay_per_sample = (10f64.powf(-60.0 / 20.0)).ln() / (DECAY_TO_MINUS_60_DB_S * rate);
+    let decay_per_sample = (10f64.powf(-60.0 / 20.0)).ln() / (shape.decay_to_minus_60_db_s * rate);
     let mut noise = Lcg(SEED);
     let ir: Vec<f64> = (0..frames)
         .map(|n| {
