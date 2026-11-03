@@ -5,6 +5,7 @@ pub mod oversample;
 mod rack;
 pub mod resample;
 pub mod smooth;
+pub mod synth_ir;
 
 pub use modules::delay::Delay;
 pub use modules::drive::Drive;
