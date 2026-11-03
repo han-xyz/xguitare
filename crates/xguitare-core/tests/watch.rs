@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use xguitare_core::control::{EngineState, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
-use xguitare_core::watch::{Action, apply};
+use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config};
 
 const QUEUE_CAPACITY: usize = 64;
@@ -118,4 +120,30 @@ fn broken_active_file_logs_and_keeps() {
     );
     assert!(audio.commands.pop().is_err());
     assert_eq!(state.active, before);
+}
+
+fn stamp(secs: u64, len: u64) -> FileStamp {
+    (SystemTime::UNIX_EPOCH + Duration::from_secs(secs), len)
+}
+
+#[test]
+fn unchanged_stat_is_filtered_out() {
+    let file = PathBuf::from("/bank/01-clean.toml");
+    let snapshot = HashMap::from([(file.clone(), stamp(100, 80))]);
+    assert!(changed_paths(&snapshot, &snapshot.clone(), &[file]).is_empty());
+}
+
+#[test]
+fn changed_mtime_passes() {
+    let file = PathBuf::from("/bank/01-clean.toml");
+    let added = PathBuf::from("/bank/03-x.toml");
+    let previous = HashMap::from([(file.clone(), stamp(100, 80))]);
+    let current = HashMap::from([
+        (file.clone(), stamp(101, 80)),
+        (added.clone(), stamp(5, 10)),
+    ]);
+    assert_eq!(
+        changed_paths(&previous, &current, &[file.clone(), added.clone()]),
+        [file, added]
+    );
 }

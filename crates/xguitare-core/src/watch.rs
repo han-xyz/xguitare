@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use tracing::warn;
 
@@ -12,6 +14,22 @@ pub enum Action {
     Reload { program: usize },
     LogAndKeep { file: PathBuf, error: String },
     Nothing,
+}
+
+/// A file's modification time and length.
+pub type FileStamp = (SystemTime, u64);
+
+/// Returns the event paths whose stamp differs between the two snapshots; a path missing from a snapshot does not exist at that time.
+pub fn changed_paths(
+    previous: &HashMap<PathBuf, FileStamp>,
+    current: &HashMap<PathBuf, FileStamp>,
+    events: &[PathBuf],
+) -> Vec<PathBuf> {
+    events
+        .iter()
+        .filter(|path| previous.get(*path) != current.get(*path))
+        .cloned()
+        .collect()
 }
 
 /// Applies a batch of changed paths in the Bank dir: re-scans the Bank when any `*.toml` changed, and swaps in the active Preset's file when its content differs from the live Preset; a broken or removed active file keeps the running Rack.

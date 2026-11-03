@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
@@ -15,7 +15,7 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::control::{EngineState, Request, Response, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
-use xguitare_core::watch::{Action, apply};
+use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
 
@@ -172,28 +172,22 @@ fn register_stop_signals() -> Result<Arc<AtomicBool>, DaemonError> {
 struct BankWatch {
     _debouncer: Option<Debouncer<RecommendedWatcher>>,
     events: Receiver<DebounceEventResult>,
-    stamps: HashMap<PathBuf, Option<FileStamp>>,
+    stamps: HashMap<PathBuf, FileStamp>,
 }
-
-type FileStamp = (SystemTime, u64);
 
 impl BankWatch {
     fn start(dir: &Path) -> BankWatch {
         let (sender, events) = mpsc::channel();
-        let stamps = fs::read_dir(dir)
+        let paths: Vec<PathBuf> = fs::read_dir(dir)
             .into_iter()
             .flatten()
             .flatten()
-            .map(|entry| {
-                let path = entry.path();
-                let stamp = file_stamp(&path);
-                (path, stamp)
-            })
+            .map(|entry| entry.path())
             .collect();
         BankWatch {
             _debouncer: debounced_watcher(dir, sender),
             events,
-            stamps,
+            stamps: snapshot(&paths),
         }
     }
 
@@ -207,19 +201,26 @@ impl BankWatch {
             .flatten()
             .map(|event| event.path)
             .collect();
-        candidates
-            .into_iter()
-            .filter(|path| {
-                let stamp = file_stamp(path);
-                self.stamps.insert(path.clone(), stamp) != Some(stamp)
-            })
-            .collect()
+        let current = snapshot(&candidates);
+        let changed = changed_paths(&self.stamps, &current, &candidates);
+        for path in &candidates {
+            match current.get(path) {
+                Some(stamp) => self.stamps.insert(path.clone(), *stamp),
+                None => self.stamps.remove(path),
+            };
+        }
+        changed
     }
 }
 
-fn file_stamp(path: &Path) -> Option<FileStamp> {
-    let metadata = fs::metadata(path).ok()?;
-    Some((metadata.modified().ok()?, metadata.len()))
+fn snapshot(paths: &[PathBuf]) -> HashMap<PathBuf, FileStamp> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            let metadata = fs::metadata(path).ok()?;
+            Some((path.clone(), (metadata.modified().ok()?, metadata.len())))
+        })
+        .collect()
 }
 
 fn debounced_watcher(
