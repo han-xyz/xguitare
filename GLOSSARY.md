@@ -39,3 +39,11 @@ _Avoid_: server, service, host
 **Control API**:
 The protocol a client (CLI, later GUI) uses to inspect and change the Daemon's Preset and Parameters.
 _Avoid_: RPC, IPC, socket API, remote
+
+**Revision**:
+A counter the Daemon increments on every change to the live Rack or the Bank, so a client knows when to refresh.
+_Avoid_: version, generation, sequence number
+
+**Program**:
+A Preset's position in the Bank, the number a MIDI program change or a digit key selects.
+_Avoid_: slot, index

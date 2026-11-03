@@ -1,0 +1,3 @@
+# The GUI is a separate egui/eframe binary over the Control API
+
+The first GUI is `xguitare-gui`, a Rust binary built with egui through eframe, talking to the Daemon over the Control API socket (ADR-0003) and never linking the engine. egui is immediate-mode: the whole screen is redrawn from state each frame, which fits a rack of sliders and meters that change twenty times a second and keeps every widget a few lines of plain Rust, at the cost of a custom look (no native toolkit) and a redraw-driven architecture that a later DAW timeline will have to respect. iced and Slint were considered: both retained, more boilerplate per widget, custom knobs through a canvas or a DSL; GTK4 would add a C toolchain for a native look nobody asked for.
