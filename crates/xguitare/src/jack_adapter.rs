@@ -9,7 +9,8 @@ use jack::{
 };
 use tracing::{error, info, warn};
 use xguitare_core::Ports;
-use xguitare_core::engine::{AudioQueues, AvailablePort, EngineShared, RackSwitcher, choose_ports};
+use xguitare_core::engine::{AudioQueues, EngineShared, RackSwitcher};
+use xguitare_core::ports::{AvailablePort, choose_ports};
 use xguitare_dsp::{Rack, midi};
 
 const CLIENT_NAME: &str = "xguitare";

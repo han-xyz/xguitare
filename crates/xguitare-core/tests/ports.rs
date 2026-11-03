@@ -1,5 +1,5 @@
 use xguitare_core::Ports;
-use xguitare_core::engine::{AvailablePort, choose_ports};
+use xguitare_core::ports::{AvailablePort, choose_ports};
 
 fn available(list: &[&str], is_physical: bool) -> Vec<AvailablePort> {
     list.iter()

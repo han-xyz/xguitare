@@ -5,6 +5,7 @@ pub mod control;
 pub mod engine;
 pub mod firstrun;
 mod ir;
+pub mod ports;
 mod preset;
 mod registry;
 pub mod watch;
