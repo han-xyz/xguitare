@@ -24,16 +24,16 @@ This builds a release binary into `~/.cargo/bin/xguitare`; that directory must b
 xguitare run
 ```
 
-The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. A start with the config shown under [Config](#config) logs:
+The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first start with the config shown under [Config](#config) logs (your home directory in place of `/home/you`):
 
 ```text
-INFO xguitare::daemon: created starter bank in /home/you/.config/xguitare/bank
-INFO jack_sys: Loading jack from libjack.so.0.
-INFO xguitare::daemon: loaded 0 Clean
-INFO xguitare::jack_adapter: jack client active: sample_rate=48000 buffer_size=128
-INFO xguitare::jack_adapter: connected Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare:in
-INFO xguitare::jack_adapter: connected xguitare:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
-INFO xguitare::jack_adapter: connected xguitare:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
+2026-11-03T12:52:12.034094Z  INFO xguitare::daemon: created starter bank in /home/you/.config/xguitare/bank
+2026-11-03T12:52:12.034221Z  INFO jack_sys: Loading jack from libjack.so.0.
+2026-11-03T12:52:12.036502Z  INFO xguitare::daemon: loaded 0 Clean
+2026-11-03T12:52:12.040213Z  INFO xguitare::jack_adapter: jack client active: sample_rate=48000 buffer_size=128
+2026-11-03T12:52:12.040576Z  INFO xguitare::jack_adapter: connected Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare:in
+2026-11-03T12:52:12.040808Z  INFO xguitare::jack_adapter: connected xguitare:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
+2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
 - `created starter bank in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with five starter Presets (Clean, Crunch, Lead, High Gain, Bass) and the cabinet IR `default-cab.wav`. An existing Bank directory is never touched.
@@ -96,7 +96,7 @@ mix = 10
 
 - Each `[[module]]` is one Module of the Rack, in signal order. `type` is required. `id` is optional and defaults to the type; give one when a Preset has two Modules of the same type (ids must be unique). The CLI addresses Parameters as `<id>.<param>`.
 - Omitted Parameters take their defaults; values outside a Parameter's range are clamped.
-- `cabinet` needs `ir`: a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo) relative to the Bank directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay` and `reverb` come after it and every other Module before it.
+- `cabinet` needs `ir`: a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo) relative to the Bank directory. The path must stay inside the Bank directory: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay` and `reverb` come after it and every other Module before it.
 
 Modules and Parameters (`min..max default unit`):
 
@@ -235,11 +235,11 @@ If `$XDG_RUNTIME_DIR` is unset, the socket defaults to `/tmp/xguitare-<uid>/xgui
 **Latency or buffer size.** The Daemon asks for `buffer_size` frames per period, but PipeWire may run a larger quantum. `xguitare status` shows the `buffer_size` in effect, and the Daemon warns at start:
 
 ```text
-WARN xguitare::jack_adapter: buffer size is 256, wanted 128; force it with: pw-metadata -n settings 0 clock.force-quantum 128
-ERROR xguitare::jack_adapter: buffer size 256 exceeds prepared 128; output is silent until restart; force it with: pw-metadata -n settings 0 clock.force-quantum 128
+2026-11-03T12:52:17.159269Z  WARN xguitare::jack_adapter: buffer size is 256, wanted 128; force it with: pw-metadata -n settings 0 clock.force-quantum 128
+2026-11-03T12:52:17.159271Z ERROR xguitare::jack_adapter: buffer size 256 exceeds prepared 128; output is silent until restart; force it with: pw-metadata -n settings 0 clock.force-quantum 128
 ```
 
-The Rack is prepared for the buffer size seen at start, so a larger quantum, at start or later, silences the output (the Daemon logs `oversize blocks dropped`). Force the quantum for the whole PipeWire graph, restart the Daemon, and undo it with `0` when you are done playing:
+The Rack is prepared for the buffer size JACK reports before the Daemon activates its client. When the quantum in effect is larger than that, output is silent: the `ERROR` line above at start, or `oversize blocks dropped` when the quantum grows later. With PipeWire this happens at start too when the quantum was already forced larger, as in the lines above (forced to 256, `buffer_size = 128`). Force the quantum for the whole PipeWire graph, restart the Daemon, and undo it with `0` when you are done playing:
 
 ```sh
 pw-metadata -n settings 0 clock.force-quantum 128
@@ -252,7 +252,7 @@ pw-metadata -n settings 0 clock.force-quantum 0
 
 **`error: daemon not running (socket ...)`.** A CLI command found no Daemon. Start one with `xguitare run`.
 
-**Cabinet sounds dry, or a warning like `cabinet 'cabinet': .../default-cab.wav: No such file or directory`.** The cabinet's `ir` file is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` path, which is relative to the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
+**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The cabinet's `ir` file is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` path, which is relative to the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
 
 ## License
 
