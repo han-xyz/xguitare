@@ -4,15 +4,24 @@ use std::path::PathBuf;
 use xguitare_core::firstrun::{Created, ensure_bank};
 use xguitare_core::{Bank, BankEntry};
 
-fn missing_dir(test: &str) -> PathBuf {
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(test: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("xguitare-firstrun-{}-{test}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    dir.join("bank")
+    TempDir(dir)
 }
 
 #[test]
 fn creates_bank_when_missing() {
-    let dir = missing_dir("missing");
+    let temp = temp_dir("missing");
+    let dir = temp.0.join("bank");
     let created = ensure_bank(&dir, 48_000).unwrap();
     assert_eq!(
         created,
@@ -52,7 +61,8 @@ fn creates_bank_when_missing() {
 
 #[test]
 fn leaves_existing_bank_alone() {
-    let dir = missing_dir("existing");
+    let temp = temp_dir("existing");
+    let dir = temp.0.join("bank");
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("mine.toml");
     fs::write(&file, "name = \"Mine\"\n").unwrap();
