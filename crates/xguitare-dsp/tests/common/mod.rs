@@ -59,3 +59,22 @@ pub fn run(rack: &mut Rack, input: &[f32]) -> Vec<f32> {
     }
     left
 }
+
+pub fn noise(amplitude: f32, frames: usize) -> Vec<f32> {
+    let mut state: u32 = 0x9E37_79B9;
+    (0..frames)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            amplitude * (state as f32 / u32::MAX as f32 * 2.0 - 1.0)
+        })
+        .collect()
+}
+
+pub fn full_scale_sine_then_noise() -> Vec<f32> {
+    let second = SAMPLE_RATE as usize;
+    let mut input = sine(1.0, 220.0, SAMPLE_RATE, second);
+    input.extend(noise(1.0, second));
+    input
+}

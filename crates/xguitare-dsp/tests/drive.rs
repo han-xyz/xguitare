@@ -1,6 +1,6 @@
 mod common;
 
-use common::{SAMPLE_RATE, bin_mag, db, peak, rack_with, run, sine};
+use common::{SAMPLE_RATE, bin_mag, db, full_scale_sine_then_noise, peak, rack_with, run, sine};
 use xguitare_dsp::Drive;
 
 const DRIVE: usize = 0;
@@ -47,4 +47,18 @@ fn clean_at_zero_drive() {
         .sum();
     let thd = db(harmonic_energy.sqrt() / fundamental);
     assert!(thd < -40.0, "thd {thd} dB");
+}
+
+#[test]
+fn silence_in_silence_out() {
+    let mut rack = rack_with(Box::new(Drive::new()));
+    let output = run(&mut rack, &vec![0.0; SAMPLE_RATE as usize]);
+    assert_eq!(peak(&output), 0.0);
+}
+
+#[test]
+fn finite_under_full_scale() {
+    let mut rack = rack_with(Box::new(Drive::new()));
+    let output = run(&mut rack, &full_scale_sine_then_noise());
+    assert!(output.iter().all(|s| s.is_finite()));
 }

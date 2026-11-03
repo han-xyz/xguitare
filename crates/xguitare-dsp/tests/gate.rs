@@ -1,6 +1,6 @@
 mod common;
 
-use common::{SAMPLE_RATE, db, peak, rack_with, rms, run, sine};
+use common::{SAMPLE_RATE, db, full_scale_sine_then_noise, peak, rack_with, rms, run, sine};
 use xguitare_dsp::{Gate, Rack};
 
 const THRESHOLD: usize = 0;
@@ -58,4 +58,18 @@ fn hysteresis_holds_open() {
     let tail = output.len() - frames(100.0);
     let difference = db(peak(&output[tail..]) / peak(&input[quiet_start..]));
     assert!(difference.abs() < 0.5, "difference {difference} dB");
+}
+
+#[test]
+fn silence_in_silence_out() {
+    let mut rack = rack_with(Box::new(Gate::new()));
+    let output = run(&mut rack, &vec![0.0; SAMPLE_RATE as usize]);
+    assert_eq!(peak(&output), 0.0);
+}
+
+#[test]
+fn finite_under_full_scale() {
+    let mut rack = rack_with(Box::new(Gate::new()));
+    let output = run(&mut rack, &full_scale_sine_then_noise());
+    assert!(output.iter().all(|s| s.is_finite()));
 }

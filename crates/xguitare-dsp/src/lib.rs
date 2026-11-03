@@ -1,10 +1,13 @@
 pub mod modules;
 pub mod oversample;
 mod rack;
+pub mod smooth;
 
 pub use modules::drive::Drive;
 pub use modules::gain::Gain;
 pub use modules::gate::Gate;
+pub use modules::preamp::Preamp;
+pub use modules::tonestack::Tonestack;
 pub use rack::{Rack, RackError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
