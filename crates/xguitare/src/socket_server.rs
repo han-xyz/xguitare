@@ -160,10 +160,13 @@ fn answer_lines(
         }
         if !line.is_empty() {
             let request = String::from_utf8_lossy(&line);
-            let reply = handle_line(
+            let (reply, warnings) = handle_line(
                 &mut state.lock().unwrap_or_else(PoisonError::into_inner),
                 request.trim_end(),
             );
+            for warning in warnings {
+                warn!("{warning}");
+            }
             writer.write_all(format!("{reply}\n").as_bytes())?;
             line.clear();
         }

@@ -7,14 +7,15 @@ use serde::de::{Deserializer, Error as _};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, json};
-use tracing::warn;
 use xguitare_dsp::{ParamSpec, Unit};
 
 pub use serde_json::Value;
 
 use crate::engine::{Command, EngineQueues, EngineShared};
 use crate::preset::shortest_f64;
-use crate::{Bank, BankEntry, Config, ModuleRegistry, ParamAddress, Preset, PresetModule};
+use crate::{
+    Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
+};
 use crate::{ResolveError, resolve};
 
 const ENGINE_BUSY: &str = "engine busy";
@@ -51,30 +52,37 @@ pub struct EngineState {
     pub max_frames: usize,
 }
 
-pub fn handle(state: &mut EngineState, req: Request) -> Response {
+/// Handles one request; the build warnings of a `load` come back beside the Response for the caller to log.
+pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarning>) {
+    let mut warnings = Vec::new();
     let result = match req {
         Request::Status => Ok(status(state)),
         Request::List => Ok(list(state)),
-        Request::Load { preset } => load(state, &preset),
+        Request::Load { preset } => load(state, &preset, &mut warnings),
         Request::Set { param, value } => set(state, &param, value),
         Request::Get { param } => get(state, param.as_deref()),
         Request::Save => save(state),
     };
-    match result {
+    let response = match result {
         Ok(payload) => Response::Ok(payload),
         Err(error) => Response::Err { error },
-    }
+    };
+    (response, warnings)
 }
 
-/// Handles one request line and returns the response line, without its newline.
-pub fn handle_line(state: &mut EngineState, line: &str) -> String {
-    let response = match serde_json::from_str(line) {
+/// Handles one request line and returns the response line, without its newline, and the build warnings as `handle` does.
+pub fn handle_line(state: &mut EngineState, line: &str) -> (String, Vec<BuildWarning>) {
+    let (response, warnings) = match serde_json::from_str(line) {
         Ok(req) => handle(state, req),
-        Err(err) => Response::Err {
-            error: format!("invalid request: {err}"),
-        },
+        Err(err) => (
+            Response::Err {
+                error: format!("invalid request: {err}"),
+            },
+            Vec::new(),
+        ),
     };
-    serde_json::to_string(&response).expect("a Response always serialises to JSON")
+    let line = serde_json::to_string(&response).expect("a Response always serialises to JSON");
+    (line, warnings)
 }
 
 impl Request {
@@ -126,7 +134,11 @@ fn list(state: &EngineState) -> Value {
     json!({"active": active_program(state), "entries": entries})
 }
 
-fn load(state: &mut EngineState, key: &str) -> Result<Value, String> {
+fn load(
+    state: &mut EngineState,
+    key: &str,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<Value, String> {
     let (program, entry) = state
         .bank
         .by_name_or_number(key)
@@ -135,7 +147,7 @@ fn load(state: &mut EngineState, key: &str) -> Result<Value, String> {
         BankEntry::Valid { file, preset } => (file.clone(), preset.clone()),
         BankEntry::Invalid { error, .. } => return Err(error.clone()),
     };
-    let (rack, warnings) = preset
+    let (rack, build_warnings) = preset
         .build(
             state.sample_rate,
             state.max_frames,
@@ -143,9 +155,7 @@ fn load(state: &mut EngineState, key: &str) -> Result<Value, String> {
             state.config.ir_max_ms,
         )
         .map_err(|err| err.to_string())?;
-    for warning in &warnings {
-        warn!("{warning}");
-    }
+    *warnings = build_warnings;
     state.queues.drain_from_audio();
     state
         .queues

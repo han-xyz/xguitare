@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::control::{EngineState, Request, Response, handle, handle_line};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
-use xguitare_core::{Bank, BankEntry, Config, Preset};
+use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Preset};
 
 const QUEUE_CAPACITY: usize = 64;
 
@@ -74,14 +74,14 @@ fn tmp_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn ok(response: Response) -> Value {
+fn ok((response, _): (Response, Vec<BuildWarning>)) -> Value {
     match response {
         Response::Ok(payload) => payload,
         Response::Err { error } => panic!("expected ok, got error {error}"),
     }
 }
 
-fn error(response: Response) -> String {
+fn error((response, _): (Response, Vec<BuildWarning>)) -> String {
     match response {
         Response::Err { error } => error,
         Response::Ok(payload) => panic!("expected error, got {payload}"),
@@ -131,6 +131,28 @@ fn list_marks_active_and_invalid() {
         entries[2]["error"].as_str().unwrap().starts_with("line 1:"),
         "{}",
         entries[2]
+    );
+}
+
+#[test]
+fn load_returns_build_warnings() {
+    let (mut state, _audio) = state("load-warnings");
+    fs::write(
+        state.config.bank_dir.join("04-cab.toml"),
+        "name = \"Cab\"\n[[module]]\ntype = \"cabinet\"\nir = \"missing.wav\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&state.config.bank_dir).unwrap();
+    let (response, warnings) = handle(
+        &mut state,
+        Request::Load {
+            preset: "Cab".to_string(),
+        },
+    );
+    assert!(matches!(response, Response::Ok(_)));
+    assert!(
+        matches!(&warnings[..], [BuildWarning::Ir { id, .. }] if id == "cabinet"),
+        "{warnings:?}"
     );
 }
 
@@ -307,7 +329,7 @@ fn queue_full_is_engine_busy() {
 fn unknown_cmd_is_error() {
     let (mut state, _audio) = state("unknown-cmd");
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"bogus"}"#)).unwrap();
+        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"bogus"}"#).0).unwrap();
     assert_eq!(response["ok"], false);
     let message = response["error"].as_str().unwrap();
     assert!(
@@ -319,7 +341,7 @@ fn unknown_cmd_is_error() {
 #[test]
 fn malformed_json_is_error() {
     let (mut state, _audio) = state("malformed");
-    let response: Value = serde_json::from_str(&handle_line(&mut state, "{\"cmd\":")).unwrap();
+    let response: Value = serde_json::from_str(&handle_line(&mut state, "{\"cmd\":").0).unwrap();
     assert_eq!(response["ok"], false);
     assert!(
         response["error"]
@@ -329,7 +351,7 @@ fn malformed_json_is_error() {
         "{response}"
     );
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"status"}"#)).unwrap();
+        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"status"}"#).0).unwrap();
     assert_eq!(response["ok"], true);
     assert_eq!(response["preset"], "Clean");
 }

@@ -66,14 +66,33 @@ fn active_file_changed_reloads() {
 }
 
 #[test]
+fn reload_build_warning_is_an_action() {
+    let (mut state, _audio) = state("reload-warning");
+    let file = active_file(&state);
+    fs::write(
+        &file,
+        "name = \"Clean\"\n[[module]]\ntype = \"cabinet\"\nir = \"missing.wav\"\n",
+    )
+    .unwrap();
+    let actions = apply(&mut state, &[file]);
+    assert!(
+        matches!(&actions[..], [Action::Reindex, Action::Warn(warning), Action::Reload { program: 0 }] if warning.starts_with("cabinet 'cabinet': ")),
+        "{actions:?}"
+    );
+}
+
+#[test]
 fn unchanged_content_is_nothing() {
     let (mut state, mut audio) = state("unchanged");
     let set = Request::Set {
         param: "gain.level".to_string(),
         value: -6.0,
     };
-    assert!(matches!(handle(&mut state, set), Response::Ok(_)));
-    assert!(matches!(handle(&mut state, Request::Save), Response::Ok(_)));
+    assert!(matches!(handle(&mut state, set).0, Response::Ok(_)));
+    assert!(matches!(
+        handle(&mut state, Request::Save).0,
+        Response::Ok(_)
+    ));
     assert!(matches!(audio.commands.pop(), Ok(Command::SetParam { .. })));
     let file = active_file(&state);
     let actions = apply(&mut state, &[file]);
@@ -89,15 +108,24 @@ fn removed_active_file_keeps_rack_and_clears_program() {
     let loud = state.config.bank_dir.join("02-loud.toml");
     let loud_text = fs::read_to_string(&loud).unwrap();
     fs::remove_file(&file).unwrap();
-    assert_eq!(apply(&mut state, &[file]), [Action::Reindex]);
+    assert_eq!(
+        apply(&mut state, &[file.clone()]),
+        [
+            Action::Reindex,
+            Action::Warn(format!(
+                "active preset file {} removed; still running",
+                file.display()
+            ))
+        ]
+    );
     assert!(audio.commands.pop().is_err());
     assert_eq!(active_level(&state), -3.0);
-    let Response::Ok(status) = handle(&mut state, Request::Status) else {
+    let (Response::Ok(status), _) = handle(&mut state, Request::Status) else {
         panic!("status failed");
     };
     assert!(status["program"].is_null(), "{status}");
     assert!(matches!(
-        handle(&mut state, Request::Save),
+        handle(&mut state, Request::Save).0,
         Response::Err { .. }
     ));
     assert_eq!(fs::read_to_string(&loud).unwrap(), loud_text);

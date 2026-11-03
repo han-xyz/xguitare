@@ -989,7 +989,6 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
- "tracing",
  "xguitare-dsp",
 ]
 

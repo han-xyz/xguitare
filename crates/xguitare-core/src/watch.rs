@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tracing::warn;
-
 use crate::control::EngineState;
 use crate::engine::Command;
 use crate::{Bank, BankEntry};
@@ -14,6 +12,7 @@ pub enum Action {
     Reload { program: usize },
     LogAndKeep { file: PathBuf, error: String },
     EngineBusy { file: PathBuf },
+    Warn(String),
     Nothing,
 }
 
@@ -55,22 +54,22 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
         return actions;
     }
     match state.bank.position(&active_file) {
-        Some(program) => actions.push(reload(state, program)),
-        None => warn!(
+        Some(program) => actions.extend(reload(state, program)),
+        None => actions.push(Action::Warn(format!(
             "active preset file {} removed; still running",
             active_file.display()
-        ),
+        ))),
     }
     actions
 }
 
-fn reload(state: &mut EngineState, program: usize) -> Action {
+fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
     let preset = match &state.bank.entries[program] {
         BankEntry::Invalid { file, error } => {
-            return Action::LogAndKeep {
+            return vec![Action::LogAndKeep {
                 file: file.clone(),
                 error: error.clone(),
-            };
+            }];
         }
         BankEntry::Valid { preset, .. } => preset.clone(),
     };
@@ -79,7 +78,7 @@ fn reload(state: &mut EngineState, program: usize) -> Action {
         .as_ref()
         .is_some_and(|(_, live)| *live == preset)
     {
-        return Action::Nothing;
+        return vec![Action::Nothing];
     }
     let file = state.bank.entries[program].file().to_path_buf();
     let built = preset.build(
@@ -91,15 +90,16 @@ fn reload(state: &mut EngineState, program: usize) -> Action {
     let (rack, warnings) = match built {
         Ok(built) => built,
         Err(err) => {
-            return Action::LogAndKeep {
+            return vec![Action::LogAndKeep {
                 file,
                 error: err.to_string(),
-            };
+            }];
         }
     };
-    for warning in &warnings {
-        warn!("{warning}");
-    }
+    let mut actions: Vec<Action> = warnings
+        .iter()
+        .map(|warning| Action::Warn(warning.to_string()))
+        .collect();
     state.queues.drain_from_audio();
     if state
         .queues
@@ -107,10 +107,12 @@ fn reload(state: &mut EngineState, program: usize) -> Action {
         .push(Command::SwapRack(Box::new(rack)))
         .is_err()
     {
-        return Action::EngineBusy { file };
+        actions.push(Action::EngineBusy { file });
+        return actions;
     }
     state.active = Some((file, preset));
-    Action::Reload { program }
+    actions.push(Action::Reload { program });
+    actions
 }
 
 fn is_toml(path: &Path) -> bool {

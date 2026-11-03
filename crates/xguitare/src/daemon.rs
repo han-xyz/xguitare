@@ -298,6 +298,7 @@ fn apply_bank_changes(state: &mut EngineState, bank_watch: &mut BankWatch) {
                     file.display()
                 );
             }
+            Action::Warn(warning) => warn!("{warning}"),
             Action::Nothing => {}
         }
     }
@@ -313,7 +314,11 @@ fn apply_program_changes(state: &mut EngineState) {
         let load = Request::Load {
             preset: program.to_string(),
         };
-        match handle(state, load) {
+        let (response, warnings) = handle(state, load);
+        for warning in warnings {
+            warn!("{warning}");
+        }
+        match response {
             Response::Ok(_) => {
                 let name = state.active.as_ref().map_or("", |(_, preset)| &preset.name);
                 info!("loaded {program} {name}");
