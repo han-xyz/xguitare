@@ -230,3 +230,19 @@ fn save_prints_path() {
     assert_eq!(out.code, 0);
     assert_eq!(out.stdout, "saved /bank/01-clean.toml\n");
 }
+
+#[test]
+fn control_chars_in_names_are_replaced() {
+    let out = cli(
+        &["list"],
+        reply(
+            r#"{"ok":true,"active":0,"entries":[{"program":0,"name":"Evil\u001b]0;x\u0007","valid":true}]}"#,
+        ),
+    );
+    assert_eq!(out.stdout, " 0* Evil\u{fffd}]0;x\u{fffd}\n");
+    let out = cli(
+        &["load", "x"],
+        reply(r#"{"ok":false,"error":"no preset 'x\u001b[2J\u007f'"}"#),
+    );
+    assert_eq!(out.stderr, "error: no preset 'x\u{fffd}[2J\u{fffd}'\n");
+}

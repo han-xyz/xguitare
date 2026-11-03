@@ -86,7 +86,7 @@ pub fn run_cli(
     });
     let written = match result {
         Ok(text) => write!(out, "{text}").map(|()| 0),
-        Err(message) => writeln!(err, "error: {message}").map(|()| 1),
+        Err(message) => writeln!(err, "error: {}", without_control_chars(&message)).map(|()| 1),
     };
     written.unwrap_or(1)
 }
@@ -195,12 +195,25 @@ fn items(value: &Value) -> impl Iterator<Item = &Value> {
 fn text(value: &Value) -> String {
     match value {
         Value::Null => "-".to_string(),
-        Value::String(text) => text.clone(),
+        Value::String(text) => without_control_chars(text),
         Value::Number(number) if number.is_f64() => number
             .as_f64()
             .map_or_else(|| number.to_string(), |float| float.to_string()),
         other => other.to_string(),
     }
+}
+
+/// Replaces every control character with U+FFFD, so text from the Daemon cannot send terminal escape sequences.
+fn without_control_chars(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() {
+                char::REPLACEMENT_CHARACTER
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 impl fmt::Display for TransportError {
