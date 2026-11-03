@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -42,7 +42,7 @@ fn server(test: &str) -> Server {
         active: None,
         shared: Arc::new(EngineShared::default()),
         queues,
-        config: Config::load(Some(&dir.join("absent.toml"))).unwrap(),
+        config: empty_config(&dir),
         connections: Vec::new(),
         sample_rate: 48_000.0,
         max_frames: 128,
@@ -122,4 +122,10 @@ fn regular_file_at_socket_path_is_refused_and_kept() {
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
     fs::remove_dir_all(&dir).unwrap();
+}
+
+fn empty_config(dir: &Path) -> Config {
+    let path = dir.join("config");
+    fs::write(&path, "").unwrap();
+    Config::load(Some(&path)).unwrap()
 }

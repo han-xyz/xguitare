@@ -200,7 +200,7 @@ pw-link "Midi-Bridge:Midi Through: Port-0 (capture)" xguitare:midi_in
 
 ## Config
 
-Optional file: `~/.config/xguitare/config.toml` (`$XDG_CONFIG_HOME/xguitare/config.toml`), or any path given with `xguitare --config <path> <subcommand>`. A missing file means all defaults; an unknown key is an error. Every key with its default:
+Optional file: `~/.config/xguitare/config.toml` (`$XDG_CONFIG_HOME/xguitare/config.toml`), or any path given with `xguitare --config <path> <subcommand>`. A missing default file means all defaults; a `--config` path must exist (`<path>: not found` otherwise); an unknown key is an error. Every key with its default:
 
 ```toml
 bank_dir = "/home/you/.config/xguitare/bank"   # default: <config dir>/bank

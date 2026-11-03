@@ -23,9 +23,12 @@ impl TempDir {
     }
 
     pub fn config(&self) -> Config {
+        let path = self.path.join("config.toml");
+        fs::write(&path, "").unwrap();
         Config {
             socket: self.socket(),
-            ..Config::load(Some(&self.path.join("absent.toml"))).unwrap()
+            socket_is_fallback: false,
+            ..Config::load(Some(&path)).unwrap()
         }
     }
 }
@@ -36,7 +39,6 @@ impl Drop for TempDir {
     }
 }
 
-/// Accepts one client and answers each request line with the next of `replies`, then closes the stream.
 pub fn serve(socket: &Path, replies: &[&str]) -> thread::JoinHandle<()> {
     let listener = UnixListener::bind(socket).unwrap();
     let replies: Vec<String> = replies.iter().map(|line| format!("{line}\n")).collect();

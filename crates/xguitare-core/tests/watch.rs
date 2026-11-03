@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -27,7 +27,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         panic!("01-clean.toml should be valid");
     };
     let active = Some((file.clone(), preset.clone()));
-    let mut config = Config::load(Some(&dir.join("absent.toml"))).unwrap();
+    let mut config = empty_config(&dir);
     config.bank_dir = dir;
     let (queues, audio) = engine_queues(QUEUE_CAPACITY);
     let state = EngineState {
@@ -238,4 +238,10 @@ fn reindex_and_reload_bump_revision() {
         [Action::Reindex, Action::Reload { program: 0 }]
     );
     assert_eq!(state.revision, 4);
+}
+
+fn empty_config(dir: &Path) -> Config {
+    let path = dir.join("config");
+    fs::write(&path, "").unwrap();
+    Config::load(Some(&path)).unwrap()
 }

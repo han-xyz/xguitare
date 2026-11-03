@@ -30,7 +30,6 @@ pub struct UnixSocketTransport {
 }
 
 impl UnixSocketTransport {
-    /// Refuses an insecure `/tmp` fallback socket directory, as every client does before it connects.
     pub fn from_config(config: &Config) -> Result<Self, ClientError> {
         check_socket_dir(config)?;
         Ok(UnixSocketTransport {
@@ -53,7 +52,6 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// Refuses an insecure `/tmp` fallback socket directory, then connects with a 1 s read and 5 s write timeout.
     pub fn connect(config: &Config) -> Result<Connection, ClientError> {
         check_socket_dir(config)?;
         let reader = connect(&config.socket, READ_TIMEOUT, WRITE_TIMEOUT)?;

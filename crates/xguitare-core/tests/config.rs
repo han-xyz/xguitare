@@ -13,17 +13,12 @@ fn config_file(test: &str, contents: &str) -> PathBuf {
 }
 
 #[test]
-fn defaults_when_missing() {
+fn explicit_missing_path_is_error() {
     let path = std::env::temp_dir().join("xguitare-config-does-not-exist/config.toml");
-    let config = Config::load(Some(&path)).unwrap();
-    assert_eq!(config.buffer_size, 128);
-    assert_eq!(config.crossfade_ms, 20.0);
-    assert_eq!(config.ir_max_ms, 100.0);
-    assert_eq!(config.ports.input, "auto");
-    assert_eq!(config.ports.output_left, "auto");
-    assert_eq!(config.ports.output_right, "auto");
-    assert!(config.bank_dir.ends_with("xguitare/bank"));
-    assert!(config.socket.ends_with("xguitare.sock"));
+    assert_eq!(
+        Config::load(Some(&path)).unwrap_err().to_string(),
+        format!("{}: not found", path.display())
+    );
 }
 
 #[test]
@@ -51,7 +46,7 @@ fn bad_toml_reports_position() {
 fn partial_file_fills_defaults() {
     let path = config_file("partial", "buffer_size = 64\n");
     let config = Config::load(Some(&path)).unwrap();
-    let defaults = Config::load(Some(&path.with_file_name("absent.toml"))).unwrap();
+    let defaults = Config::load(Some(&config_file("partial-empty", ""))).unwrap();
     assert_eq!(config.buffer_size, 64);
     assert_eq!(config.bank_dir, defaults.bank_dir);
     assert_eq!(config.socket, defaults.socket);

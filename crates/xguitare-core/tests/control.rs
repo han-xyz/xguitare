@@ -53,7 +53,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     shared.xruns.store(3, Ordering::Relaxed);
     shared.callback_ns_max.store(250_000, Ordering::Relaxed);
     shared.callback_ns_last.store(90_000, Ordering::Relaxed);
-    let mut config = Config::load(Some(&dir.0.join("absent.toml"))).unwrap();
+    let mut config = empty_config(&dir.0);
     config.bank_dir = dir.0.clone();
     let (queues, audio) = engine_queues(QUEUE_CAPACITY);
     let state = EngineState {
@@ -601,4 +601,10 @@ fn reprepare_bumps_revision() {
     ));
     reprepare(&mut state, 512).unwrap();
     assert_eq!(revision(&mut state), 3);
+}
+
+fn empty_config(dir: &Path) -> Config {
+    let path = dir.join("config");
+    fs::write(&path, "").unwrap();
+    Config::load(Some(&path)).unwrap()
 }

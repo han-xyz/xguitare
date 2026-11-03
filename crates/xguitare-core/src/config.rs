@@ -54,6 +54,9 @@ pub enum ConfigError {
     BufferSize {
         path: PathBuf,
     },
+    NotFound {
+        path: PathBuf,
+    },
 }
 
 #[derive(Deserialize)]
@@ -79,10 +82,16 @@ impl Config {
     pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
         let dirs = ProjectDirs::from("", "", "xguitare").ok_or(ConfigError::NoHomeDir)?;
         let default_path = dirs.config_dir().join(CONFIG_FILE);
+        let explicit = path.is_some();
         let path = path.unwrap_or(&default_path);
         let defaults = Config::default_for(&dirs)?;
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
+            Err(error) if error.kind() == ErrorKind::NotFound && explicit => {
+                return Err(ConfigError::NotFound {
+                    path: path.to_path_buf(),
+                });
+            }
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(defaults),
             Err(source) => {
                 return Err(ConfigError::Io {
@@ -225,6 +234,7 @@ impl fmt::Display for ConfigError {
                 "{}: buffer_size must be between 1 and {SWITCHER_MAX_FRAMES}",
                 path.display()
             ),
+            ConfigError::NotFound { path } => write!(f, "{}: not found", path.display()),
         }
     }
 }

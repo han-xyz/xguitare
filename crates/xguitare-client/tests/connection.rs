@@ -6,7 +6,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{TempDir, answer, serve};
-use xguitare_client::{ClientError, Connection};
+use xguitare_client::{ClientError, Connection, UnixSocketTransport};
+use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 
 const STATUS: &str = r#"{"ok":true,"preset":"Clean","revision":3}"#;
@@ -98,4 +99,28 @@ fn malformed_line_is_protocol_error() {
         "{err}"
     );
     server.join().unwrap();
+}
+
+#[test]
+fn symlinked_fallback_dir_is_refused() {
+    let dir = TempDir::new("symlink");
+    let target = dir.path.join("real");
+    let link = dir.path.join("link");
+    fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let config = Config {
+        socket: link.join("s.sock"),
+        socket_is_fallback: true,
+        ..dir.config()
+    };
+    let refusal = format!(
+        "refusing socket directory {}: it is a symlink",
+        link.display()
+    );
+    let err = Connection::connect(&config).err().unwrap();
+    assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
+    assert_eq!(err.to_string(), refusal);
+    let err = UnixSocketTransport::from_config(&config).err().unwrap();
+    assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
+    assert_eq!(err.to_string(), refusal);
 }
