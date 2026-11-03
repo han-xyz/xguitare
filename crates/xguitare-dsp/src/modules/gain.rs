@@ -1,7 +1,8 @@
+use super::db_to_linear;
+use crate::smooth::Smoother;
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const LEVEL: usize = 0;
-const SMOOTHING_SECONDS: f32 = 0.005;
 
 static SPEC: ModuleSpec = ModuleSpec {
     type_name: "gain",
@@ -17,9 +18,7 @@ static SPEC: ModuleSpec = ModuleSpec {
 
 pub struct Gain {
     level_db: f32,
-    target: f32,
-    current: f32,
-    coeff: f32,
+    level: Smoother,
 }
 
 impl Gain {
@@ -27,9 +26,7 @@ impl Gain {
         let level_db = SPEC.params[LEVEL].default;
         Gain {
             level_db,
-            target: db_to_linear(level_db),
-            current: db_to_linear(level_db),
-            coeff: 0.0,
+            level: Smoother::new(db_to_linear(level_db)),
         }
     }
 }
@@ -46,18 +43,18 @@ impl Module for Gain {
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_frames: usize) {
-        self.coeff = (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp();
+        self.level.prepare(sample_rate);
     }
 
     fn reset(&mut self) {
-        self.current = self.target;
+        self.level.snap();
     }
 
     fn set_param(&mut self, idx: usize, value: f32) {
         debug_assert!(idx == LEVEL, "gain has no parameter {idx}");
         let spec = &SPEC.params[LEVEL];
         self.level_db = value.clamp(spec.min, spec.max);
-        self.target = db_to_linear(self.level_db);
+        self.level.set_target(db_to_linear(self.level_db));
     }
 
     fn param(&self, idx: usize) -> f32 {
@@ -67,12 +64,7 @@ impl Module for Gain {
 
     fn process(&mut self, io: &mut AudioBuffers) {
         for sample in &mut io.mono[..io.frames] {
-            self.current = self.target + self.coeff * (self.current - self.target);
-            *sample *= self.current;
+            *sample *= self.level.next_value();
         }
     }
-}
-
-fn db_to_linear(db: f32) -> f32 {
-    10.0_f32.powf(db / 20.0)
 }

@@ -32,7 +32,13 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let session = jack_adapter::start(
         config.buffer_size,
         |sample_rate, max_frames| {
-            build_rack(preset.as_ref(), sample_rate, max_frames, &config.bank_dir)
+            build_rack(
+                preset.as_ref(),
+                sample_rate,
+                max_frames,
+                &config.bank_dir,
+                config.ir_max_ms,
+            )
         },
         Arc::clone(&shared),
     )
@@ -80,10 +86,14 @@ fn build_rack(
     sample_rate: f32,
     max_frames: usize,
     bank_dir: &Path,
+    ir_max_ms: f32,
 ) -> Rack {
     if let Some(preset) = preset {
-        match preset.build(sample_rate, max_frames, bank_dir) {
-            Ok(rack) => {
+        match preset.build(sample_rate, max_frames, bank_dir, ir_max_ms) {
+            Ok((rack, warnings)) => {
+                for warning in &warnings {
+                    warn!("{warning}");
+                }
                 info!("loaded 0 {}", preset.name);
                 return rack;
             }

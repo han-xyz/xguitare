@@ -1,0 +1,23 @@
+name = "Full chain"
+
+[[module]]
+type = "gate"
+
+[[module]]
+type = "drive"
+
+[[module]]
+type = "preamp"
+
+[[module]]
+type = "tonestack"
+
+[[module]]
+type = "cabinet"
+ir = "missing.wav"
+
+[[module]]
+type = "delay"
+
+[[module]]
+type = "reverb"

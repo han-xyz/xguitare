@@ -2,13 +2,15 @@ mod address;
 mod bank;
 mod config;
 pub mod engine;
+mod ir;
 mod preset;
 mod registry;
 
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
 pub use bank::{Bank, BankEntry};
 pub use config::{AUTO_PORT, Config, ConfigError, Ports};
-pub use preset::{BuildError, Preset, PresetError, PresetModule};
+pub use ir::{IrError, load_ir};
+pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
 
 fn line_col(text: &str, offset: usize) -> (usize, usize) {

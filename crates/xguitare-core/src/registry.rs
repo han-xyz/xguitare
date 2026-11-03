@@ -1,11 +1,5 @@
-use xguitare_dsp::{Channels, Gain, Module, ModuleSpec};
-
-// Placeholder: parse and the layout check know the cabinet; task 08 replaces it with the dsp spec and a constructor.
-static CABINET: ModuleSpec = ModuleSpec {
-    type_name: "cabinet",
-    channels: Channels::MonoToStereo,
-    params: &[],
-};
+use xguitare_dsp::modules::cabinet::Cabinet;
+use xguitare_dsp::{Delay, Drive, Gain, Gate, Module, ModuleSpec, Preamp, Reverb, Tonestack};
 
 struct Entry {
     spec: &'static ModuleSpec,
@@ -25,8 +19,32 @@ impl Default for ModuleRegistry {
                     construct: Some(|| Box::new(Gain::new())),
                 },
                 Entry {
-                    spec: &CABINET,
+                    spec: Gate::new().spec(),
+                    construct: Some(|| Box::new(Gate::new())),
+                },
+                Entry {
+                    spec: Drive::new().spec(),
+                    construct: Some(|| Box::new(Drive::new())),
+                },
+                Entry {
+                    spec: Preamp::new().spec(),
+                    construct: Some(|| Box::new(Preamp::new())),
+                },
+                Entry {
+                    spec: Tonestack::new().spec(),
+                    construct: Some(|| Box::new(Tonestack::new())),
+                },
+                Entry {
+                    spec: Cabinet::new(None).spec(),
                     construct: None,
+                },
+                Entry {
+                    spec: Delay::new().spec(),
+                    construct: Some(|| Box::new(Delay::new())),
+                },
+                Entry {
+                    spec: Reverb::new().spec(),
+                    construct: Some(|| Box::new(Reverb::new())),
                 },
             ],
         }
