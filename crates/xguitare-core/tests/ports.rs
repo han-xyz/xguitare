@@ -14,59 +14,39 @@ fn ports(input: &str, output_left: &str, output_right: &str) -> Ports {
 }
 
 fn capture() -> Vec<String> {
-    names(&["card:capture_FL", "card:capture_FR"])
+    names(&["card:capture_FR", "card:capture_FL"])
 }
 
 fn playback() -> Vec<String> {
-    names(&["card:playback_FL", "card:playback_FR"])
+    names(&["card:playback_FR", "card:playback_FL"])
 }
 
 #[test]
-fn choose_ports_defaults() {
+fn choose_ports_auto_single_device() {
     let choice = choose_ports(&capture(), &playback(), &ports("auto", "auto", "auto"));
     assert_eq!(choice.input.as_deref(), Some("card:capture_FL"));
     assert_eq!(choice.output_left.as_deref(), Some("card:playback_FL"));
     assert_eq!(choice.output_right.as_deref(), Some("card:playback_FR"));
+    assert!(choice.warnings.is_empty(), "{:?}", choice.warnings);
 }
 
 #[test]
-fn choose_ports_config_override() {
+fn choose_ports_auto_several_devices_picks_none() {
     let choice = choose_ports(
-        &capture(),
-        &playback(),
-        &ports("other:out", "card:playback_FR", "auto"),
+        &names(&["mic:capture_MONO", "card:capture_FL"]),
+        &names(&["hdmi:playback_FL", "card:playback_FL"]),
+        &ports("auto", "auto", "auto"),
     );
-    assert_eq!(choice.input.as_deref(), Some("other:out"));
-    assert_eq!(choice.output_left.as_deref(), Some("card:playback_FR"));
-    assert_eq!(choice.output_right.as_deref(), Some("card:playback_FR"));
-}
-
-#[test]
-fn choose_ports_missing_is_none() {
-    let choice = choose_ports(&[], &[], &ports("auto", "auto", "auto"));
     assert_eq!(choice.input, None);
     assert_eq!(choice.output_left, None);
     assert_eq!(choice.output_right, None);
-}
-
-#[test]
-fn choose_ports_empty_means_none() {
-    let choice = choose_ports(&capture(), &playback(), &ports("", "", ""));
-    assert_eq!(choice.input, None);
-    assert_eq!(choice.output_left, None);
-    assert_eq!(choice.output_right, None);
-}
-
-#[test]
-fn choose_ports_auto_picks_first_physical() {
-    let choice = choose_ports(
-        &names(&["a:capture_1", "b:capture_1"]),
-        &playback(),
-        &ports("auto", "auto", ""),
+    assert_eq!(
+        choice.warnings,
+        [
+            "several capture devices; pick one in config ports.input: card:capture_FL, mic:capture_MONO",
+            "several playback devices; pick one in config ports.output_left, ports.output_right: card:playback_FL, hdmi:playback_FL",
+        ]
     );
-    assert_eq!(choice.input.as_deref(), Some("a:capture_1"));
-    assert_eq!(choice.output_left.as_deref(), Some("card:playback_FL"));
-    assert_eq!(choice.output_right, None);
 }
 
 #[test]
@@ -78,4 +58,54 @@ fn choose_ports_auto_single_playback_warns() {
     );
     assert_eq!(choice.output_left.as_deref(), Some("card:playback_MONO"));
     assert_eq!(choice.output_right, None);
+    assert_eq!(choice.warnings.len(), 1, "{:?}", choice.warnings);
+}
+
+#[test]
+fn choose_ports_pattern_wildcard() {
+    let available = names(&[
+        "Razer Mono:capture_MONO",
+        "Split Scarlett Input 1:capture_FL",
+        "Scarlett Input 1:capture_FR",
+        "Scarlett Input 1:capture_FL",
+    ]);
+    let choice = choose_ports(
+        &available,
+        &playback(),
+        &ports("Scarlett*capture_FL", "", ""),
+    );
+    assert_eq!(choice.input.as_deref(), Some("Scarlett Input 1:capture_FL"));
+    let reversed = choose_ports(
+        &available,
+        &playback(),
+        &ports("capture_FL*Scarlett", "", ""),
+    );
+    assert_eq!(reversed.input, None);
+}
+
+#[test]
+fn choose_ports_pattern_exact() {
+    let exact = choose_ports(&capture(), &playback(), &ports("card:capture_FR", "", ""));
+    assert_eq!(exact.input.as_deref(), Some("card:capture_FR"));
+    let partial = choose_ports(&capture(), &playback(), &ports("card:capture", "", ""));
+    assert_eq!(partial.input, None);
+}
+
+#[test]
+fn choose_ports_pattern_no_match() {
+    let choice = choose_ports(&capture(), &playback(), &ports("Focusrite*", "", ""));
+    assert_eq!(choice.input, None);
+    assert_eq!(
+        choice.warnings,
+        ["port 'Focusrite*' not found, not connecting"]
+    );
+}
+
+#[test]
+fn choose_ports_empty_means_none() {
+    let choice = choose_ports(&capture(), &playback(), &ports("", "", ""));
+    assert_eq!(choice.input, None);
+    assert_eq!(choice.output_left, None);
+    assert_eq!(choice.output_right, None);
+    assert!(choice.warnings.is_empty(), "{:?}", choice.warnings);
 }

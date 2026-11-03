@@ -17,25 +17,137 @@ pub struct PortChoice {
     pub input: Option<String>,
     pub output_left: Option<String>,
     pub output_right: Option<String>,
+    pub warnings: Vec<String>,
 }
 
-/// Resolves each configured port: `"auto"` takes the nth port of the physical list (input and left the first, right the second), `""` means do not connect, any other name is used verbatim.
+const WILDCARD: char = '*';
+
+/// Resolves each configured port against the physical capture and playback ports (see `Ports` for the three forms); every port left unconnected for a reason the user can fix adds a line to `warnings`.
 pub fn choose_ports(
     available_capture: &[String],
     available_playback: &[String],
     ports: &Ports,
 ) -> PortChoice {
+    let capture = sorted(available_capture);
+    let playback = sorted(available_playback);
+    let mut warnings = Vec::new();
+
+    let input = match ports.input.as_str() {
+        AUTO_PORT => auto_device(&capture, "capture", "ports.input", &mut warnings)
+            .and_then(|device| device.first().cloned()),
+        pattern => first_match(&capture, pattern, &mut warnings),
+    };
+
+    let auto_outputs: Vec<&str> = [
+        ("ports.output_left", &ports.output_left),
+        ("ports.output_right", &ports.output_right),
+    ]
+    .into_iter()
+    .filter(|(_, configured)| configured.as_str() == AUTO_PORT)
+    .map(|(key, _)| key)
+    .collect();
+    let playback_device = if auto_outputs.is_empty() {
+        None
+    } else {
+        auto_device(
+            &playback,
+            "playback",
+            &auto_outputs.join(", "),
+            &mut warnings,
+        )
+    };
+
+    let output_left = match ports.output_left.as_str() {
+        AUTO_PORT => playback_device
+            .as_ref()
+            .and_then(|device| device.first().cloned()),
+        pattern => first_match(&playback, pattern, &mut warnings),
+    };
+    let output_right = match ports.output_right.as_str() {
+        AUTO_PORT => playback_device.as_ref().and_then(|device| {
+            let second = device.get(1).cloned();
+            if second.is_none() {
+                warnings.push(format!(
+                    "playback device has only {}, not connecting ports.output_right",
+                    device[0]
+                ));
+            }
+            second
+        }),
+        pattern => first_match(&playback, pattern, &mut warnings),
+    };
+
     PortChoice {
-        input: resolve(available_capture, 0, &ports.input),
-        output_left: resolve(available_playback, 0, &ports.output_left),
-        output_right: resolve(available_playback, 1, &ports.output_right),
+        input,
+        output_left,
+        output_right,
+        warnings,
     }
 }
 
-fn resolve(physical: &[String], auto_index: usize, configured: &str) -> Option<String> {
-    match configured {
-        "" => None,
-        AUTO_PORT => physical.get(auto_index).cloned(),
-        name => Some(name.to_string()),
+fn sorted(names: &[String]) -> Vec<String> {
+    let mut names = names.to_vec();
+    names.sort();
+    names
+}
+
+fn device_of(port: &str) -> &str {
+    port.rsplit_once(':').map_or(port, |(device, _)| device)
+}
+
+fn auto_device(
+    sorted_ports: &[String],
+    kind: &str,
+    keys: &str,
+    warnings: &mut Vec<String>,
+) -> Option<Vec<String>> {
+    let Some(first) = sorted_ports.first() else {
+        warnings.push(format!(
+            "no physical {kind} port found for {keys}, not connecting"
+        ));
+        return None;
+    };
+    if sorted_ports
+        .iter()
+        .any(|port| device_of(port) != device_of(first))
+    {
+        warnings.push(format!(
+            "several {kind} devices; pick one in config {keys}: {}",
+            sorted_ports.join(", ")
+        ));
+        return None;
     }
+    Some(sorted_ports.to_vec())
+}
+
+fn first_match(
+    sorted_ports: &[String],
+    pattern: &str,
+    warnings: &mut Vec<String>,
+) -> Option<String> {
+    if pattern.is_empty() {
+        return None;
+    }
+    let found = sorted_ports
+        .iter()
+        .find(|name| matches_pattern(pattern, name))
+        .cloned();
+    if found.is_none() {
+        warnings.push(format!("port '{pattern}' not found, not connecting"));
+    }
+    found
+}
+
+fn matches_pattern(pattern: &str, name: &str) -> bool {
+    if !pattern.contains(WILDCARD) {
+        return pattern == name;
+    }
+    let mut rest = name;
+    for piece in pattern.split(WILDCARD) {
+        match rest.find(piece) {
+            Some(at) => rest = &rest[at + piece.len()..],
+            None => return false,
+        }
+    }
+    true
 }

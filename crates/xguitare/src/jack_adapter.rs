@@ -8,8 +8,8 @@ use jack::{
     NotificationHandler, Port, PortFlags, PortSpec, ProcessHandler, ProcessScope,
 };
 use tracing::{info, warn};
+use xguitare_core::Ports;
 use xguitare_core::engine::{EngineShared, choose_ports};
-use xguitare_core::{AUTO_PORT, Ports};
 use xguitare_dsp::Rack;
 
 const CLIENT_NAME: &str = "xguitare";
@@ -78,30 +78,19 @@ impl Session {
         let capture = physical_ports(client, PortFlags::IS_OUTPUT);
         let playback = physical_ports(client, PortFlags::IS_INPUT);
         let choice = choose_ports(&capture, &playback, ports);
+        for warning in &choice.warnings {
+            warn!("{warning}");
+        }
         let own = |port: &str| format!("{}:{port}", client.name());
         let links = [
-            ("in", &ports.input, choice.input.map(|src| (src, own("in")))),
-            (
-                "out_l",
-                &ports.output_left,
-                choice.output_left.map(|dst| (own("out_l"), dst)),
-            ),
-            (
-                "out_r",
-                &ports.output_right,
-                choice.output_right.map(|dst| (own("out_r"), dst)),
-            ),
+            choice.input.map(|src| (src, own("in"))),
+            choice.output_left.map(|dst| (own("out_l"), dst)),
+            choice.output_right.map(|dst| (own("out_r"), dst)),
         ];
-        for (port, configured, link) in links {
-            match link {
-                Some((src, dst)) => match client.connect_ports_by_name(&src, &dst) {
-                    Ok(()) => info!("connected {src} -> {dst}"),
-                    Err(err) => warn!("cannot connect {src} -> {dst}: {err}"),
-                },
-                None if configured == AUTO_PORT => {
-                    warn!("no physical port for '{port}', not connecting")
-                }
-                None => {}
+        for (src, dst) in links.into_iter().flatten() {
+            match client.connect_ports_by_name(&src, &dst) {
+                Ok(()) => info!("connected {src} -> {dst}"),
+                Err(err) => warn!("cannot connect {src} -> {dst}: {err}"),
             }
         }
     }
@@ -125,13 +114,11 @@ fn register<PS: PortSpec>(
 }
 
 fn physical_ports(client: &Client, direction: PortFlags) -> Vec<String> {
-    let mut names = client.ports(
+    client.ports(
         None,
         Some(AUDIO_PORT_TYPE),
         direction | PortFlags::IS_PHYSICAL,
-    );
-    names.sort();
-    names
+    )
 }
 
 struct Notifications {
