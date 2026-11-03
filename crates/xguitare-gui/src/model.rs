@@ -35,6 +35,53 @@ pub enum Command {
     Quit,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BankRow {
+    pub program: usize,
+    pub name: String,
+    pub active: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KeyEvent {
+    Digit(u8),
+    CtrlS,
+}
+
+pub fn bank_rows(list_payload: &Value) -> Vec<BankRow> {
+    let active = list_payload["active"].as_u64();
+    let Some(entries) = list_payload["entries"].as_array() else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .map(|entry| {
+            let program = entry["program"].as_u64().unwrap_or_default();
+            let valid = entry["valid"].as_bool().unwrap_or_default();
+            BankRow {
+                program: program as usize,
+                name: entry["name"].as_str().unwrap_or_default().to_string(),
+                active: active == Some(program),
+                error: (!valid).then(|| entry["error"].as_str().unwrap_or_default().to_string()),
+            }
+        })
+        .collect()
+}
+
+pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
+    match key {
+        KeyEvent::CtrlS => Some(Command::Save),
+        KeyEvent::Digit(digit @ 1..=9) => {
+            let program = usize::from(digit - 1);
+            rows.iter()
+                .find(|row| row.program == program && row.error.is_none())
+                .map(|row| Command::Load(row.program.to_string()))
+        }
+        KeyEvent::Digit(_) => None,
+    }
+}
+
 pub fn spawn_policy(failures: u32, last_spawn: Option<Instant>, now: Instant) -> bool {
     failures >= SPAWN_AFTER_FAILURES
         && last_spawn.is_none_or(|spawned| now.duration_since(spawned) >= SPAWN_BACKOFF)

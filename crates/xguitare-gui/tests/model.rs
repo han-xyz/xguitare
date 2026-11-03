@@ -5,8 +5,9 @@ use serde_json::json;
 use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_gui::model::{
-    Command, Link, counts_toward_spawn, meter_fraction, peak_fraction, refresh_decision,
-    requests_until_quit, spawn_policy, status_line,
+    BankRow, Command, KeyEvent, Link, bank_rows, counts_toward_spawn, key_to_command,
+    meter_fraction, peak_fraction, refresh_decision, requests_until_quit, spawn_policy,
+    status_line,
 };
 
 #[test]
@@ -131,4 +132,65 @@ fn link_text() {
         ),
         "starting daemon 3s"
     );
+}
+
+fn starter_list() -> serde_json::Value {
+    json!({
+        "active": 1,
+        "entries": [
+            {"program": 0, "name": "Clean", "valid": true},
+            {"program": 1, "name": "Crunch", "valid": true},
+            {"program": 2, "name": "Lead", "valid": true},
+            {"program": 3, "name": "06-broken", "valid": false, "error": "line 1:8: string values must be quoted"},
+        ],
+    })
+}
+
+#[test]
+fn bank_rows_marks_active_and_invalid() {
+    let rows = bank_rows(&starter_list());
+    let row = |program: usize, name: &str, active: bool, error: Option<&str>| BankRow {
+        program,
+        name: name.to_string(),
+        active,
+        error: error.map(str::to_string),
+    };
+    assert_eq!(
+        rows,
+        vec![
+            row(0, "Clean", false, None),
+            row(1, "Crunch", true, None),
+            row(2, "Lead", false, None),
+            row(
+                3,
+                "06-broken",
+                false,
+                Some("line 1:8: string values must be quoted")
+            ),
+        ]
+    );
+    let no_active =
+        json!({"active": null, "entries": [{"program": 0, "name": "Clean", "valid": true}]});
+    assert!(!bank_rows(&no_active)[0].active);
+}
+
+#[test]
+fn key_digit_loads_program_only_when_valid() {
+    let rows = bank_rows(&starter_list());
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(3), &rows),
+        Some(Command::Load("2".to_string()))
+    );
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(1), &rows),
+        Some(Command::Load("0".to_string()))
+    );
+    assert_eq!(key_to_command(KeyEvent::Digit(4), &rows), None);
+    assert_eq!(key_to_command(KeyEvent::Digit(5), &rows), None);
+    assert_eq!(key_to_command(KeyEvent::Digit(0), &rows), None);
+}
+
+#[test]
+fn key_ctrl_s_is_save() {
+    assert_eq!(key_to_command(KeyEvent::CtrlS, &[]), Some(Command::Save));
 }
