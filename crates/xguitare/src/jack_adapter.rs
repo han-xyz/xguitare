@@ -7,7 +7,7 @@ use jack::{
     AsyncClient, AudioIn, AudioOut, Client, ClientOptions, Control, Frames, MidiIn,
     NotificationHandler, Port, PortFlags, PortSpec, ProcessHandler, ProcessScope,
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use xguitare_core::Ports;
 use xguitare_core::engine::{AvailablePort, EngineShared, choose_ports};
 use xguitare_dsp::Rack;
@@ -25,6 +25,7 @@ pub enum JackError {
 
 pub struct Session {
     client: AsyncClient<Notifications, Process>,
+    max_frames: usize,
 }
 
 /// Opens the JACK client, requests `buffer_size`, builds the Rack with the effective sample rate and buffer size, and activates it.
@@ -42,7 +43,7 @@ pub fn start(
     if let Err(err) = client.set_buffer_size(buffer_size) {
         warn!("cannot set buffer size {buffer_size}: {err}");
     }
-    let max_frames = client.buffer_size() as usize;
+    let max_frames = (buffer_size as usize).max(client.buffer_size() as usize);
     let rack = build_rack(client.sample_rate() as f32, max_frames);
     let process = Process {
         rack,
@@ -69,14 +70,23 @@ pub fn start(
             "buffer size is {effective}, wanted {buffer_size}; force it with: pw-metadata -n settings 0 clock.force-quantum {buffer_size}"
         );
     }
-    Ok(Session { client })
+    if effective as usize > max_frames {
+        error!(
+            "buffer size {effective} exceeds prepared {max_frames}; output is silent until restart; force it with: pw-metadata -n settings 0 clock.force-quantum {buffer_size}"
+        );
+    }
+    Ok(Session { client, max_frames })
 }
 
 impl Session {
+    pub fn max_frames(&self) -> usize {
+        self.max_frames
+    }
+
     pub fn connect(&self, ports: &Ports) {
         let client = self.client.as_client();
-        let capture = audio_ports(client, PortFlags::IS_OUTPUT);
-        let playback = audio_ports(client, PortFlags::IS_INPUT);
+        let capture = foreign_audio_ports(client, PortFlags::IS_OUTPUT);
+        let playback = foreign_audio_ports(client, PortFlags::IS_INPUT);
         let choice = choose_ports(&capture, &playback, ports);
         for warning in &choice.warnings {
             warn!("{warning}");
@@ -113,7 +123,8 @@ fn register<PS: PortSpec>(
         .map_err(|err| JackError::RegisterPort(name, err))
 }
 
-fn audio_ports(client: &Client, direction: PortFlags) -> Vec<AvailablePort> {
+fn foreign_audio_ports(client: &Client, direction: PortFlags) -> Vec<AvailablePort> {
+    let own_prefix = format!("{}:", client.name());
     let physical = client.ports(
         None,
         Some(AUDIO_PORT_TYPE),
@@ -122,6 +133,7 @@ fn audio_ports(client: &Client, direction: PortFlags) -> Vec<AvailablePort> {
     client
         .ports(None, Some(AUDIO_PORT_TYPE), direction)
         .into_iter()
+        .filter(|name| !name.starts_with(&own_prefix))
         .map(|name| AvailablePort {
             is_physical: physical.contains(&name),
             name,

@@ -34,10 +34,10 @@ pub fn choose_ports(
     available_playback: &[AvailablePort],
     ports: &Ports,
 ) -> PortChoice {
-    let capture = sorted_names(available_capture, false);
-    let playback = sorted_names(available_playback, false);
-    let physical_capture = sorted_names(available_capture, true);
-    let physical_playback = sorted_names(available_playback, true);
+    let capture = sorted(port_names(available_capture, false));
+    let playback = sorted(port_names(available_playback, false));
+    let physical_capture = port_names(available_capture, true);
+    let physical_playback = port_names(available_playback, true);
     let mut warnings = Vec::new();
 
     let input = match ports.input.as_str() {
@@ -93,12 +93,15 @@ pub fn choose_ports(
     }
 }
 
-fn sorted_names(available: &[AvailablePort], physical_only: bool) -> Vec<String> {
-    let mut names: Vec<String> = available
+fn port_names(available: &[AvailablePort], physical_only: bool) -> Vec<String> {
+    available
         .iter()
         .filter(|port| port.is_physical || !physical_only)
         .map(|port| port.name.clone())
-        .collect();
+        .collect()
+}
+
+fn sorted(mut names: Vec<String>) -> Vec<String> {
     names.sort();
     names
 }
@@ -107,29 +110,27 @@ fn device_of(port: &str) -> &str {
     port.rsplit_once(':').map_or(port, |(device, _)| device)
 }
 
+/// Returns the ports of the only device in `ports`, in the order given (JACK's order, which is channel order).
 fn auto_device(
-    sorted_ports: &[String],
+    ports: &[String],
     kind: &str,
     keys: &str,
     warnings: &mut Vec<String>,
 ) -> Option<Vec<String>> {
-    let Some(first) = sorted_ports.first() else {
+    let Some(first) = ports.first() else {
         warnings.push(format!(
             "no physical {kind} port found for {keys}, not connecting"
         ));
         return None;
     };
-    if sorted_ports
-        .iter()
-        .any(|port| device_of(port) != device_of(first))
-    {
+    if ports.iter().any(|port| device_of(port) != device_of(first)) {
         warnings.push(format!(
             "several {kind} devices; pick one in config {keys}: {}",
-            sorted_ports.join(", ")
+            sorted(ports.to_vec()).join(", ")
         ));
         return None;
     }
-    Some(sorted_ports.to_vec())
+    Some(ports.to_vec())
 }
 
 fn first_match(
@@ -154,12 +155,18 @@ fn matches_pattern(pattern: &str, name: &str) -> bool {
     if !pattern.contains(WILDCARD) {
         return pattern == name;
     }
-    let mut rest = name;
-    for piece in pattern.split(WILDCARD) {
+    let mut pieces = pattern.split(WILDCARD);
+    let first = pieces.next().unwrap_or_default();
+    let mut middle: Vec<&str> = pieces.collect();
+    let last = middle.pop().unwrap_or_default();
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    for piece in middle {
         match rest.find(piece) {
             Some(at) => rest = &rest[at + piece.len()..],
             None => return false,
         }
     }
-    true
+    rest.ends_with(last)
 }

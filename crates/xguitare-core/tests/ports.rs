@@ -23,11 +23,11 @@ fn ports(input: &str, output_left: &str, output_right: &str) -> Ports {
 }
 
 fn capture() -> Vec<AvailablePort> {
-    names(&["card:capture_FR", "card:capture_FL"])
+    names(&["card:capture_FL", "card:capture_FR"])
 }
 
 fn playback() -> Vec<AvailablePort> {
-    names(&["card:playback_FR", "card:playback_FL"])
+    names(&["card:playback_FL", "card:playback_FR"])
 }
 
 #[test]
@@ -127,4 +127,33 @@ fn choose_ports_pattern_matches_non_physical() {
     assert_eq!(choice.input.as_deref(), Some("Scarlett Input 1:capture_FL"));
     let auto = choose_ports(&capture, &playback(), &ports("auto", "", ""));
     assert_eq!(auto.input.as_deref(), Some("Scarlett 0:capture_AUX0"));
+}
+
+#[test]
+fn choose_ports_pattern_is_anchored() {
+    let capture = names(&["Scarlett:capture_10", "Split Scarlett Input 1:capture_FL"]);
+    let choice = choose_ports(&capture, &playback(), &ports("Scarlett*capture_1", "", ""));
+    assert_eq!(choice.input, None);
+    let choice = choose_ports(&capture, &playback(), &ports("Scarlett*capture_FL", "", ""));
+    assert_eq!(choice.input, None);
+    let choice = choose_ports(&capture, &playback(), &ports("*capture_FL", "", ""));
+    assert_eq!(
+        choice.input.as_deref(),
+        Some("Split Scarlett Input 1:capture_FL")
+    );
+}
+
+#[test]
+fn choose_ports_auto_uses_jack_order() {
+    let surround = names(&[
+        "card:playback_FL",
+        "card:playback_FR",
+        "card:playback_RL",
+        "card:playback_RR",
+        "card:playback_FC",
+        "card:playback_LFE",
+    ]);
+    let choice = choose_ports(&capture(), &surround, &ports("auto", "auto", "auto"));
+    assert_eq!(choice.output_left.as_deref(), Some("card:playback_FL"));
+    assert_eq!(choice.output_right.as_deref(), Some("card:playback_FR"));
 }

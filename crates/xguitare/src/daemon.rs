@@ -15,7 +15,7 @@ use xguitare_dsp::Rack;
 use crate::jack_adapter::{self, JackError};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
-const POLLS_PER_XRUN_REPORT: u32 = 10;
+const POLLS_PER_REPORT: u32 = 10;
 
 #[derive(Debug)]
 pub enum DaemonError {
@@ -27,6 +27,7 @@ pub enum DaemonError {
 pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let config = Config::load(config_path).map_err(DaemonError::Config)?;
     let preset = first_preset(&config.bank_dir);
+    let stop = register_stop_signals()?;
     let shared = Arc::new(EngineShared::default());
     let session = jack_adapter::start(
         config.buffer_size,
@@ -37,7 +38,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     )
     .map_err(DaemonError::Jack)?;
     session.connect(&config.ports);
-    wait_for_signal(&shared)?;
+    watch_until_stopped(&stop, &shared, session.max_frames());
     session.stop().map_err(DaemonError::Jack)?;
     info!("stopped");
     Ok(())
@@ -94,17 +95,23 @@ fn build_rack(
     rack
 }
 
-fn wait_for_signal(shared: &EngineShared) -> Result<(), DaemonError> {
+fn register_stop_signals() -> Result<Arc<AtomicBool>, DaemonError> {
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGINT, SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&stop)).map_err(DaemonError::Signal)?;
     }
+    Ok(stop)
+}
+
+fn watch_until_stopped(stop: &AtomicBool, shared: &EngineShared, max_frames: usize) {
     let mut reported_xruns = 0;
+    let mut reported_oversize = 0;
+    let mut reported_buffer_size = shared.buffer_size.load(Ordering::Relaxed);
     let mut polls = 0;
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(POLL_INTERVAL);
         polls += 1;
-        if polls % POLLS_PER_XRUN_REPORT != 0 {
+        if polls % POLLS_PER_REPORT != 0 {
             continue;
         }
         let xruns = shared.xruns.load(Ordering::Relaxed);
@@ -112,8 +119,20 @@ fn wait_for_signal(shared: &EngineShared) -> Result<(), DaemonError> {
             warn!("xruns: {xruns} (+{})", xruns - reported_xruns);
             reported_xruns = xruns;
         }
+        let buffer_size = shared.buffer_size.load(Ordering::Relaxed);
+        if buffer_size != reported_buffer_size {
+            warn!("buffer size changed to {buffer_size}");
+            reported_buffer_size = buffer_size;
+        }
+        let oversize = shared.oversize_blocks.load(Ordering::Relaxed);
+        if oversize > reported_oversize {
+            warn!(
+                "{} oversize blocks dropped: quantum {buffer_size} > prepared {max_frames}; restart or force the quantum",
+                oversize - reported_oversize
+            );
+            reported_oversize = oversize;
+        }
     }
-    Ok(())
 }
 
 impl fmt::Display for DaemonError {
