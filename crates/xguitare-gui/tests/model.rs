@@ -3,9 +3,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use xguitare_client::ClientError;
+use xguitare_core::control::Request;
 use xguitare_gui::model::{
-    Link, counts_toward_spawn, meter_fraction, peak_fraction, refresh_decision, spawn_policy,
-    status_line,
+    Command, Link, counts_toward_spawn, meter_fraction, peak_fraction, refresh_decision,
+    requests_until_quit, spawn_policy, status_line,
 };
 
 #[test]
@@ -32,6 +33,36 @@ fn spawn_policy_ignores_live_daemon_errors() {
     assert!(!counts_toward_spawn(&ClientError::InsecureSocketDir(
         "socket directory /tmp/xguitare-1000 is owned by another user".to_string()
     )));
+}
+
+#[test]
+fn commands_before_quit_are_sent_in_order() {
+    let queued = vec![
+        Command::Save,
+        Command::Set {
+            param: "preamp.gain".to_string(),
+            value: 70.0,
+        },
+        Command::Quit,
+        Command::Load("2".to_string()),
+    ];
+    let expected = vec![
+        Request::Save,
+        Request::Set {
+            param: "preamp.gain".to_string(),
+            value: 70.0,
+        },
+    ];
+    assert_eq!(requests_until_quit(queued), (expected, true));
+    assert_eq!(
+        requests_until_quit(vec![Command::Load("Lead".to_string())]),
+        (
+            vec![Request::Load {
+                preset: "Lead".to_string()
+            }],
+            false
+        )
+    );
 }
 
 #[test]

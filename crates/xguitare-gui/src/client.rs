@@ -15,7 +15,8 @@ use xguitare_client::{ClientError, Connection};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 use xguitare_gui::model::{
-    Command, Link, Snapshot, counts_toward_spawn, refresh_decision, spawn_policy,
+    Command, Link, Snapshot, counts_toward_spawn, refresh_decision, requests_until_quit,
+    spawn_policy,
 };
 
 pub const TICK: Duration = Duration::from_millis(50);
@@ -96,17 +97,15 @@ impl Client {
     }
 
     fn handle_commands(&mut self, commands: &Receiver<Command>) -> bool {
-        let mut requests = Vec::new();
-        loop {
+        let mut queued = Vec::new();
+        let ui_gone = loop {
             match commands.try_recv() {
-                Ok(command) => match request_for(command) {
-                    Some(req) => requests.push(req),
-                    None => return false,
-                },
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return false,
+                Ok(command) => queued.push(command),
+                Err(TryRecvError::Empty) => break false,
+                Err(TryRecvError::Disconnected) => break true,
             }
-        }
+        };
+        let (requests, quit) = requests_until_quit(queued);
         for req in requests {
             let text = match self.request(&req) {
                 Ok(Response::Ok(payload)) => payload.to_string(),
@@ -115,7 +114,7 @@ impl Client {
             };
             self.snapshot.last_message = Some((text, Instant::now()));
         }
-        true
+        !quit && !ui_gone
     }
 
     fn poll(&mut self, now: Instant) {
@@ -288,15 +287,6 @@ impl Client {
         if let Err(err) = child.kill().and_then(|()| child.wait().map(drop)) {
             warn!("cannot kill daemon: {err}");
         }
-    }
-}
-
-fn request_for(command: Command) -> Option<Request> {
-    match command {
-        Command::Load(preset) => Some(Request::Load { preset }),
-        Command::Set { param, value } => Some(Request::Set { param, value }),
-        Command::Save => Some(Request::Save),
-        Command::Quit => None,
     }
 }
 

@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use xguitare_client::ClientError;
+use xguitare_core::control::Request;
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
@@ -42,6 +43,20 @@ pub fn spawn_policy(failures: u32, last_spawn: Option<Instant>, now: Instant) ->
 /// Only a missing socket counts: a Daemon that does not answer may still be alive, and an insecure socket directory fails a spawned Daemon too.
 pub fn counts_toward_spawn(err: &ClientError) -> bool {
     matches!(err, ClientError::NotRunning(_))
+}
+
+pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
+    let mut requests = Vec::new();
+    for command in queued {
+        let req = match command {
+            Command::Load(preset) => Request::Load { preset },
+            Command::Set { param, value } => Request::Set { param, value },
+            Command::Save => Request::Save,
+            Command::Quit => return (requests, true),
+        };
+        requests.push(req);
+    }
+    (requests, false)
 }
 
 pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {
