@@ -23,10 +23,10 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
     )
     .unwrap();
     let bank = Bank::load_dir(&dir).unwrap();
-    let BankEntry::Valid { preset, .. } = &bank.entries[0] else {
+    let BankEntry::Valid { file, preset } = &bank.entries[0] else {
         panic!("01-clean.toml should be valid");
     };
-    let active = Some((0, preset.clone()));
+    let active = Some((file.clone(), preset.clone()));
     let mut config = Config::load(Some(&dir.join("absent.toml"))).unwrap();
     config.bank_dir = dir;
     let (queues, audio) = engine_queues(QUEUE_CAPACITY);
@@ -80,6 +80,53 @@ fn unchanged_content_is_nothing() {
     assert_eq!(actions, [Action::Reindex, Action::Nothing]);
     assert!(audio.commands.pop().is_err());
     assert_eq!(active_level(&state), -6.0);
+}
+
+#[test]
+fn removed_active_file_keeps_rack_and_clears_program() {
+    let (mut state, mut audio) = state("removed");
+    let file = active_file(&state);
+    let loud = state.config.bank_dir.join("02-loud.toml");
+    let loud_text = fs::read_to_string(&loud).unwrap();
+    fs::remove_file(&file).unwrap();
+    assert_eq!(apply(&mut state, &[file]), [Action::Reindex]);
+    assert!(audio.commands.pop().is_err());
+    assert_eq!(active_level(&state), -3.0);
+    let Response::Ok(status) = handle(&mut state, Request::Status) else {
+        panic!("status failed");
+    };
+    assert!(status["program"].is_null(), "{status}");
+    assert!(matches!(
+        handle(&mut state, Request::Save),
+        Response::Err { .. }
+    ));
+    assert_eq!(fs::read_to_string(&loud).unwrap(), loud_text);
+    fs::write(&loud, loud_text.replace("level = 6", "level = 1")).unwrap();
+    assert_eq!(apply(&mut state, &[loud]), [Action::Reindex]);
+    assert!(audio.commands.pop().is_err());
+}
+
+#[test]
+fn engine_busy_retries_next_tick() {
+    let (mut state, mut audio) = state("busy");
+    let set = || Command::SetParam {
+        module: 0,
+        param: 0,
+        value: 0.0,
+    };
+    while state.queues.commands.push(set()).is_ok() {}
+    let file = active_file(&state);
+    fs::write(&file, CLEAN.replace("level = -3", "level = 2")).unwrap();
+    assert_eq!(
+        apply(&mut state, std::slice::from_ref(&file)),
+        [Action::Reindex, Action::EngineBusy { file: file.clone() }]
+    );
+    while audio.commands.pop().is_ok() {}
+    assert_eq!(
+        apply(&mut state, &[file]),
+        [Action::Reindex, Action::Reload { program: 0 }]
+    );
+    assert_eq!(active_level(&state), 2.0);
 }
 
 #[test]

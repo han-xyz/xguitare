@@ -47,6 +47,7 @@ fn rack_switcher_does_not_allocate() {
     let mut right = [0.0; BLOCK];
     assert_no_alloc(|| {
         for _ in 0..20 {
+            switcher.push_program_change(3);
             switcher.apply_commands();
             switcher.process(&input, &mut left, &mut right);
         }

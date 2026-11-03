@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -17,8 +17,9 @@ use crate::preset::shortest_f64;
 use crate::{Bank, BankEntry, Config, ModuleRegistry, ParamAddress, Preset, PresetModule};
 use crate::{ResolveError, resolve};
 
-pub(crate) const ENGINE_BUSY: &str = "engine busy";
+const ENGINE_BUSY: &str = "engine busy";
 const NO_PRESET: &str = "no preset loaded";
+const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";
 const NANOS_PER_MICRO: u64 = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,7 +42,7 @@ pub enum Response {
 
 pub struct EngineState {
     pub bank: Bank,
-    pub active: Option<(usize, Preset)>,
+    pub active: Option<(PathBuf, Preset)>,
     pub shared: Arc<EngineShared>,
     pub queues: EngineQueues,
     pub config: Config,
@@ -130,8 +131,8 @@ fn load(state: &mut EngineState, key: &str) -> Result<Value, String> {
         .bank
         .by_name_or_number(key)
         .ok_or_else(|| format!("no preset '{key}'"))?;
-    let preset = match entry {
-        BankEntry::Valid { preset, .. } => preset.clone(),
+    let (file, preset) = match entry {
+        BankEntry::Valid { file, preset } => (file.clone(), preset.clone()),
         BankEntry::Invalid { error, .. } => return Err(error.clone()),
     };
     let (rack, warnings) = preset
@@ -152,7 +153,7 @@ fn load(state: &mut EngineState, key: &str) -> Result<Value, String> {
         .push(Command::SwapRack(Box::new(rack)))
         .map_err(|_| ENGINE_BUSY.to_string())?;
     let payload = json!({"program": program, "name": preset.name});
-    state.active = Some((program, preset));
+    state.active = Some((file, preset));
     Ok(payload)
 }
 
@@ -184,17 +185,17 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
 }
 
 fn save(state: &EngineState) -> Result<Value, String> {
-    let (program, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
-    let file = state
-        .bank
-        .entries
-        .get(*program)
-        .ok_or("active preset file is gone")?
-        .file();
+    let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
+    if state.bank.position(file).is_none() {
+        return Err(ACTIVE_REMOVED.to_string());
+    }
     let tmp = file.with_extension("toml.tmp");
     fs::write(&tmp, preset.to_toml())
         .and_then(|()| fs::rename(&tmp, file))
-        .map_err(|err| format!("cannot save {}: {err}", file.display()))?;
+        .map_err(|err| {
+            let _ = fs::remove_file(&tmp);
+            format!("cannot save {}: {err}", file.display())
+        })?;
     Ok(json!({"path": file.display().to_string()}))
 }
 
@@ -260,7 +261,10 @@ fn unit_text(unit: Unit) -> &'static str {
 }
 
 fn active_program(state: &EngineState) -> Option<usize> {
-    state.active.as_ref().map(|(program, _)| *program)
+    state
+        .active
+        .as_ref()
+        .and_then(|(file, _)| state.bank.position(file))
 }
 
 fn file_stem(file: &Path) -> String {

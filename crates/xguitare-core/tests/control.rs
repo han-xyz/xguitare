@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -31,10 +31,10 @@ fn bank_dir(test: &str) -> PathBuf {
 fn state(test: &str) -> (EngineState, AudioQueues) {
     let dir = bank_dir(test);
     let bank = Bank::load_dir(&dir).unwrap();
-    let BankEntry::Valid { preset, .. } = &bank.entries[0] else {
+    let BankEntry::Valid { file, preset } = &bank.entries[0] else {
         panic!("01-clean.toml should be valid");
     };
-    let active = Some((0, preset.clone()));
+    let active = Some((file.clone(), preset.clone()));
     let shared = Arc::new(EngineShared::default());
     shared.sample_rate.store(48_000, Ordering::Relaxed);
     shared.buffer_size.store(128, Ordering::Relaxed);
@@ -55,6 +55,23 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         max_frames: 128,
     };
     (state, audio)
+}
+
+fn active_file(state: &EngineState) -> Option<PathBuf> {
+    state.active.as_ref().map(|(file, _)| file.clone())
+}
+
+fn remove_active_file_and_reindex(state: &mut EngineState) {
+    fs::remove_file(state.config.bank_dir.join("01-clean.toml")).unwrap();
+    state.bank = Bank::load_dir(&state.config.bank_dir).unwrap();
+}
+
+fn tmp_files(dir: &Path) -> Vec<PathBuf> {
+    fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "tmp"))
+        .collect()
 }
 
 fn ok(response: Response) -> Value {
@@ -139,7 +156,10 @@ fn load_by_name_and_number() {
     ));
     assert_eq!(payload, json!({"program": 0, "name": "Clean"}));
     assert!(matches!(audio.commands.pop(), Ok(Command::SwapRack(_))));
-    assert_eq!(state.active.as_ref().map(|(program, _)| *program), Some(0));
+    assert_eq!(
+        active_file(&state),
+        Some(state.config.bank_dir.join("01-clean.toml"))
+    );
 }
 
 #[test]
@@ -153,7 +173,10 @@ fn load_invalid_entry_is_error() {
     ));
     assert!(message.starts_with("line 1:"), "{message}");
     assert!(audio.commands.is_empty());
-    assert_eq!(state.active.as_ref().map(|(program, _)| *program), Some(0));
+    assert_eq!(
+        active_file(&state),
+        Some(state.config.bank_dir.join("01-clean.toml"))
+    );
 }
 
 #[test]
@@ -273,7 +296,10 @@ fn queue_full_is_engine_busy() {
         )),
         "engine busy"
     );
-    assert_eq!(state.active.as_ref().map(|(program, _)| *program), Some(0));
+    assert_eq!(
+        active_file(&state),
+        Some(state.config.bank_dir.join("01-clean.toml"))
+    );
     assert_eq!(audio.commands.slots(), QUEUE_CAPACITY);
 }
 
@@ -317,11 +343,7 @@ fn save_writes_live_values_atomically() {
     assert_eq!(payload, json!({"path": file.display().to_string()}));
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(saved.modules[0].params[0], ("level".to_string(), -6.0));
-    let leftovers: Vec<_> = fs::read_dir(&state.config.bank_dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "tmp"))
-        .collect();
+    let leftovers = tmp_files(&state.config.bank_dir);
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
 
@@ -330,4 +352,44 @@ fn save_without_preset_is_error() {
     let (mut state, _audio) = state("save-without-preset");
     state.active = None;
     assert_eq!(error(handle(&mut state, Request::Save)), "no preset loaded");
+}
+
+#[test]
+fn save_after_active_removed_is_error() {
+    let (mut state, _audio) = state("save-after-removal");
+    remove_active_file_and_reindex(&mut state);
+    let loud = fs::read_to_string(state.config.bank_dir.join("02-loud.toml")).unwrap();
+    assert_eq!(
+        error(handle(&mut state, Request::Save)),
+        "active preset file was removed; load a preset first"
+    );
+    assert!(!state.config.bank_dir.join("01-clean.toml").exists());
+    assert_eq!(
+        fs::read_to_string(state.config.bank_dir.join("02-loud.toml")).unwrap(),
+        loud
+    );
+    assert!(tmp_files(&state.config.bank_dir).is_empty());
+}
+
+#[test]
+fn status_program_null_after_removal() {
+    let (mut state, _audio) = state("status-after-removal");
+    remove_active_file_and_reindex(&mut state);
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["program"], Value::Null);
+    assert_eq!(status["preset"], "Clean");
+    let list = ok(handle(&mut state, Request::List));
+    assert_eq!(list["active"], Value::Null);
+}
+
+#[test]
+fn failed_save_leaves_no_tmp() {
+    let (mut state, _audio) = state("save-fails");
+    let target = state.config.bank_dir.join("01-clean.toml");
+    fs::remove_file(&target).unwrap();
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("occupied"), "").unwrap();
+    let message = error(handle(&mut state, Request::Save));
+    assert!(message.starts_with("cannot save"), "{message}");
+    assert!(tmp_files(&state.config.bank_dir).is_empty());
 }

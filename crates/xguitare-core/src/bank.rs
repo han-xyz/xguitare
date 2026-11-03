@@ -32,6 +32,10 @@ impl Bank {
         })
     }
 
+    pub fn position(&self, file: &Path) -> Option<usize> {
+        self.entries.iter().position(|entry| entry.file() == file)
+    }
+
     pub fn by_name_or_number(&self, key: &str) -> Option<(usize, &BankEntry)> {
         if !key.is_empty() && key.bytes().all(|b| b.is_ascii_digit()) {
             let number: usize = key.parse().ok()?;

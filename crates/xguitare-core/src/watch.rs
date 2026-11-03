@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use tracing::warn;
 
-use crate::control::{ENGINE_BUSY, EngineState};
+use crate::control::EngineState;
 use crate::engine::Command;
 use crate::{Bank, BankEntry};
 
@@ -13,10 +13,10 @@ pub enum Action {
     Reindex,
     Reload { program: usize },
     LogAndKeep { file: PathBuf, error: String },
+    EngineBusy { file: PathBuf },
     Nothing,
 }
 
-/// A file's modification time and length.
 pub type FileStamp = (SystemTime, u64);
 
 /// Returns the event paths whose stamp differs between the two snapshots; a path missing from a snapshot does not exist at that time.
@@ -38,11 +38,6 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
     if changed.is_empty() {
         return Vec::new();
     }
-    let active_file = state
-        .active
-        .as_ref()
-        .and_then(|(program, _)| state.bank.entries.get(*program))
-        .map(|entry| entry.file().to_path_buf());
     state.bank = match Bank::load_dir(&state.bank.dir) {
         Ok(bank) => bank,
         Err(err) => {
@@ -53,21 +48,18 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
         }
     };
     let mut actions = vec![Action::Reindex];
-    let Some(active_file) = active_file else {
+    let Some(active_file) = state.active.as_ref().map(|(file, _)| file.clone()) else {
         return actions;
     };
-    let Some(program) = position(&state.bank, &active_file) else {
-        warn!(
+    if !changed.iter().any(|path| same_file(path, &active_file)) {
+        return actions;
+    }
+    match state.bank.position(&active_file) {
+        Some(program) => actions.push(reload(state, program)),
+        None => warn!(
             "active preset file {} removed; still running",
             active_file.display()
-        );
-        return actions;
-    };
-    if let Some(active) = state.active.as_mut() {
-        active.0 = program;
-    }
-    if changed.iter().any(|path| same_file(path, &active_file)) {
-        actions.push(reload(state, program));
+        ),
     }
     actions
 }
@@ -115,23 +107,14 @@ fn reload(state: &mut EngineState, program: usize) -> Action {
         .push(Command::SwapRack(Box::new(rack)))
         .is_err()
     {
-        return Action::LogAndKeep {
-            file,
-            error: ENGINE_BUSY.to_string(),
-        };
+        return Action::EngineBusy { file };
     }
-    state.active = Some((program, preset));
+    state.active = Some((file, preset));
     Action::Reload { program }
 }
 
 fn is_toml(path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "toml")
-}
-
-fn position(bank: &Bank, file: &Path) -> Option<usize> {
-    bank.entries
-        .iter()
-        .position(|entry| same_file(entry.file(), file))
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {

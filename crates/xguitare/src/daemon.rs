@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::io::{self, ErrorKind};
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
@@ -55,9 +56,9 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         |sample_rate, max_frames| {
             let built = preset
                 .as_ref()
-                .and_then(|preset| build_rack(preset, sample_rate, max_frames, &config));
+                .and_then(|(_, preset)| build_rack(preset, sample_rate, max_frames, &config));
             if built.is_some() {
-                active = preset.map(|preset| (0, preset));
+                active = preset;
             }
             built.unwrap_or_else(|| passthrough_rack(sample_rate, max_frames))
         },
@@ -119,7 +120,7 @@ fn load_bank(bank_dir: &Path) -> Bank {
     }
 }
 
-fn first_preset(bank: &Bank) -> Option<Preset> {
+fn first_preset(bank: &Bank) -> Option<(PathBuf, Preset)> {
     match bank.entries.first() {
         None => {
             warn!("bank {} is empty, running passthrough", bank.dir.display());
@@ -129,7 +130,7 @@ fn first_preset(bank: &Bank) -> Option<Preset> {
             error!("preset {}: {error}, running passthrough", file.display());
             None
         }
-        Some(BankEntry::Valid { preset, .. }) => Some(preset.clone()),
+        Some(BankEntry::Valid { file, preset }) => Some((file.clone(), preset.clone())),
     }
 }
 
@@ -173,6 +174,7 @@ struct BankWatch {
     _debouncer: Option<Debouncer<RecommendedWatcher>>,
     events: Receiver<DebounceEventResult>,
     stamps: HashMap<PathBuf, FileStamp>,
+    retries: Vec<PathBuf>,
 }
 
 impl BankWatch {
@@ -188,18 +190,22 @@ impl BankWatch {
             _debouncer: debounced_watcher(dir, sender),
             events,
             stamps: snapshot(&paths),
+            retries: Vec::new(),
         }
     }
 
     /// Returns the paths whose modification time or length changed since last seen, so reading a file (the re-scan included) is not a change.
     fn changed_paths(&mut self) -> Vec<PathBuf> {
         // Editors save by truncating or by writing a new file and renaming it, so every event kind on a path is a candidate change.
-        let candidates: Vec<PathBuf> = self
+        let events = self
             .events
             .try_iter()
             .filter_map(|result| result.inspect_err(|err| warn!("bank watcher: {err}")).ok())
             .flatten()
-            .map(|event| event.path)
+            .map(|event| event.path);
+        let candidates: Vec<PathBuf> = mem::take(&mut self.retries)
+            .into_iter()
+            .chain(events)
             .collect();
         let current = snapshot(&candidates);
         let changed = changed_paths(&self.stamps, &current, &candidates);
@@ -210,6 +216,12 @@ impl BankWatch {
             };
         }
         changed
+    }
+
+    /// Makes `file` count as changed on the next poll, whether or not it changes again.
+    fn retry_next_tick(&mut self, file: PathBuf) {
+        self.stamps.remove(&file);
+        self.retries.push(file);
     }
 }
 
@@ -259,6 +271,10 @@ fn apply_bank_changes(state: &mut EngineState, bank_watch: &mut BankWatch) {
             Action::Reload { program } => {
                 let name = state.active.as_ref().map_or("", |(_, preset)| &preset.name);
                 info!("reloaded {program} {name}");
+            }
+            Action::EngineBusy { file } => {
+                warn!("preset {}: engine busy; retrying", file.display());
+                bank_watch.retry_next_tick(file);
             }
             Action::LogAndKeep { file, error } => {
                 warn!(
