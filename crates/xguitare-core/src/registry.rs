@@ -1,5 +1,5 @@
 use xguitare_dsp::modules::cabinet::Cabinet;
-use xguitare_dsp::{Drive, Gain, Gate, Module, ModuleSpec, Preamp, Tonestack};
+use xguitare_dsp::{Delay, Drive, Gain, Gate, Module, ModuleSpec, Preamp, Reverb, Tonestack};
 
 struct Entry {
     spec: &'static ModuleSpec,
@@ -37,6 +37,14 @@ impl Default for ModuleRegistry {
                 Entry {
                     spec: Cabinet::new(None).spec(),
                     construct: None,
+                },
+                Entry {
+                    spec: Delay::new().spec(),
+                    construct: Some(|| Box::new(Delay::new())),
+                },
+                Entry {
+                    spec: Reverb::new().spec(),
+                    construct: Some(|| Box::new(Reverb::new())),
                 },
             ],
         }

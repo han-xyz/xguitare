@@ -3,7 +3,7 @@
 
 use std::f64::consts::TAU;
 
-use xguitare_dsp::{Module, Rack};
+use xguitare_dsp::{AudioBuffers, Module, Rack};
 
 pub const SAMPLE_RATE: f32 = 48_000.0;
 pub const BLOCK: usize = 128;
@@ -77,4 +77,29 @@ pub fn full_scale_sine_then_noise() -> Vec<f32> {
     let mut input = sine(1.0, 220.0, SAMPLE_RATE, second);
     input.extend(noise(1.0, second));
     input
+}
+
+pub fn prepared<M: Module>(mut module: M, settings: &[(usize, f32)]) -> M {
+    for &(idx, value) in settings {
+        module.set_param(idx, value);
+    }
+    module.prepare(SAMPLE_RATE, BLOCK);
+    module.reset();
+    module
+}
+
+pub fn run_stereo(module: &mut dyn Module, left: &mut [f32], right: &mut [f32]) {
+    let mut mono = [0.0; BLOCK];
+    for (l, r) in left.chunks_mut(BLOCK).zip(right.chunks_mut(BLOCK)) {
+        module.process(&mut AudioBuffers {
+            frames: l.len(),
+            mono: &mut mono,
+            left: l,
+            right: r,
+        });
+    }
+}
+
+pub fn frames(ms: f32) -> usize {
+    (ms / 1000.0 * SAMPLE_RATE) as usize
 }

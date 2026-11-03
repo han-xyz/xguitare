@@ -1,8 +1,10 @@
 pub mod cabinet;
+pub mod delay;
 pub mod drive;
 pub mod gain;
 pub mod gate;
 pub mod preamp;
+pub mod reverb;
 pub mod tonestack;
 
 fn db_to_linear(db: f32) -> f32 {

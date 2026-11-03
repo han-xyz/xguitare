@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use xguitare_core::{BuildWarning, Preset, PresetModule};
+use xguitare_core::{BuildWarning, Preset, PresetError, PresetModule};
 
 struct TempDir(PathBuf);
 
@@ -135,4 +135,51 @@ fn zero_length_ir_builds_passthrough_with_warning() {
         .finalize()
         .unwrap();
     assert_passthrough_with_ir_warning(&dir.0, "empty.wav");
+}
+
+#[test]
+fn full_chain_parses_and_builds() {
+    let preset = Preset::parse(include_str!("fixtures/full-chain.toml")).unwrap();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let (mut rack, warnings) = preset.build(48_000.0, 128, &fixtures, 100.0).unwrap();
+    assert!(
+        matches!(warnings.as_slice(), [BuildWarning::Ir { id, .. }] if id == "cabinet"),
+        "{warnings:?}"
+    );
+    let types: Vec<&str> = rack
+        .modules()
+        .iter()
+        .map(|(_, module)| module.spec().type_name)
+        .collect();
+    assert_eq!(
+        types,
+        [
+            "gate",
+            "drive",
+            "preamp",
+            "tonestack",
+            "cabinet",
+            "delay",
+            "reverb"
+        ]
+    );
+    let input = [0.25; 128];
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    rack.process(&input, &mut left, &mut right);
+    assert!(left.iter().chain(&right).all(|s| s.is_finite()));
+}
+
+#[test]
+fn layout_error_from_rack() {
+    let cabinet = "[[module]]\ntype = \"cabinet\"\nir = \"cab.wav\"\n";
+    let stereo_first = format!("name = \"X\"\n[[module]]\ntype = \"delay\"\n{cabinet}");
+    let mono_last = format!("name = \"X\"\n{cabinet}[[module]]\ntype = \"gain\"\n");
+    for (text, expected) in [
+        (stereo_first, "stereo module 'delay' before the cabinet"),
+        (mono_last, "mono module 'gain' after the cabinet"),
+    ] {
+        let error = Preset::parse(&text).unwrap_err();
+        assert!(matches!(error, PresetError::Layout(_)), "{error:?}");
+        assert_eq!(error.to_string(), expected);
+    }
 }
