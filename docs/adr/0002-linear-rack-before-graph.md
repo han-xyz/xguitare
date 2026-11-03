@@ -1,0 +1,3 @@
+# The Rack is a linear Module list, not a node graph
+
+The long-term goal includes a DAW, which will need a routing graph with splits and merges. The first product is a live amp rack, and every preset it needs is a straight line from input to output. We build the Rack as an ordered Module list so that presets are trivially serialised, reordered and crossfaded, and the Engine stays small enough to prove real-time safety first. The graph comes when the DAW does, with the Rack becoming one node type inside it; building the graph now would delay first sound by a milestone for no preset we can play today.
