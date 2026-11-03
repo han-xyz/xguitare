@@ -13,8 +13,8 @@ One sound-shaping unit in a Rack with a fixed set of Parameters: gate, drive, pr
 _Avoid_: effect, plugin, node, block, stomp
 
 **Parameter**:
-A named control of a Module with a defined range and unit.
-_Avoid_: knob, setting, control, param
+A named control of a Module with a defined range and unit. `param` is the accepted short form in code and in the Control API (`<module>.<param>`, `params`).
+_Avoid_: knob, setting, control
 
 **Preset**:
 A named, saved Rack: its Module order and every Parameter value.

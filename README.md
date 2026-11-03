@@ -252,7 +252,7 @@ pw-metadata -n settings 0 clock.force-quantum 0
 
 **`error: daemon not running (socket ...)`.** A CLI command found no Daemon. Start one with `xguitare run`.
 
-**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The cabinet's `ir` file is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` path, which is relative to the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
+**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` path, which is relative to the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
 
 ## License
 
