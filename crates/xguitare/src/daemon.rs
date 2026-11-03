@@ -14,7 +14,9 @@ use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
-use xguitare_core::control::{EngineState, Request, Response, handle, needs_reprepare, reprepare};
+use xguitare_core::control::{
+    EngineState, Reprepare, Request, Response, handle, needs_reprepare, reprepare,
+};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
@@ -371,11 +373,14 @@ fn watch_until_stopped(
 
 fn reprepare_rack(state: &mut EngineState, buffer_size: u32) {
     match reprepare(state, buffer_size) {
-        Ok(warnings) => {
+        Ok(Reprepare::Built(warnings)) => {
             for warning in &warnings {
                 warn!("{warning}");
             }
             info!("re-prepared rack for {buffer_size} frames");
+        }
+        Ok(Reprepare::Passthrough { preset, error }) => {
+            error!("re-prepare of '{preset}' failed: {error}; running passthrough");
         }
         Err(err) => warn!("cannot re-prepare rack for {buffer_size} frames: {err}; retrying"),
     }

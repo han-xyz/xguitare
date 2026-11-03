@@ -90,27 +90,45 @@ pub fn needs_reprepare(prepared: usize, buffer_size: u32) -> bool {
     prepared != buffer_size as usize
 }
 
-/// Rebuilds the active Preset's Rack, or the empty passthrough Rack when none is active, for `buffer_size` frames and pushes it as a `SwapRack`; the build warnings come back for the caller to log.
-pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Vec<BuildWarning>, String> {
+/// What `reprepare` swapped in, for the caller to log.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reprepare {
+    /// The active Preset's Rack, or the passthrough Rack when no Preset is active.
+    Built(Vec<BuildWarning>),
+    /// The active Preset failed to build, so the passthrough Rack runs and no Preset is active.
+    Passthrough { preset: String, error: String },
+}
+
+/// Rebuilds the active Preset's Rack, or the empty passthrough Rack when none is active or the build fails, for `buffer_size` frames and pushes it as a `SwapRack`; fails only with `engine busy`, leaving the state unchanged.
+pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare, String> {
     let max_frames = buffer_size as usize;
-    let (rack, warnings) = match &state.active {
-        Some((_, preset)) => preset
+    let built = state.active.as_ref().map(|(_, preset)| {
+        preset
             .build(
                 state.sample_rate,
                 max_frames,
                 &state.config.bank_dir,
                 state.config.ir_max_ms,
             )
-            .map_err(|err| err.to_string())?,
-        None => {
-            let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
-            rack.prepare(state.sample_rate, max_frames);
-            (rack, Vec::new())
-        }
+            .map_err(|err| (preset.name.clone(), err.to_string()))
+    });
+    let (rack, outcome) = match built {
+        Some(Ok((rack, warnings))) => (rack, Reprepare::Built(warnings)),
+        Some(Err((preset, error))) => (
+            passthrough_rack(state.sample_rate, max_frames),
+            Reprepare::Passthrough { preset, error },
+        ),
+        None => (
+            passthrough_rack(state.sample_rate, max_frames),
+            Reprepare::Built(Vec::new()),
+        ),
     };
     swap_rack(state, rack)?;
+    if let Reprepare::Passthrough { .. } = outcome {
+        state.active = None;
+    }
     state.max_frames = max_frames;
-    Ok(warnings)
+    Ok(outcome)
 }
 
 impl Request {
@@ -189,6 +207,12 @@ fn load(
     let payload = json!({"program": program, "name": preset.name});
     state.active = Some((file, preset));
     Ok(payload)
+}
+
+fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
+    let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
+    rack.prepare(sample_rate, max_frames);
+    rack
 }
 
 fn swap_rack(state: &mut EngineState, rack: Rack) -> Result<(), String> {

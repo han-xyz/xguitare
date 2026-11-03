@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use directories::ProjectDirs;
 use serde::Deserialize;
 
+use crate::engine::SWITCHER_MAX_FRAMES;
+
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
 const SOCKET_DIR_MODE: u32 = 0o700;
@@ -48,6 +50,9 @@ pub enum ConfigError {
     Io {
         path: PathBuf,
         source: std::io::Error,
+    },
+    BufferSize {
+        path: PathBuf,
     },
 }
 
@@ -95,6 +100,14 @@ impl Config {
                 msg: error.message().to_string(),
             }
         })?;
+        if file
+            .buffer_size
+            .is_some_and(|size| size == 0 || size as usize > SWITCHER_MAX_FRAMES)
+        {
+            return Err(ConfigError::BufferSize {
+                path: path.to_path_buf(),
+            });
+        }
         Ok(defaults.overridden_by(file))
     }
 
@@ -207,6 +220,11 @@ impl fmt::Display for ConfigError {
                 msg,
             } => write!(f, "{}: line {line}:{col}: {msg}", path.display()),
             ConfigError::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            ConfigError::BufferSize { path } => write!(
+                f,
+                "{}: buffer_size must be between 1 and {SWITCHER_MAX_FRAMES}",
+                path.display()
+            ),
         }
     }
 }

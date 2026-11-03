@@ -95,3 +95,16 @@ fn socket_dir_refuses_symlink() {
         )
     );
 }
+
+#[test]
+fn buffer_size_out_of_range() {
+    for (test, size) in [("buffer-zero", 0), ("buffer-big", 8193)] {
+        let path = config_file(test, &format!("buffer_size = {size}\n"));
+        assert_eq!(
+            Config::load(Some(&path)).unwrap_err().to_string(),
+            format!("{}: buffer_size must be between 1 and 8192", path.display())
+        );
+    }
+    let path = config_file("buffer-max", "buffer_size = 8192\n");
+    assert_eq!(Config::load(Some(&path)).unwrap().buffer_size, 8192);
+}

@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, Request, Response, handle, handle_line, needs_reprepare, reprepare,
+    EngineState, Reprepare, Request, Response, handle, handle_line, needs_reprepare, reprepare,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Preset};
@@ -429,8 +429,10 @@ fn needs_reprepare_when_sizes_differ() {
 #[test]
 fn reprepare_swaps_in_active_preset_at_new_size() {
     let (mut state, mut audio) = state("reprepare");
-    let warnings = reprepare(&mut state, 256).unwrap();
-    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(
+        reprepare(&mut state, 256).unwrap(),
+        Reprepare::Built(Vec::new())
+    );
     let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
         panic!("expected SwapRack");
     };

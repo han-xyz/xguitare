@@ -201,7 +201,7 @@ Optional file: `~/.config/xguitare/config.toml` (`$XDG_CONFIG_HOME/xguitare/conf
 
 ```toml
 bank_dir = "/home/you/.config/xguitare/bank"   # default: <config dir>/bank
-buffer_size = 128                              # frames per JACK period requested at start
+buffer_size = 128                              # frames per JACK period requested at start, 1 to 8192
 crossfade_ms = 20                              # Preset switch crossfade
 ir_max_ms = 100                                # cabinet IRs are cut to this length
 socket = "/run/user/1000/xguitare/xguitare.sock" # default: $XDG_RUNTIME_DIR/xguitare/xguitare.sock
