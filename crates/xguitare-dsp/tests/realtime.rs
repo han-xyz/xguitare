@@ -2,7 +2,7 @@ use assert_no_alloc::*;
 use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
-use xguitare_dsp::{Delay, Drive, Gain, Gate, Module, Preamp, Rack, Reverb, Tonestack};
+use xguitare_dsp::{Compressor, Delay, Drive, Gain, Gate, Module, Preamp, Rack, Reverb, Tonestack};
 
 #[cfg(debug_assertions)]
 #[global_allocator]
@@ -48,6 +48,14 @@ fn assert_rack_does_not_allocate(module: Box<dyn Module>, settings: &[(usize, f3
 #[test]
 fn gate_does_not_allocate() {
     assert_rack_does_not_allocate(Box::new(Gate::new()), &[(0, -40.0)]);
+}
+
+#[test]
+fn compressor_does_not_allocate() {
+    assert_rack_does_not_allocate(
+        Box::new(Compressor::new()),
+        &[(0, -30.0), (1, 8.0), (2, 2.0), (3, 200.0), (4, 6.0)],
+    );
 }
 
 #[test]

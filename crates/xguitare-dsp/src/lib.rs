@@ -7,6 +7,7 @@ pub mod resample;
 pub mod smooth;
 pub mod synth_ir;
 
+pub use modules::compressor::Compressor;
 pub use modules::delay::Delay;
 pub use modules::drive::Drive;
 pub use modules::gain::Gain;

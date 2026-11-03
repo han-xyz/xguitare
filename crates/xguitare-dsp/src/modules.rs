@@ -1,4 +1,5 @@
 pub mod cabinet;
+pub mod compressor;
 pub mod delay;
 pub mod drive;
 pub mod gain;
