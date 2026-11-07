@@ -34,7 +34,7 @@ fn sized_gain_rack(levels_db: &[f32], max_frames: usize) -> Box<Rack> {
 }
 
 fn switcher(levels_db: &[f32]) -> (RackSwitcher, EngineQueues) {
-    let (control, audio) = engine_queues(CAPACITY);
+    let (control, audio, _) = engine_queues(CAPACITY);
     (
         RackSwitcher::new(gain_rack(levels_db), BLOCK, FADE, audio, Arc::default()),
         control,
@@ -115,7 +115,7 @@ fn retired_capacity_never_exceeded() {
 #[test]
 fn swap_to_larger_rack_during_oversize_period() {
     const LARGER: usize = 2 * BLOCK;
-    let (mut control, audio) = engine_queues(CAPACITY);
+    let (mut control, audio, _) = engine_queues(CAPACITY);
     let shared = Arc::new(EngineShared::default());
     let mut switcher = RackSwitcher::new(
         gain_rack(&[0.0]),

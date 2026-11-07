@@ -1,6 +1,6 @@
 use std::mem;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use xguitare_dsp::Rack;
@@ -20,6 +20,8 @@ pub struct EngineShared {
     pub input_peak_bits: AtomicU32,
     /// f32 bits of the largest |sample| over both outputs since the last `take_peak`.
     pub output_peak_bits: AtomicU32,
+    /// While true the switcher ramps both outputs to silence; the tap still carries the input.
+    pub muted: AtomicBool,
 }
 
 pub enum Command {
@@ -47,9 +49,13 @@ pub struct EngineQueues {
 pub struct AudioQueues {
     pub commands: Consumer<Command>,
     pub from_audio: Producer<FromAudio>,
+    /// The dry input, for the Tuner on the control thread.
+    pub tap: Producer<f32>,
 }
 
 const PROGRAM_CHANGE_SLOTS: usize = 16;
+const TAP_CAPACITY: usize = 16384;
+const MUTE_RAMP_FRAMES: f32 = 512.0;
 
 /// PipeWire's default `clock.quantum-limit`: the largest block the switcher's own scratch is prepared for, so a swap to a Rack re-prepared for any quantum up to it never allocates on the audio thread.
 pub const SWITCHER_MAX_FRAMES: usize = 8192;
@@ -71,10 +77,12 @@ pub fn take_peak(peak: &AtomicU32) -> f32 {
     f32::from_bits(peak.swap(0, Ordering::Relaxed))
 }
 
-pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues) {
+/// The control side, the audio side, and the control thread's end of the input tap.
+pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues, Consumer<f32>) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);
     // At most every queued SwapRack plus the current and the fading-in Rack, minus the one left current, can be retired between two drains, and `control::handle` drains before each SwapRack push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
     let (from_audio_tx, from_audio_rx) = RingBuffer::new(capacity + 2 + PROGRAM_CHANGE_SLOTS);
+    let (tap_tx, tap_rx) = RingBuffer::new(TAP_CAPACITY);
     (
         EngineQueues {
             commands: commands_tx,
@@ -84,8 +92,19 @@ pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues) {
         AudioQueues {
             commands: commands_rx,
             from_audio: from_audio_tx,
+            tap: tap_tx,
         },
+        tap_rx,
     )
+}
+
+/// Pushes `input` into the tap; when the ring is full the rest is dropped, since a slow control thread is never a reason to block.
+pub fn tap_block(tap: &mut Producer<f32>, input: &[f32]) {
+    for &sample in input {
+        if tap.push(sample).is_err() {
+            return;
+        }
+    }
 }
 
 impl EngineQueues {
@@ -115,6 +134,7 @@ pub struct RackSwitcher {
     queues: AudioQueues,
     reserved_slots: usize,
     shared: Arc<EngineShared>,
+    mute_gain: f32,
 }
 
 impl RackSwitcher {
@@ -140,6 +160,7 @@ impl RackSwitcher {
             queues,
             reserved_slots,
             shared,
+            mute_gain: 1.0,
         }
     }
 
@@ -170,8 +191,15 @@ impl RackSwitcher {
         }
     }
 
-    /// Runs one block through the current Rack, or through both while a fade runs; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for.
+    /// Taps the input, runs one block through the current Rack, or through both while a fade runs, then applies the Mute gain; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for.
     pub fn process(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
+        tap_block(&mut self.queues.tap, input);
+        let fits = self.run_racks(input, out_l, out_r);
+        self.apply_mute(out_l, out_r);
+        fits
+    }
+
+    fn run_racks(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
         let frames = input.len();
         if frames > self.current.max_frames()
             && let Some(new) = self.incoming.take_if(|new| frames <= new.max_frames())
@@ -201,6 +229,31 @@ impl RackSwitcher {
             self.retire(old);
         }
         true
+    }
+
+    fn apply_mute(&mut self, out_l: &mut [f32], out_r: &mut [f32]) {
+        let target = if self.shared.muted.load(Ordering::Relaxed) {
+            0.0
+        } else {
+            1.0
+        };
+        if self.mute_gain == target {
+            if target == 0.0 {
+                out_l.fill(0.0);
+                out_r.fill(0.0);
+            }
+            return;
+        }
+        let step = 1.0 / MUTE_RAMP_FRAMES;
+        for (left, right) in out_l.iter_mut().zip(out_r.iter_mut()) {
+            self.mute_gain = if target > self.mute_gain {
+                (self.mute_gain + step).min(target)
+            } else {
+                (self.mute_gain - step).max(target)
+            };
+            *left *= self.mute_gain;
+            *right *= self.mute_gain;
+        }
     }
 
     /// Hands a MIDI program change to the control thread, or drops it when only the slots reserved for retired Racks are free.

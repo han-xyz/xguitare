@@ -8,6 +8,7 @@ mod ir;
 pub mod ports;
 mod preset;
 mod registry;
+pub mod tuner;
 pub mod watch;
 
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};

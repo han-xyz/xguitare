@@ -1,9 +1,10 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use assert_no_alloc::*;
 use xguitare_core::engine::{
-    Command, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak, engine_queues, raise_peak,
+    Command, EngineShared, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak, engine_queues,
+    raise_peak, tap_block,
 };
 use xguitare_dsp::{Gain, Module, Rack};
 
@@ -29,7 +30,7 @@ fn sized_gain_rack(max_frames: usize) -> Box<Rack> {
 
 #[test]
 fn rack_switcher_does_not_allocate() {
-    let (mut control, audio) = engine_queues(64);
+    let (mut control, audio, _tap) = engine_queues(64);
     let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, 960, audio, Arc::default());
     for _ in 0..2 {
         assert!(
@@ -67,7 +68,7 @@ fn rack_switcher_does_not_allocate() {
 
 #[test]
 fn rack_switcher_at_quantum_limit_does_not_allocate() {
-    let (mut control, audio) = engine_queues(64);
+    let (mut control, audio, _tap) = engine_queues(64);
     let mut switcher = RackSwitcher::new(
         sized_gain_rack(SWITCHER_MAX_FRAMES),
         SWITCHER_MAX_FRAMES,
@@ -97,7 +98,7 @@ fn rack_switcher_at_quantum_limit_does_not_allocate() {
 #[test]
 fn oversize_then_swap_and_cut_does_not_allocate() {
     const LARGER: usize = 2 * BLOCK;
-    let (mut control, audio) = engine_queues(64);
+    let (mut control, audio, _tap) = engine_queues(64);
     let mut switcher = RackSwitcher::new(
         sized_gain_rack(BLOCK),
         SWITCHER_MAX_FRAMES,
@@ -134,4 +135,34 @@ fn peak_update_does_not_allocate() {
             raise_peak(&peak, block_peak(&input));
         }
     });
+}
+
+#[test]
+fn tap_block_does_not_allocate() {
+    let (_control, mut audio, mut tap) = engine_queues(4);
+    let input = [0.25; BLOCK];
+    assert_no_alloc(|| {
+        for _ in 0..200 {
+            tap_block(&mut audio.tap, &input);
+        }
+    });
+    assert!(tap.pop().is_ok());
+}
+
+#[test]
+fn mute_process_does_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, 960, audio, Arc::clone(&shared));
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for round in 0..40 {
+            shared.muted.store(round % 6 < 3, Ordering::Relaxed);
+            switcher.process(&input, &mut left, &mut right);
+        }
+    });
+    drop(switcher);
+    control.drain_from_audio();
 }
