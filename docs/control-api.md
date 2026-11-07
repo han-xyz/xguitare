@@ -152,13 +152,14 @@ Request:
 Response:
 
 ```json
-{"ok":true,"params":[{"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","unit":"%","value":100.0}]}
+{"ok":true,"params":[{"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
 ```
 
 | Key | Value |
 | --- | --- |
 | `params` | The selected Parameters in Rack order, then Parameter order. |
 | `params[].module` | Module id. |
+| `params[].type` | The Module's type, as in `modules`. |
 | `params[].param` | Parameter name. |
 | `params[].value` | Current value. |
 | `params[].unit` | `"dB"`, `"ms"`, `"Hz"`, `"%"`, or `""` for a plain number. |

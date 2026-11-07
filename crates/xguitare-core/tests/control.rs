@@ -288,7 +288,7 @@ fn set_without_preset() {
 #[test]
 fn get_all_and_one() {
     let (mut state, _audio, _dir) = state("get");
-    let expected = json!({"module": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "integer": false});
+    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "integer": false});
     let all = ok(handle(&mut state, Request::Get { param: None }));
     assert_eq!(all, json!({"params": [expected]}));
     let module = ok(handle(

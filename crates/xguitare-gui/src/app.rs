@@ -15,7 +15,7 @@ use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
     SET_INTERVAL, Snapshot, Throttle, add_after, bank_rows, key_to_command, link_text, move_target,
-    param_rows, peak_fraction, status_line, unit_suffix,
+    param_rows, peak_fraction, rack_channels, status_line, unit_suffix,
 };
 
 use crate::widgets;
@@ -256,13 +256,14 @@ fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, sliders: &mut Sliders) -> Vec<
             commands.push(Command::Save);
         }
         ui.label(preset.unwrap_or(NO_PRESET));
-        commands.extend(add_combo(ui, &snapshot.module_types, add_after(&modules)));
+        let rack = rack_channels(&modules, &snapshot.module_types);
+        commands.extend(add_combo(ui, &snapshot.module_types, &rack));
     });
     ScrollArea::vertical().show(ui, |ui| {
         for (index, (module, rows)) in modules.iter().enumerate() {
             CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(module), true)
                 .show_header(ui, |ui| {
-                    ui.label(module);
+                    ui.label(module_label(module, rows));
                     commands.extend(module_buttons(ui, module, index, modules.len()));
                 })
                 .body(|ui| {
@@ -273,7 +274,18 @@ fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, sliders: &mut Sliders) -> Vec<
     commands
 }
 
-fn add_combo(ui: &mut Ui, module_types: &[ModuleType], after: Option<String>) -> Option<Command> {
+fn module_label(module: &str, rows: &[ParamRow]) -> String {
+    match rows.first() {
+        Some(row) if row.module_type != module => format!("{module} ({})", row.module_type),
+        _ => module.to_string(),
+    }
+}
+
+fn add_combo(
+    ui: &mut Ui,
+    module_types: &[ModuleType],
+    rack: &[(String, String)],
+) -> Option<Command> {
     let mut added = None;
     ComboBox::from_id_salt("add_module")
         .selected_text("Add")
@@ -282,7 +294,7 @@ fn add_combo(ui: &mut Ui, module_types: &[ModuleType], after: Option<String>) ->
                 if ui.selectable_label(false, module_type.label()).clicked() {
                     added = Some(Command::RackAdd {
                         type_name: module_type.type_name.clone(),
-                        after: after.clone(),
+                        after: add_after(rack, &module_type.channels),
                     });
                 }
             }

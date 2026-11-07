@@ -479,6 +479,7 @@ fn param_json(module: &PresetModule, param: usize) -> Value {
     let (name, value) = &module.params[param];
     json!({
         "module": module.id,
+        "type": module.type_name,
         "param": name,
         "value": shortest_f64(*value),
         "unit": unit_text(spec.unit),

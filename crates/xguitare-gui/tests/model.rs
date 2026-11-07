@@ -8,8 +8,8 @@ use xguitare_core::control::Response;
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
     Throttle, add_after, bank_rows, counts_toward_spawn, failed_set, key_to_command,
-    meter_fraction, module_types, move_target, param_rows, peak_fraction, refresh_decision,
-    requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
+    meter_fraction, module_types, move_target, param_rows, peak_fraction, rack_channels,
+    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
 
 #[test]
@@ -230,10 +230,10 @@ fn key_ctrl_s_is_save() {
 
 fn two_module_get() -> serde_json::Value {
     json!({"params": [
-        {"module": "preamp", "param": "gain", "value": 40.0, "unit": "%", "min": 0.0, "max": 100.0, "integer": false},
-        {"module": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
-        {"module": "delay", "param": "time", "value": 350.0, "unit": "ms", "min": 1.0, "max": 2000.0, "integer": false},
-        {"module": "delay", "param": "pingpong", "value": 0.0, "unit": "", "min": 0.0, "max": 1.0, "integer": true},
+        {"module": "preamp", "type": "preamp", "param": "gain", "value": 40.0, "unit": "%", "min": 0.0, "max": 100.0, "integer": false},
+        {"module": "preamp", "type": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
+        {"module": "delay", "type": "delay", "param": "time", "value": 350.0, "unit": "ms", "min": 1.0, "max": 2000.0, "integer": false},
+        {"module": "delay", "type": "delay", "param": "pingpong", "value": 0.0, "unit": "", "min": 0.0, "max": 1.0, "integer": true},
     ]})
 }
 
@@ -244,6 +244,7 @@ fn param_rows_in_rack_order_with_units() {
             ParamRow {
                 address: format!("{module}.{param}"),
                 module: module.to_string(),
+                module_type: module.to_string(),
                 param: param.to_string(),
                 value,
                 min,
@@ -277,8 +278,8 @@ fn param_rows_in_rack_order_with_units() {
 #[test]
 fn integer_flag_from_payload() {
     let bias = json!({"params": [
-        {"module": "preamp", "param": "bias", "value": 0.0, "unit": "", "min": -1.0, "max": 1.0, "integer": false},
-        {"module": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
+        {"module": "preamp", "type": "preamp", "param": "bias", "value": 0.0, "unit": "", "min": -1.0, "max": 1.0, "integer": false},
+        {"module": "preamp", "type": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
     ]});
     let flags: Vec<bool> = param_rows(&bias)[0]
         .1
@@ -487,13 +488,58 @@ fn move_target_middle() {
     assert_eq!(move_target(4, Direction::Up, 5), Some(3));
 }
 
+fn clean_rack() -> Vec<(String, String)> {
+    [
+        ("gate", "mono"),
+        ("amp", "mono"),
+        ("cabinet", "mono_to_stereo"),
+        ("reverb", "stereo"),
+    ]
+    .map(|(id, channels)| (id.to_string(), channels.to_string()))
+    .to_vec()
+}
+
 #[test]
-fn add_after_is_last_id_or_none() {
+fn add_after_mono_goes_before_cabinet() {
+    assert_eq!(add_after(&clean_rack(), "mono").as_deref(), Some("amp"));
     assert_eq!(
-        add_after(&param_rows(&two_module_get())).as_deref(),
-        Some("delay")
+        add_after(&clean_rack(), "mono_to_stereo").as_deref(),
+        Some("amp")
     );
-    assert_eq!(add_after(&[]), None);
+    assert_eq!(add_after(&clean_rack()[2..], "mono"), None);
+}
+
+#[test]
+fn add_after_stereo_appends() {
+    assert_eq!(
+        add_after(&clean_rack(), "stereo").as_deref(),
+        Some("reverb")
+    );
+}
+
+#[test]
+fn add_after_empty_rack_is_front() {
+    assert_eq!(add_after(&[], "mono"), None);
+    assert_eq!(add_after(&[], "stereo"), None);
+}
+
+#[test]
+fn rack_channels_by_module_type() {
+    let get = json!({"params": [
+        {"module": "amp", "type": "preamp", "param": "gain", "value": 40.0, "unit": "%", "min": 0.0, "max": 100.0, "integer": false},
+        {"module": "delay-2", "type": "delay", "param": "time", "value": 350.0, "unit": "ms", "min": 1.0, "max": 2000.0, "integer": false},
+    ]});
+    let types = module_types(&json!({"modules": [
+        {"type": "preamp", "channels": "mono", "params": []},
+        {"type": "delay", "channels": "stereo", "params": []},
+    ]}));
+    assert_eq!(
+        rack_channels(&param_rows(&get), &types),
+        vec![
+            ("amp".to_string(), "mono".to_string()),
+            ("delay-2".to_string(), "stereo".to_string()),
+        ]
+    );
 }
 
 #[test]

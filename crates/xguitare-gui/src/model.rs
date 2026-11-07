@@ -93,9 +93,40 @@ pub fn move_target(index: usize, direction: Direction, len: usize) -> Option<usi
     }
 }
 
-/// The id a new Module is inserted after: the last Module of the Rack.
-pub fn add_after(modules: &[(String, Vec<ParamRow>)]) -> Option<String> {
-    modules.last().map(|(id, _)| id.clone())
+pub const MONO: &str = "mono";
+pub const STEREO: &str = "stereo";
+
+/// Each Module id of the Rack with its type's `channels`, empty when `modules` does not list the type.
+pub fn rack_channels(
+    modules: &[(String, Vec<ParamRow>)],
+    module_types: &[ModuleType],
+) -> Vec<(String, String)> {
+    modules
+        .iter()
+        .map(|(id, rows)| {
+            let channels = rows
+                .first()
+                .and_then(|row| {
+                    module_types
+                        .iter()
+                        .find(|module_type| module_type.type_name == row.module_type)
+                })
+                .map(|module_type| module_type.channels.clone())
+                .unwrap_or_default();
+            (id.clone(), channels)
+        })
+        .collect()
+}
+
+/// The id a new Module of `new_channels` is inserted after: a stereo one after the last Module, a mono one or the cabinet after the last mono Module; `None` is the front.
+pub fn add_after(rack: &[(String, String)], new_channels: &str) -> Option<String> {
+    let mut candidates = rack.iter().rev();
+    let after = if new_channels == STEREO {
+        candidates.next()
+    } else {
+        candidates.find(|(_, channels)| channels == MONO)
+    };
+    after.map(|(id, _)| id.clone())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +265,7 @@ fn seconds_since(since: Instant, now: Instant) -> u64 {
 pub struct ParamRow {
     pub address: String,
     pub module: String,
+    pub module_type: String,
     pub param: String,
     pub value: f64,
     pub min: f64,
@@ -251,6 +283,7 @@ pub fn param_rows(get_payload: &Value) -> Vec<(String, Vec<ParamRow>)> {
         let row = ParamRow {
             address: format!("{module}.{name}"),
             module: module.clone(),
+            module_type: param["type"].as_str().unwrap_or_default().to_string(),
             param: name,
             value: param["value"].as_f64().unwrap_or_default(),
             min: param["min"].as_f64().unwrap_or_default(),
