@@ -47,3 +47,11 @@ _Avoid_: version, generation, sequence number
 **Program**:
 A Preset's position in the Bank, the number a MIDI program change or a digit key selects.
 _Avoid_: slot, index
+
+**Tuner**:
+The pitch readout of the dry input: the nearest note, how far from it in cents, and the frequency. It is not a Module and belongs to no Preset.
+_Avoid_: pitch detector, tuner module, tuner effect
+
+**Mute**:
+The Daemon state in which the Rack output is silent while the input is still analysed, for tuning.
+_Avoid_: bypass, standby, kill switch
