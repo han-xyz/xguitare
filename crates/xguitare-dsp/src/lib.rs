@@ -13,6 +13,7 @@ pub use modules::compressor::Compressor;
 pub use modules::delay::Delay;
 pub use modules::drive::Drive;
 pub use modules::flanger::Flanger;
+pub use modules::fuzz::Fuzz;
 pub use modules::gain::Gain;
 pub use modules::gate::Gate;
 pub use modules::preamp::Preamp;

@@ -4,6 +4,7 @@ pub mod compressor;
 pub mod delay;
 pub mod drive;
 pub mod flanger;
+pub mod fuzz;
 pub mod gain;
 pub mod gate;
 pub mod preamp;

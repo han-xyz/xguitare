@@ -47,8 +47,8 @@ fn syntax_error_reports_line_and_col() {
 
 #[test]
 fn unknown_module_type() {
-    let message = error("name = \"X\"\n[[module]]\ntype = \"fuzz\"\n");
-    assert_eq!(message, "unknown module type 'fuzz'");
+    let message = error("name = \"X\"\n[[module]]\ntype = \"wah\"\n");
+    assert_eq!(message, "unknown module type 'wah'");
 }
 
 #[test]

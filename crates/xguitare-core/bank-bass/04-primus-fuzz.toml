@@ -6,11 +6,11 @@ type = "gate"
 threshold = -45
 
 [[module]]
-type = "drive"
+type = "fuzz"
 [module.params]
-drive = 85
-tone = 40
-level = 0
+sustain = 75
+tone = 35
+level = -2
 
 [[module]]
 type = "preamp"

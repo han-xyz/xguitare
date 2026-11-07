@@ -9,7 +9,7 @@ The ordered list of Modules a signal passes through, from guitar input to stereo
 _Avoid_: chain, pipeline, graph, signal path
 
 **Module**:
-One sound-shaping unit in a Rack with a fixed set of Parameters: gate, compressor, drive, preamp, tonestack, cabinet, delay, chorus, flanger, reverb.
+One sound-shaping unit in a Rack with a fixed set of Parameters: gate, compressor, drive, fuzz, preamp, tonestack, cabinet, delay, chorus, flanger, reverb.
 _Avoid_: effect, plugin, node, block, stomp
 
 **Parameter**:
