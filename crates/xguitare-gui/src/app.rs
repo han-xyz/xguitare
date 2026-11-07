@@ -6,17 +6,16 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{
-    Button, CentralPanel, CollapsingHeader, Event, Key, Modifiers, Panel, ScrollArea, Slider, Ui,
-};
+use egui::collapsing_header::CollapsingState;
+use egui::{Button, CentralPanel, ComboBox, Event, Key, Modifiers, Panel, ScrollArea, Slider, Ui};
 use serde_json::Value;
 use tracing::error;
 use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
-    BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, SET_INTERVAL, Snapshot,
-    Throttle, bank_rows, key_to_command, link_text, param_rows, peak_fraction, status_line,
-    unit_suffix,
+    BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
+    SET_INTERVAL, Snapshot, Throttle, add_after, bank_rows, key_to_command, link_text, move_target,
+    param_rows, peak_fraction, status_line, unit_suffix,
 };
 
 use crate::widgets;
@@ -68,6 +67,7 @@ impl App {
                 status: None,
                 bank: None,
                 params: None,
+                module_types: Vec::new(),
                 last_message: None,
                 failed_set: None,
             },
@@ -250,23 +250,67 @@ fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, sliders: &mut Sliders) -> Vec<
         .status
         .as_ref()
         .and_then(|status| status["preset"].as_str());
+    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     ui.horizontal(|ui| {
         if ui.button("Save").clicked() {
             commands.push(Command::Save);
         }
         ui.label(preset.unwrap_or(NO_PRESET));
+        commands.extend(add_combo(ui, &snapshot.module_types, add_after(&modules)));
     });
-    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     ScrollArea::vertical().show(ui, |ui| {
-        for (module, rows) in &modules {
-            CollapsingHeader::new(module)
-                .default_open(true)
-                .show(ui, |ui| {
+        for (index, (module, rows)) in modules.iter().enumerate() {
+            CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(module), true)
+                .show_header(ui, |ui| {
+                    ui.label(module);
+                    commands.extend(module_buttons(ui, module, index, modules.len()));
+                })
+                .body(|ui| {
                     commands.extend(rows.iter().filter_map(|row| param_slider(ui, row, sliders)));
                 });
         }
     });
     commands
+}
+
+fn add_combo(ui: &mut Ui, module_types: &[ModuleType], after: Option<String>) -> Option<Command> {
+    let mut added = None;
+    ComboBox::from_id_salt("add_module")
+        .selected_text("Add")
+        .show_ui(ui, |ui| {
+            for module_type in module_types {
+                if ui.selectable_label(false, module_type.label()).clicked() {
+                    added = Some(Command::RackAdd {
+                        type_name: module_type.type_name.clone(),
+                        after: after.clone(),
+                    });
+                }
+            }
+        });
+    added
+}
+
+fn module_buttons(ui: &mut Ui, module: &str, index: usize, len: usize) -> Option<Command> {
+    let mut clicked = None;
+    for (text, direction) in [("▲", Direction::Up), ("▼", Direction::Down)] {
+        let to = move_target(index, direction, len);
+        if ui
+            .add_enabled(to.is_some(), Button::new(text).small())
+            .clicked()
+            && let Some(to) = to
+        {
+            clicked = Some(Command::RackMove {
+                id: module.to_string(),
+                to,
+            });
+        }
+    }
+    if ui.small_button("✕").clicked() {
+        clicked = Some(Command::RackRemove {
+            id: module.to_string(),
+        });
+    }
+    clicked
 }
 
 /// A click or key press changes the value without a drag, so it is sent as a final value.

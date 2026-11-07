@@ -6,9 +6,10 @@ use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_gui::model::{
-    BankRow, Command, Feedback, KeyEvent, KeyModifiers, Link, ParamRow, Throttle, bank_rows,
-    counts_toward_spawn, failed_set, key_to_command, meter_fraction, param_rows, peak_fraction,
-    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
+    BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
+    Throttle, add_after, bank_rows, counts_toward_spawn, failed_set, key_to_command,
+    meter_fraction, module_types, move_target, param_rows, peak_fraction, refresh_decision,
+    requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
 
 #[test]
@@ -45,6 +46,17 @@ fn commands_before_quit_are_sent_in_order() {
             param: "preamp.gain".to_string(),
             value: 70.0,
         },
+        Command::RackAdd {
+            type_name: "delay".to_string(),
+            after: Some("reverb".to_string()),
+        },
+        Command::RackMove {
+            id: "delay".to_string(),
+            to: 4,
+        },
+        Command::RackRemove {
+            id: "delay".to_string(),
+        },
         Command::Quit,
         Command::Load("2".to_string()),
     ];
@@ -53,6 +65,17 @@ fn commands_before_quit_are_sent_in_order() {
         Request::Set {
             param: "preamp.gain".to_string(),
             value: 70.0,
+        },
+        Request::RackAdd {
+            r#type: "delay".to_string(),
+            after: Some("reverb".to_string()),
+        },
+        Request::RackMove {
+            id: "delay".to_string(),
+            to: 4,
+        },
+        Request::RackRemove {
+            id: "delay".to_string(),
         },
     ];
     assert_eq!(requests_until_quit(queued), (expected, true));
@@ -447,4 +470,56 @@ fn hold_cleared_on_set_error() {
     ));
     assert_eq!(failed_set(&set, &applied), None);
     assert_eq!(failed_set(&Request::Save, &busy), None);
+}
+
+#[test]
+fn move_target_at_ends_is_none() {
+    assert_eq!(move_target(0, Direction::Up, 5), None);
+    assert_eq!(move_target(4, Direction::Down, 5), None);
+    assert_eq!(move_target(0, Direction::Down, 1), None);
+}
+
+#[test]
+fn move_target_middle() {
+    assert_eq!(move_target(2, Direction::Up, 5), Some(1));
+    assert_eq!(move_target(2, Direction::Down, 5), Some(3));
+    assert_eq!(move_target(0, Direction::Down, 5), Some(1));
+    assert_eq!(move_target(4, Direction::Up, 5), Some(3));
+}
+
+#[test]
+fn add_after_is_last_id_or_none() {
+    assert_eq!(
+        add_after(&param_rows(&two_module_get())).as_deref(),
+        Some("delay")
+    );
+    assert_eq!(add_after(&[]), None);
+}
+
+#[test]
+fn module_types_from_payload() {
+    let payload = json!({"modules": [
+        {"type": "gain", "channels": "mono", "params": []},
+        {"type": "gate", "channels": "mono", "params": []},
+        {"type": "compressor", "channels": "mono", "params": []},
+        {"type": "drive", "channels": "mono", "params": []},
+        {"type": "preamp", "channels": "mono", "params": []},
+        {"type": "tonestack", "channels": "mono", "params": []},
+        {"type": "cabinet", "channels": "mono_to_stereo", "params": []},
+        {"type": "delay", "channels": "stereo", "params": []},
+        {"type": "chorus", "channels": "stereo", "params": []},
+        {"type": "flanger", "channels": "stereo", "params": []},
+        {"type": "reverb", "channels": "stereo", "params": []},
+    ]});
+    let types = module_types(&payload);
+    assert_eq!(types.len(), 11);
+    let module_type = |type_name: &str, channels: &str| ModuleType {
+        type_name: type_name.to_string(),
+        channels: channels.to_string(),
+    };
+    assert_eq!(types[0], module_type("gain", "mono"));
+    assert_eq!(types[6], module_type("cabinet", "mono_to_stereo"));
+    assert_eq!(types[10], module_type("reverb", "stereo"));
+    assert_eq!(types[6].label(), "cabinet (mono_to_stereo)");
+    assert!(module_types(&json!({})).is_empty());
 }

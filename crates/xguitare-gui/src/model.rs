@@ -21,13 +21,14 @@ pub enum Link {
     Starting { since: Instant },
 }
 
-/// What the client thread last saw; the payloads are the Control API's `status`, `list` and `get` replies as sent.
+/// What the client thread last saw; the payloads are the Control API's `status`, `list` and `get` replies as sent, `module_types` the `modules` reply of the current connection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub link: Link,
     pub status: Option<Value>,
     pub bank: Option<Value>,
     pub params: Option<Value>,
+    pub module_types: Vec<ModuleType>,
     pub last_message: Option<(String, Instant)>,
     pub failed_set: Option<(String, Instant)>,
 }
@@ -35,9 +36,66 @@ pub struct Snapshot {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Load(String),
-    Set { param: String, value: f64 },
+    Set {
+        param: String,
+        value: f64,
+    },
     Save,
+    RackAdd {
+        type_name: String,
+        after: Option<String>,
+    },
+    RackRemove {
+        id: String,
+    },
+    RackMove {
+        id: String,
+        to: usize,
+    },
     Quit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleType {
+    pub type_name: String,
+    pub channels: String,
+}
+
+impl ModuleType {
+    pub fn label(&self) -> String {
+        format!("{} ({})", self.type_name, self.channels)
+    }
+}
+
+pub fn module_types(modules_payload: &Value) -> Vec<ModuleType> {
+    modules_payload["modules"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|module| ModuleType {
+            type_name: module["type"].as_str().unwrap_or_default().to_string(),
+            channels: module["channels"].as_str().unwrap_or_default().to_string(),
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Direction {
+    Up,
+    Down,
+}
+
+/// The Rack position a Module at `index` moves to; `None` when it is already at that end.
+pub fn move_target(index: usize, direction: Direction, len: usize) -> Option<usize> {
+    match direction {
+        Direction::Up => index.checked_sub(1),
+        Direction::Down => Some(index + 1).filter(|&to| to < len),
+    }
+}
+
+/// The id a new Module is inserted after: the last Module of the Rack.
+pub fn add_after(modules: &[(String, Vec<ParamRow>)]) -> Option<String> {
+    modules.last().map(|(id, _)| id.clone())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -122,6 +180,12 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::Load(preset) => Request::Load { preset },
             Command::Set { param, value } => Request::Set { param, value },
             Command::Save => Request::Save,
+            Command::RackAdd { type_name, after } => Request::RackAdd {
+                r#type: type_name,
+                after,
+            },
+            Command::RackRemove { id } => Request::RackRemove { id },
+            Command::RackMove { id, to } => Request::RackMove { id, to },
             Command::Quit => return (requests, true),
         };
         requests.push(req);

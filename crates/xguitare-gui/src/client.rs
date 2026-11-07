@@ -10,8 +10,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::model::{
-    Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, refresh_decision,
-    requests_until_quit, response_text, spawn_policy,
+    Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, module_types,
+    refresh_decision, requests_until_quit, response_text, spawn_policy,
 };
 use serde_json::Value;
 use tracing::{info, warn};
@@ -69,6 +69,7 @@ impl Client {
                 status: None,
                 bank: None,
                 params: None,
+                module_types: Vec::new(),
                 last_message: None,
                 failed_set: None,
             },
@@ -187,6 +188,11 @@ impl Client {
         if self.snapshot.link != Link::Connected {
             info!("connected to {}", self.config.socket.display());
             self.snapshot.link = Link::Connected;
+            self.snapshot.module_types = self
+                .payload(&Request::Modules)
+                .as_ref()
+                .map(module_types)
+                .unwrap_or_default();
         }
         self.failures = 0;
         let revision = status["revision"].as_u64().unwrap_or(0);
