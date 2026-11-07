@@ -28,8 +28,11 @@ impl Tuner {
         }
     }
 
-    /// Restarts the Detector at `sample_rate`, dropping the samples it holds and the last reading.
+    /// Restarts the Detector at `sample_rate`, dropping the samples it and the tap hold and the last reading.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        if let Ok(chunk) = self.tap.read_chunk(self.tap.slots()) {
+            chunk.commit_all();
+        }
         self.detector = Detector::new(sample_rate);
         self.last = None;
     }

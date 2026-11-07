@@ -1188,6 +1188,24 @@ fn tuner_reports_a2_after_tick() {
 }
 
 #[test]
+fn tuner_after_rate_change_ignores_old_rate_samples() {
+    let (mut state, mut audio, _dir) = state("tuner-rate-change");
+    for n in 0..8192 {
+        let sample = 0.9 * (TAU * 110.0 * n as f32 / 48_000.0).sin();
+        assert!(audio.tap.push(sample).is_ok());
+    }
+    state.shared.sample_rate.store(96_000, Ordering::Relaxed);
+    change_sample_rate(&mut state, 96_000).unwrap();
+    for n in 0..2048 {
+        let sample = 0.5 * (TAU * 110.0 * n as f32 / 96_000.0).sin();
+        assert!(audio.tap.push(sample).is_ok());
+    }
+    state.tuner.tick();
+    let note = &ok(handle(&mut state, Request::Tuner))["note"];
+    assert!(note.is_null() || note == "A2", "{note}");
+}
+
+#[test]
 fn mute_on_off_and_status() {
     let (mut state, _audio, _dir) = state("mute");
     let connection = open_connection(&mut state);
