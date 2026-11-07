@@ -292,7 +292,7 @@ Changes made elsewhere (the CLI, MIDI program change, an edited Preset file) sho
 
 Keys: `1` to `9` load programs 0 to 8 (a key for a missing or invalid entry does nothing); `Ctrl+S` saves, like the `Save` button.
 
-When no Daemon answers on the socket, the GUI starts `xguitare run` itself, taken from the directory `xguitare-gui` is in, else from `PATH`, and shows `starting daemon` until it answers. The Daemon's log goes to the GUI's stderr. A Daemon the GUI started is stopped when the window closes; one you started yourself keeps running. If the Daemon goes away, the status bar shows `disconnected` and the GUI keeps reconnecting.
+When no Daemon answers on the socket, the GUI starts `xguitare run` itself, taken from the directory `xguitare-gui` is in, else from `PATH`, and shows `starting daemon` until it answers. The Daemon's log goes to the GUI's stderr. A Daemon the GUI started is stopped when the window closes; one you started yourself keeps running. If the GUI crashes or is killed, the Daemon it started keeps running and the sound does not stop; the next `xguitare-gui` connects to it. To stop that Daemon, send it SIGTERM: `kill <pid>`, with the pid from the GUI's `starting daemon ... (pid N)` log line or from `pgrep -x xguitare`. If the Daemon goes away, the status bar shows `disconnected` and the GUI keeps reconnecting.
 
 Window size and position are kept in `~/.local/share/xguitare/app.ron` (`$XDG_DATA_HOME/xguitare/app.ron`). `RUST_LOG` sets the GUI's log level as for the Daemon.
 

@@ -14,6 +14,8 @@ pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
 pub const INVALID_PRESET: &str = "invalid preset";
 pub const KNOB_DRAG_PX: f32 = 200.0;
 pub const KNOB_FINE_DRAG_PX: f32 = 2000.0;
+pub const KNOB_ARC_START_DEG: f32 = 135.0;
+pub const KNOB_ARC_SWEEP_DEG: f32 = 270.0;
 pub const NEUTRAL_ACCENT: (u8, u8, u8) = (120, 120, 120);
 pub const CENTS_SPAN: i64 = 50;
 pub const IN_TUNE_CENTS: i64 = 3;
@@ -128,6 +130,20 @@ pub fn knob_value_from_drag(
     };
     let moved = (value - dy_px * (max - min) / px_per_range).clamp(min, max);
     if integer { moved.round() } else { moved }
+}
+
+/// Where `value` sits in `min..=max`, clamped to 0..=1; 0 for an empty range.
+pub fn knob_fraction(value: f32, min: f32, max: f32) -> f32 {
+    let range = max - min;
+    if range <= 0.0 {
+        return 0.0;
+    }
+    ((value - min) / range).clamp(0.0, 1.0)
+}
+
+/// Clockwise degrees in egui's y-down screen space: 135° is lower left, 270° the top, 405° lower right.
+pub fn knob_angle_deg(fraction: f32) -> f32 {
+    KNOB_ARC_START_DEG + KNOB_ARC_SWEEP_DEG * fraction
 }
 
 pub fn accent_for(type_name: &str) -> (u8, u8, u8) {

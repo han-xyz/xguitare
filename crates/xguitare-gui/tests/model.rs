@@ -15,9 +15,10 @@ use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
     NEUTRAL_ACCENT, ParamRow, Throttle, TunerReading, accent_for, add_after, add_command,
     bank_rows, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, failed_set, in_tune,
-    ir_names, key_to_command, knob_value_from_drag, meter_fraction, module_types, move_target,
-    param_rows, peak_fraction, quit_commands, rack_channels, refresh_decision, requests_until_quit,
-    response_text, spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
+    ir_names, key_to_command, knob_angle_deg, knob_fraction, knob_value_from_drag, meter_fraction,
+    module_types, move_target, param_rows, peak_fraction, quit_commands, rack_channels,
+    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, tuner_reading,
+    tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -695,6 +696,23 @@ fn knob_integer_rounds() {
         1.0
     );
     assert_eq!(knob_value_from_drag(1.0, 0.0, 1.0, 90.0, false, true), 1.0);
+}
+
+#[test]
+fn knob_fraction_ends_mid_and_clamping() {
+    assert_eq!(knob_fraction(-60.0, -60.0, 20.0), 0.0);
+    assert_eq!(knob_fraction(20.0, -60.0, 20.0), 1.0);
+    assert_eq!(knob_fraction(-20.0, -60.0, 20.0), 0.5);
+    assert_eq!(knob_fraction(-90.0, -60.0, 20.0), 0.0);
+    assert_eq!(knob_fraction(35.0, -60.0, 20.0), 1.0);
+    assert_eq!(knob_fraction(3.0, 3.0, 3.0), 0.0);
+}
+
+#[test]
+fn knob_angle_sweeps_270_degrees_from_lower_left() {
+    assert_eq!(knob_angle_deg(0.0), 135.0);
+    assert_eq!(knob_angle_deg(0.5), 270.0);
+    assert_eq!(knob_angle_deg(1.0), 405.0);
 }
 
 #[test]

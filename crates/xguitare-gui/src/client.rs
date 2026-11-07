@@ -1,6 +1,5 @@
 use std::env;
 use std::io;
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
@@ -356,15 +355,6 @@ impl Client {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());
-        // SAFETY: prctl is async-signal-safe and touches only the forked child. The signal fires when this (client) thread exits, which happens only after stop_daemon.
-        unsafe {
-            process.pre_exec(|| {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
         match process.spawn() {
             Ok(child) => {
                 info!(

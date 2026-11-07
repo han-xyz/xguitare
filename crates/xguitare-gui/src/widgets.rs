@@ -1,5 +1,8 @@
 use egui::{Align, Color32, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
-use xguitare_gui::model::{METER_RED_DB, accent_for, knob_value_from_drag, meter_fraction};
+use xguitare_gui::model::{
+    KNOB_ARC_START_DEG, KNOB_ARC_SWEEP_DEG, METER_RED_DB, accent_for, knob_angle_deg,
+    knob_fraction, knob_value_from_drag, meter_fraction,
+};
 
 const METER_SIZE: Vec2 = Vec2::new(120.0, 12.0);
 const KNOB_DIAMETER: f32 = 48.0;
@@ -7,8 +10,6 @@ const KNOB_CELL_WIDTH: f32 = 72.0;
 const KNOB_ARC_WIDTH: f32 = 4.0;
 const KNOB_BODY_INSET: f32 = 7.0;
 const KNOB_POINTER_WIDTH: f32 = 2.5;
-const ARC_START_DEG: f32 = 135.0;
-const ARC_SWEEP_DEG: f32 = 270.0;
 const ARC_SEGMENTS: usize = 48;
 const CENTS_BAR_SIZE: Vec2 = Vec2::new(120.0, 10.0);
 const CENTS_TICK_WIDTH: f32 = 1.5;
@@ -122,7 +123,8 @@ pub fn knob(ui: &mut Ui, value: &mut f32, spec: &KnobSpec) -> KnobResponse {
         if reset {
             *value = spec.default;
         }
-        paint_knob(ui, rect, knob_fraction(*value, spec), response.hovered());
+        let fraction = knob_fraction(*value, spec.min, spec.max);
+        paint_knob(ui, rect, fraction, response.hovered());
         ui.label(knob_text(*value, spec));
         KnobResponse {
             changed: reset || *value != before,
@@ -131,14 +133,6 @@ pub fn knob(ui: &mut Ui, value: &mut f32, spec: &KnobSpec) -> KnobResponse {
         }
     })
     .inner
-}
-
-fn knob_fraction(value: f32, spec: &KnobSpec) -> f32 {
-    let range = spec.max - spec.min;
-    if range <= 0.0 {
-        return 0.0;
-    }
-    ((value - spec.min) / range).clamp(0.0, 1.0)
 }
 
 fn knob_text(value: f32, spec: &KnobSpec) -> String {
@@ -158,15 +152,20 @@ fn paint_knob(ui: &Ui, rect: Rect, fraction: f32, hovered: bool) {
     };
     let center = rect.center();
     let radius = rect.width() / 2.0 - KNOB_ARC_WIDTH / 2.0;
-    let value_deg = ARC_START_DEG + ARC_SWEEP_DEG * fraction;
+    let value_deg = knob_angle_deg(fraction);
     let painter = ui.painter();
     painter.line(
-        arc_points(center, radius, ARC_START_DEG, ARC_START_DEG + ARC_SWEEP_DEG),
+        arc_points(
+            center,
+            radius,
+            KNOB_ARC_START_DEG,
+            KNOB_ARC_START_DEG + KNOB_ARC_SWEEP_DEG,
+        ),
         Stroke::new(KNOB_ARC_WIDTH, visuals.extreme_bg_color),
     );
     if fraction > 0.0 {
         painter.line(
-            arc_points(center, radius, ARC_START_DEG, value_deg),
+            arc_points(center, radius, KNOB_ARC_START_DEG, value_deg),
             Stroke::new(KNOB_ARC_WIDTH, visuals.selection.bg_fill),
         );
     }
