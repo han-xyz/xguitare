@@ -214,6 +214,7 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::RackAdd { type_name, after } => Request::RackAdd {
                 r#type: type_name,
                 after,
+                at: None,
             },
             Command::RackRemove { id } => Request::RackRemove { id },
             Command::RackMove { id, to } => Request::RackMove { id, to },

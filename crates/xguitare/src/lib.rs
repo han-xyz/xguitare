@@ -57,12 +57,14 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum RackCmd {
-    /// Add a Module with default Parameters, after <id> or at the end
+    /// Add a Module with default Parameters: after <id>, at a zero-based position, or at the end
     Add {
         #[arg(value_name = "TYPE")]
         type_name: String,
         #[arg(long)]
         after: Option<String>,
+        #[arg(long, conflicts_with = "after")]
+        at: Option<usize>,
     },
     /// Remove a Module
     Remove { id: String },

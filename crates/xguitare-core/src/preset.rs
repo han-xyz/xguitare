@@ -90,7 +90,6 @@ impl Preset {
         let registry = ModuleRegistry::default();
         let mut ids = HashSet::new();
         let mut modules = Vec::with_capacity(file.module.len());
-        let mut probes: Vec<(String, Box<dyn Module>)> = Vec::new();
         for entry in file.module {
             let spec = registry
                 .spec(&entry.type_name)
@@ -99,14 +98,35 @@ impl Preset {
             if !ids.insert(module.id.clone()) {
                 return Err(PresetError::DuplicateId(module.id));
             }
-            probes.push((module.id.clone(), Box::new(LayoutProbe(spec))));
             modules.push(module);
         }
-        Rack::new(probes).map_err(|error| PresetError::Layout(error.to_string()))?;
-        Ok(Preset {
+        let preset = Preset {
             name: file.name,
             modules,
-        })
+        };
+        preset
+            .validate_layout()
+            .map_err(|error| PresetError::Layout(error.to_string()))?;
+        Ok(preset)
+    }
+
+    /// Checks the Module order against the Rack's layout rules without building any Module.
+    pub fn validate_layout(&self) -> Result<(), RackError> {
+        let registry = ModuleRegistry::default();
+        let probes: Vec<(String, Box<dyn Module>)> = self
+            .modules
+            .iter()
+            .map(|module| {
+                let spec = registry
+                    .spec(&module.type_name)
+                    .expect("a Preset names only registered Module types");
+                (
+                    module.id.clone(),
+                    Box::new(LayoutProbe(spec)) as Box<dyn Module>,
+                )
+            })
+            .collect();
+        Rack::new(probes).map(|_| ())
     }
 
     pub fn to_toml(&self) -> String {

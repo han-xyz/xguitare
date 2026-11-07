@@ -12,6 +12,7 @@ use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 pub use serde_json::Value;
 
 use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
+use crate::firstrun::{BASS_IR, DEFAULT_IR};
 use crate::preset::{CABINET_TYPE, shortest_f64};
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
@@ -23,8 +24,9 @@ const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";
 const NANOS_PER_MICRO: u64 = 1_000;
 const SILENCE_DB: f32 = -120.0;
-const CABINET_IRS: [&str; 2] = ["default-cab.wav", "bass-cab.wav"];
+const CABINET_IRS: [&str; 2] = [DEFAULT_IR, BASS_IR];
 const CABINET_NEEDS_IR: &str = "cabinet needs an ir; add one in the preset file";
+const AFTER_OR_AT: &str = "give either after or at";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -46,6 +48,7 @@ pub enum Request {
     RackAdd {
         r#type: String,
         after: Option<String>,
+        at: Option<usize>,
     },
     RackRemove {
         id: String,
@@ -87,8 +90,8 @@ pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarn
         Request::Get { param } => get(state, param.as_deref()),
         Request::Save => save(state),
         Request::Modules => Ok(modules()),
-        Request::RackAdd { r#type, after } => {
-            rack_add(state, &r#type, after.as_deref(), &mut warnings)
+        Request::RackAdd { r#type, after, at } => {
+            rack_add(state, &r#type, after.as_deref(), at, &mut warnings)
         }
         Request::RackRemove { id } => rack_remove(state, &id, &mut warnings),
         Request::RackMove { id, to } => rack_move(state, &id, to, &mut warnings),
@@ -234,6 +237,18 @@ fn load(
         BankEntry::Valid { file, preset } => (file.clone(), preset.clone()),
         BankEntry::Invalid { error, .. } => return Err(error.clone()),
     };
+    let payload = json!({"program": program, "name": preset.name});
+    install_preset(state, file, preset, warnings)?;
+    Ok(payload)
+}
+
+/// Builds `preset`'s Rack, swaps it in and makes it the active Preset; on an error the state is unchanged.
+fn install_preset(
+    state: &mut EngineState,
+    file: PathBuf,
+    preset: Preset,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<(), String> {
     let (rack, build_warnings) = preset
         .build(
             state.sample_rate,
@@ -245,9 +260,8 @@ fn load(
     *warnings = build_warnings;
     swap_rack(state, rack)?;
     state.revision += 1;
-    let payload = json!({"program": program, "name": preset.name});
     state.active = Some((file, preset));
-    Ok(payload)
+    Ok(())
 }
 
 /// The empty Rack, which sends the input to both outputs unchanged.
@@ -339,25 +353,20 @@ fn rack_add(
     state: &mut EngineState,
     type_name: &str,
     after: Option<&str>,
+    at: Option<usize>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
     let bank_dir = state.config.bank_dir.clone();
-    edit_rack(state, warnings, |modules| {
+    edit_rack(state, warnings, |preset| {
         let spec = ModuleRegistry::default()
             .spec(type_name)
             .ok_or_else(|| format!("unknown module type '{type_name}'"))?;
-        let index = match after {
-            None => modules.len(),
-            Some(after) => module_index(modules, after)? + 1,
-        };
-        let ir = if type_name == CABINET_TYPE {
-            let ir = CABINET_IRS
-                .into_iter()
-                .find(|ir| bank_dir.join(ir).is_file())
-                .ok_or(CABINET_NEEDS_IR)?;
-            Some(ir.to_string())
-        } else {
-            None
+        let modules = &mut preset.modules;
+        let index = match (after, at) {
+            (Some(_), Some(_)) => return Err(AFTER_OR_AT.to_string()),
+            (Some(after), None) => module_index(modules, after)? + 1,
+            (None, Some(at)) => at.min(modules.len()),
+            (None, None) => modules.len(),
         };
         let id = free_id(modules, type_name);
         modules.insert(
@@ -365,7 +374,7 @@ fn rack_add(
             PresetModule {
                 id: id.clone(),
                 type_name: type_name.to_string(),
-                ir,
+                ir: None,
                 params: spec
                     .params
                     .iter()
@@ -373,6 +382,14 @@ fn rack_add(
                     .collect(),
             },
         );
+        preset.validate_layout().map_err(|err| err.to_string())?;
+        if type_name == CABINET_TYPE {
+            let ir = CABINET_IRS
+                .into_iter()
+                .find(|ir| bank_dir.join(ir).is_file())
+                .ok_or(CABINET_NEEDS_IR)?;
+            preset.modules[index].ir = Some(ir.to_string());
+        }
         Ok(json!({ "id": id }))
     })
 }
@@ -382,7 +399,8 @@ fn rack_remove(
     id: &str,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    edit_rack(state, warnings, |modules| {
+    edit_rack(state, warnings, |preset| {
+        let modules = &mut preset.modules;
         modules.remove(module_index(modules, id)?);
         Ok(json!({ "id": id }))
     })
@@ -394,7 +412,8 @@ fn rack_move(
     to: usize,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    edit_rack(state, warnings, |modules| {
+    edit_rack(state, warnings, |preset| {
+        let modules = &mut preset.modules;
         let module = modules.remove(module_index(modules, id)?);
         let to = to.min(modules.len());
         modules.insert(to, module);
@@ -405,23 +424,12 @@ fn rack_move(
 fn edit_rack(
     state: &mut EngineState,
     warnings: &mut Vec<BuildWarning>,
-    edit: impl FnOnce(&mut Vec<PresetModule>) -> Result<Value, String>,
+    edit: impl FnOnce(&mut Preset) -> Result<Value, String>,
 ) -> Result<Value, String> {
     let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
     let (file, mut preset) = (file.clone(), preset.clone());
-    let payload = edit(&mut preset.modules)?;
-    let (rack, build_warnings) = preset
-        .build(
-            state.sample_rate,
-            state.max_frames,
-            &state.config.bank_dir,
-            state.config.ir_max_ms,
-        )
-        .map_err(|err| err.to_string())?;
-    *warnings = build_warnings;
-    swap_rack(state, rack)?;
-    state.revision += 1;
-    state.active = Some((file, preset));
+    let payload = edit(&mut preset)?;
+    install_preset(state, file, preset, warnings)?;
     Ok(payload)
 }
 

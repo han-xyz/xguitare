@@ -303,6 +303,7 @@ fn rack_add_prints() {
         [Request::RackAdd {
             r#type: "delay".to_string(),
             after: Some("cabinet".to_string()),
+            at: None,
         }]
     );
     assert_eq!(out.stdout, "added delay-2\n");
@@ -315,6 +316,19 @@ fn rack_add_prints() {
         [Request::RackAdd {
             r#type: "gate".to_string(),
             after: None,
+            at: None,
+        }]
+    );
+    let out = cli(
+        &["rack", "add", "gate", "--at", "0"],
+        reply(r#"{"ok":true,"id":"gate"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackAdd {
+            r#type: "gate".to_string(),
+            after: None,
+            at: Some(0),
         }]
     );
     let out = cli(

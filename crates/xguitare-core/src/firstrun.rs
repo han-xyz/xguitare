@@ -8,8 +8,8 @@ use xguitare_dsp::synth_ir::{bass_cabinet, default_cabinet};
 
 use crate::BankKind;
 
-const DEFAULT_IR: &str = "default-cab.wav";
-const BASS_IR: &str = "bass-cab.wav";
+pub(crate) const DEFAULT_IR: &str = "default-cab.wav";
+pub(crate) const BASS_IR: &str = "bass-cab.wav";
 const STAGING_SUFFIX: &str = ".xguitare-staging";
 const STARTER_PRESETS: [(&str, &str); 5] = [
     ("01-clean.toml", include_str!("../bank/01-clean.toml")),

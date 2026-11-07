@@ -69,6 +69,7 @@ fn commands_before_quit_are_sent_in_order() {
         Request::RackAdd {
             r#type: "delay".to_string(),
             after: Some("reverb".to_string()),
+            at: None,
         },
         Request::RackMove {
             id: "delay".to_string(),

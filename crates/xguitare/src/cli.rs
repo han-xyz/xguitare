@@ -47,9 +47,14 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         Cmd::Get { param } => Request::Get { param },
         Cmd::Save => Request::Save,
         Cmd::Modules => Request::Modules,
-        Cmd::Rack(RackCmd::Add { type_name, after }) => Request::RackAdd {
+        Cmd::Rack(RackCmd::Add {
+            type_name,
+            after,
+            at,
+        }) => Request::RackAdd {
             r#type: type_name,
             after,
+            at,
         },
         Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id },
         Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove { id, to },

@@ -652,6 +652,7 @@ fn amp_state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     let (file, clean) = state.active.clone().unwrap();
     let cab = PresetModule {
         ir: Some("default-cab.wav".to_string()),
+        params: vec![("level".to_string(), 0.0)],
         ..cabinet("cabinet")
     };
     let preset = Preset {
@@ -671,6 +672,15 @@ fn rack_add(type_name: &str, after: Option<&str>) -> Request {
     Request::RackAdd {
         r#type: type_name.to_string(),
         after: after.map(str::to_string),
+        at: None,
+    }
+}
+
+fn rack_add_at(type_name: &str, at: usize) -> Request {
+    Request::RackAdd {
+        r#type: type_name.to_string(),
+        after: None,
+        at: Some(at),
     }
 }
 
@@ -758,6 +768,55 @@ fn rack_add_after_inserts_at_position() {
 }
 
 #[test]
+fn rack_add_at_inserts_at_index() {
+    let (mut state, _audio, _dir) = amp_state("rack-add-at");
+    ok(handle(&mut state, rack_add_at("gate", 0)));
+    assert_eq!(ids(&state), ["gate", "gain", "cabinet"]);
+    ok(handle(&mut state, rack_add_at("delay", 99)));
+    assert_eq!(ids(&state), ["gate", "gain", "cabinet", "delay"]);
+    let both = Request::RackAdd {
+        r#type: "gate".to_string(),
+        after: Some("gain".to_string()),
+        at: Some(0),
+    };
+    assert_eq!(error(handle(&mut state, both)), "give either after or at");
+    assert_eq!(ids(&state), ["gate", "gain", "cabinet", "delay"]);
+}
+
+#[test]
+fn rack_add_cabinet_picks_ir() {
+    let (mut state, mut audio, dir) = state("rack-add-cabinet-ir");
+    assert_eq!(
+        error(handle(&mut state, rack_add("cabinet", None))),
+        "cabinet needs an ir; add one in the preset file"
+    );
+    assert_eq!(ids(&state), ["gain"]);
+    assert!(audio.commands.pop().is_err(), "SwapRack pushed");
+    assert_eq!(revision(&mut state), 1);
+    let cabinet_ir = |state: &EngineState| {
+        let (_, preset) = state.active.as_ref().unwrap();
+        preset.modules[1].ir.clone()
+    };
+    fs::write(dir.0.join("bass-cab.wav"), "").unwrap();
+    ok(handle(&mut state, rack_add("cabinet", None)));
+    assert_eq!(cabinet_ir(&state).as_deref(), Some("bass-cab.wav"));
+    ok(handle(&mut state, rack_remove("cabinet")));
+    fs::write(dir.0.join("default-cab.wav"), "").unwrap();
+    ok(handle(&mut state, rack_add("cabinet", None)));
+    assert_eq!(cabinet_ir(&state).as_deref(), Some("default-cab.wav"));
+}
+
+#[test]
+fn rack_add_second_cabinet_is_layout_error() {
+    let (mut state, _audio, _dir) = amp_state("rack-add-second-cabinet");
+    assert_eq!(
+        error(handle(&mut state, rack_add("cabinet", None))),
+        "more than one cabinet"
+    );
+    assert_eq!(ids(&state), ["gain", "cabinet"]);
+}
+
+#[test]
 fn rack_add_without_after_appends() {
     let (mut state, _audio, _dir) = amp_state("rack-add-without-after");
     ok(handle(&mut state, rack_add("delay", None)));
@@ -806,7 +865,7 @@ fn rack_add_unknown_type_is_error() {
 
 #[test]
 fn rack_remove_unknown_is_error() {
-    let (mut state, _audio, _dir) = amp_state("rack-remove-unknown");
+    let (mut state, mut audio, _dir) = amp_state("rack-remove-unknown");
     assert_eq!(
         error(handle(&mut state, rack_remove("nope"))),
         "no module 'nope'"
@@ -814,15 +873,32 @@ fn rack_remove_unknown_is_error() {
     let payload = ok(handle(&mut state, rack_remove("gain")));
     assert_eq!(payload, json!({"id": "gain"}));
     assert_eq!(ids(&state), ["cabinet"]);
+    assert!(matches!(audio.commands.pop(), Ok(Command::SwapRack(_))));
+}
+
+#[test]
+fn rack_remove_layout_error_changes_nothing() {
+    let (mut state, mut audio, _dir) = amp_state("rack-remove-layout");
+    ok(handle(&mut state, rack_add("delay", Some("cabinet"))));
+    while audio.commands.pop().is_ok() {}
+    assert_eq!(
+        error(handle(&mut state, rack_remove("cabinet"))),
+        "stereo module 'delay' before the cabinet"
+    );
+    assert_eq!(ids(&state), ["gain", "cabinet", "delay"]);
+    assert!(audio.commands.pop().is_err(), "SwapRack pushed");
+    assert_eq!(revision(&mut state), 2);
 }
 
 #[test]
 fn rack_move_clamps_and_reorders() {
-    let (mut state, _audio, _dir) = amp_state("rack-move");
+    let (mut state, mut audio, _dir) = amp_state("rack-move");
     ok(handle(&mut state, rack_add("delay", Some("cabinet"))));
     ok(handle(&mut state, rack_add("reverb", Some("delay"))));
+    while audio.commands.pop().is_ok() {}
     let payload = ok(handle(&mut state, rack_move("delay", 6)));
     assert_eq!(payload, json!({"id": "delay", "to": 3}));
+    assert!(matches!(audio.commands.pop(), Ok(Command::SwapRack(_))));
     assert_eq!(ids(&state), ["gain", "cabinet", "reverb", "delay"]);
     assert_eq!(
         error(handle(&mut state, rack_move("delay", 1))),
@@ -857,8 +933,8 @@ fn save_after_rack_edit_round_trips() {
     ok(handle(&mut state, Request::Save));
     let file = state.config.bank_dir.join("01-clean.toml");
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
-    let saved_ids: Vec<String> = saved.modules.iter().map(|m| m.id.clone()).collect();
-    assert_eq!(saved_ids, ids(&state));
+    let (_, live) = state.active.as_ref().unwrap();
+    assert_eq!(saved, *live);
     let types: Vec<&str> = saved.modules.iter().map(|m| m.type_name.as_str()).collect();
     assert_eq!(types, ["gain", "gate", "cabinet", "delay", "delay"]);
 }

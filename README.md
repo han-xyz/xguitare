@@ -206,14 +206,16 @@ $ xguitare save
 saved /home/you/.config/xguitare/bank/03-lead.toml
 ```
 
-`modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file:
+`modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, preamp, tonestack, cabinet, reverb):
 
 ```console
 $ xguitare modules
 gain        mono            level
 gate        mono            threshold,attack,release,hysteresis
 ...
-$ xguitare rack add delay --after reverb
+$ xguitare load Clean
+loaded 0 Clean
+$ xguitare rack add delay
 added delay
 $ xguitare rack move delay 1
 error: stereo module 'delay' before the cabinet
