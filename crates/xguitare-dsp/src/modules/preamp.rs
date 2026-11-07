@@ -70,7 +70,7 @@ impl Preamp {
         Preamp {
             values,
             stages: values[STAGES] as usize,
-            gain: Smoother::new(total_gain(values[GAIN])),
+            gain: Smoother::new(stage_gain(values[GAIN], values[STAGES] as usize)),
             bias: Smoother::new(values[BIAS] * BIAS_SCALE),
             master: Smoother::new(db_to_linear(values[MASTER])),
             dc_block_coeff: 0.0,
@@ -112,12 +112,18 @@ impl Module for Preamp {
         let spec = &SPEC.params[idx];
         let mut value = value.clamp(spec.min, spec.max);
         match idx {
-            GAIN => self.gain.set_target(total_gain(value)),
+            GAIN => self.gain.set_target(stage_gain(value, self.stages)),
             BIAS => self.bias.set_target(value * BIAS_SCALE),
             MASTER => self.master.set_target(db_to_linear(value)),
             STAGES => {
                 value = value.round();
-                self.stages = value as usize;
+                let stages = value as usize;
+                if stages > self.stages {
+                    self.dc_blocks[self.stages..stages].fill(DcBlock::default());
+                }
+                self.stages = stages;
+                self.gain
+                    .set_target(stage_gain(self.values[GAIN], self.stages));
             }
             _ => unreachable!("preamp has no parameter {idx}"),
         }
@@ -130,9 +136,8 @@ impl Module for Preamp {
 
     fn process(&mut self, io: &mut AudioBuffers) {
         let mono = &mut io.mono[..io.frames];
-        let per_stage = 1.0 / self.stages as f32;
         for sample in self.oversampler.upsample(mono) {
-            let stage_gain = self.gain.next_value().powf(per_stage);
+            let stage_gain = self.gain.next_value();
             let bias = self.bias.next_value();
             let rest = bias.tanh();
             for dc_block in &mut self.dc_blocks[..self.stages] {
@@ -148,8 +153,8 @@ impl Module for Preamp {
     }
 }
 
-fn total_gain(gain: f32) -> f32 {
-    10.0_f32.powf(gain / 100.0 * 1.6)
+fn stage_gain(gain: f32, stages: usize) -> f32 {
+    10.0_f32.powf(gain / 100.0 * 1.6 / stages as f32)
 }
 
 #[derive(Clone, Copy, Default)]

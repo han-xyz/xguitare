@@ -1,6 +1,8 @@
 mod common;
 
-use common::{SAMPLE_RATE, bin_mag, db, full_scale_sine_then_noise, peak, rack_with, run, sine};
+use common::{
+    BLOCK, SAMPLE_RATE, bin_mag, db, full_scale_sine_then_noise, noise, peak, rack_with, run, sine,
+};
 use xguitare_dsp::Preamp;
 
 const GAIN: usize = 0;
@@ -87,4 +89,25 @@ fn silence_in_silence_out() {
 fn finite_under_full_scale() {
     let output = preamp_output(&[(GAIN, 100.0)], &full_scale_sine_then_noise());
     assert!(output.iter().all(|s| s.is_finite()));
+}
+
+// Transient: the peak of the first block after `stages` rises, fed silence after the
+// lower stage count has settled; steady state: the peak of the output while playing noise
+// at the higher stage count. The transient must stay 60 dB below steady state.
+#[test]
+fn preamp_stage_rise_no_transient() {
+    let mut rack = rack_with(Box::new(Preamp::new()));
+    for (idx, value) in [(GAIN, 100.0), (BIAS, 0.5), (STAGES, 4.0)] {
+        rack.module_mut(0).set_param(idx, value);
+    }
+    let steady = peak(&run(&mut rack, &noise(0.5, 188 * BLOCK))[94 * BLOCK..]);
+    rack.module_mut(0).set_param(STAGES, 1.0);
+    run(&mut rack, &noise(0.5, 4 * BLOCK));
+    run(&mut rack, &vec![0.0; SAMPLE_RATE as usize]);
+    rack.module_mut(0).set_param(STAGES, 4.0);
+    let transient = peak(&run(&mut rack, &[0.0; BLOCK]));
+    assert!(
+        db(transient / steady) <= -60.0,
+        "transient {transient}, steady {steady}"
+    );
 }
