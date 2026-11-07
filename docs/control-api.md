@@ -80,7 +80,7 @@ Errors: none besides the transport errors.
 
 ## load
 
-Switches the running Rack to a Bank entry, with a crossfade. `preset` is a program number (all digits) or a Preset name (exact match, first in Bank order).
+Switches the running Rack to a Bank entry, with a crossfade. A switch that arrives while a crossfade runs waits for it to end and then crossfades; when several arrive, only the newest runs. `preset` is a program number (all digits) or a Preset name (exact match, first in Bank order).
 
 Request:
 
@@ -409,7 +409,7 @@ Errors: none besides the transport errors.
 
 ## mute
 
-Turns Mute on or off: while on, both outputs fade to silence over about 10 ms and stay silent, while the Tuner still reads the input. Off fades them back in. Mute stays on until a client turns it off, also when the client that turned it on disconnects. The Revision does not change.
+Turns Mute on or off: while on, both outputs fade to silence over 10 ms at any sample rate and stay silent, while the Tuner still reads the input. Off fades them back in. Mute stays on until a client turns it off, also when the client that turned it on disconnects. The Revision does not change.
 
 Request:
 

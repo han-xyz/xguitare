@@ -26,6 +26,8 @@ pub struct EngineShared {
 
 pub enum Command {
     SwapRack(Box<Rack>),
+    /// Applies to the next crossfade and to the Mute ramp from the next block; sent before the `SwapRack` of a Rack rebuilt at a new sample rate.
+    SetFadeLengths(FadeLengths),
     SetParam {
         module: usize,
         param: usize,
@@ -55,10 +57,27 @@ pub struct AudioQueues {
 
 const PROGRAM_CHANGE_SLOTS: usize = 16;
 const TAP_CAPACITY: usize = 16384;
-const MUTE_RAMP_FRAMES: f32 = 512.0;
+const MUTE_RAMP_MS: f32 = 10.0;
 
 /// PipeWire's default `clock.quantum-limit`: the largest block the switcher's own scratch is prepared for, so a swap to a Rack re-prepared for any quantum up to it never allocates on the audio thread.
 pub const SWITCHER_MAX_FRAMES: usize = 8192;
+
+/// The crossfade and Mute ramp lengths at one sample rate, computed on the control side so the audio thread does no conversion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FadeLengths {
+    crossfade_frames: usize,
+    mute_step: f32,
+}
+
+impl FadeLengths {
+    pub fn at(sample_rate: f32, crossfade_ms: f32) -> FadeLengths {
+        let mute_ramp_frames = (MUTE_RAMP_MS * sample_rate / 1000.0).round().max(1.0);
+        FadeLengths {
+            crossfade_frames: (crossfade_ms * sample_rate / 1000.0) as usize,
+            mute_step: 1.0 / mute_ramp_frames,
+        }
+    }
+}
 
 /// The largest |sample| of `samples`, 0 for an empty slice.
 pub fn block_peak(samples: &[f32]) -> f32 {
@@ -80,7 +99,7 @@ pub fn take_peak(peak: &AtomicU32) -> f32 {
 /// The control side, the audio side, and the control thread's end of the input tap.
 pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues, Consumer<f32>) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);
-    // At most every queued SwapRack plus the current and the fading-in Rack, minus the one left current, can be retired between two drains, and `control::handle` drains before each SwapRack push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
+    // At most every queued SwapRack plus the current, the fading-in and the pending Rack, minus the one left current, can be retired between two drains, and `control::handle` drains before each SwapRack push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
     let (from_audio_tx, from_audio_rx) = RingBuffer::new(capacity + 2 + PROGRAM_CHANGE_SLOTS);
     let (tap_tx, tap_rx) = RingBuffer::new(TAP_CAPACITY);
     (
@@ -124,13 +143,14 @@ impl EngineQueues {
     }
 }
 
-/// The audio thread's Rack state: the current Rack, the one fading in, and the Commands that change them. Allocates and frees nothing after `new`; every Rack it lets go of leaves through `AudioQueues::from_audio`.
+/// The audio thread's Rack state: the current Rack, the one fading in, the one waiting for that fade to end, and the Commands that change them. Allocates and frees nothing after `new`; every Rack it lets go of leaves through `AudioQueues::from_audio`.
 pub struct RackSwitcher {
     current: Box<Rack>,
     incoming: Option<Box<Rack>>,
+    pending: Option<Box<Rack>>,
     crossfader: Crossfader,
     max_frames: usize,
-    crossfade_frames: usize,
+    fades: FadeLengths,
     queues: AudioQueues,
     reserved_slots: usize,
     shared: Arc<EngineShared>,
@@ -141,7 +161,7 @@ impl RackSwitcher {
     pub fn new(
         rack: Box<Rack>,
         max_frames: usize,
-        crossfade_frames: usize,
+        fades: FadeLengths,
         queues: AudioQueues,
         shared: Arc<EngineShared>,
     ) -> RackSwitcher {
@@ -154,9 +174,10 @@ impl RackSwitcher {
         RackSwitcher {
             current: rack,
             incoming: None,
+            pending: None,
             crossfader,
             max_frames,
-            crossfade_frames,
+            fades,
             queues,
             reserved_slots,
             shared,
@@ -172,23 +193,28 @@ impl RackSwitcher {
                     param,
                     value,
                 } => {
-                    let newest = self.incoming.as_mut().unwrap_or(&mut self.current);
+                    let newest = self
+                        .pending
+                        .as_mut()
+                        .or(self.incoming.as_mut())
+                        .unwrap_or(&mut self.current);
                     newest.module_mut(module).set_param(param, value);
                 }
-                Command::SwapRack(new) => match self.incoming.take() {
-                    // A swap during a fade cuts straight to the newest Rack rather than queueing fades, so at most two Racks are ever live.
-                    Some(fading_in) => {
-                        let old = self.make_current(new);
-                        self.retire(old);
-                        self.retire(fading_in);
+                Command::SwapRack(new) => {
+                    if self.incoming.is_none() {
+                        self.start_fade(new);
+                    } else if let Some(replaced) = self.pending.replace(new) {
+                        self.retire(replaced);
                     }
-                    None => {
-                        self.incoming = Some(new);
-                        self.crossfader.start(self.crossfade_frames);
-                    }
-                },
+                }
+                Command::SetFadeLengths(fades) => self.fades = fades,
             }
         }
+    }
+
+    fn start_fade(&mut self, new: Box<Rack>) {
+        self.incoming = Some(new);
+        self.crossfader.start(self.fades.crossfade_frames);
     }
 
     /// Taps the input, runs one block through the current Rack, or through both while a fade runs, then applies the Mute gain; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for.
@@ -201,14 +227,10 @@ impl RackSwitcher {
 
     fn run_racks(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
         let frames = input.len();
-        if frames > self.current.max_frames()
-            && let Some(new) = self.incoming.take_if(|new| frames <= new.max_frames())
-        {
-            // The current Rack has been silent at this block size, so there is nothing to fade from.
-            let old = self.make_current(new);
-            self.retire(old);
-        }
         let fits = |rack: &Rack| frames <= rack.max_frames();
+        if !fits(&self.current) || self.incoming.as_deref().is_some_and(|new| !fits(new)) {
+            self.cut_to_fitting(frames);
+        }
         if frames > self.max_frames
             || !fits(&self.current)
             || self.incoming.as_deref().is_some_and(|new| !fits(new))
@@ -225,10 +247,34 @@ impl RackSwitcher {
             .crossfader
             .process(&mut self.current, incoming, input, out_l, out_r);
         if let Some(new) = self.incoming.take_if(|_| faded) {
-            let old = self.make_current(new);
-            self.retire(old);
+            self.finish_fade(new);
         }
         true
+    }
+
+    /// A Rack that cannot run this block makes the output silent and stops the fade, so cut without a fade: to the pending Rack if it fits, else to the fading-in one when the current Rack is the one that does not fit.
+    fn cut_to_fitting(&mut self, frames: usize) {
+        if let Some(newest) = self.pending.take_if(|new| frames <= new.max_frames()) {
+            if let Some(fading_in) = self.incoming.take() {
+                self.retire(fading_in);
+            }
+            let old = self.make_current(newest);
+            self.retire(old);
+            return;
+        }
+        if frames > self.current.max_frames()
+            && let Some(new) = self.incoming.take_if(|new| frames <= new.max_frames())
+        {
+            self.finish_fade(new);
+        }
+    }
+
+    fn finish_fade(&mut self, new: Box<Rack>) {
+        let old = self.make_current(new);
+        self.retire(old);
+        if let Some(next) = self.pending.take() {
+            self.start_fade(next);
+        }
     }
 
     fn apply_mute(&mut self, out_l: &mut [f32], out_r: &mut [f32]) {
@@ -244,7 +290,7 @@ impl RackSwitcher {
             }
             return;
         }
-        let step = 1.0 / MUTE_RAMP_FRAMES;
+        let step = self.fades.mute_step;
         for (left, right) in out_l.iter_mut().zip(out_r.iter_mut()) {
             self.mute_gain = if target > self.mute_gain {
                 (self.mute_gain + step).min(target)

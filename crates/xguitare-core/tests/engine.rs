@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use xguitare_core::control::passthrough_rack;
 use xguitare_core::engine::{
-    EngineShared, RackSwitcher, block_peak, engine_queues, raise_peak, take_peak,
+    EngineShared, FadeLengths, RackSwitcher, block_peak, engine_queues, raise_peak, take_peak,
 };
 
 const SAMPLE_RATE: f32 = 48_000.0;
-const MUTE_RAMP_FRAMES: usize = 512;
+const CROSSFADE_MS: f32 = 20.0;
 
 #[test]
 fn block_peak_is_max_abs() {
@@ -29,7 +29,8 @@ fn peak_atomic_only_raises_and_swaps_to_zero() {
 fn passthrough_switcher(frames: usize, shared: Arc<EngineShared>) -> RackSwitcher {
     let (_, audio, _) = engine_queues(4);
     let rack = Box::new(passthrough_rack(SAMPLE_RATE, frames));
-    RackSwitcher::new(rack, frames, 960, audio, shared)
+    let fades = FadeLengths::at(SAMPLE_RATE, CROSSFADE_MS);
+    RackSwitcher::new(rack, frames, fades, audio, shared)
 }
 
 fn sine(start: usize, frames: usize) -> Vec<f32> {
@@ -43,7 +44,8 @@ fn tap_ring_carries_input() {
     const FRAMES: usize = 128;
     let (_control, audio, mut tap) = engine_queues(4);
     let rack = Box::new(passthrough_rack(SAMPLE_RATE, FRAMES));
-    let mut switcher = RackSwitcher::new(rack, FRAMES, 960, audio, Arc::default());
+    let fades = FadeLengths::at(SAMPLE_RATE, CROSSFADE_MS);
+    let mut switcher = RackSwitcher::new(rack, FRAMES, fades, audio, Arc::default());
     let (mut left, mut right) = ([0.0; FRAMES], [0.0; FRAMES]);
     let input = sine(0, 2 * FRAMES);
     for block in input.chunks(FRAMES) {
@@ -58,7 +60,7 @@ fn tap_ring_carries_input() {
 
 #[test]
 fn mute_ramps_to_silence_and_back() {
-    const FRAMES: usize = MUTE_RAMP_FRAMES;
+    const FRAMES: usize = 512;
     let shared = Arc::new(EngineShared::default());
     let mut switcher = passthrough_switcher(FRAMES, Arc::clone(&shared));
     let (mut left, mut right) = (vec![0.0; FRAMES], vec![0.0; FRAMES]);
@@ -92,4 +94,28 @@ fn mute_ramps_to_silence_and_back() {
     let input = block(&mut switcher, &mut left, &mut right);
     assert_eq!(left, input);
     assert_eq!(right, input);
+}
+
+fn frames_to_silence(sample_rate: f32) -> usize {
+    const FRAMES: usize = 2048;
+    let shared = Arc::new(EngineShared::default());
+    let (_, audio, _) = engine_queues(4);
+    let rack = Box::new(passthrough_rack(sample_rate, FRAMES));
+    let fades = FadeLengths::at(sample_rate, CROSSFADE_MS);
+    let mut switcher = RackSwitcher::new(rack, FRAMES, fades, audio, Arc::clone(&shared));
+    shared.muted.store(true, Ordering::Relaxed);
+    let input = [0.5; FRAMES];
+    let (mut left, mut right) = ([0.0; FRAMES], [0.0; FRAMES]);
+    assert!(switcher.process(&input, &mut left, &mut right));
+    let silent_from = left.iter().position(|&sample| sample == 0.0).unwrap();
+    assert!(left[silent_from..].iter().all(|&sample| sample == 0.0));
+    silent_from + 1
+}
+
+#[test]
+fn mute_ramp_10ms_44k_96k() {
+    let at_44k = frames_to_silence(44_100.0);
+    assert!((441..=442).contains(&at_44k), "{at_44k}");
+    let at_96k = frames_to_silence(96_000.0);
+    assert!((960..=961).contains(&at_96k), "{at_96k}");
 }

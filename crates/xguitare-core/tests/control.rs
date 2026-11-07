@@ -7,10 +7,11 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::control::{
     EngineState, Reprepare, Request, Response, change_sample_rate, handle, handle_line,
-    needs_reprepare, reprepare,
+    needs_reprepare, passthrough_rack, reprepare,
 };
 use xguitare_core::engine::{
-    AudioQueues, Command, EngineShared, SWITCHER_MAX_FRAMES, engine_queues, raise_peak,
+    AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
+    engine_queues, raise_peak,
 };
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, ModuleRegistry, Preset, PresetModule};
@@ -506,6 +507,10 @@ fn sample_rate_change_rebuilds() {
         change_sample_rate(&mut state, 96_000).unwrap(),
         Reprepare::Built(Vec::new())
     );
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SetFadeLengths(_))
+    ));
     let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
         panic!("expected SwapRack");
     };
@@ -523,6 +528,67 @@ fn sample_rate_change_rebuilds() {
     let payload = ok(handle(&mut state, Request::Tuner));
     assert_eq!(payload["note"], "A2");
     assert_eq!(payload["hz"], 110.0);
+}
+
+fn run_blocks(switcher: &mut RackSwitcher, frames: usize) -> Vec<f32> {
+    const BLOCK: usize = 128;
+    let input = [0.5; BLOCK];
+    let mut out = Vec::new();
+    for _ in 0..frames / BLOCK {
+        let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+        switcher.apply_commands();
+        switcher.process(&input, &mut left, &mut right);
+        out.extend_from_slice(&left);
+    }
+    out
+}
+
+fn frames_to_settle(out: &[f32]) -> usize {
+    let last = out[out.len() - 1];
+    out.iter()
+        .rposition(|&sample| (sample - last).abs() >= 1e-6)
+        .map_or(0, |n| n + 1)
+}
+
+#[test]
+fn rate_change_doubles_fade_frames() {
+    let (mut state, audio, _dir) = state("rate-change-fades");
+    let shared = Arc::clone(&state.shared);
+    let rack = Box::new(passthrough_rack(48_000.0, 128));
+    let fades = FadeLengths::at(48_000.0, state.config.crossfade_ms);
+    let mut switcher = RackSwitcher::new(rack, 128, fades, audio, Arc::clone(&shared));
+    let mute_ramp = |switcher: &mut RackSwitcher| {
+        shared.muted.store(true, Ordering::Relaxed);
+        let frames = frames_to_settle(&run_blocks(switcher, 4096));
+        shared.muted.store(false, Ordering::Relaxed);
+        run_blocks(switcher, 4096);
+        frames
+    };
+
+    ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "Loud".to_string(),
+        },
+    ));
+    let crossfade_48k = frames_to_settle(&run_blocks(&mut switcher, 8192));
+    let mute_48k = mute_ramp(&mut switcher);
+    state.shared.sample_rate.store(96_000, Ordering::Relaxed);
+    change_sample_rate(&mut state, 96_000).unwrap();
+    run_blocks(&mut switcher, 4096);
+    ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "Clean".to_string(),
+        },
+    ));
+    let crossfade_96k = frames_to_settle(&run_blocks(&mut switcher, 8192));
+    let mute_96k = mute_ramp(&mut switcher);
+
+    assert_eq!(crossfade_48k, 960);
+    assert_eq!(crossfade_96k, 2 * crossfade_48k);
+    assert!((479..=480).contains(&mute_48k), "{mute_48k}");
+    assert!((959..=960).contains(&mute_96k), "{mute_96k}");
 }
 
 #[test]

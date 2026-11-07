@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use assert_no_alloc::*;
 use xguitare_core::engine::{
-    Command, EngineShared, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak, engine_queues,
-    raise_peak, tap_block,
+    Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak,
+    engine_queues, raise_peak, tap_block,
 };
 use xguitare_dsp::{Gain, Module, Rack};
 
@@ -13,6 +13,10 @@ use xguitare_dsp::{Gain, Module, Rack};
 static A: AllocDisabler = AllocDisabler;
 
 const BLOCK: usize = 128;
+
+fn fades() -> FadeLengths {
+    FadeLengths::at(48_000.0, 20.0)
+}
 
 fn gain_rack() -> Box<Rack> {
     sized_gain_rack(BLOCK)
@@ -31,7 +35,7 @@ fn sized_gain_rack(max_frames: usize) -> Box<Rack> {
 #[test]
 fn rack_switcher_does_not_allocate() {
     let (mut control, audio, _tap) = engine_queues(64);
-    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, 960, audio, Arc::default());
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::default());
     for _ in 0..2 {
         assert!(
             control
@@ -72,7 +76,7 @@ fn rack_switcher_at_quantum_limit_does_not_allocate() {
     let mut switcher = RackSwitcher::new(
         sized_gain_rack(SWITCHER_MAX_FRAMES),
         SWITCHER_MAX_FRAMES,
-        960,
+        fades(),
         audio,
         Arc::default(),
     );
@@ -102,7 +106,7 @@ fn oversize_then_swap_and_cut_does_not_allocate() {
     let mut switcher = RackSwitcher::new(
         sized_gain_rack(BLOCK),
         SWITCHER_MAX_FRAMES,
-        960,
+        fades(),
         audio,
         Arc::default(),
     );
@@ -153,7 +157,7 @@ fn tap_block_does_not_allocate() {
 fn mute_process_does_not_allocate() {
     let (mut control, audio, _tap) = engine_queues(64);
     let shared = Arc::new(EngineShared::default());
-    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, 960, audio, Arc::clone(&shared));
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::clone(&shared));
     let input = [0.25; BLOCK];
     let mut left = [0.0; BLOCK];
     let mut right = [0.0; BLOCK];
@@ -165,4 +169,37 @@ fn mute_process_does_not_allocate() {
     });
     drop(switcher);
     control.drain_from_audio();
+}
+
+#[test]
+fn pending_swap_and_new_fade_lengths_do_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::default());
+    let racks = [gain_rack(), gain_rack(), gain_rack()];
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    let doubled = FadeLengths::at(96_000.0, 20.0);
+    assert_no_alloc(|| {
+        assert!(
+            control
+                .commands
+                .push(Command::SetFadeLengths(doubled))
+                .is_ok()
+        );
+        for rack in racks {
+            assert!(control.commands.push(Command::SwapRack(rack)).is_ok());
+            switcher.apply_commands();
+            switcher.process(&input, &mut left, &mut right);
+        }
+        for _ in 0..40 {
+            switcher.process(&input, &mut left, &mut right);
+        }
+    });
+    let mut retired = 0;
+    while let Ok(FromAudio::Retired(_)) = control.from_audio.pop() {
+        retired += 1;
+    }
+    assert_eq!(retired, 3);
+    drop(switcher);
 }

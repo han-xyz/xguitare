@@ -10,7 +10,8 @@ use jack::{
 use tracing::{info, warn};
 use xguitare_core::Ports;
 use xguitare_core::engine::{
-    AudioQueues, EngineShared, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak, raise_peak,
+    AudioQueues, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak,
+    raise_peak,
 };
 use xguitare_core::ports::{AvailablePort, choose_ports};
 use xguitare_dsp::{Rack, midi};
@@ -51,12 +52,11 @@ pub fn start(
     let max_frames = (buffer_size as usize).max(client.buffer_size() as usize);
     let sample_rate = client.sample_rate() as f32;
     let rack = Box::new(build_rack(sample_rate, max_frames));
-    let crossfade_frames = (crossfade_ms * sample_rate / 1000.0) as usize;
     let process = Process {
         switcher: RackSwitcher::new(
             rack,
             SWITCHER_MAX_FRAMES,
-            crossfade_frames,
+            FadeLengths::at(sample_rate, crossfade_ms),
             queues,
             Arc::clone(&shared),
         ),

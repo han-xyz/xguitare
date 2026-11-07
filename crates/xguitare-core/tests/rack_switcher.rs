@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use xguitare_core::engine::{
-    Command, EngineQueues, EngineShared, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES,
+    Command, EngineQueues, EngineShared, FadeLengths, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES,
     engine_queues,
 };
 use xguitare_dsp::{Gain, Module, Rack};
@@ -10,6 +10,10 @@ use xguitare_dsp::{Gain, Module, Rack};
 const BLOCK: usize = 128;
 const FADE: usize = 960;
 const CAPACITY: usize = 64;
+
+fn fades() -> FadeLengths {
+    FadeLengths::at(48_000.0, 20.0)
+}
 
 fn gain_rack(levels_db: &[f32]) -> Box<Rack> {
     sized_gain_rack(levels_db, BLOCK)
@@ -36,7 +40,7 @@ fn sized_gain_rack(levels_db: &[f32], max_frames: usize) -> Box<Rack> {
 fn switcher(levels_db: &[f32]) -> (RackSwitcher, EngineQueues) {
     let (control, audio, _) = engine_queues(CAPACITY);
     (
-        RackSwitcher::new(gain_rack(levels_db), BLOCK, FADE, audio, Arc::default()),
+        RackSwitcher::new(gain_rack(levels_db), BLOCK, fades(), audio, Arc::default()),
         control,
     )
 }
@@ -55,20 +59,34 @@ fn swap(control: &mut EngineQueues, rack: Box<Rack>) {
 }
 
 #[test]
-fn swap_during_fade_retires_both() {
+fn swap_mid_fade_crossfades() {
     let (mut switcher, mut control) = switcher(&[0.0]);
     swap(&mut control, gain_rack(&[-6.0]));
-    block(&mut switcher);
-    assert_eq!(control.from_audio.slots(), 0);
-    assert!(
-        control
-            .commands
-            .push(Command::SwapRack(gain_rack(&[-20.0])))
-            .is_ok()
-    );
-    let out = block(&mut switcher);
-    assert_eq!(control.from_audio.slots(), 2);
-    assert!((out[0] - 0.05).abs() < 1e-6, "{}", out[0]);
+    let mut out = block(&mut switcher).to_vec();
+    for level in [-12.0, -20.0] {
+        assert!(
+            control
+                .commands
+                .push(Command::SwapRack(gain_rack(&[level])))
+                .is_ok()
+        );
+    }
+    out.extend(block(&mut switcher));
+    let Ok(FromAudio::Retired(replaced)) = control.from_audio.pop() else {
+        panic!("expected the replaced pending Rack");
+    };
+    assert_eq!(replaced.modules()[0].1.param(0), -12.0);
+    assert!(control.from_audio.pop().is_err());
+    for _ in 0..2 * FADE.div_ceil(BLOCK) + 2 {
+        out.extend(block(&mut switcher));
+    }
+    let largest_step = 0.5 / FADE as f32 + 1e-6;
+    for (n, pair) in out.windows(2).enumerate() {
+        let step = (pair[1] - pair[0]).abs();
+        assert!(step <= largest_step, "frame {n}: step {step}");
+    }
+    let last = out[out.len() - 1];
+    assert!((last - 0.05).abs() < 1e-6, "{last}");
 }
 
 #[test]
@@ -120,7 +138,7 @@ fn swap_to_larger_rack_during_oversize_period() {
     let mut switcher = RackSwitcher::new(
         gain_rack(&[0.0]),
         SWITCHER_MAX_FRAMES,
-        FADE,
+        fades(),
         audio,
         Arc::clone(&shared),
     );
@@ -140,4 +158,27 @@ fn swap_to_larger_rack_during_oversize_period() {
         control.from_audio.pop(),
         Ok(FromAudio::Retired(_))
     ));
+}
+
+#[test]
+fn grown_block_mid_fade_cuts_to_newest() {
+    const LARGER: usize = 2 * BLOCK;
+    let (mut control, audio, _) = engine_queues(CAPACITY);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(
+        sized_gain_rack(&[0.0], LARGER),
+        SWITCHER_MAX_FRAMES,
+        fades(),
+        audio,
+        Arc::clone(&shared),
+    );
+    swap(&mut control, gain_rack(&[-6.0]));
+    block(&mut switcher);
+    swap(&mut control, sized_gain_rack(&[-20.0], LARGER));
+    let input = [0.5; LARGER];
+    let (mut left, mut right) = ([0.0; LARGER], [0.0; LARGER]);
+    switcher.apply_commands();
+    assert!(switcher.process(&input, &mut left, &mut right));
+    assert!((left[0] - 0.05).abs() < 1e-6, "{}", left[0]);
+    assert_eq!(shared.running_frames.load(Ordering::Relaxed), LARGER);
 }

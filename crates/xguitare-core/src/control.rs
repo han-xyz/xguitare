@@ -12,7 +12,9 @@ use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 pub use serde_json::Value;
 
 use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
-use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
+use crate::engine::{
+    Command, EngineQueues, EngineShared, FadeLengths, SWITCHER_MAX_FRAMES, take_peak,
+};
 use crate::firstrun::{BASS_IR, DEFAULT_IR};
 use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
 use crate::tuner::Tuner;
@@ -158,9 +160,19 @@ pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare,
     Ok(outcome)
 }
 
-/// Rebuilds the live Rack as `reprepare` does, IRs resampled, and the Tuner at `sample_rate`; fails only with `engine busy`, leaving the state unchanged.
+/// Rebuilds the live Rack as `reprepare` does, IRs resampled, and the Tuner at `sample_rate`, and sends the switcher the crossfade and Mute ramp lengths at that rate ahead of the Rack; fails only with `engine busy`, leaving the state unchanged.
 pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
     let sample_rate = sample_rate as f32;
+    let fades = FadeLengths::at(sample_rate, state.config.crossfade_ms);
+    if state.queues.commands.slots() < 2
+        || state
+            .queues
+            .commands
+            .push(Command::SetFadeLengths(fades))
+            .is_err()
+    {
+        return Err(ENGINE_BUSY.to_string());
+    }
     let outcome = rebuild(state, sample_rate, state.max_frames)?;
     state.sample_rate = sample_rate;
     state.tuner.set_sample_rate(sample_rate);
