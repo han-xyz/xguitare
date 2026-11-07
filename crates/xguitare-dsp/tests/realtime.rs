@@ -96,6 +96,15 @@ fn cabinet_does_not_allocate() {
     assert_rack_does_not_allocate(Box::new(Cabinet::new(Some(ir))), &[(0, -6.0)]);
 }
 
+#[test]
+fn cabinet_cuts_do_not_allocate() {
+    let ir = CabinetIr {
+        left: (0..4800).map(|n| 0.9_f32.powi(n)).collect(),
+        right: Some(vec![0.5; 4800]),
+    };
+    assert_rack_does_not_allocate(Box::new(Cabinet::new(Some(ir))), &[(1, 100.0), (2, 5000.0)]);
+}
+
 fn assert_after_cabinet_does_not_allocate(module: Box<dyn Module>, settings: &[(usize, f32)]) {
     let mut rack = Rack::new(vec![
         (

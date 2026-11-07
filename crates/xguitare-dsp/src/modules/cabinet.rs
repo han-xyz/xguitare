@@ -6,19 +6,40 @@ use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const LEVEL: usize = 0;
+const LOW_CUT: usize = 1;
+const HIGH_CUT: usize = 2;
 const SMOOTHING_SECONDS: f32 = 0.005;
+const BUTTERWORTH_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
 static SPEC: ModuleSpec = ModuleSpec {
     type_name: "cabinet",
     channels: Channels::MonoToStereo,
-    params: &[ParamSpec {
-        name: "level",
-        min: -20.0,
-        max: 20.0,
-        default: 0.0,
-        unit: Unit::Db,
-        integer: false,
-    }],
+    params: &[
+        ParamSpec {
+            name: "level",
+            min: -20.0,
+            max: 20.0,
+            default: 0.0,
+            unit: Unit::Db,
+            integer: false,
+        },
+        ParamSpec {
+            name: "low_cut",
+            min: 20.0,
+            max: 300.0,
+            default: 20.0,
+            unit: Unit::Hz,
+            integer: true,
+        },
+        ParamSpec {
+            name: "high_cut",
+            min: 2000.0,
+            max: 20000.0,
+            default: 20000.0,
+            unit: Unit::Hz,
+            integer: true,
+        },
+    ],
 };
 
 /// A Cabinet IR already resampled to the engine rate and truncated; `right: None` feeds `left` to both outputs.
@@ -28,6 +49,20 @@ pub struct CabinetIr {
     pub right: Option<Vec<f32>>,
 }
 
+impl CabinetIr {
+    /// Scales `left` and `right` by one factor so the energy (sum of squares) of `left` is 1.0; an all-zero `left` leaves both unchanged.
+    pub fn normalise(&mut self) {
+        let energy: f32 = self.left.iter().map(|tap| tap * tap).sum();
+        if energy == 0.0 {
+            return;
+        }
+        let factor = 1.0 / energy.sqrt();
+        for tap in self.left.iter_mut().chain(self.right.iter_mut().flatten()) {
+            *tap *= factor;
+        }
+    }
+}
+
 pub struct Cabinet {
     ir: Option<CabinetIr>,
     convolver: Option<Convolver>,
@@ -35,6 +70,11 @@ pub struct Cabinet {
     target: f32,
     current: f32,
     coeff: f32,
+    sample_rate: f64,
+    low_cut_hz: f32,
+    high_cut_hz: f32,
+    high_pass: Cut,
+    low_pass: Cut,
 }
 
 impl Cabinet {
@@ -48,7 +88,27 @@ impl Cabinet {
             target: db_to_linear(level_db),
             current: db_to_linear(level_db),
             coeff: 0.0,
+            sample_rate: 0.0,
+            low_cut_hz: SPEC.params[LOW_CUT].default,
+            high_cut_hz: SPEC.params[HIGH_CUT].default,
+            high_pass: Cut::default(),
+            low_pass: Cut::default(),
         }
+    }
+
+    // A cut at its default (outermost) value is bypassed: the samples are not touched, so default Presets stay bit-exact.
+    fn update_cuts(&mut self) {
+        let rate = self.sample_rate;
+        let low_cut = f64::from(self.low_cut_hz);
+        let high_cut = f64::from(self.high_cut_hz);
+        self.high_pass.engage(
+            (self.low_cut_hz != SPEC.params[LOW_CUT].default)
+                .then(|| Biquad::high_pass(low_cut, rate)),
+        );
+        self.low_pass.engage(
+            (self.high_cut_hz != SPEC.params[HIGH_CUT].default)
+                .then(|| Biquad::low_pass(high_cut, rate)),
+        );
     }
 }
 
@@ -59,26 +119,45 @@ impl Module for Cabinet {
 
     fn prepare(&mut self, sample_rate: f32, max_frames: usize) {
         self.coeff = (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp();
+        self.sample_rate = f64::from(sample_rate);
+        self.update_cuts();
         self.convolver = self.ir.as_ref().map(|ir| Convolver::new(ir, max_frames));
     }
 
     fn reset(&mut self) {
         self.current = self.target;
+        self.high_pass.clear();
+        self.low_pass.clear();
         if let Some(convolver) = &mut self.convolver {
             convolver.reset();
         }
     }
 
     fn set_param(&mut self, idx: usize, value: f32) {
-        debug_assert!(idx == LEVEL, "cabinet has no parameter {idx}");
-        let spec = &SPEC.params[LEVEL];
-        self.level_db = value.clamp(spec.min, spec.max);
-        self.target = db_to_linear(self.level_db);
+        let spec = &SPEC.params[idx];
+        let value = value.clamp(spec.min, spec.max);
+        match idx {
+            LEVEL => {
+                self.level_db = value;
+                self.target = db_to_linear(value);
+            }
+            LOW_CUT => {
+                self.low_cut_hz = value.round();
+                self.update_cuts();
+            }
+            _ => {
+                self.high_cut_hz = value.round();
+                self.update_cuts();
+            }
+        }
     }
 
     fn param(&self, idx: usize) -> f32 {
-        debug_assert!(idx == LEVEL, "cabinet has no parameter {idx}");
-        self.level_db
+        match idx {
+            LEVEL => self.level_db,
+            LOW_CUT => self.low_cut_hz,
+            _ => self.high_cut_hz,
+        }
     }
 
     fn process(&mut self, io: &mut AudioBuffers) {
@@ -91,12 +170,88 @@ impl Module for Cabinet {
                 right.copy_from_slice(&io.mono[..frames]);
             }
         }
+        self.high_pass.process(left, right);
+        self.low_pass.process(left, right);
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
             self.current = self.target + self.coeff * (self.current - self.target);
             *l *= self.current;
             *r *= self.current;
         }
     }
+}
+
+#[derive(Default)]
+struct Cut {
+    biquad: Option<Biquad>,
+    state: [[f64; 2]; 2],
+}
+
+impl Cut {
+    fn engage(&mut self, biquad: Option<Biquad>) {
+        if biquad.is_none() {
+            self.clear();
+        }
+        self.biquad = biquad;
+    }
+
+    fn clear(&mut self) {
+        self.state = [[0.0; 2]; 2];
+    }
+
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let Some(biquad) = &self.biquad else {
+            return;
+        };
+        let [left_state, right_state] = &mut self.state;
+        biquad.process(left, left_state);
+        biquad.process(right, right_state);
+    }
+}
+
+/// RBJ cookbook biquad, normalised so `a0 == 1`, run as transposed direct form II.
+struct Biquad {
+    b: [f64; 3],
+    a: [f64; 2],
+}
+
+impl Biquad {
+    fn high_pass(freq: f64, rate: f64) -> Biquad {
+        let (cos, alpha) = angle(freq, rate);
+        Biquad::normalised(
+            [(1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0],
+            [1.0 + alpha, -2.0 * cos, 1.0 - alpha],
+        )
+    }
+
+    fn low_pass(freq: f64, rate: f64) -> Biquad {
+        let (cos, alpha) = angle(freq, rate);
+        Biquad::normalised(
+            [(1.0 - cos) / 2.0, 1.0 - cos, (1.0 - cos) / 2.0],
+            [1.0 + alpha, -2.0 * cos, 1.0 - alpha],
+        )
+    }
+
+    fn normalised(b: [f64; 3], a: [f64; 3]) -> Biquad {
+        Biquad {
+            b: b.map(|coeff| coeff / a[0]),
+            a: [a[1] / a[0], a[2] / a[0]],
+        }
+    }
+
+    fn process(&self, samples: &mut [f32], state: &mut [f64; 2]) {
+        for sample in samples {
+            let x = f64::from(*sample);
+            let y = self.b[0] * x + state[0];
+            state[0] = self.b[1] * x - self.a[0] * y + state[1];
+            state[1] = self.b[2] * x - self.a[1] * y;
+            *sample = y as f32;
+        }
+    }
+}
+
+fn angle(freq: f64, rate: f64) -> (f64, f64) {
+    let w0 = std::f64::consts::TAU * freq / rate;
+    (w0.cos(), w0.sin() / (2.0 * BUTTERWORTH_Q))
 }
 
 /// Uniformly partitioned overlap-save convolution with partition size `block` and FFT size `2 * block`.

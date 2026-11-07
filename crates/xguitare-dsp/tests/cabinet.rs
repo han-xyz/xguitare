@@ -1,3 +1,5 @@
+mod common;
+
 use std::f32::consts::TAU;
 use std::time::Instant;
 
@@ -171,4 +173,96 @@ fn short_block_matches_long_ir() {
     }
     assert_close(&left, &expected, 1e-4);
     assert_close(&right, &expected, 1e-4);
+}
+
+const LOW_CUT: usize = 1;
+const HIGH_CUT: usize = 2;
+
+fn tone_gain_db(cut: (usize, f32), freq: f32) -> f32 {
+    let mut rack = cabinet_rack(mono_ir(vec![1.0]));
+    rack.module_mut(0).set_param(cut.0, cut.1);
+    let input = common::sine(0.5, freq, SAMPLE_RATE, SAMPLE_RATE as usize);
+    let (left, _) = run(&mut rack, &input, BLOCK);
+    let settled = input.len() / 2;
+    common::db(
+        common::bin_mag(&left[settled..], freq, SAMPLE_RATE)
+            / common::bin_mag(&input[settled..], freq, SAMPLE_RATE),
+    )
+}
+
+fn energy(samples: &[f32]) -> f32 {
+    samples.iter().map(|s| s * s).sum()
+}
+
+#[test]
+fn default_cuts_are_bit_exact() {
+    let input = noise(10 * BLOCK, 31);
+    let (left, right) = run(&mut cabinet_rack(None), &input, BLOCK);
+    assert_eq!(left, input);
+    assert_eq!(right, input);
+
+    let ir = noise(300, 37);
+    let (fresh_left, fresh_right) = run(&mut cabinet_rack(mono_ir(ir.clone())), &input, BLOCK);
+    let mut restored = cabinet_rack(mono_ir(ir));
+    restored.module_mut(0).set_param(LOW_CUT, 150.0);
+    restored.module_mut(0).set_param(HIGH_CUT, 4000.0);
+    restored.process(&input[..BLOCK], &mut [0.0; BLOCK], &mut [0.0; BLOCK]);
+    restored.module_mut(0).reset();
+    restored.module_mut(0).set_param(LOW_CUT, 20.0);
+    restored.module_mut(0).set_param(HIGH_CUT, 20_000.0);
+    let (left, right) = run(&mut restored, &input, BLOCK);
+    assert_eq!(left, fresh_left);
+    assert_eq!(right, fresh_right);
+}
+
+#[test]
+fn low_cut_attenuates_sub_bass() {
+    let sub_bass = tone_gain_db((LOW_CUT, 100.0), 50.0);
+    assert!(sub_bass <= -10.0, "50 Hz {sub_bass} dB");
+    let mid = tone_gain_db((LOW_CUT, 100.0), 1000.0);
+    assert!(mid.abs() <= 0.5, "1 kHz {mid} dB");
+}
+
+#[test]
+fn high_cut_attenuates_treble() {
+    let treble = tone_gain_db((HIGH_CUT, 5000.0), 10_000.0);
+    assert!(treble <= -10.0, "10 kHz {treble} dB");
+    let mid = tone_gain_db((HIGH_CUT, 5000.0), 1000.0);
+    assert!(mid.abs() <= 0.5, "1 kHz {mid} dB");
+}
+
+#[test]
+fn normalise_unit_energy() {
+    let left = noise(500, 41);
+    let right = noise(500, 43);
+    let mut ir = CabinetIr {
+        left: left.clone(),
+        right: Some(right.clone()),
+    };
+    ir.normalise();
+    assert!(
+        (energy(&ir.left) - 1.0).abs() <= 1e-4,
+        "{}",
+        energy(&ir.left)
+    );
+    let factor = ir.left[0] / left[0];
+    let scaled = ir.right.expect("right kept");
+    for (n, (s, r)) in scaled.iter().zip(&right).enumerate() {
+        assert!(
+            (s - r * factor).abs() <= 1e-6,
+            "sample {n}: {s} vs {}",
+            r * factor
+        );
+    }
+}
+
+#[test]
+fn normalise_zero_ir_is_noop() {
+    let mut ir = CabinetIr {
+        left: vec![0.0; 64],
+        right: Some(vec![0.5; 64]),
+    };
+    let before = ir.clone();
+    ir.normalise();
+    assert_eq!(ir, before);
 }

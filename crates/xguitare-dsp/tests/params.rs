@@ -23,5 +23,13 @@ fn integer_params_are_stages_and_pingpong() {
                 .map(|param| format!("{}.{}", spec.type_name, param.name))
         })
         .collect();
-    assert_eq!(integer, ["preamp.stages", "delay.pingpong"]);
+    assert_eq!(
+        integer,
+        [
+            "preamp.stages",
+            "cabinet.low_cut",
+            "cabinet.high_cut",
+            "delay.pingpong"
+        ]
+    );
 }
