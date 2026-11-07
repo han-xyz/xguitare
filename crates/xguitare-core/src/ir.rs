@@ -22,12 +22,17 @@ pub enum IrError {
         detail: String,
     },
     NonFinite {
-        path: PathBuf,
+        name: String,
     },
 }
 
-/// Reads at most `max_ms` of a 16/24/32-bit PCM or 32-bit float wav with one or two channels, refuses a non-finite sample, then resamples to `engine_rate`, truncates to `max_ms` and normalises to unit energy.
-pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, IrError> {
+/// Reads at most `max_ms` of a 16/24/32-bit PCM or 32-bit float wav with one or two channels, refuses a non-finite sample, then resamples to `engine_rate`, truncates to `max_ms` and normalises to unit energy. `name` is the Cabinet IR name as written in the Preset, used in the non-finite error.
+pub fn load_ir(
+    path: &Path,
+    name: &str,
+    engine_rate: u32,
+    max_ms: f32,
+) -> Result<CabinetIr, IrError> {
     let hound_error = |error| IrError::from_hound(path, error);
     let reader = WavReader::open(path).map_err(hound_error)?;
     let spec = reader.spec();
@@ -57,7 +62,7 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
         }
     };
     let non_finite = || IrError::NonFinite {
-        path: path.to_path_buf(),
+        name: name.to_string(),
     };
     if !samples.iter().all(|sample| sample.is_finite()) {
         return Err(non_finite());
@@ -132,7 +137,7 @@ impl fmt::Display for IrError {
                 write!(f, "{}: unsupported wav format: {detail}", path.display())
             }
             IrError::Decode { path, detail } => write!(f, "{}: {detail}", path.display()),
-            IrError::NonFinite { path } => write!(f, "ir {}: non-finite sample", path.display()),
+            IrError::NonFinite { name } => write!(f, "ir {name}: non-finite sample"),
         }
     }
 }

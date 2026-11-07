@@ -84,7 +84,7 @@ fn loads_int(test: &str, bits: u16) {
     let dir = temp_dir(test);
     let path = dir.join("ir.wav");
     write_int(&path, spec(1, 48_000, bits, SampleFormat::Int), &ramp());
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     assert_ramp(&ir.left);
     assert_eq!(ir.right, None);
 }
@@ -109,7 +109,7 @@ fn loads_float32() {
     let dir = temp_dir("float32");
     let path = dir.join("ir.wav");
     write_float(&path, spec(1, 48_000, 32, SampleFormat::Float), &ramp());
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     assert_ramp(&ir.left);
 }
 
@@ -123,7 +123,7 @@ fn loads_stereo() {
         spec(2, 48_000, 32, SampleFormat::Float),
         &interleaved,
     );
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     assert_ramp(&ir.left);
     let right = ir.right.expect("stereo file has a right channel");
     let negated: Vec<f32> = right.iter().map(|s| -s).collect();
@@ -140,7 +140,7 @@ fn stereo_with_unbounded_max_ms_loads() {
         spec(2, 48_000, 32, SampleFormat::Float),
         &interleaved,
     );
-    let ir = load_ir(&path, 48_000, f32::INFINITY).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, f32::INFINITY).unwrap();
     assert_ramp(&ir.left);
 }
 
@@ -149,7 +149,7 @@ fn resamples_to_engine_rate() {
     let dir = temp_dir("resample");
     let path = dir.join("ir.wav");
     write_float(&path, spec(1, 44_100, 32, SampleFormat::Float), &ramp());
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     assert_eq!(ir.left.len(), 109);
 }
 
@@ -162,7 +162,7 @@ fn truncates_to_max_ms() {
         spec(1, 48_000, 32, SampleFormat::Float),
         &[0.1; 48_000],
     );
-    let ir = load_ir(&path, 48_000, 100.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 100.0).unwrap();
     assert_eq!(ir.left.len(), 4800);
 }
 
@@ -176,7 +176,7 @@ fn load_ir_has_unit_energy() {
         spec(2, 48_000, 32, SampleFormat::Float),
         &interleaved,
     );
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     let right = ir.right.expect("stereo file has a right channel");
     let mean = (energy(&ir.left) + energy(&right)) / 2.0;
     assert!((mean - 1.0).abs() <= 1e-4, "{mean}");
@@ -195,7 +195,7 @@ fn ir_right_only_not_boosted() {
         spec(2, 48_000, 32, SampleFormat::Float),
         &interleaved,
     );
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     assert!(ir.left.iter().all(|tap| *tap == 0.0), "{:?}", ir.left);
     let right = ir.right.expect("stereo file has a right channel");
     let mono_ir_energy_on_both_outputs = 2.0;
@@ -216,18 +216,15 @@ fn ir_non_finite_refused() {
             spec(1, 48_000, 32, SampleFormat::Float),
             &[0.5, bad, 0.25],
         );
-        let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            format!("ir {}: non-finite sample", path.display())
-        );
+        let error = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap_err();
+        assert_eq!(error.to_string(), "ir ir.wav: non-finite sample");
     }
     write_float(
         &path,
         spec(1, 48_000, 32, SampleFormat::Float),
         &[1e20, 1e20, 5e19],
     );
-    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     assert!(ir.left.iter().all(|tap| tap.is_finite()), "{:?}", ir.left);
     assert!(
         (energy(&ir.left) - 1.0).abs() <= 1e-4,
@@ -244,12 +241,9 @@ fn near_max_sample_resampled_is_refused_or_finite() {
         .map(|n| if n < 100 { f32::MAX } else { -f32::MAX })
         .collect();
     write_float(&path, spec(1, 48_000, 32, SampleFormat::Float), &step);
-    match load_ir(&path, 44_100, 1000.0) {
+    match load_ir(&path, "ir.wav", 44_100, 1000.0) {
         Ok(ir) => assert!(ir.left.iter().all(|tap| tap.is_finite()), "{:?}", ir.left),
-        Err(error) => assert_eq!(
-            error.to_string(),
-            format!("ir {}: non-finite sample", path.display())
-        ),
+        Err(error) => assert_eq!(error.to_string(), "ir ir.wav: non-finite sample"),
     }
 }
 
@@ -266,7 +260,7 @@ fn ir_reads_at_most_max_ms() {
     let unread_tail_bytes = 40_000 * 4;
     file.set_len(file.metadata().unwrap().len() - unread_tail_bytes)
         .unwrap();
-    let ir = load_ir(&path, 48_000, 100.0).unwrap();
+    let ir = load_ir(&path, "ir.wav", 48_000, 100.0).unwrap();
     assert_eq!(ir.left.len(), 4800);
 }
 
@@ -275,7 +269,7 @@ fn unsupported_8_bit() {
     let dir = temp_dir("pcm8");
     let path = dir.join("ir.wav");
     write_int(&path, spec(1, 48_000, 8, SampleFormat::Int), &ramp());
-    let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
+    let error = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap_err();
     assert!(matches!(error, IrError::Unsupported { .. }), "{error}");
     assert_eq!(
         error.to_string(),
@@ -287,7 +281,7 @@ fn unsupported_8_bit() {
 fn missing_file_is_io() {
     let dir = temp_dir("missing");
     let path = dir.join("absent.wav");
-    let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
+    let error = load_ir(&path, "absent.wav", 48_000, 1000.0).unwrap_err();
     assert!(matches!(error, IrError::Io { .. }), "{error}");
     assert!(
         error
@@ -302,7 +296,7 @@ fn three_channels_unsupported() {
     let dir = temp_dir("three");
     let path = dir.join("ir.wav");
     write_float(&path, spec(3, 48_000, 32, SampleFormat::Float), &[0.1; 30]);
-    let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
+    let error = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap_err();
     assert_eq!(
         error.to_string(),
         format!("{}: unsupported wav format: 3 channels", path.display())
@@ -314,7 +308,7 @@ fn empty_file_is_error() {
     let dir = temp_dir("empty");
     let path = dir.join("ir.wav");
     write_float(&path, spec(1, 48_000, 32, SampleFormat::Float), &[]);
-    let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
+    let error = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap_err();
     assert!(matches!(error, IrError::Decode { .. }), "{error}");
     assert_eq!(
         error.to_string(),

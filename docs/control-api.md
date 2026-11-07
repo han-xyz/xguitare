@@ -366,7 +366,7 @@ Errors (on any of them nothing changes and the Revision stays):
 | `module '<id>' is not a cabinet` | The Module with that id is not a cabinet, e.g. `module 'gate' is not a cabinet`. |
 | `invalid ir name '<ir>'` | `ir` is empty, absolute, or has a `.`, `..` or empty path segment, e.g. `invalid ir name '../x.wav'`. |
 | `<path>: <reason>` | The Cabinet IR cannot be loaded, e.g. `/srv/irs/bad.wav: unsupported wav format: 8-bit int`; `<path>` is the `ir_dir` path when the file is in neither directory. |
-| `ir <path>: non-finite sample` | The Cabinet IR has a NaN or infinite sample, e.g. `ir /srv/irs/bad.wav: non-finite sample`. |
+| `ir <name>: non-finite sample` | The Cabinet IR has a NaN or infinite sample; `<name>` is the `ir` as given, e.g. `ir bad.wav: non-finite sample`. |
 | `no preset loaded` | No Preset is active. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 

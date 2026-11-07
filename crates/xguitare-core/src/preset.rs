@@ -166,6 +166,7 @@ impl Preset {
                 let ir = match preset_module.ir.as_deref().map(|file| {
                     load_ir(
                         &ir_path(ir_dir, bank_dir, file),
+                        file,
                         sample_rate as u32,
                         ir_max_ms,
                     )

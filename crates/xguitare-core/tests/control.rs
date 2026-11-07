@@ -1175,7 +1175,7 @@ fn non_finite_ir_refused_by_rack_ir_warned_on_load() {
     let (mut state, _audio, _dir) = ir_state("rack-ir-non-finite");
     let nan = state.config.ir_dir.join("nan.wav");
     write_wav(&nan, &[0.5, f32::NAN]);
-    let expected = format!("ir {}: non-finite sample", nan.display());
+    let expected = "ir nan.wav: non-finite sample";
     assert_eq!(
         error(handle(&mut state, rack_ir("nan.wav", None))),
         expected
@@ -1282,7 +1282,7 @@ fn rack_ir_errors_verbatim() {
     let before = ok(handle(&mut state, Request::Get { param: None }));
     let bad = state.config.ir_dir.join("bad.wav");
     fs::write(&bad, "").unwrap();
-    let loader_error = xguitare_core::load_ir(&bad, 48_000, 100.0)
+    let loader_error = xguitare_core::load_ir(&bad, "bad.wav", 48_000, 100.0)
         .unwrap_err()
         .to_string();
     for (req, expected) in [
