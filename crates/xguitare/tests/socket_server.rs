@@ -123,6 +123,20 @@ fn stop_removes_socket_file() {
 }
 
 #[test]
+fn stop_removes_lock_file_and_allows_restart() {
+    let mut server = server("relock");
+    let lock = server.path.with_extension("sock.lock");
+    assert!(lock.exists());
+    server.stop.store(true, Ordering::Relaxed);
+    server.thread.take().unwrap().join().unwrap();
+    assert!(!lock.exists());
+    let again = bind(&server.path, MAX_CONNECTIONS, IDLE_TIMEOUT).unwrap();
+    assert!(lock.exists());
+    drop(again);
+    assert!(!lock.exists());
+}
+
+#[test]
 fn regular_file_at_socket_path_is_refused_and_kept() {
     let dir = PathBuf::from(format!("/tmp/xguitare-srv-{}-file", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

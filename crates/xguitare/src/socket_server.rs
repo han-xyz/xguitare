@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions, TryLockError};
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -38,12 +38,13 @@ pub enum SocketError {
     Spawn(io::Error),
 }
 
-/// The bound control socket; dropping it removes the socket file and releases the Daemon lock.
+/// The bound control socket; dropping it removes the socket file and the lock file, then releases the Daemon lock.
 pub struct ControlSocket {
     listener: UnixListener,
     path: PathBuf,
     max_connections: usize,
     idle_timeout: Duration,
+    lock_path: PathBuf,
     _daemon_lock: File,
 }
 
@@ -68,7 +69,8 @@ pub fn bind(
     if let Some(dir) = path.parent() {
         create_socket_dir(dir).map_err(bind_error)?;
     }
-    let daemon_lock = lock_daemon(path)?;
+    let lock_path = lock_path(path);
+    let daemon_lock = lock_daemon(&lock_path)?;
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.file_type().is_socket() => {
             return Err(SocketError::NotASocket(path.to_path_buf()));
@@ -89,26 +91,42 @@ pub fn bind(
         path: path.to_path_buf(),
         max_connections,
         idle_timeout,
+        lock_path,
         _daemon_lock: daemon_lock,
     })
 }
 
-fn lock_daemon(socket: &Path) -> Result<File, SocketError> {
+fn lock_path(socket: &Path) -> PathBuf {
     let mut lock_path = socket.as_os_str().to_owned();
     lock_path.push(".lock");
-    let lock_path = PathBuf::from(lock_path);
-    let lock_error = |err| SocketError::Lock(lock_path.clone(), err);
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(LOCK_FILE_MODE)
-        .open(&lock_path)
-        .map_err(lock_error)?;
-    match file.try_lock() {
-        Ok(()) => Ok(file),
-        Err(TryLockError::WouldBlock) => Err(SocketError::AnotherDaemon),
-        Err(TryLockError::Error(err)) => Err(lock_error(err)),
+    PathBuf::from(lock_path)
+}
+
+fn lock_daemon(lock_path: &Path) -> Result<File, SocketError> {
+    let lock_error = |err| SocketError::Lock(lock_path.to_path_buf(), err);
+    // A stopping Daemon removes the lock file before it unlocks; a lock taken on that removed file guards nothing, so open the path again.
+    loop {
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(LOCK_FILE_MODE)
+            .open(lock_path)
+            .map_err(lock_error)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => return Err(SocketError::AnotherDaemon),
+            Err(TryLockError::Error(err)) => return Err(lock_error(err)),
+        }
+        let locked = file.metadata().map_err(lock_error)?;
+        match fs::metadata(lock_path) {
+            Ok(current) if current.dev() == locked.dev() && current.ino() == locked.ino() => {
+                return Ok(file);
+            }
+            Ok(_) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(lock_error(err)),
+        }
     }
 }
 
@@ -163,8 +181,10 @@ impl ControlSocket {
 
 impl Drop for ControlSocket {
     fn drop(&mut self) {
-        if let Err(err) = fs::remove_file(&self.path) {
-            warn!("cannot remove {}: {err}", self.path.display());
+        for path in [&self.path, &self.lock_path] {
+            if let Err(err) = fs::remove_file(path) {
+                warn!("cannot remove {}: {err}", path.display());
+            }
         }
     }
 }
