@@ -195,6 +195,9 @@ impl Client {
         }
         if !self.modules_fetched {
             self.fetch_modules();
+            if self.connection.is_none() {
+                return;
+            }
         }
         self.failures = 0;
         let revision = status["revision"].as_u64().unwrap_or(0);

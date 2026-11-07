@@ -154,3 +154,29 @@ fn modules_error_is_retried_without_disconnect() {
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();
 }
+
+#[test]
+fn modules_transport_error_leaves_no_stale_status() {
+    let dir = temp_dir("modules-broken");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_record(listener, |cmd| match cmd {
+        "modules" => String::new(),
+        _ => reply(cmd).to_string(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    next_arrival(&received, "modules");
+    let deadline = Instant::now() + Duration::from_millis(300);
+    while let Ok(snapshot) =
+        snapshots.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+    {
+        assert!(
+            snapshot.link == Link::Connected || snapshot.status.is_none(),
+            "disconnected with a status: {:?}",
+            snapshot.status
+        );
+    }
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}

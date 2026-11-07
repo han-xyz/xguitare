@@ -26,9 +26,9 @@ impl Drop for TempDir {
     }
 }
 
-fn registry_modules() -> serde_json::Value {
+fn registry_modules(test: &str) -> serde_json::Value {
     let dir = TempDir(PathBuf::from(format!(
-        "/tmp/xguitare-gm-{}-modules",
+        "/tmp/xguitare-gm-{}-{test}",
         std::process::id()
     )));
     fs::create_dir_all(&dir.0).unwrap();
@@ -623,7 +623,7 @@ fn rack_channels_by_module_type() {
 
 #[test]
 fn module_types_from_payload() {
-    let types = module_types(&registry_modules());
+    let types = module_types(&registry_modules("module-types"));
     assert_eq!(types.len(), 12);
     let channels = |type_name: &str| {
         types
@@ -693,7 +693,7 @@ fn knob_integer_rounds() {
 
 #[test]
 fn accent_table_covers_all_types() {
-    let types = module_types(&registry_modules());
+    let types = module_types(&registry_modules("accents"));
     let accents: Vec<_> = types
         .iter()
         .map(|module_type| accent_for(&module_type.type_name))
