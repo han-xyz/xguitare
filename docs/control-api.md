@@ -16,7 +16,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `ir_list`, `rack_ir` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 
 Parameter addresses are `<module id>.<param name>`, e.g. `preamp.gain`. A Module's id is its `id` in the Preset file, or its type when the file gives none.
@@ -219,7 +219,7 @@ Request:
 Response (shortened to two types):
 
 ```json
-{"ok":true,"modules":[{"channels":"mono","params":[{"default":0.0,"integer":false,"max":20.0,"min":-60.0,"name":"level","unit":"dB"}],"type":"gain"},{"channels":"mono_to_stereo","params":[{"default":0.0,"integer":false,"max":20.0,"min":-20.0,"name":"level","unit":"dB"}],"type":"cabinet"}]}
+{"ok":true,"modules":[{"channels":"mono","params":[{"default":0.0,"integer":false,"max":20.0,"min":-60.0,"name":"level","unit":"dB"}],"type":"gain"},{"channels":"mono_to_stereo","params":[{"default":0.0,"integer":false,"max":20.0,"min":-20.0,"name":"level","unit":"dB"},{"default":20.0,"integer":true,"max":300.0,"min":20.0,"name":"low_cut","unit":"Hz"},{"default":20000.0,"integer":true,"max":20000.0,"min":2000.0,"name":"high_cut","unit":"Hz"}],"type":"cabinet"}]}
 ```
 
 | Key | Value |
