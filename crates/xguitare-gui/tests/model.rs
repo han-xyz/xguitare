@@ -6,9 +6,10 @@ use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_gui::model::{
-    BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    Throttle, add_after, add_command, bank_rows, counts_toward_spawn, failed_set, key_to_command,
-    meter_fraction, module_types, move_target, param_rows, peak_fraction, rack_channels,
+    BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
+    NEUTRAL_ACCENT, ParamRow, Throttle, accent_for, add_after, add_command, bank_rows,
+    counts_toward_spawn, failed_set, key_to_command, knob_value_from_drag, meter_fraction,
+    module_types, move_target, param_default, param_rows, peak_fraction, rack_channels,
     refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
 
@@ -536,6 +537,7 @@ fn add_after_empty_rack_is_front() {
     let gate = ModuleType {
         type_name: "gate".to_string(),
         channels: "mono".to_string(),
+        defaults: Vec::new(),
     };
     let front = Command::RackAdd {
         type_name: "gate".to_string(),
@@ -593,10 +595,103 @@ fn module_types_from_payload() {
     let module_type = |type_name: &str, channels: &str| ModuleType {
         type_name: type_name.to_string(),
         channels: channels.to_string(),
+        defaults: Vec::new(),
     };
     assert_eq!(types[0], module_type("gain", "mono"));
     assert_eq!(types[6], module_type("cabinet", "mono_to_stereo"));
     assert_eq!(types[10], module_type("reverb", "stereo"));
     assert_eq!(types[6].label(), "cabinet (mono_to_stereo)");
     assert!(module_types(&json!({})).is_empty());
+}
+
+#[test]
+fn param_default_from_modules_payload() {
+    let types = module_types(&json!({"modules": [
+        {"type": "delay", "channels": "stereo", "params": [
+            {"name": "time", "min": 1.0, "max": 2000.0, "default": 350.0, "unit": "ms", "integer": false},
+            {"name": "pingpong", "min": 0.0, "max": 1.0, "default": 0.0, "unit": "", "integer": true},
+        ]},
+    ]}));
+    assert_eq!(param_default(&types, "delay", "time"), Some(350.0));
+    assert_eq!(param_default(&types, "delay", "pingpong"), Some(0.0));
+    assert_eq!(param_default(&types, "delay", "feedback"), None);
+    assert_eq!(param_default(&types, "reverb", "time"), None);
+}
+
+#[test]
+fn knob_value_from_drag_steps_and_clamps() {
+    assert_eq!(
+        knob_value_from_drag(0.0, 0.0, 100.0, -200.0, false, false),
+        100.0
+    );
+    assert_eq!(
+        knob_value_from_drag(50.0, 0.0, 100.0, -1.0, false, false),
+        50.5
+    );
+    assert_eq!(
+        knob_value_from_drag(50.0, 0.0, 100.0, 1.0, false, false),
+        49.5
+    );
+    assert_eq!(
+        knob_value_from_drag(-20.0, -60.0, 20.0, -100.0, false, false),
+        20.0
+    );
+    assert_eq!(
+        knob_value_from_drag(-20.0, -60.0, 20.0, 400.0, false, false),
+        -60.0
+    );
+}
+
+#[test]
+fn knob_fine_is_ten_times_slower() {
+    assert_eq!(
+        knob_value_from_drag(50.0, 0.0, 100.0, -10.0, true, false),
+        50.5
+    );
+    assert_eq!(
+        knob_value_from_drag(0.0, 0.0, 100.0, -2000.0, true, false),
+        100.0
+    );
+    assert_eq!(
+        knob_value_from_drag(0.0, 0.0, 100.0, -200.0, true, false),
+        10.0
+    );
+}
+
+#[test]
+fn knob_integer_rounds() {
+    assert_eq!(knob_value_from_drag(2.0, 1.0, 4.0, -40.0, false, true), 3.0);
+    assert_eq!(knob_value_from_drag(2.0, 1.0, 4.0, -20.0, false, true), 2.0);
+    assert_eq!(
+        knob_value_from_drag(0.0, 0.0, 1.0, -100.0, false, true),
+        1.0
+    );
+    assert_eq!(knob_value_from_drag(1.0, 0.0, 1.0, 90.0, false, true), 1.0);
+}
+
+#[test]
+fn accent_table_covers_all_types() {
+    let types = module_types(&json!({"modules": [
+        {"type": "gain", "channels": "mono", "params": []},
+        {"type": "gate", "channels": "mono", "params": []},
+        {"type": "compressor", "channels": "mono", "params": []},
+        {"type": "drive", "channels": "mono", "params": []},
+        {"type": "fuzz", "channels": "mono", "params": []},
+        {"type": "preamp", "channels": "mono", "params": []},
+        {"type": "tonestack", "channels": "mono", "params": []},
+        {"type": "cabinet", "channels": "mono_to_stereo", "params": []},
+        {"type": "delay", "channels": "stereo", "params": []},
+        {"type": "chorus", "channels": "stereo", "params": []},
+        {"type": "flanger", "channels": "stereo", "params": []},
+        {"type": "reverb", "channels": "stereo", "params": []},
+    ]}));
+    let accents: Vec<_> = types
+        .iter()
+        .map(|module_type| accent_for(&module_type.type_name))
+        .collect();
+    assert!(accents.iter().all(|accent| *accent != NEUTRAL_ACCENT));
+    for (index, accent) in accents.iter().enumerate() {
+        assert!(!accents[index + 1..].contains(accent), "{:?}", types[index]);
+    }
+    assert_eq!(accent_for("theremin"), NEUTRAL_ACCENT);
 }

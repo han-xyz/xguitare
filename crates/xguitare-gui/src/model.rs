@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use egui::Color32;
 use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_core::control::{Request, Response};
@@ -13,6 +14,9 @@ pub const METER_RED_DB: f64 = -6.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);
 pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
 pub const INVALID_PRESET: &str = "invalid preset";
+pub const KNOB_DRAG_PX: f32 = 200.0;
+pub const KNOB_FINE_DRAG_PX: f32 = 2000.0;
+pub const NEUTRAL_ACCENT: Color32 = Color32::from_rgb(120, 120, 120);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -60,6 +64,7 @@ pub enum Command {
 pub struct ModuleType {
     pub type_name: String,
     pub channels: String,
+    pub defaults: Vec<(String, f64)>,
 }
 
 impl ModuleType {
@@ -76,8 +81,66 @@ pub fn module_types(modules_payload: &Value) -> Vec<ModuleType> {
         .map(|module| ModuleType {
             type_name: module["type"].as_str().unwrap_or_default().to_string(),
             channels: module["channels"].as_str().unwrap_or_default().to_string(),
+            defaults: module["params"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|param| {
+                    Some((
+                        param["name"].as_str()?.to_string(),
+                        param["default"].as_f64()?,
+                    ))
+                })
+                .collect(),
         })
         .collect()
+}
+
+/// The ModuleSpec default of `param` as the `modules` reply gives it; `None` when that reply lacks the type or the Parameter.
+pub fn param_default(module_types: &[ModuleType], type_name: &str, param: &str) -> Option<f64> {
+    module_types
+        .iter()
+        .find(|module_type| module_type.type_name == type_name)?
+        .defaults
+        .iter()
+        .find(|(name, _)| name == param)
+        .map(|(_, default)| *default)
+}
+
+/// `dy_px` is the pointer's vertical motion in screen pixels, positive downward as egui reports it, so dragging up raises the value; [`KNOB_DRAG_PX`] crosses the whole range, [`KNOB_FINE_DRAG_PX`] when `fine`.
+pub fn knob_value_from_drag(
+    value: f32,
+    min: f32,
+    max: f32,
+    dy_px: f32,
+    fine: bool,
+    integer: bool,
+) -> f32 {
+    let px_per_range = if fine {
+        KNOB_FINE_DRAG_PX
+    } else {
+        KNOB_DRAG_PX
+    };
+    let moved = (value - dy_px * (max - min) / px_per_range).clamp(min, max);
+    if integer { moved.round() } else { moved }
+}
+
+pub fn accent_for(type_name: &str) -> Color32 {
+    match type_name {
+        "gain" => Color32::from_rgb(170, 175, 185),
+        "gate" => Color32::from_rgb(140, 140, 140),
+        "drive" => Color32::from_rgb(235, 130, 40),
+        "fuzz" => Color32::from_rgb(210, 50, 45),
+        "preamp" => Color32::from_rgb(240, 180, 50),
+        "tonestack" => Color32::from_rgb(215, 195, 150),
+        "compressor" => Color32::from_rgb(40, 170, 160),
+        "cabinet" => Color32::from_rgb(140, 95, 60),
+        "delay" => Color32::from_rgb(60, 120, 220),
+        "reverb" => Color32::from_rgb(150, 90, 210),
+        "chorus" => Color32::from_rgb(70, 180, 80),
+        "flanger" => Color32::from_rgb(50, 200, 220),
+        _ => NEUTRAL_ACCENT,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -339,7 +402,7 @@ impl Drag {
     }
 }
 
-/// Per Parameter address: while dragged, a `set` at most every [`SET_INTERVAL`], a throttled value sent by [`Throttle::tick`] once the interval has passed; the slider keeps its local value until a snapshot newer than the release Revision arrives.
+/// Per Parameter address: while dragged, a `set` at most every [`SET_INTERVAL`], a throttled value sent by [`Throttle::tick`] once the interval has passed; the knob keeps its local value until a snapshot newer than the release Revision arrives.
 #[derive(Debug, Default)]
 pub struct Throttle {
     drags: HashMap<String, Drag>,

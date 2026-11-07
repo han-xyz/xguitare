@@ -6,22 +6,37 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::collapsing_header::CollapsingState;
-use egui::{Button, CentralPanel, ComboBox, Event, Key, Modifiers, Panel, ScrollArea, Slider, Ui};
+use egui::{
+    Button, CentralPanel, Color32, ComboBox, CornerRadius, Event, Frame, Key, Margin, Modifiers,
+    Panel, Rect, RichText, ScrollArea, Sides, Theme, Ui, Visuals, vec2,
+};
 use serde_json::Value;
 use tracing::error;
 use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    SET_INTERVAL, Snapshot, Throttle, add_command, bank_rows, key_to_command, link_text,
-    move_target, param_rows, peak_fraction, rack_channels, status_line, unit_suffix,
+    SET_INTERVAL, Snapshot, Throttle, accent_for, add_command, bank_rows, key_to_command,
+    link_text, move_target, param_default, param_rows, peak_fraction, rack_channels, status_line,
+    unit_suffix,
 };
 
-use crate::widgets;
+use crate::widgets::{self, KnobSpec};
 
 const NO_PRESET: &str = "no preset";
 const BANK_WIDTH: f32 = 220.0;
+const PANEL_FILL: Color32 = Color32::from_rgb(28, 26, 24);
+const CARD_FILL: Color32 = Color32::from_rgb(40, 37, 34);
+const CARD_RADIUS: u8 = 8;
+const CARD_MARGIN: i8 = 8;
+const CARD_GAP: f32 = 8.0;
+const BAND_HEIGHT: f32 = 4.0;
+const AMP_BAND_HEIGHT: f32 = 12.0;
+const PLATE_FILL: Color32 = Color32::from_rgb(16, 15, 14);
+const PLATE_TEXT: Color32 = Color32::from_rgb(230, 225, 215);
+const PLATE_RADIUS: u8 = 4;
+const AMP_LABEL: &str = "amp";
+const AMP_TYPES: [&str; 2] = ["preamp", "tonestack"];
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -52,6 +67,14 @@ impl App {
         config_path: Option<PathBuf>,
         stop: Arc<AtomicBool>,
     ) -> App {
+        ctx.set_theme(Theme::Dark);
+        ctx.set_visuals_of(
+            Theme::Dark,
+            Visuals {
+                panel_fill: PANEL_FILL,
+                ..Visuals::dark()
+            },
+        );
         let (commands, snapshots, client) =
             client::spawn(config, config_path, Arc::clone(&stop), move || {
                 ctx.request_repaint()
@@ -143,14 +166,14 @@ impl eframe::App for App {
         Panel::left("bank")
             .exact_size(BANK_WIDTH)
             .show(ui, |ui| commands.extend(bank_panel(ui, &rows)));
-        let mut sliders = Sliders {
+        let mut knobs = Knobs {
             throttle: &mut self.throttle,
             locals: &mut self.locals,
             revision: revision(snapshot),
             now,
         };
         CentralPanel::default().show(ui, |ui| {
-            commands.extend(preset_panel(ui, snapshot, &mut sliders))
+            commands.extend(preset_panel(ui, snapshot, &mut knobs))
         });
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
@@ -173,7 +196,7 @@ impl eframe::App for App {
     }
 }
 
-/// No shortcut while a widget takes typing, e.g. a slider's value field. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
+/// No shortcut while a widget takes typing. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
     if ui.ctx().egui_wants_keyboard_input() {
         return Vec::new();
@@ -229,7 +252,7 @@ fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     clicked
 }
 
-struct Sliders<'a> {
+struct Knobs<'a> {
     throttle: &'a mut Throttle,
     locals: &'a mut HashMap<String, f64>,
     revision: u64,
@@ -244,7 +267,7 @@ fn revision(snapshot: &Snapshot) -> u64 {
         .unwrap_or_default()
 }
 
-fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, sliders: &mut Sliders) -> Vec<Command> {
+fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, knobs: &mut Knobs) -> Vec<Command> {
     let mut commands = Vec::new();
     let preset = snapshot
         .status
@@ -261,17 +284,74 @@ fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, sliders: &mut Sliders) -> Vec<
     });
     ScrollArea::vertical().show(ui, |ui| {
         for (index, (module, rows)) in modules.iter().enumerate() {
-            CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(module), true)
-                .show_header(ui, |ui| {
-                    ui.label(module_label(module, rows));
-                    commands.extend(module_buttons(ui, module, index, modules.len()));
-                })
-                .body(|ui| {
-                    commands.extend(rows.iter().filter_map(|row| param_slider(ui, row, sliders)));
-                });
+            let place = (index, modules.len());
+            commands.extend(module_card(ui, module, rows, place, snapshot, knobs));
+            ui.add_space(CARD_GAP);
         }
     });
     commands
+}
+
+fn module_card(
+    ui: &mut Ui,
+    module: &str,
+    rows: &[ParamRow],
+    (index, len): (usize, usize),
+    snapshot: &Snapshot,
+    knobs: &mut Knobs,
+) -> Vec<Command> {
+    let type_name = rows.first().map_or("", |row| row.module_type.as_str());
+    let is_amp = AMP_TYPES.contains(&type_name);
+    let band = if is_amp { AMP_BAND_HEIGHT } else { BAND_HEIGHT };
+    let card = Frame::new()
+        .fill(CARD_FILL)
+        .corner_radius(CARD_RADIUS)
+        .inner_margin(Margin {
+            top: band as i8 + CARD_MARGIN,
+            ..Margin::same(CARD_MARGIN)
+        })
+        .show(ui, |ui| {
+            let (_, clicked) = Sides::new().show(
+                ui,
+                |ui| {
+                    label_plate(ui, &module_label(module, rows));
+                    if is_amp {
+                        ui.label(AMP_LABEL);
+                    }
+                },
+                |ui| module_buttons(ui, module, index, len),
+            );
+            let mut commands: Vec<Command> = clicked.into_iter().collect();
+            ui.horizontal_wrapped(|ui| {
+                commands.extend(
+                    rows.iter()
+                        .filter_map(|row| param_knob(ui, row, &snapshot.module_types, knobs)),
+                );
+            });
+            commands
+        });
+    let rect = card.response.rect;
+    ui.painter().rect_filled(
+        Rect::from_min_size(rect.min, vec2(rect.width(), band)),
+        CornerRadius {
+            nw: CARD_RADIUS,
+            ne: CARD_RADIUS,
+            sw: 0,
+            se: 0,
+        },
+        accent_for(type_name),
+    );
+    card.inner
+}
+
+fn label_plate(ui: &mut Ui, text: &str) {
+    Frame::new()
+        .fill(PLATE_FILL)
+        .corner_radius(PLATE_RADIUS)
+        .inner_margin(Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).color(PLATE_TEXT).strong())
+        });
 }
 
 fn module_label(module: &str, rows: &[ParamRow]) -> String {
@@ -299,9 +379,15 @@ fn add_combo(
     added
 }
 
+/// Added right to left, so that they read ▲ ▼ ✕ at the right of the card header.
 fn module_buttons(ui: &mut Ui, module: &str, index: usize, len: usize) -> Option<Command> {
     let mut clicked = None;
-    for (text, direction) in [("▲", Direction::Up), ("▼", Direction::Down)] {
+    if ui.small_button("✕").clicked() {
+        clicked = Some(Command::RackRemove {
+            id: module.to_string(),
+        });
+    }
+    for (text, direction) in [("▼", Direction::Down), ("▲", Direction::Up)] {
         let to = move_target(index, direction, len);
         if ui
             .add_enabled(to.is_some(), Button::new(text).small())
@@ -314,40 +400,49 @@ fn module_buttons(ui: &mut Ui, module: &str, index: usize, len: usize) -> Option
             });
         }
     }
-    if ui.small_button("✕").clicked() {
-        clicked = Some(Command::RackRemove {
-            id: module.to_string(),
-        });
-    }
     clicked
 }
 
-/// A click or key press changes the value without a drag, so it is sent as a final value.
-fn param_slider(ui: &mut Ui, row: &ParamRow, sliders: &mut Sliders) -> Option<Command> {
-    let held = sliders.throttle.hold_local(&row.address, sliders.revision);
-    let mut value = match sliders.locals.get(&row.address) {
+/// A double-click reset is a final value, like a release.
+fn param_knob(
+    ui: &mut Ui,
+    row: &ParamRow,
+    module_types: &[ModuleType],
+    knobs: &mut Knobs,
+) -> Option<Command> {
+    let held = knobs.throttle.hold_local(&row.address, knobs.revision);
+    let shown = match knobs.locals.get(&row.address) {
         Some(local) if held => *local,
         _ => row.value,
     };
-    let mut slider = Slider::new(&mut value, row.min..=row.max)
-        .text(&row.param)
-        .suffix(unit_suffix(&row.unit));
-    if row.integer {
-        slider = slider.integer();
-    }
-    let response = ui.add(slider);
-    if !response.changed() && !response.drag_stopped() {
+    let mut value = shown as f32;
+    let spec = KnobSpec {
+        min: row.min as f32,
+        max: row.max as f32,
+        default: param_default(module_types, &row.module_type, &row.param)
+            .map(|default| default as f32),
+        integer: row.integer,
+        label: &row.param,
+        suffix: unit_suffix(&row.unit),
+    };
+    let response = widgets::knob(ui, &mut value, &spec);
+    if !response.changed && !response.drag_stopped {
         return None;
     }
-    sliders.locals.insert(row.address.clone(), value);
-    if response.dragged() {
-        return sliders.throttle.on_drag(&row.address, value, sliders.now);
+    let value = if response.changed {
+        f64::from(value)
+    } else {
+        shown
+    };
+    knobs.locals.insert(row.address.clone(), value);
+    if response.drag_stopped || response.reset {
+        return Some(
+            knobs
+                .throttle
+                .on_release(&row.address, value, knobs.revision),
+        );
     }
-    Some(
-        sliders
-            .throttle
-            .on_release(&row.address, value, sliders.revision),
-    )
+    knobs.throttle.on_drag(&row.address, value, knobs.now)
 }
 
 fn status_bar(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instant) {
