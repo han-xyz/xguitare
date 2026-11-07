@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicBool;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use signal_hook::consts::{SIGINT, SIGTERM};
-use xguitare_client::UnixSocketTransport;
+use xguitare_client::{Connection, Transport, UnixSocketTransport};
 use xguitare_core::Config;
 
 pub use cli::{CliEnv, run_cli};
@@ -137,14 +137,18 @@ fn run_client(
         is_tty: io::stdout().is_terminal(),
         stop,
     };
-    let mut transport = UnixSocketTransport::from_config(&config).map_err(|err| err.to_string())?;
+    let mut transport: Box<dyn Transport> = if stops_on_signal {
+        Box::new(Connection::connect(&config).map_err(|err| err.to_string())?)
+    } else {
+        Box::new(UnixSocketTransport::from_config(&config).map_err(|err| err.to_string())?)
+    };
     let argv: Vec<String> = argv
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
     Ok(run_cli(
         &argv,
-        &mut transport,
+        &mut *transport,
         &mut io::stdout(),
         &mut io::stderr(),
         &env,

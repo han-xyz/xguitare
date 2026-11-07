@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{TempDir, answer, serve};
-use xguitare_client::{ClientError, Connection, UnixSocketTransport};
+use xguitare_client::{ClientError, Connection, Transport, UnixSocketTransport};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 
@@ -123,4 +123,18 @@ fn symlinked_fallback_dir_is_refused() {
     let err = UnixSocketTransport::from_config(&config).err().unwrap();
     assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
     assert_eq!(err.to_string(), refusal);
+}
+
+#[test]
+fn connection_is_a_transport() {
+    let dir = TempDir::new("as-transport");
+    let server = serve(&dir.socket(), &[STATUS]);
+    let mut connection = Connection::connect(&dir.config()).unwrap();
+    let transport: &mut dyn Transport = &mut connection;
+    assert_eq!(
+        transport.request(&Request::Status).unwrap(),
+        Response::from_line(STATUS).unwrap()
+    );
+    drop(connection);
+    server.join().unwrap();
 }
