@@ -4,6 +4,7 @@ use std::f32::consts::TAU;
 use std::time::Instant;
 
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
+use xguitare_dsp::smooth::SMOOTHING_SECONDS;
 use xguitare_dsp::{Module, Rack};
 
 const SAMPLE_RATE: f32 = 48_000.0;
@@ -266,7 +267,7 @@ fn normalise_zero_ir_is_noop() {
 
 #[test]
 fn cabinet_level_ramps() {
-    const SMOOTHING_FRAMES: f32 = 0.005 * SAMPLE_RATE;
+    const SMOOTHING_FRAMES: f32 = SMOOTHING_SECONDS * SAMPLE_RATE;
     let mut rack = cabinet_rack(None);
     rack.module_mut(0).set_param(0, 20.0);
     let (left, right) = run(&mut rack, &vec![1.0; 4800], BLOCK);

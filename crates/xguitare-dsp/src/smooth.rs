@@ -1,6 +1,6 @@
 use crate::modules::one_pole_coeff;
 
-const SMOOTHING_SECONDS: f32 = 0.005;
+pub const SMOOTHING_SECONDS: f32 = 0.005;
 
 /// One-pole 5 ms Parameter smoother; `prepare` with the rate at which `next_value` is called.
 pub struct Smoother {
@@ -24,6 +24,11 @@ impl Smoother {
 
     pub fn set_target(&mut self, value: f32) {
         self.target = value;
+    }
+
+    /// Replaces the current value with `map(current)`; the ramp toward the target carries on from there.
+    pub fn map_current(&mut self, map: impl FnOnce(f32) -> f32) {
+        self.current = map(self.current);
     }
 
     pub fn snap(&mut self) {

@@ -1,7 +1,8 @@
 mod common;
 
 use common::{
-    BLOCK, SAMPLE_RATE, bin_mag, db, full_scale_sine_then_noise, noise, peak, rack_with, run, sine,
+    BLOCK, SAMPLE_RATE, bin_mag, db, full_scale_sine_then_noise, noise, peak, rack_with, rms, run,
+    sine,
 };
 use xguitare_dsp::Preamp;
 
@@ -110,4 +111,46 @@ fn preamp_stage_rise_no_transient() {
         db(transient / steady) <= -60.0,
         "transient {transient}, steady {steady}"
     );
+}
+
+fn largest_step(samples: &[f32]) -> f32 {
+    samples
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0, f32::max)
+}
+
+// 2400 frames hold exactly 11 periods of 220 Hz at 48 kHz, so a window shifted by a
+// multiple of it sees the same phase: the settled window starts 250 ms after the change.
+// The step bound is 3x, not 1x: switching between one and four cascaded tanh stages
+// changes the shaping law at once, a step of about 2.8x at gain 20 that predates the
+// per-stage gain Smoother; a crossfade on a `stages` change is a deferred follow-up.
+#[test]
+fn preamp_stage_change_under_signal() {
+    const PERIODS: usize = 2400;
+    const CHANGE: usize = 188 * BLOCK;
+    const SETTLED: usize = 5 * PERIODS;
+    let first_10_ms = (0.01 * SAMPLE_RATE) as usize;
+    let input = sine(0.3, FUNDAMENTAL, SAMPLE_RATE, CHANGE + SETTLED + PERIODS);
+    for gain in [20.0, 100.0] {
+        for (from, to) in [(1.0, 4.0), (4.0, 1.0)] {
+            let mut rack = rack_with(Box::new(Preamp::new()));
+            for (idx, value) in [(GAIN, gain), (BIAS, 0.0), (MASTER, 0.0), (STAGES, from)] {
+                rack.module_mut(0).set_param(idx, value);
+            }
+            run(&mut rack, &input[..CHANGE]);
+            rack.module_mut(0).set_param(STAGES, to);
+            let after = run(&mut rack, &input[CHANGE..]);
+            let settled = &after[SETTLED..];
+            let case = format!("gain {gain}, stages {from} -> {to}");
+            let step = largest_step(&after[..PERIODS]);
+            let settled_step = largest_step(settled);
+            assert!(
+                step <= 3.0 * settled_step,
+                "{case}: step {step}, settled {settled_step}"
+            );
+            let rise = db(rms(&after[..first_10_ms]) / rms(&settled[..first_10_ms]));
+            assert!(rise <= 1.0, "{case}: first 10 ms {rise} dB above settled");
+        }
+    }
 }

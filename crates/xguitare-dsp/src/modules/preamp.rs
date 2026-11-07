@@ -121,6 +121,9 @@ impl Module for Preamp {
                 if stages > self.stages {
                     self.dc_blocks[self.stages..stages].fill(DcBlock::default());
                 }
+                let total = self.stages as f32;
+                self.gain
+                    .map_current(|per_stage| per_stage.powf(total / stages as f32));
                 self.stages = stages;
                 self.gain
                     .set_target(stage_gain(self.values[GAIN], self.stages));
