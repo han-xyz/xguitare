@@ -148,6 +148,7 @@ fn regular_file_at_socket_path_is_refused_and_kept() {
         format!("socket path {} exists and is not a socket", path.display())
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
+    assert!(!path.with_extension("sock.lock").exists());
     fs::remove_dir_all(&dir).unwrap();
 }
 

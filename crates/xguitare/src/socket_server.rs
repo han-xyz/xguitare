@@ -71,6 +71,23 @@ pub fn bind(
     }
     let lock_path = lock_path(path);
     let daemon_lock = lock_daemon(&lock_path)?;
+    let listener = listen(path).inspect_err(|_| {
+        if let Err(err) = fs::remove_file(&lock_path) {
+            warn!("cannot remove {}: {err}", lock_path.display());
+        }
+    })?;
+    Ok(ControlSocket {
+        listener,
+        path: path.to_path_buf(),
+        max_connections,
+        idle_timeout,
+        lock_path,
+        _daemon_lock: daemon_lock,
+    })
+}
+
+fn listen(path: &Path) -> Result<UnixListener, SocketError> {
+    let bind_error = |err| SocketError::Bind(path.to_path_buf(), err);
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.file_type().is_socket() => {
             return Err(SocketError::NotASocket(path.to_path_buf()));
@@ -86,14 +103,7 @@ pub fn bind(
     }
     let listener = UnixListener::bind(path).map_err(bind_error)?;
     listener.set_nonblocking(true).map_err(bind_error)?;
-    Ok(ControlSocket {
-        listener,
-        path: path.to_path_buf(),
-        max_connections,
-        idle_timeout,
-        lock_path,
-        _daemon_lock: daemon_lock,
-    })
+    Ok(listener)
 }
 
 fn lock_path(socket: &Path) -> PathBuf {
