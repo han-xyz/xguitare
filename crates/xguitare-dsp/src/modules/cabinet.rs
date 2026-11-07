@@ -50,15 +50,17 @@ pub struct CabinetIr {
 }
 
 impl CabinetIr {
-    /// Scales `left` and `right` by one factor so the energy (sum of squares) of `left` is 1.0; an all-zero `left` leaves both unchanged.
+    /// Scales `left` and `right` by one factor so the energy (sum of squares) per channel, averaged over the channels, is 1.0: a stereo IR plays as loud in total as a mono one; an all-zero IR is left unchanged.
     pub fn normalise(&mut self) {
-        let energy: f32 = self.left.iter().map(|tap| tap * tap).sum();
+        let channels = if self.right.is_some() { 2.0 } else { 1.0 };
+        let taps = self.left.iter().chain(self.right.iter().flatten());
+        let energy: f64 = taps.map(|tap| f64::from(*tap).powi(2)).sum();
         if energy == 0.0 {
             return;
         }
-        let factor = 1.0 / energy.sqrt();
+        let factor = 1.0 / (energy / channels).sqrt();
         for tap in self.left.iter_mut().chain(self.right.iter_mut().flatten()) {
-            *tap *= factor;
+            *tap = (f64::from(*tap) * factor) as f32;
         }
     }
 }

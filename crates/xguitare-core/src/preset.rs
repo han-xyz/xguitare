@@ -249,7 +249,7 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
 }
 
 /// `ir_dir/<ir>` when it exists, else `bank_dir/<ir>`; neither existing gives the `ir_dir` path, so the load error names it.
-fn ir_path(ir_dir: &Path, bank_dir: &Path, ir: &str) -> PathBuf {
+pub(crate) fn ir_path(ir_dir: &Path, bank_dir: &Path, ir: &str) -> PathBuf {
     let in_ir_dir = ir_dir.join(ir);
     let in_bank = bank_dir.join(ir);
     if !in_ir_dir.exists() && in_bank.exists() {

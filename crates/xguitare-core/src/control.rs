@@ -14,7 +14,7 @@ pub use serde_json::Value;
 use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
 use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
 use crate::firstrun::{BASS_IR, DEFAULT_IR};
-use crate::preset::{CABINET_TYPE, is_relative_name, shortest_f64};
+use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
 use crate::tuner::Tuner;
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
@@ -389,7 +389,7 @@ fn rack_add(
     at: Option<usize>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    let bank_dir = state.config.bank_dir.clone();
+    let (ir_dir, bank_dir) = (state.config.ir_dir.clone(), state.config.bank_dir.clone());
     edit_rack(state, warnings, |preset| {
         let spec = ModuleRegistry::default()
             .spec(type_name)
@@ -419,7 +419,7 @@ fn rack_add(
         if type_name == CABINET_TYPE {
             let ir = CABINET_IRS
                 .into_iter()
-                .find(|ir| bank_dir.join(ir).is_file())
+                .find(|ir| ir_path(&ir_dir, &bank_dir, ir).is_file())
                 .ok_or(CABINET_NEEDS_IR)?;
             preset.modules[index].ir = Some(ir.to_string());
         }

@@ -240,13 +240,10 @@ fn normalise_unit_energy() {
         right: Some(right.clone()),
     };
     ir.normalise();
-    assert!(
-        (energy(&ir.left) - 1.0).abs() <= 1e-4,
-        "{}",
-        energy(&ir.left)
-    );
+    let scaled = ir.right.clone().expect("right kept");
+    let mean = (energy(&ir.left) + energy(&scaled)) / 2.0;
+    assert!((mean - 1.0).abs() <= 1e-4, "{mean}");
     let factor = ir.left[0] / left[0];
-    let scaled = ir.right.expect("right kept");
     for (n, (s, r)) in scaled.iter().zip(&right).enumerate() {
         assert!(
             (s - r * factor).abs() <= 1e-6,
@@ -260,7 +257,7 @@ fn normalise_unit_energy() {
 fn normalise_zero_ir_is_noop() {
     let mut ir = CabinetIr {
         left: vec![0.0; 64],
-        right: Some(vec![0.5; 64]),
+        right: Some(vec![0.0; 64]),
     };
     let before = ir.clone();
     ir.normalise();

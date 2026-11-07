@@ -800,6 +800,16 @@ fn rack_add_cabinet_picks_ir() {
 }
 
 #[test]
+fn rack_add_cabinet_default_ir_from_ir_dir() {
+    let (mut state, _audio, dir) = state("rack-add-cabinet-ir-dir");
+    state.config.ir_dir = dir.0.join("irs");
+    write_impulse(&state.config.ir_dir.join("default-cab.wav"));
+    ok(handle(&mut state, rack_add("cabinet", None)));
+    let (_, preset) = state.active.as_ref().unwrap();
+    assert_eq!(preset.modules[1].ir.as_deref(), Some("default-cab.wav"));
+}
+
+#[test]
 fn rack_add_second_cabinet_is_layout_error() {
     let (mut state, _audio, _dir) = amp_state("rack-add-second-cabinet");
     assert_eq!(
@@ -1012,6 +1022,10 @@ fn rack_ir(ir: &str, id: Option<&str>) -> Request {
 }
 
 fn write_impulse(path: &Path) {
+    write_wav(path, &[1.0, 0.5, 0.25]);
+}
+
+fn write_wav(path: &Path, samples: &[f32]) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let spec = hound::WavSpec {
         channels: 1,
@@ -1020,8 +1034,8 @@ fn write_impulse(path: &Path) {
         sample_format: hound::SampleFormat::Float,
     };
     let mut writer = hound::WavWriter::create(path, spec).unwrap();
-    for sample in [1.0_f32, 0.5, 0.25] {
-        writer.write_sample(sample).unwrap();
+    for sample in samples {
+        writer.write_sample(*sample).unwrap();
     }
     writer.finalize().unwrap();
 }
@@ -1036,6 +1050,36 @@ fn ir_state(test: &str) -> (EngineState, AudioQueues, TempDir) {
 fn active_ir(state: &EngineState) -> Option<String> {
     let (_, preset) = state.active.as_ref().unwrap();
     preset.modules[1].ir.clone()
+}
+
+#[test]
+fn non_finite_ir_refused_by_rack_ir_warned_on_load() {
+    let (mut state, _audio, _dir) = ir_state("rack-ir-non-finite");
+    let nan = state.config.ir_dir.join("nan.wav");
+    write_wav(&nan, &[0.5, f32::NAN]);
+    let expected = format!("ir {}: non-finite sample", nan.display());
+    assert_eq!(
+        error(handle(&mut state, rack_ir("nan.wav", None))),
+        expected
+    );
+    assert_eq!(active_ir(&state).as_deref(), Some("default-cab.wav"));
+    fs::write(
+        state.config.bank_dir.join("04-nan.toml"),
+        "name = \"Nan\"\n[[module]]\ntype = \"cabinet\"\nir = \"nan.wav\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&state.config.bank_dir).unwrap();
+    let (response, warnings) = handle(
+        &mut state,
+        Request::Load {
+            preset: "Nan".to_string(),
+        },
+    );
+    assert!(matches!(response, Response::Ok(_)));
+    assert!(
+        matches!(&warnings[..], [BuildWarning::Ir { error, .. }] if *error == expected),
+        "{warnings:?}"
+    );
 }
 
 #[test]

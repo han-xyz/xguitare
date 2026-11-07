@@ -163,15 +163,80 @@ fn load_ir_has_unit_energy() {
         &interleaved,
     );
     let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    let right = ir.right.expect("stereo file has a right channel");
+    let mean = (energy(&ir.left) + energy(&right)) / 2.0;
+    assert!((mean - 1.0).abs() <= 1e-4, "{mean}");
+    for (left, right) in ir.left.iter().zip(&right) {
+        assert!((right - left / 2.0).abs() <= 1e-6, "{left} {right}");
+    }
+}
+
+#[test]
+fn ir_right_only_not_boosted() {
+    let dir = temp_dir("right-only");
+    let path = dir.join("ir.wav");
+    let interleaved: Vec<f32> = (0..40).flat_map(|_| [0.0, 0.5]).collect();
+    write_float(
+        &path,
+        spec(2, 48_000, 32, SampleFormat::Float),
+        &interleaved,
+    );
+    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    assert!(ir.left.iter().all(|tap| *tap == 0.0), "{:?}", ir.left);
+    let right = ir.right.expect("stereo file has a right channel");
+    let mono_ir_energy_on_both_outputs = 2.0;
+    assert!(
+        (energy(&right) - mono_ir_energy_on_both_outputs).abs() <= 1e-4,
+        "{}",
+        energy(&right)
+    );
+}
+
+#[test]
+fn ir_non_finite_refused() {
+    let dir = temp_dir("non-finite");
+    let path = dir.join("ir.wav");
+    for bad in [f32::NAN, f32::INFINITY] {
+        write_float(
+            &path,
+            spec(1, 48_000, 32, SampleFormat::Float),
+            &[0.5, bad, 0.25],
+        );
+        let error = load_ir(&path, 48_000, 1000.0).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("ir {}: non-finite sample", path.display())
+        );
+    }
+    write_float(
+        &path,
+        spec(1, 48_000, 32, SampleFormat::Float),
+        &[1e20, 1e20, 5e19],
+    );
+    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    assert!(ir.left.iter().all(|tap| tap.is_finite()), "{:?}", ir.left);
     assert!(
         (energy(&ir.left) - 1.0).abs() <= 1e-4,
         "{}",
         energy(&ir.left)
     );
-    let right = ir.right.expect("stereo file has a right channel");
-    for (left, right) in ir.left.iter().zip(&right) {
-        assert!((right - left / 2.0).abs() <= 1e-6, "{left} {right}");
-    }
+}
+
+#[test]
+fn ir_reads_at_most_max_ms() {
+    let dir = temp_dir("max-ms");
+    let path = dir.join("ir.wav");
+    write_float(
+        &path,
+        spec(1, 48_000, 32, SampleFormat::Float),
+        &[0.1; 48_000],
+    );
+    let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+    let unread_tail_bytes = 40_000 * 4;
+    file.set_len(file.metadata().unwrap().len() - unread_tail_bytes)
+        .unwrap();
+    let ir = load_ir(&path, 48_000, 100.0).unwrap();
+    assert_eq!(ir.left.len(), 4800);
 }
 
 #[test]

@@ -21,24 +21,31 @@ pub enum IrError {
         path: PathBuf,
         detail: String,
     },
+    NonFinite {
+        path: PathBuf,
+    },
 }
 
-/// Reads a 16/24/32-bit PCM or 32-bit float wav with one or two channels, resampled to `engine_rate`, truncated to `max_ms` and normalised to unit energy.
+/// Reads at most `max_ms` of a 16/24/32-bit PCM or 32-bit float wav with one or two channels, refuses a non-finite sample, then resamples to `engine_rate`, truncates to `max_ms` and normalises to unit energy.
 pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, IrError> {
     let hound_error = |error| IrError::from_hound(path, error);
     let reader = WavReader::open(path).map_err(hound_error)?;
     let spec = reader.spec();
+    let file_max_len = (spec.sample_rate as f32 * max_ms / 1000.0).ceil() as usize;
+    let max_samples = file_max_len * usize::from(spec.channels);
     let samples: Vec<f32> = match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Int, bits @ (16 | 24 | 32)) => {
             let full_scale = (1_i64 << (bits - 1)) as f32;
             reader
                 .into_samples::<i32>()
+                .take(max_samples)
                 .map(|sample| sample.map(|value| value as f32 / full_scale))
                 .collect::<Result<_, _>>()
                 .map_err(hound_error)?
         }
         (SampleFormat::Float, 32) => reader
             .into_samples::<f32>()
+            .take(max_samples)
             .collect::<Result<_, _>>()
             .map_err(hound_error)?,
         (format, bits) => {
@@ -49,7 +56,11 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
             return Err(IrError::unsupported(path, format!("{bits}-bit {format}")));
         }
     };
-    let file_max_len = (spec.sample_rate as f32 * max_ms / 1000.0).ceil() as usize;
+    if !samples.iter().all(|sample| sample.is_finite()) {
+        return Err(IrError::NonFinite {
+            path: path.to_path_buf(),
+        });
+    }
     let max_len = (engine_rate as f32 * max_ms / 1000.0) as usize;
     let fit = |mut channel: Vec<f32>| {
         channel.truncate(file_max_len);
@@ -117,6 +128,7 @@ impl fmt::Display for IrError {
                 write!(f, "{}: unsupported wav format: {detail}", path.display())
             }
             IrError::Decode { path, detail } => write!(f, "{}: {detail}", path.display()),
+            IrError::NonFinite { path } => write!(f, "ir {}: non-finite sample", path.display()),
         }
     }
 }

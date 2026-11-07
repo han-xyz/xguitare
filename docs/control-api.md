@@ -232,7 +232,7 @@ Errors: none besides the transport errors.
 
 ## rack_add
 
-Inserts a Module with default Parameters into the active Preset, rebuilds the Rack from it and swaps it in with a crossfade. `after` is the id of the Module to insert after, or `at` the zero-based position to insert at (past the end means at the end); give at most one of them. With neither (or both `null`), the Module goes at the end. The new Module's id is its type, or `<type>-2`, `<type>-3`… when that id is taken. A cabinet gets `ir = "default-cab.wav"`, or `"bass-cab.wav"` when only that file is in the Bank directory. The change is not written to the Preset file until `save`.
+Inserts a Module with default Parameters into the active Preset, rebuilds the Rack from it and swaps it in with a crossfade. `after` is the id of the Module to insert after, or `at` the zero-based position to insert at (past the end means at the end); give at most one of them. With neither (or both `null`), the Module goes at the end. The new Module's id is its type, or `<type>-2`, `<type>-3`… when that id is taken. A cabinet gets `ir = "default-cab.wav"`, or `"bass-cab.wav"` when only that file is found; each name is looked up under the IR directory (`ir_dir`) and then the Bank directory, as a Preset's `ir` is. The change is not written to the Preset file until `save`.
 
 Request:
 
@@ -260,7 +260,7 @@ Errors (on any of them nothing changes):
 | `stereo module '<id>' before the cabinet` | A stereo Module would come before the cabinet, or the Rack has no cabinet. |
 | `mono module '<id>' after the cabinet` | A mono Module would come after the cabinet. |
 | `more than one cabinet` | The Rack already has a cabinet. |
-| `cabinet needs an ir; add one in the preset file` | A cabinet is added where the layout allows one, and neither `default-cab.wav` nor `bass-cab.wav` is in the Bank directory. |
+| `cabinet needs an ir; add one in the preset file` | A cabinet is added where the layout allows one, and neither `default-cab.wav` nor `bass-cab.wav` is in the IR directory or the Bank directory. |
 | `no preset loaded` | No Preset is active. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
@@ -366,6 +366,7 @@ Errors (on any of them nothing changes and the Revision stays):
 | `module '<id>' is not a cabinet` | The Module with that id is not a cabinet, e.g. `module 'gate' is not a cabinet`. |
 | `invalid ir name '<ir>'` | `ir` is empty, absolute, or has a `.`, `..` or empty path segment, e.g. `invalid ir name '../x.wav'`. |
 | `<path>: <reason>` | The Cabinet IR cannot be loaded, e.g. `/srv/irs/bad.wav: unsupported wav format: 8-bit int`; `<path>` is the `ir_dir` path when the file is in neither directory. |
+| `ir <path>: non-finite sample` | The Cabinet IR has a NaN or infinite sample, e.g. `ir /srv/irs/bad.wav: non-finite sample`. |
 | `no preset loaded` | No Preset is active. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
