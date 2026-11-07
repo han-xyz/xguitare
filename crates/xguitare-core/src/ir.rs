@@ -56,10 +56,11 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
             return Err(IrError::unsupported(path, format!("{bits}-bit {format}")));
         }
     };
+    let non_finite = || IrError::NonFinite {
+        path: path.to_path_buf(),
+    };
     if !samples.iter().all(|sample| sample.is_finite()) {
-        return Err(IrError::NonFinite {
-            path: path.to_path_buf(),
-        });
+        return Err(non_finite());
     }
     let max_len = (engine_rate as f32 * max_ms / 1000.0) as usize;
     let fit = |mut channel: Vec<f32>| {
@@ -70,6 +71,9 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
             resample_offline(&channel, spec.sample_rate, engine_rate)
         };
         channel.truncate(max_len);
+        if !channel.iter().all(|tap| tap.is_finite()) {
+            return Err(non_finite());
+        }
         if channel.is_empty() {
             return Err(IrError::Decode {
                 path: path.to_path_buf(),

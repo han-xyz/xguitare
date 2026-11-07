@@ -223,6 +223,23 @@ fn ir_non_finite_refused() {
 }
 
 #[test]
+fn near_max_sample_resampled_is_refused_or_finite() {
+    let dir = temp_dir("near-max-resampled");
+    let path = dir.join("ir.wav");
+    let step: Vec<f32> = (0..200)
+        .map(|n| if n < 100 { f32::MAX } else { -f32::MAX })
+        .collect();
+    write_float(&path, spec(1, 48_000, 32, SampleFormat::Float), &step);
+    match load_ir(&path, 44_100, 1000.0) {
+        Ok(ir) => assert!(ir.left.iter().all(|tap| tap.is_finite()), "{:?}", ir.left),
+        Err(error) => assert_eq!(
+            error.to_string(),
+            format!("ir {}: non-finite sample", path.display())
+        ),
+    }
+}
+
+#[test]
 fn ir_reads_at_most_max_ms() {
     let dir = temp_dir("max-ms");
     let path = dir.join("ir.wav");
