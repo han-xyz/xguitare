@@ -324,6 +324,12 @@ Response:
 {"ok":true,"cents":0,"confident":true,"hz":110.0,"note":"A2"}
 ```
 
+A pitch detected, but not clearly enough to show:
+
+```json
+{"ok":true,"cents":12,"confident":false,"hz":83.0,"note":"E2"}
+```
+
 With no pitch detected (silence, noise, or a pitch outside 35 to 1400 Hz):
 
 ```json
@@ -335,7 +341,7 @@ With no pitch detected (silence, noise, or a pitch outside 35 to 1400 Hz):
 | `hz` | Detected frequency in Hz, one decimal; `null` when nothing is detected. |
 | `note` | The nearest note and its octave, sharps only, A4 at the config key `tuner_reference_hz` (default 440), e.g. `E1`, `A#4`; `null` when nothing is detected. |
 | `cents` | Distance from `note` in cents, an integer from -49 to 50; `null` when nothing is detected. |
-| `confident` | Whether the reading is clear enough to show; a client shows only confident readings. |
+| `confident` | Whether the reading is clear enough to show. Clients (the CLI and the GUI) show only confident readings and treat an unconfident one like no pitch. |
 
 Errors: none besides the transport errors.
 
