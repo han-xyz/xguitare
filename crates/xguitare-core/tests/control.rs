@@ -7,8 +7,9 @@ use std::sync::atomic::Ordering;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, handle, handle_line,
-    needs_reprepare, open_connection, passthrough_rack, prepared_max_frames, reprepare,
+    EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, follow_sample_rate,
+    handle, handle_line, needs_reprepare, open_connection, passthrough_rack, prepared_max_frames,
+    reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
@@ -581,6 +582,29 @@ fn reprepare_swaps_in_active_preset_at_new_size() {
     };
     assert_eq!(rack.max_frames(), 256);
     assert_eq!(rack.modules()[0].0, "gain");
+}
+
+#[test]
+fn notified_rate_equal_to_built_rate_rebuilds_nothing() {
+    let (mut state, mut audio, _dir) = state("sample-rate-equal");
+    assert_eq!(follow_sample_rate(&mut state), None);
+    assert!(audio.commands.pop().is_err());
+}
+
+#[test]
+fn notified_rate_change_rebuilds() {
+    let (mut state, mut audio, _dir) = state("sample-rate-follow");
+    state.shared.sample_rate.store(44_100, Ordering::Relaxed);
+    assert_eq!(
+        follow_sample_rate(&mut state),
+        Some(Ok(Reprepare::Built(Vec::new())))
+    );
+    assert_eq!(state.sample_rate, 44_100.0);
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SetFadeLengths(_))
+    ));
+    assert!(matches!(audio.commands.pop(), Ok(Command::SwapRack(_))));
 }
 
 #[test]

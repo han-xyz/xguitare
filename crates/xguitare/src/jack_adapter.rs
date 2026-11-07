@@ -69,6 +69,9 @@ pub fn start(
         midi_in,
         shared: Arc::clone(&shared),
     };
+    shared
+        .sample_rate
+        .store(built_sample_rate, Ordering::Relaxed);
     let notifications = Notifications {
         shared: Arc::clone(&shared),
     };
@@ -77,7 +80,6 @@ pub fn start(
         .map_err(JackError::Activate)?;
     let sample_rate = client.as_client().sample_rate();
     let effective = client.as_client().buffer_size();
-    shared.sample_rate.store(sample_rate, Ordering::Relaxed);
     shared.buffer_size.store(effective, Ordering::Relaxed);
     info!("jack client active: sample_rate={sample_rate} buffer_size={effective}");
     if effective != buffer_size {

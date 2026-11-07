@@ -241,6 +241,15 @@ pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare,
     Ok(outcome)
 }
 
+/// Calls `change_sample_rate` with the rate JACK last reported, or returns `None` when the live Rack already runs at it.
+pub fn follow_sample_rate(state: &mut EngineState) -> Option<Result<Reprepare, String>> {
+    let reported = state.shared.sample_rate.load(Ordering::Relaxed);
+    if reported == state.sample_rate as u32 {
+        return None;
+    }
+    Some(change_sample_rate(state, reported))
+}
+
 /// Rebuilds the live Rack as `reprepare` does, IRs resampled, and the Tuner at `sample_rate`, and sends the switcher the crossfade and Mute ramp lengths at that rate ahead of the Rack; fails only with `engine busy`, leaving the state unchanged.
 pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
     let sample_rate = sample_rate as f32;
