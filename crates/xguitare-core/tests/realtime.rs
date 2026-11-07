@@ -131,6 +131,41 @@ fn oversize_then_swap_and_cut_does_not_allocate() {
 }
 
 #[test]
+fn pending_kept_through_grown_block_then_promoted_does_not_allocate() {
+    const LARGER: usize = 2 * BLOCK;
+    let (mut control, audio, _tap) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(
+        sized_gain_rack(BLOCK),
+        SWITCHER_MAX_FRAMES,
+        fades(),
+        audio,
+        Arc::default(),
+    );
+    let larger = sized_gain_rack(LARGER);
+    let pending = sized_gain_rack(BLOCK);
+    let input = [0.25; LARGER];
+    let mut left = [0.0; LARGER];
+    let mut right = [0.0; LARGER];
+    let processed = assert_no_alloc(|| {
+        assert!(control.commands.push(Command::SwapRack(larger)).is_ok());
+        switcher.apply_commands();
+        let mut processed =
+            switcher.process(&input[..BLOCK], &mut left[..BLOCK], &mut right[..BLOCK]);
+        assert!(control.commands.push(Command::SwapRack(pending)).is_ok());
+        switcher.apply_commands();
+        processed &= switcher.process(&input, &mut left, &mut right);
+        for _ in 0..BLOCK {
+            switcher.apply_commands();
+            processed &= switcher.process(&input[..BLOCK], &mut left[..BLOCK], &mut right[..BLOCK]);
+        }
+        processed
+    });
+    assert!(processed);
+    drop(switcher);
+    control.drain_from_audio();
+}
+
+#[test]
 fn peak_update_does_not_allocate() {
     let peak = AtomicU32::new(0);
     let input = [0.25; BLOCK];
