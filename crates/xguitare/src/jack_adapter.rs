@@ -9,11 +9,12 @@ use jack::{
 };
 use tracing::{info, warn};
 use xguitare_core::Ports;
+use xguitare_core::control::prepared_max_frames;
 use xguitare_core::engine::{
     AudioQueues, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak,
     raise_peak,
 };
-use xguitare_core::ports::{AvailablePort, choose_ports};
+use xguitare_core::ports::{AvailablePort, choose_ports, foreign_ports};
 use xguitare_dsp::{Rack, midi};
 
 const CLIENT_NAME: &str = "xguitare";
@@ -49,7 +50,7 @@ pub fn start(
     if let Err(err) = client.set_buffer_size(buffer_size) {
         warn!("cannot set buffer size {buffer_size}: {err}");
     }
-    let max_frames = (buffer_size as usize).max(client.buffer_size() as usize);
+    let max_frames = prepared_max_frames(buffer_size, client.buffer_size());
     let sample_rate = client.sample_rate() as f32;
     let rack = Box::new(build_rack(sample_rate, max_frames));
     let process = Process {
@@ -140,21 +141,13 @@ fn register<PS: PortSpec>(
 }
 
 fn foreign_audio_ports(client: &Client, direction: PortFlags) -> Vec<AvailablePort> {
-    let own_prefix = format!("{}:", client.name());
     let physical = client.ports(
         None,
         Some(AUDIO_PORT_TYPE),
         direction | PortFlags::IS_PHYSICAL,
     );
-    client
-        .ports(None, Some(AUDIO_PORT_TYPE), direction)
-        .into_iter()
-        .filter(|name| !name.starts_with(&own_prefix))
-        .map(|name| AvailablePort {
-            is_physical: physical.contains(&name),
-            name,
-        })
-        .collect()
+    let all = client.ports(None, Some(AUDIO_PORT_TYPE), direction);
+    foreign_ports(client.name(), all, &physical)
 }
 
 struct Notifications {

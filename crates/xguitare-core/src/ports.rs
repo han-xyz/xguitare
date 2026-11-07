@@ -16,6 +16,23 @@ pub struct PortChoice {
 
 const WILDCARD: char = '*';
 
+/// The ports in `names` that do not belong to the client `client_name`, each marked physical when it is in `physical`.
+pub fn foreign_ports(
+    client_name: &str,
+    names: Vec<String>,
+    physical: &[String],
+) -> Vec<AvailablePort> {
+    let own_prefix = format!("{client_name}:");
+    names
+        .into_iter()
+        .filter(|name| !name.starts_with(&own_prefix))
+        .map(|name| AvailablePort {
+            is_physical: physical.contains(&name),
+            name,
+        })
+        .collect()
+}
+
 /// Resolves each configured port against the available capture and playback ports (see `Ports` for the three forms: "auto" looks at physical ports only, a pattern at all of them); every port left unconnected for a reason the user can fix adds a line to `warnings`.
 pub fn choose_ports(
     available_capture: &[AvailablePort],

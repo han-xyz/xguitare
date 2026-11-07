@@ -213,6 +213,11 @@ pub fn handle_line(
     (line, warnings)
 }
 
+/// The frame count the first Rack is prepared for: the larger of the requested and the effective buffer size, since the quantum can settle on either.
+pub fn prepared_max_frames(requested_buffer_size: u32, effective_buffer_size: u32) -> usize {
+    requested_buffer_size.max(effective_buffer_size) as usize
+}
+
 /// Whether the Rack prepared for `prepared` frames must be rebuilt for the quantum in effect: larger blocks would be silent, smaller ones would waste work on oversized FFTs. Never above `SWITCHER_MAX_FRAMES`, which the audio thread cannot run whatever the Rack.
 pub fn needs_reprepare(prepared: usize, buffer_size: u32) -> bool {
     let frames = buffer_size as usize;

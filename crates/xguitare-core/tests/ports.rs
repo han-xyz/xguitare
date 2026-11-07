@@ -1,5 +1,5 @@
 use xguitare_core::Ports;
-use xguitare_core::ports::{AvailablePort, choose_ports};
+use xguitare_core::ports::{AvailablePort, choose_ports, foreign_ports};
 
 fn available(list: &[&str], is_physical: bool) -> Vec<AvailablePort> {
     list.iter()
@@ -156,4 +156,34 @@ fn choose_ports_auto_uses_jack_order() {
     let choice = choose_ports(&capture(), &surround, &ports("auto", "auto", "auto"));
     assert_eq!(choice.output_left.as_deref(), Some("card:playback_FL"));
     assert_eq!(choice.output_right.as_deref(), Some("card:playback_FR"));
+}
+
+#[test]
+fn foreign_ports_drop_own_client_and_mark_physical() {
+    let all = [
+        "xguitare:out_l",
+        "Scarlett:capture_MONO",
+        "xguitare-gui:in",
+        "Firefox:output_FL",
+    ]
+    .map(String::from)
+    .to_vec();
+    let physical = ["Scarlett:capture_MONO".to_string()];
+    assert_eq!(
+        foreign_ports("xguitare", all, &physical),
+        [
+            AvailablePort {
+                name: "Scarlett:capture_MONO".to_string(),
+                is_physical: true,
+            },
+            AvailablePort {
+                name: "xguitare-gui:in".to_string(),
+                is_physical: false,
+            },
+            AvailablePort {
+                name: "Firefox:output_FL".to_string(),
+                is_physical: false,
+            },
+        ]
+    );
 }

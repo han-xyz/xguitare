@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::control::{
     EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, handle, handle_line,
-    needs_reprepare, open_connection, passthrough_rack, reprepare,
+    needs_reprepare, open_connection, passthrough_rack, prepared_max_frames, reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
@@ -560,6 +560,13 @@ fn needs_reprepare_when_sizes_differ() {
     assert!(needs_reprepare(128, 256));
     assert!(needs_reprepare(512, 128));
     assert!(!needs_reprepare(128, 128));
+}
+
+#[test]
+fn prepared_max_frames_is_larger_of_requested_and_effective() {
+    assert_eq!(prepared_max_frames(128, 256), 256);
+    assert_eq!(prepared_max_frames(512, 128), 512);
+    assert_eq!(prepared_max_frames(128, 128), 128);
 }
 
 #[test]
