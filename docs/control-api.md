@@ -330,7 +330,7 @@ A pitch detected, but not clearly enough to show:
 {"ok":true,"cents":12,"confident":false,"hz":83.0,"note":"E2"}
 ```
 
-With no pitch detected (silence, noise, or a pitch outside 35 to 1400 Hz):
+With no pitch detected (silence or input below -60 dBFS, or a pitch outside 35 to 1400 Hz):
 
 ```json
 {"ok":true,"cents":null,"confident":false,"hz":null,"note":null}

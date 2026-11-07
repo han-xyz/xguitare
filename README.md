@@ -135,7 +135,7 @@ The first run creates five Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primu
 
 ## CLI
 
-Every subcommand except `run` sends one request to the running Daemon and exits 0 on success; on an error it prints one `error: ...` line to stderr and exits 1. `xguitare --help` lists them.
+Every subcommand except `run` and `tuner --watch` sends one request to the running Daemon and exits 0 on success; `tuner --watch` keeps requesting until Ctrl-C; on an error it prints one `error: ...` line to stderr and exits 1. `xguitare --help` lists them.
 
 `status` shows the active Preset, the Revision, whether Mute is on, input and output peaks since the last `status`, audio settings and port connections:
 
