@@ -109,7 +109,7 @@ Errors:
 
 ## set
 
-Changes one Parameter of the running Rack. The value is clamped to the Parameter's range. The change is not written to the Preset file until `save`.
+Changes one Parameter of the running Rack. The value is rounded to a whole number for an integer Parameter, then clamped to the Parameter's range. The change is not written to the Preset file until `save`.
 
 Request:
 
@@ -126,7 +126,7 @@ Response:
 | Key | Value |
 | --- | --- |
 | `param` | The address as given. |
-| `value` | The value applied, after clamping. |
+| `value` | The value applied, after rounding and clamping. |
 | `clamped` | `true` when the requested value was outside the range. |
 
 Errors:
@@ -166,7 +166,7 @@ Response:
 | `params[].unit` | `"dB"`, `"ms"`, `"Hz"`, `"%"`, or `""` for a plain number. |
 | `params[].min`, `params[].max` | The Parameter's range. |
 | `params[].default` | The value a new Module of this type starts with. |
-| `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`); the Module rounds other values. |
+| `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`, `cabinet.low_cut`, `cabinet.high_cut`); `set` and the Module round other values. |
 | `params[].ir` | Cabinet entries only: the Module's Cabinet IR name, as in the Preset's `ir` (`null` when it has none). Other Modules' entries have no `ir` key. |
 
 Errors:

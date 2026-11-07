@@ -244,6 +244,30 @@ fn set_clamps_and_reports() {
 }
 
 #[test]
+fn set_rounds_integer_param() {
+    let (mut state, mut audio, _dir) = amp_state("set-rounds-integer");
+    let (_, preset) = state.active.as_mut().unwrap();
+    preset.modules[1].params = vec![
+        ("level".to_string(), 0.0),
+        ("low_cut".to_string(), 20.0),
+        ("high_cut".to_string(), 20000.0),
+    ];
+    let payload = ok(handle(&mut state, set("cabinet.low_cut", 150.4)));
+    assert_eq!(
+        payload,
+        json!({"param": "cabinet.low_cut", "value": 150.0, "clamped": false})
+    );
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SetParam { module: 1, param: 1, value }) if value == 150.0
+    ));
+    ok(handle(&mut state, Request::Save));
+    let file = state.config.bank_dir.join("01-clean.toml");
+    let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved.modules[1].params[1], ("low_cut".to_string(), 150.0));
+}
+
+#[test]
 fn set_non_finite_is_error() {
     let (mut state, audio, _dir) = state("set-non-finite");
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {

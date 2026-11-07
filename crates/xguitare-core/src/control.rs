@@ -347,6 +347,7 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
     let (module, param) = resolve(preset, &address).map_err(|err| err.to_string())?;
     let spec = param_spec(&preset.modules[module], param);
     let clamped = value < f64::from(spec.min) || value > f64::from(spec.max);
+    let value = if spec.integer { value.round() } else { value };
     let applied = (value as f32).clamp(spec.min, spec.max);
     state
         .queues
