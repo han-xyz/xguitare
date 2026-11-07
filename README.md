@@ -239,8 +239,12 @@ xguitare-gui
 The window shows:
 
 - Left, the Bank: one row per entry, `program name`, the active Preset highlighted. Click a row to load it. An invalid entry is greyed out; hover over it for the parse error.
-- Centre, a `Save` button and the active Preset's name, then one section per Module in Rack order, titled with the Module id, with one slider per Parameter and its unit. Dragging a slider changes the sound while you drag: the GUI sends `set` at most every 30 ms and the final value on release. `preamp.stages` and `delay.pingpong` step in whole numbers. As with `xguitare set`, a change is not written to the Preset file until you save.
+- Centre, a `Save` button, the active Preset's name and an `Add` menu, then one card per Module in Rack order. A card has a coloured band on top for its Module type (preamp and tonestack cards have a taller band and read `amp` beside the id), the Module id on a dark plate at the left, `▲` `▼` `✕` at the right, and one knob per Parameter below, wrapping onto more rows when the window is narrow. Each knob shows the Parameter name above and the value with its unit below.
 - Bottom, the status bar: `connected`, `disconnected Ns` or `starting daemon Ns`; for 3 seconds, the result of a save (`saved /home/you/.config/xguitare/bank/01-clean.toml`) or the error of any command (`error: ...`); then `sample rate Hz · buffer_size/prepared_frames frames · xruns N · cb last/max µs` as in `xguitare status`, and the `in` and `out` peak meters, from -60 dB to 0 dB, red above -6 dB.
+
+Knobs: drag up to raise a value and down to lower it; 200 pixels cross the whole range. Hold Shift while dragging for steps ten times finer. Double-click a knob to reset the Parameter to its default. `preamp.stages` and `delay.pingpong` step in whole numbers. The sound changes while you drag: the GUI sends `set` at most every 30 ms and the final value on release. As with `xguitare set`, a change is not written to the Preset file until you save.
+
+Rack editing, as with `xguitare rack`: `Add` lists the Module types with their channels; a stereo Module is added at the end of the Rack, a mono Module or a cabinet after the last mono Module (at the front when there is none). `▲` and `▼` move a Module one place, `✕` removes it. A layout the Daemon refuses (a stereo Module before the cabinet, say) leaves the Rack unchanged and shows the error in the status bar. `Save` writes the new layout to the Preset file.
 
 Changes made elsewhere (the CLI, MIDI program change, an edited Preset file) show up at the next `status` poll, every 50 ms.
 
