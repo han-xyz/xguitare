@@ -32,7 +32,7 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
     let reader = WavReader::open(path).map_err(hound_error)?;
     let spec = reader.spec();
     let file_max_len = (spec.sample_rate as f32 * max_ms / 1000.0).ceil() as usize;
-    let max_samples = file_max_len * usize::from(spec.channels);
+    let max_samples = file_max_len.saturating_mul(usize::from(spec.channels));
     let samples: Vec<f32> = match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Int, bits @ (16 | 24 | 32)) => {
             let full_scale = (1_i64 << (bits - 1)) as f32;

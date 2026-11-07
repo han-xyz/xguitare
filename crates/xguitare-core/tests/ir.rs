@@ -131,6 +131,20 @@ fn loads_stereo() {
 }
 
 #[test]
+fn stereo_with_unbounded_max_ms_loads() {
+    let dir = temp_dir("stereo-unbounded");
+    let path = dir.join("ir.wav");
+    let interleaved: Vec<f32> = ramp().iter().flat_map(|s| [*s, -*s]).collect();
+    write_float(
+        &path,
+        spec(2, 48_000, 32, SampleFormat::Float),
+        &interleaved,
+    );
+    let ir = load_ir(&path, 48_000, f32::INFINITY).unwrap();
+    assert_ramp(&ir.left);
+}
+
+#[test]
 fn resamples_to_engine_rate() {
     let dir = temp_dir("resample");
     let path = dir.join("ir.wav");
