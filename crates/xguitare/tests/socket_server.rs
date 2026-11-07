@@ -8,8 +8,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
-use xguitare_core::control::EngineState;
-use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
+use xguitare_core::control::{EngineState, PeakMeters, Value};
+use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 
@@ -17,6 +17,7 @@ struct Server {
     path: PathBuf,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    shared: Arc<EngineShared>,
     _audio: AudioQueues,
 }
 
@@ -42,13 +43,14 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
     let (queues, audio, tap) = engine_queues(64);
     let config = empty_config(&dir);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
+    let shared = Arc::new(EngineShared::default());
     let state = EngineState {
         bank: Bank {
             dir: dir.clone(),
             entries: Vec::new(),
         },
         active: None,
-        shared: Arc::new(EngineShared::default()),
+        shared: Arc::clone(&shared),
         queues,
         tuner,
         config,
@@ -56,6 +58,7 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 1,
+        peaks: PeakMeters::default(),
     };
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket
@@ -65,6 +68,7 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
         path,
         stop,
         thread: Some(thread),
+        shared,
         _audio: audio,
     }
 }
@@ -188,6 +192,25 @@ fn idle_connection_closed() {
     let mut rest = Vec::new();
     assert_eq!(stream.read_to_end(&mut rest).unwrap(), 0);
     assert!(started.elapsed() >= Duration::from_millis(300));
+}
+
+#[test]
+fn peaks_per_connection() {
+    let server = server("peaks");
+    let first = UnixStream::connect(&server.path).unwrap();
+    let second = UnixStream::connect(&server.path).unwrap();
+    let input_peak = |stream: &UnixStream| {
+        let reply: Value = request(stream, r#"{"cmd":"status"}"#).parse().unwrap();
+        reply["input_peak_db"].clone()
+    };
+    input_peak(&first);
+    input_peak(&second);
+    raise_peak(&server.shared.input_peak_bits, 0.5);
+    assert_eq!(input_peak(&first), -6.0);
+    raise_peak(&server.shared.input_peak_bits, 0.25);
+    assert_eq!(input_peak(&second), -6.0);
+    assert_eq!(input_peak(&first), -12.0);
+    assert_eq!(input_peak(&first), -120.0);
 }
 
 fn empty_config(dir: &Path) -> Config {

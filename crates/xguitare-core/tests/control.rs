@@ -1,13 +1,14 @@
 use std::f32::consts::TAU;
 use std::fs;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, change_sample_rate, handle, handle_line,
-    needs_reprepare, passthrough_rack, reprepare,
+    EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, handle, handle_line,
+    needs_reprepare, open_connection, passthrough_rack, reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
@@ -72,6 +73,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 1,
+        peaks: PeakMeters::default(),
     };
     (state, audio, dir)
 }
@@ -414,8 +416,9 @@ fn queue_full_is_engine_busy() {
 #[test]
 fn unknown_cmd_is_error() {
     let (mut state, _audio, _dir) = state("unknown-cmd");
+    let connection = open_connection(&mut state);
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"bogus"}"#).0).unwrap();
+        serde_json::from_str(&handle_line(&mut state, connection, r#"{"cmd":"bogus"}"#).0).unwrap();
     assert_eq!(response["ok"], false);
     let message = response["error"].as_str().unwrap();
     assert!(
@@ -427,7 +430,9 @@ fn unknown_cmd_is_error() {
 #[test]
 fn malformed_json_is_error() {
     let (mut state, _audio, _dir) = state("malformed");
-    let response: Value = serde_json::from_str(&handle_line(&mut state, "{\"cmd\":").0).unwrap();
+    let connection = open_connection(&mut state);
+    let response: Value =
+        serde_json::from_str(&handle_line(&mut state, connection, "{\"cmd\":").0).unwrap();
     assert_eq!(response["ok"], false);
     assert!(
         response["error"]
@@ -437,7 +442,8 @@ fn malformed_json_is_error() {
         "{response}"
     );
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, r#"{"cmd":"status"}"#).0).unwrap();
+        serde_json::from_str(&handle_line(&mut state, connection, r#"{"cmd":"status"}"#).0)
+            .unwrap();
     assert_eq!(response["ok"], true);
     assert_eq!(response["preset"], "Clean");
 }
@@ -453,6 +459,37 @@ fn save_writes_live_values_atomically() {
     assert_eq!(saved.modules[0].params[0], ("level".to_string(), -6.0));
     let leftovers = tmp_files(&state.config.bank_dir);
     assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn save_keeps_mode() {
+    let (mut state, _audio, _dir) = state("save-keeps-mode");
+    let file = state.config.bank_dir.join("01-clean.toml");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    ok(handle(&mut state, Request::Save));
+    assert_eq!(fs::metadata(&file).unwrap().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn save_through_symlink() {
+    let (mut state, _audio, dir) = state("save-through-symlink");
+    let link = state.config.bank_dir.join("01-clean.toml");
+    let elsewhere = dir.0.join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    let target = elsewhere.join("clean.toml");
+    fs::rename(&link, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    ok(handle(&mut state, set("gain.level", -6.0)));
+    ok(handle(&mut state, Request::Save));
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    let saved = Preset::parse(&fs::read_to_string(&target).unwrap()).unwrap();
+    assert_eq!(saved.modules[0].params[0], ("level".to_string(), -6.0));
+    assert!(tmp_files(&elsewhere).is_empty());
 }
 
 #[test]
@@ -1076,7 +1113,8 @@ fn rack_edit_without_preset_is_error() {
 #[test]
 fn tuner_null_before_tick() {
     let (mut state, _audio, _dir) = state("tuner-null");
-    let (line, _) = handle_line(&mut state, r#"{"cmd":"tuner"}"#);
+    let connection = open_connection(&mut state);
+    let (line, _) = handle_line(&mut state, connection, r#"{"cmd":"tuner"}"#);
     assert_eq!(
         serde_json::from_str::<Value>(&line).unwrap(),
         json!({"ok": true, "hz": null, "note": null, "cents": null, "confident": false})
@@ -1101,7 +1139,8 @@ fn tuner_reports_a2_after_tick() {
 #[test]
 fn mute_on_off_and_status() {
     let (mut state, _audio, _dir) = state("mute");
-    let (line, _) = handle_line(&mut state, r#"{"cmd":"mute","on":true}"#);
+    let connection = open_connection(&mut state);
+    let (line, _) = handle_line(&mut state, connection, r#"{"cmd":"mute","on":true}"#);
     assert_eq!(line, r#"{"ok":true,"muted":true}"#);
     assert!(state.shared.muted.load(Ordering::Relaxed));
     assert_eq!(ok(handle(&mut state, Request::Status))["muted"], true);
@@ -1114,8 +1153,10 @@ fn mute_on_off_and_status() {
 #[test]
 fn mute_without_on_is_invalid_request() {
     let (mut state, _audio, _dir) = state("mute-no-on");
+    let connection = open_connection(&mut state);
     for line in [r#"{"cmd":"mute"}"#, r#"{"cmd":"mute","on":"yes"}"#] {
-        let response: Value = serde_json::from_str(&handle_line(&mut state, line).0).unwrap();
+        let response: Value =
+            serde_json::from_str(&handle_line(&mut state, connection, line).0).unwrap();
         assert_eq!(response["ok"], false);
         let message = response["error"].as_str().unwrap();
         assert!(message.starts_with("invalid request: "), "{message}");
@@ -1260,7 +1301,12 @@ fn rack_ir_swaps_and_bumps_revision() {
 #[test]
 fn rack_ir_first_cabinet_when_id_omitted() {
     let (mut state, _audio, _dir) = ir_state("rack-ir-first");
-    let (line, warnings) = handle_line(&mut state, r#"{"cmd":"rack_ir","ir":"cabs/x.wav"}"#);
+    let connection = open_connection(&mut state);
+    let (line, warnings) = handle_line(
+        &mut state,
+        connection,
+        r#"{"cmd":"rack_ir","ir":"cabs/x.wav"}"#,
+    );
     assert_eq!(warnings, []);
     assert_eq!(
         serde_json::from_str::<Value>(&line).unwrap(),

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use xguitare_core::control::{Request, Response};
-use xguitare_core::{Config, secure_socket_dir};
+use xguitare_core::{Config, check_private_dir, current_uid};
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
@@ -116,7 +116,9 @@ fn check_socket_dir(config: &Config) -> Result<(), ClientError> {
         .filter(|dir| config.socket_is_fallback && dir.symlink_metadata().is_ok());
     match fallback_dir {
         Some(dir) => {
-            secure_socket_dir(dir).map_err(|err| ClientError::InsecureSocketDir(err.to_string()))
+            let uid = current_uid().map_err(ClientError::Io)?;
+            check_private_dir(dir, uid)
+                .map_err(|err| ClientError::InsecureSocketDir(err.to_string()))
         }
         None => Ok(()),
     }

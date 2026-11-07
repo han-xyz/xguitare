@@ -244,29 +244,53 @@ pub struct SocketDirError {
 
 /// Checks that `dir`, the `/tmp` fallback socket directory, is a real directory owned by this user with mode 0700; a wrong mode on our own directory is tightened rather than refused.
 pub fn secure_socket_dir(dir: &Path) -> Result<(), SocketDirError> {
-    let refuse = |reason: String| SocketDirError {
-        dir: dir.to_path_buf(),
-        reason,
-    };
-    let meta = fs::symlink_metadata(dir).map_err(|err| refuse(err.to_string()))?;
-    if meta.file_type().is_symlink() {
-        return Err(refuse("it is a symlink".to_string()));
-    }
-    if !meta.is_dir() {
-        return Err(refuse("not a directory".to_string()));
-    }
-    let uid = current_uid().map_err(|err| refuse(err.to_string()))?;
-    if meta.uid() != uid {
-        return Err(refuse(format!("owned by uid {}, not {uid}", meta.uid())));
-    }
+    let uid = current_uid().map_err(|err| socket_dir_error(dir, err.to_string()))?;
+    let meta = owned_dir(dir, uid)?;
     if meta.mode() & 0o777 != SOCKET_DIR_MODE {
         fs::set_permissions(dir, fs::Permissions::from_mode(SOCKET_DIR_MODE))
-            .map_err(|err| refuse(err.to_string()))?;
+            .map_err(|err| socket_dir_error(dir, err.to_string()))?;
     }
     Ok(())
 }
 
-fn current_uid() -> std::io::Result<u32> {
+/// Refuses `dir` unless it is a real directory owned by `uid` with mode 0700; unlike `secure_socket_dir` it never changes the mode.
+pub fn check_private_dir(dir: &Path, uid: u32) -> Result<(), SocketDirError> {
+    let mode = owned_dir(dir, uid)?.mode() & 0o777;
+    if mode != SOCKET_DIR_MODE {
+        return Err(socket_dir_error(
+            dir,
+            format!("mode {mode:04o}, not {SOCKET_DIR_MODE:04o}"),
+        ));
+    }
+    Ok(())
+}
+
+fn owned_dir(dir: &Path, uid: u32) -> Result<fs::Metadata, SocketDirError> {
+    let meta = fs::symlink_metadata(dir).map_err(|err| socket_dir_error(dir, err.to_string()))?;
+    if meta.file_type().is_symlink() {
+        return Err(socket_dir_error(dir, "it is a symlink".to_string()));
+    }
+    if !meta.is_dir() {
+        return Err(socket_dir_error(dir, "not a directory".to_string()));
+    }
+    if meta.uid() != uid {
+        return Err(socket_dir_error(
+            dir,
+            format!("owned by uid {}, not {uid}", meta.uid()),
+        ));
+    }
+    Ok(meta)
+}
+
+fn socket_dir_error(dir: &Path, reason: String) -> SocketDirError {
+    SocketDirError {
+        dir: dir.to_path_buf(),
+        reason,
+    }
+}
+
+/// This process's real uid, read from `/proc/self`.
+pub fn current_uid() -> std::io::Result<u32> {
     Ok(fs::metadata("/proc/self")?.uid())
 }
 

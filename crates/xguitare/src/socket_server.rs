@@ -5,12 +5,14 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use tracing::warn;
-use xguitare_core::control::{EngineState, handle_line};
+use xguitare_core::control::{
+    ConnectionId, EngineState, close_connection, handle_line, open_connection,
+};
 use xguitare_core::{SOCKET_DIR_MODE, SocketDirError, secure_socket_dir};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -202,17 +204,24 @@ fn serve_connection(
     stop: &AtomicBool,
     idle_timeout: Duration,
 ) {
-    match answer_lines(stream, state, stop, idle_timeout) {
+    let connection = open_connection(&mut lock(state));
+    match answer_lines(stream, state, connection, stop, idle_timeout) {
         Err(err) if !matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
             warn!("control connection: {err}");
         }
         _ => {}
     }
+    close_connection(&mut lock(state), connection);
+}
+
+fn lock(state: &Mutex<EngineState>) -> MutexGuard<'_, EngineState> {
+    state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn answer_lines(
     stream: &UnixStream,
     state: &Mutex<EngineState>,
+    connection: ConnectionId,
     stop: &AtomicBool,
     idle_timeout: Duration,
 ) -> io::Result<()> {
@@ -245,10 +254,7 @@ fn answer_lines(
         }
         if !line.is_empty() {
             let request = String::from_utf8_lossy(&line);
-            let (reply, warnings) = handle_line(
-                &mut state.lock().unwrap_or_else(PoisonError::into_inner),
-                request.trim_end(),
-            );
+            let (reply, warnings) = handle_line(&mut lock(state), connection, request.trim_end());
             for warning in warnings {
                 warn!("{warning}");
             }

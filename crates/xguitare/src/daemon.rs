@@ -16,8 +16,8 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::build;
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, change_sample_rate, handle, needs_reprepare,
-    passthrough_rack, reprepare,
+    EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, handle,
+    needs_reprepare, passthrough_rack, reprepare,
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
@@ -93,6 +93,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         sample_rate,
         max_frames: session.max_frames(),
         revision: 1,
+        peaks: PeakMeters::default(),
     }));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);
     let control = socket

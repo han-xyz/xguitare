@@ -1,4 +1,7 @@
-use std::fs;
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::{self, ErrorKind, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -92,13 +95,73 @@ pub struct EngineState {
     pub max_frames: usize,
     /// Incremented on every change to the live Rack or the Bank; starts at 1.
     pub revision: u64,
+    pub peaks: PeakMeters,
+}
+
+/// One Control API connection, from `open_connection` to `close_connection`; `status` reports and clears only its own peaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ConnectionId(u64);
+
+const IN_PROCESS: ConnectionId = ConnectionId(0);
+
+/// For each open connection, the largest input and output peaks since its previous `status`.
+#[derive(Debug, Default)]
+pub struct PeakMeters {
+    opened: u64,
+    meters: HashMap<ConnectionId, Peaks>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Peaks {
+    input: f32,
+    output: f32,
+}
+
+/// Registers a new connection; its first `status` reports the peaks since the previous `status` on any connection, so a one-request client such as the CLI still sees them.
+pub fn open_connection(state: &mut EngineState) -> ConnectionId {
+    let peaks = &mut state.peaks;
+    peaks.opened += 1;
+    let connection = ConnectionId(peaks.opened);
+    peaks.meters.insert(connection, Peaks::default());
+    connection
+}
+
+pub fn close_connection(state: &mut EngineState, connection: ConnectionId) {
+    state.peaks.meters.remove(&connection);
+}
+
+fn drain_peaks(state: &mut EngineState) {
+    let input = take_peak(&state.shared.input_peak_bits);
+    let output = take_peak(&state.shared.output_peak_bits);
+    for peaks in state.peaks.meters.values_mut() {
+        peaks.input = peaks.input.max(input);
+        peaks.output = peaks.output.max(output);
+    }
+}
+
+fn take_peaks(state: &mut EngineState, connection: ConnectionId) -> Peaks {
+    state.peaks.meters.entry(connection).or_default();
+    drain_peaks(state);
+    state
+        .peaks
+        .meters
+        .insert(connection, Peaks::default())
+        .unwrap_or_default()
 }
 
 /// Handles one request; the build warnings of a `load` or a Rack edit come back beside the Response for the caller to log.
 pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarning>) {
+    handle_from(state, IN_PROCESS, req)
+}
+
+fn handle_from(
+    state: &mut EngineState,
+    connection: ConnectionId,
+    req: Request,
+) -> (Response, Vec<BuildWarning>) {
     let mut warnings = Vec::new();
     let result = match req {
-        Request::Status => Ok(status(state)),
+        Request::Status => Ok(status(state, connection)),
         Request::List => Ok(list(state)),
         Request::Load { preset } => load(state, &preset, &mut warnings),
         Request::Set { param, value } => set(state, &param, value),
@@ -122,10 +185,14 @@ pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarn
     (response, warnings)
 }
 
-/// Handles one request line and returns the response line, without its newline, and the build warnings as `handle` does.
-pub fn handle_line(state: &mut EngineState, line: &str) -> (String, Vec<BuildWarning>) {
+/// Handles one request line from `connection` and returns the response line, without its newline, and the build warnings as `handle` does.
+pub fn handle_line(
+    state: &mut EngineState,
+    connection: ConnectionId,
+    line: &str,
+) -> (String, Vec<BuildWarning>) {
     let (response, warnings) = match serde_json::from_str(line) {
-        Ok(req) => handle(state, req),
+        Ok(req) => handle_from(state, connection, req),
         Err(err) => (
             Response::Err {
                 error: format!("invalid request: {err}"),
@@ -219,7 +286,8 @@ impl Response {
     }
 }
 
-fn status(state: &EngineState) -> Value {
+fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
+    let peaks = take_peaks(state, connection);
     let shared = &state.shared;
     let connections: Vec<Value> = state
         .connections
@@ -234,8 +302,8 @@ fn status(state: &EngineState) -> Value {
         "prepared_frames": state.max_frames,
         "revision": state.revision,
         "muted": shared.muted.load(Ordering::Relaxed),
-        "input_peak_db": peak_db(take_peak(&shared.input_peak_bits)),
-        "output_peak_db": peak_db(take_peak(&shared.output_peak_bits)),
+        "input_peak_db": peak_db(peaks.input),
+        "output_peak_db": peak_db(peaks.output),
         "xruns": shared.xruns.load(Ordering::Relaxed),
         "callback_max_us": shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
@@ -372,14 +440,8 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
     if state.bank.position(file).is_none() {
         return Err(ACTIVE_REMOVED.to_string());
     }
-    let tmp = file.with_extension("toml.tmp");
     let text = preset.to_toml();
-    fs::write(&tmp, &text)
-        .and_then(|()| fs::rename(&tmp, file))
-        .map_err(|err| {
-            let _ = fs::remove_file(&tmp);
-            format!("cannot save {}: {err}", file.display())
-        })?;
+    write_through(file, &text).map_err(|err| format!("cannot save {}: {err}", file.display()))?;
     let payload = json!({"path": file.display().to_string()});
     let saved = Preset::parse(&text).expect("a saved Preset parses back");
     if let Some((_, active)) = state.active.as_mut() {
@@ -387,6 +449,38 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
     }
     state.revision += 1;
     Ok(payload)
+}
+
+/// Replaces the file `path` names, through a symlink, by a temp file and rename beside it, keeping the old file's mode.
+fn write_through(path: &Path, text: &str) -> io::Result<()> {
+    let target = if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        fs::canonicalize(path)?
+    } else {
+        path.to_path_buf()
+    };
+    let permissions = match fs::metadata(&target) {
+        Ok(meta) => Some(meta.permissions()),
+        Err(err) if err.kind() == ErrorKind::NotFound => None,
+        Err(err) => return Err(err),
+    };
+    let tmp = target.with_extension("toml.tmp");
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    if let Some(permissions) = &permissions {
+        options.mode(permissions.mode());
+    }
+    let written = options
+        .open(&tmp)
+        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .and_then(|()| match permissions {
+            Some(permissions) => fs::set_permissions(&tmp, permissions),
+            None => Ok(()),
+        })
+        .and_then(|()| fs::rename(&tmp, &target));
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    written
 }
 
 fn modules() -> Value {

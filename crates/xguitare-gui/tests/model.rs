@@ -7,7 +7,7 @@ use serde_json::json;
 use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
-use xguitare_core::control::{EngineState, handle};
+use xguitare_core::control::{EngineState, PeakMeters, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
@@ -53,6 +53,7 @@ fn registry_modules(test: &str) -> serde_json::Value {
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 0,
+        peaks: PeakMeters::default(),
     };
     match handle(&mut state, Request::Modules).0 {
         Response::Ok(payload) => payload,

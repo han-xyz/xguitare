@@ -48,7 +48,7 @@ Response:
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
 | `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
 | `muted` | Whether Mute is on (see `mute`). |
-| `input_peak_db` | Largest input sample since the previous `status`, in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it. |
+| `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
 | `xruns` | Xruns since the Daemon started. |
 | `callback_max_us` | Longest audio callback so far, in µs. |

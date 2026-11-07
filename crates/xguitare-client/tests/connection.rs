@@ -1,14 +1,15 @@
 mod common;
 
 use std::fs;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{TempDir, answer, serve};
 use xguitare_client::{ClientError, Connection, Reconnecting, Transport, UnixSocketTransport};
-use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
+use xguitare_core::{Config, check_private_dir};
 
 const STATUS: &str = r#"{"ok":true,"preset":"Clean","revision":3}"#;
 const LIST: &str = r#"{"ok":true,"active":0,"entries":[]}"#;
@@ -123,6 +124,43 @@ fn symlinked_fallback_dir_is_refused() {
     let err = UnixSocketTransport::from_config(&config).err().unwrap();
     assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
     assert_eq!(err.to_string(), refusal);
+}
+
+#[test]
+fn client_refuses_foreign_fallback_dir() {
+    let dir = TempDir::new("foreign-fallback");
+    let fallback = dir.path.join("fallback");
+    fs::create_dir(&fallback).unwrap();
+    fs::set_permissions(&fallback, fs::Permissions::from_mode(0o755)).unwrap();
+    let config = Config {
+        socket: fallback.join("s.sock"),
+        socket_is_fallback: true,
+        ..dir.config()
+    };
+    let refusal = format!(
+        "refusing socket directory {}: mode 0755, not 0700",
+        fallback.display()
+    );
+    let err = Connection::connect(&config).err().unwrap();
+    assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
+    assert_eq!(err.to_string(), refusal);
+    let err = UnixSocketTransport::from_config(&config).err().unwrap();
+    assert_eq!(err.to_string(), refusal);
+    assert_eq!(fs::metadata(&fallback).unwrap().mode() & 0o777, 0o755);
+
+    fs::set_permissions(&fallback, fs::Permissions::from_mode(0o700)).unwrap();
+    let uid = fs::metadata(&fallback).unwrap().uid();
+    assert!(check_private_dir(&fallback, uid).is_ok());
+    assert_eq!(
+        check_private_dir(&fallback, uid + 1)
+            .unwrap_err()
+            .to_string(),
+        format!(
+            "refusing socket directory {}: owned by uid {uid}, not {}",
+            fallback.display(),
+            uid + 1
+        )
+    );
 }
 
 #[test]

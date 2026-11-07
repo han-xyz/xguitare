@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use xguitare_core::control::{EngineState, Request, Response, handle};
+use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
@@ -43,6 +43,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 1,
+        peaks: PeakMeters::default(),
     };
     (state, audio)
 }
