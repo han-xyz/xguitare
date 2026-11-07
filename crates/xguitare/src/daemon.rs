@@ -346,7 +346,7 @@ fn watch_until_stopped(
         thread::sleep(POLL_INTERVAL);
         {
             let mut state = state_guard(state);
-            log_sample_rate_change(&mut state);
+            follow_sample_rate_change(&mut state);
             state.tuner.tick();
             apply_bank_changes(&mut state, bank_watch);
             apply_program_changes(&mut state);
@@ -391,14 +391,14 @@ fn watch_until_stopped(
     }
 }
 
-fn log_sample_rate_change(state: &mut EngineState) {
+fn follow_sample_rate_change(state: &mut EngineState) {
     let old = state.sample_rate as u32;
     let Some(changed) = follow_sample_rate(state) else {
         return;
     };
-    let new = state.shared.sample_rate.load(Ordering::Relaxed);
     match changed {
         Ok(outcome) => {
+            let new = state.sample_rate as u32;
             info!("sample rate changed: {old} -> {new}");
             match outcome {
                 Reprepare::Built(warnings) => {
@@ -413,7 +413,10 @@ fn log_sample_rate_change(state: &mut EngineState) {
                 }
             }
         }
-        Err(err) => warn!("cannot rebuild rack at {new} Hz: {err}; retrying"),
+        Err(err) => {
+            let new = state.shared.sample_rate.load(Ordering::Relaxed);
+            warn!("cannot rebuild rack at {new} Hz: {err}; retrying")
+        }
     }
 }
 
