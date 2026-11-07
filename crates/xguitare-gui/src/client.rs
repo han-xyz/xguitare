@@ -285,6 +285,7 @@ impl Client {
                 info!("ir_list: {} irs", self.snapshot.irs.len());
             }
             Ok(Response::Err { .. }) => {
+                self.snapshot.irs.clear();
                 if let Some(text) = response_text(&Request::IrList, response) {
                     self.snapshot.last_message = Some((text, Instant::now()));
                 }

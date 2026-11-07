@@ -339,10 +339,15 @@ fn preset_panel(
     ScrollArea::vertical().show(ui, |ui| {
         for (index, (module, rows)) in modules.iter().enumerate() {
             let place = (index, modules.len());
-            let ir_choice = snapshot.params.as_ref().map(|params| IrChoice {
-                current: cabinet_ir(params, module),
-                irs: &snapshot.irs,
-            });
+            let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
+            let ir_choice = snapshot
+                .params
+                .as_ref()
+                .filter(|_| is_cabinet)
+                .map(|params| IrChoice {
+                    current: cabinet_ir(params, module),
+                    irs: &snapshot.irs,
+                });
             commands.extend(module_card(ui, module, rows, place, ir_choice, knobs));
             ui.add_space(CARD_GAP);
         }
@@ -396,7 +401,6 @@ fn module_card(
     knobs: &mut Knobs,
 ) -> Vec<Command> {
     let type_name = rows.first().map_or("", |row| row.module_type.as_str());
-    let ir_choice = ir_choice.filter(|_| type_name == CABINET);
     let is_amp = AMP_TYPES.contains(&type_name);
     let band = if is_amp { AMP_BAND_HEIGHT } else { BAND_HEIGHT };
     let card = Frame::new()
@@ -445,16 +449,13 @@ struct IrChoice<'a> {
     irs: &'a [String],
 }
 
-/// Opening the combo refetches `ir_list`, so that a Cabinet IR copied into the IR directory shows without a reconnect.
+/// A click on the combo, opening or closing it, refetches `ir_list`, so that a Cabinet IR copied into the IR directory shows without a reconnect.
 fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
     let mut commands = Vec::new();
     ui.horizontal(|ui| {
         ui.label("IR");
-        let salt = ("ir", module);
-        let id = ui.make_persistent_id(salt);
-        let was_open = ComboBox::is_open(ui.ctx(), id);
         let current = ir_choice.current.as_deref();
-        ComboBox::from_id_salt(salt)
+        let combo = ComboBox::from_id_salt(("ir", module))
             .selected_text(current.unwrap_or(NO_IR))
             .show_ui(ui, |ui| {
                 for name in ir_choice.irs {
@@ -469,7 +470,7 @@ fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
                     }
                 }
             });
-        if !was_open && ComboBox::is_open(ui.ctx(), id) {
+        if combo.response.clicked() {
             commands.push(Command::RefreshIrs);
         }
     });
