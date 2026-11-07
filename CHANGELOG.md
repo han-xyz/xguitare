@@ -30,7 +30,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - `rack_add cabinet` finds `default-cab.wav` or `bass-cab.wav` under the IR directory as well as the Bank directory.
 - An IR path error names both directories it looked in.
 - `crossfade_ms` (above 0 to 1000) and `ir_max_ms` (above 0 to 10000) out of range, NaN or infinite are refused when the config loads.
-- Cabinet `level` changes are smoothed, and a preamp `stages` change no longer jumps in level.
+- A preamp `stages` change no longer jumps in level.
 - The CLI and the GUI refuse a fallback socket directory that is not yours or not mode 0700.
 
 ### Known
