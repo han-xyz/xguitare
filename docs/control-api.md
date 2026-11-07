@@ -152,7 +152,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"params":[{"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
+{"ok":true,"params":[{"default":40.0,"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
 ```
 
 | Key | Value |
@@ -164,6 +164,7 @@ Response:
 | `params[].value` | Current value. |
 | `params[].unit` | `"dB"`, `"ms"`, `"Hz"`, `"%"`, or `""` for a plain number. |
 | `params[].min`, `params[].max` | The Parameter's range. |
+| `params[].default` | The value a new Module of this type starts with. |
 | `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`); the Module rounds other values. |
 
 Errors:

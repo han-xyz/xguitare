@@ -288,7 +288,7 @@ fn set_without_preset() {
 #[test]
 fn get_all_and_one() {
     let (mut state, _audio, _dir) = state("get");
-    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "integer": false});
+    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "default": 0.0, "integer": false});
     let all = ok(handle(&mut state, Request::Get { param: None }));
     assert_eq!(all, json!({"params": [expected]}));
     let module = ok(handle(
@@ -704,24 +704,12 @@ fn modules_lists_registry() {
         .iter()
         .map(|m| m["type"].as_str().unwrap())
         .collect();
-    for expected in [
-        "gain",
-        "gate",
-        "compressor",
-        "drive",
-        "preamp",
-        "tonestack",
-        "cabinet",
-        "delay",
-        "chorus",
-        "flanger",
-        "reverb",
-    ] {
-        assert!(
-            types.contains(&expected),
-            "{expected} missing from {types:?}"
-        );
-    }
+    let registry: Vec<&str> = ModuleRegistry::default()
+        .specs()
+        .map(|spec| spec.type_name)
+        .collect();
+    assert_eq!(types, registry);
+    assert!(types.contains(&"fuzz"), "fuzz missing from {types:?}");
     let by_type = |t: &str| modules.iter().find(|m| m["type"] == t).unwrap().clone();
     assert_eq!(by_type("gain")["channels"], "mono");
     assert_eq!(by_type("delay")["channels"], "stereo");

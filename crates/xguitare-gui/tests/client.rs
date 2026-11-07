@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_core::Config;
 use xguitare_gui::client;
-use xguitare_gui::model::Command;
+use xguitare_gui::model::{Command, Link};
 
 const WAIT: Duration = Duration::from_secs(2);
 
@@ -50,7 +50,10 @@ fn reply(cmd: &str) -> &'static str {
 }
 
 /// Answers every request line by its `cmd` and reports each `cmd` with its arrival time.
-fn serve_and_record(listener: UnixListener) -> Receiver<(String, Instant)> {
+fn serve_and_record(
+    listener: UnixListener,
+    mut reply: impl FnMut(&str) -> String + Send + 'static,
+) -> Receiver<(String, Instant)> {
     let (arrivals, received) = mpsc::channel();
     thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
@@ -86,7 +89,8 @@ fn next_arrival(received: &Receiver<(String, Instant)>, cmd: &str) -> Instant {
 fn set_goes_out_before_the_next_poll() {
     let dir = temp_dir("set-now");
     let config = config(&dir);
-    let received = serve_and_record(UnixListener::bind(&config.socket).unwrap());
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_record(listener, |cmd| reply(cmd).to_string());
     let stop = Arc::new(AtomicBool::new(false));
     let (commands, _snapshots, handle) = client::spawn(config, None, stop, || {});
     next_arrival(&received, "status");
@@ -106,6 +110,47 @@ fn set_goes_out_before_the_next_poll() {
         set.duration_since(sent),
         set.duration_since(polled)
     );
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn modules_error_is_retried_without_disconnect() {
+    let dir = temp_dir("modules-retry");
+    let config = config(&dir);
+    let mut modules_asked = 0;
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_record(listener, move |cmd| {
+        if cmd != "modules" {
+            return reply(cmd).to_string();
+        }
+        modules_asked += 1;
+        if modules_asked == 1 {
+            r#"{"ok":false,"error":"busy"}"#.to_string()
+        } else {
+            r#"{"ok":true,"modules":[{"type":"gate","channels":"mono","params":[]}]}"#.to_string()
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let deadline = Instant::now() + WAIT;
+    let mut modules_seen = 0;
+    while modules_seen < 2 {
+        assert!(
+            Instant::now() < deadline,
+            "modules asked {modules_seen} times"
+        );
+        let (cmd, _) = received.recv_timeout(WAIT).unwrap();
+        modules_seen += usize::from(cmd == "modules");
+    }
+    let snapshot = loop {
+        let snapshot = snapshots.recv_timeout(WAIT).unwrap();
+        if !snapshot.module_types.is_empty() {
+            break snapshot;
+        }
+    };
+    assert_eq!(snapshot.link, Link::Connected);
+    assert_eq!(snapshot.module_types[0].type_name, "gate");
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();
 }

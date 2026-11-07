@@ -16,9 +16,8 @@ use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    SET_INTERVAL, Snapshot, Throttle, accent_for, add_command, bank_rows, key_to_command,
-    link_text, move_target, param_default, param_rows, peak_fraction, rack_channels, status_line,
-    unit_suffix,
+    SET_INTERVAL, Snapshot, Throttle, add_command, bank_rows, key_to_command, link_text,
+    move_target, param_rows, peak_fraction, rack_channels, status_line, unit_suffix,
 };
 
 use crate::widgets::{self, KnobSpec};
@@ -35,6 +34,7 @@ const AMP_BAND_HEIGHT: f32 = 12.0;
 const PLATE_FILL: Color32 = Color32::from_rgb(16, 15, 14);
 const PLATE_TEXT: Color32 = Color32::from_rgb(230, 225, 215);
 const PLATE_RADIUS: u8 = 4;
+const PLATE_MARGIN: Margin = Margin::symmetric(6, 2);
 const AMP_LABEL: &str = "amp";
 const AMP_TYPES: [&str; 2] = ["preamp", "tonestack"];
 const DIGIT_KEYS: [Key; 9] = [
@@ -285,7 +285,7 @@ fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, knobs: &mut Knobs) -> Vec<Comm
     ScrollArea::vertical().show(ui, |ui| {
         for (index, (module, rows)) in modules.iter().enumerate() {
             let place = (index, modules.len());
-            commands.extend(module_card(ui, module, rows, place, snapshot, knobs));
+            commands.extend(module_card(ui, module, rows, place, knobs));
             ui.add_space(CARD_GAP);
         }
     });
@@ -297,7 +297,6 @@ fn module_card(
     module: &str,
     rows: &[ParamRow],
     (index, len): (usize, usize),
-    snapshot: &Snapshot,
     knobs: &mut Knobs,
 ) -> Vec<Command> {
     let type_name = rows.first().map_or("", |row| row.module_type.as_str());
@@ -323,10 +322,7 @@ fn module_card(
             );
             let mut commands: Vec<Command> = clicked.into_iter().collect();
             ui.horizontal_wrapped(|ui| {
-                commands.extend(
-                    rows.iter()
-                        .filter_map(|row| param_knob(ui, row, &snapshot.module_types, knobs)),
-                );
+                commands.extend(rows.iter().filter_map(|row| param_knob(ui, row, knobs)));
             });
             commands
         });
@@ -339,7 +335,7 @@ fn module_card(
             sw: 0,
             se: 0,
         },
-        accent_for(type_name),
+        widgets::accent(type_name),
     );
     card.inner
 }
@@ -348,7 +344,7 @@ fn label_plate(ui: &mut Ui, text: &str) {
     Frame::new()
         .fill(PLATE_FILL)
         .corner_radius(PLATE_RADIUS)
-        .inner_margin(Margin::symmetric(6, 2))
+        .inner_margin(PLATE_MARGIN)
         .show(ui, |ui| {
             ui.label(RichText::new(text).color(PLATE_TEXT).strong())
         });
@@ -404,12 +400,7 @@ fn module_buttons(ui: &mut Ui, module: &str, index: usize, len: usize) -> Option
 }
 
 /// A double-click reset is a final value, like a release.
-fn param_knob(
-    ui: &mut Ui,
-    row: &ParamRow,
-    module_types: &[ModuleType],
-    knobs: &mut Knobs,
-) -> Option<Command> {
+fn param_knob(ui: &mut Ui, row: &ParamRow, knobs: &mut Knobs) -> Option<Command> {
     let held = knobs.throttle.hold_local(&row.address, knobs.revision);
     let shown = match knobs.locals.get(&row.address) {
         Some(local) if held => *local,
@@ -419,8 +410,7 @@ fn param_knob(
     let spec = KnobSpec {
         min: row.min as f32,
         max: row.max as f32,
-        default: param_default(module_types, &row.module_type, &row.param)
-            .map(|default| default as f32),
+        default: row.default as f32,
         integer: row.integer,
         label: &row.param,
         suffix: unit_suffix(&row.unit),

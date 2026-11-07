@@ -47,6 +47,8 @@ struct Client {
     last_spawn: Option<Instant>,
     daemon: Option<Child>,
     revision: Option<u64>,
+    modules_fetched: bool,
+    modules_warned: bool,
     snapshot: Snapshot,
 }
 
@@ -62,6 +64,8 @@ impl Client {
             last_spawn: None,
             daemon: None,
             revision: None,
+            modules_fetched: false,
+            modules_warned: false,
             snapshot: Snapshot {
                 link: Link::Disconnected {
                     since: Instant::now(),
@@ -188,17 +192,32 @@ impl Client {
         if self.snapshot.link != Link::Connected {
             info!("connected to {}", self.config.socket.display());
             self.snapshot.link = Link::Connected;
-            self.snapshot.module_types = self
-                .payload(&Request::Modules)
-                .as_ref()
-                .map(module_types)
-                .unwrap_or_default();
+        }
+        if !self.modules_fetched {
+            self.fetch_modules();
         }
         self.failures = 0;
         let revision = status["revision"].as_u64().unwrap_or(0);
         self.snapshot.status = Some(status);
         if refresh_decision(self.revision, revision) {
             self.refresh(revision);
+        }
+    }
+
+    fn fetch_modules(&mut self) {
+        match self.request(&Request::Modules) {
+            Ok(Response::Ok(payload)) => {
+                self.snapshot.module_types = module_types(&payload);
+                self.modules_fetched = true;
+                self.modules_warned = false;
+            }
+            Ok(Response::Err { error }) => {
+                if !self.modules_warned {
+                    warn!("modules: {error}; retrying");
+                    self.modules_warned = true;
+                }
+            }
+            Err(_) => {}
         }
     }
 
@@ -243,6 +262,7 @@ impl Client {
         warn!("disconnected: {err}");
         self.connection = None;
         self.revision = None;
+        self.modules_fetched = false;
         self.snapshot.status = None;
         self.snapshot.link = Link::Disconnected {
             since: Instant::now(),

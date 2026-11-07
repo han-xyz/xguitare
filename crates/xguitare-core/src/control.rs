@@ -493,6 +493,7 @@ fn param_json(module: &PresetModule, param: usize) -> Value {
         "unit": unit_text(spec.unit),
         "min": shortest_f64(spec.min),
         "max": shortest_f64(spec.max),
+        "default": shortest_f64(spec.default),
         "integer": spec.integer,
     })
 }

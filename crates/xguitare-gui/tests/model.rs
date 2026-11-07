@@ -1,17 +1,59 @@
+use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
+use xguitare_core::control::{EngineState, handle};
+use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
     NEUTRAL_ACCENT, ParamRow, Throttle, accent_for, add_after, add_command, bank_rows,
     counts_toward_spawn, failed_set, key_to_command, knob_value_from_drag, meter_fraction,
-    module_types, move_target, param_default, param_rows, peak_fraction, rack_channels,
-    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
+    module_types, move_target, param_rows, peak_fraction, rack_channels, refresh_decision,
+    requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
+
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn registry_modules() -> serde_json::Value {
+    let dir = TempDir(PathBuf::from(format!(
+        "/tmp/xguitare-gm-{}-modules",
+        std::process::id()
+    )));
+    fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("config.toml");
+    fs::write(&path, "").unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    let mut state = EngineState {
+        bank: Bank {
+            dir: dir.0.clone(),
+            entries: Vec::new(),
+        },
+        active: None,
+        shared: Arc::new(EngineShared::default()),
+        queues: engine_queues(1).0,
+        config,
+        connections: Vec::new(),
+        sample_rate: 48_000.0,
+        max_frames: 128,
+        revision: 0,
+    };
+    match handle(&mut state, Request::Modules).0 {
+        Response::Ok(payload) => payload,
+        Response::Err { error } => panic!("modules: {error}"),
+    }
+}
 
 #[test]
 fn spawn_policy_three_failures_then_backoff() {
@@ -243,44 +285,49 @@ fn key_ctrl_s_is_save() {
 
 fn two_module_get() -> serde_json::Value {
     json!({"params": [
-        {"module": "preamp", "type": "preamp", "param": "gain", "value": 40.0, "unit": "%", "min": 0.0, "max": 100.0, "integer": false},
-        {"module": "preamp", "type": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
-        {"module": "delay", "type": "delay", "param": "time", "value": 350.0, "unit": "ms", "min": 1.0, "max": 2000.0, "integer": false},
-        {"module": "delay", "type": "delay", "param": "pingpong", "value": 0.0, "unit": "", "min": 0.0, "max": 1.0, "integer": true},
+        {"module": "preamp", "type": "preamp", "param": "gain", "value": 40.0, "unit": "%", "min": 0.0, "max": 100.0, "default": 50.0, "integer": false},
+        {"module": "preamp", "type": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "default": 2.0, "integer": true},
+        {"module": "delay", "type": "delay", "param": "time", "value": 350.0, "unit": "ms", "min": 1.0, "max": 2000.0, "default": 400.0, "integer": false},
+        {"module": "delay", "type": "delay", "param": "pingpong", "value": 0.0, "unit": "", "min": 0.0, "max": 1.0, "default": 0.0, "integer": true},
     ]})
 }
 
 #[test]
 fn param_rows_in_rack_order_with_units() {
-    let row =
-        |module: &str, param: &str, value: f64, min: f64, max: f64, unit: &str, integer: bool| {
-            ParamRow {
-                address: format!("{module}.{param}"),
-                module: module.to_string(),
-                module_type: module.to_string(),
-                param: param.to_string(),
-                value,
-                min,
-                max,
-                unit: unit.to_string(),
-                integer,
-            }
-        };
+    let row = |module: &str,
+               param: &str,
+               value: f64,
+               (min, max, default): (f64, f64, f64),
+               unit: &str,
+               integer: bool| {
+        ParamRow {
+            address: format!("{module}.{param}"),
+            module: module.to_string(),
+            module_type: module.to_string(),
+            param: param.to_string(),
+            value,
+            min,
+            max,
+            default,
+            unit: unit.to_string(),
+            integer,
+        }
+    };
     assert_eq!(
         param_rows(&two_module_get()),
         vec![
             (
                 "preamp".to_string(),
                 vec![
-                    row("preamp", "gain", 40.0, 0.0, 100.0, "%", false),
-                    row("preamp", "stages", 3.0, 1.0, 4.0, "", true),
+                    row("preamp", "gain", 40.0, (0.0, 100.0, 50.0), "%", false),
+                    row("preamp", "stages", 3.0, (1.0, 4.0, 2.0), "", true),
                 ]
             ),
             (
                 "delay".to_string(),
                 vec![
-                    row("delay", "time", 350.0, 1.0, 2000.0, "ms", false),
-                    row("delay", "pingpong", 0.0, 0.0, 1.0, "", true),
+                    row("delay", "time", 350.0, (1.0, 2000.0, 400.0), "ms", false),
+                    row("delay", "pingpong", 0.0, (0.0, 1.0, 0.0), "", true),
                 ]
             ),
         ]
@@ -537,7 +584,6 @@ fn add_after_empty_rack_is_front() {
     let gate = ModuleType {
         type_name: "gate".to_string(),
         channels: "mono".to_string(),
-        defaults: Vec::new(),
     };
     let front = Command::RackAdd {
         type_name: "gate".to_string(),
@@ -577,45 +623,21 @@ fn rack_channels_by_module_type() {
 
 #[test]
 fn module_types_from_payload() {
-    let payload = json!({"modules": [
-        {"type": "gain", "channels": "mono", "params": []},
-        {"type": "gate", "channels": "mono", "params": []},
-        {"type": "compressor", "channels": "mono", "params": []},
-        {"type": "drive", "channels": "mono", "params": []},
-        {"type": "preamp", "channels": "mono", "params": []},
-        {"type": "tonestack", "channels": "mono", "params": []},
-        {"type": "cabinet", "channels": "mono_to_stereo", "params": []},
-        {"type": "delay", "channels": "stereo", "params": []},
-        {"type": "chorus", "channels": "stereo", "params": []},
-        {"type": "flanger", "channels": "stereo", "params": []},
-        {"type": "reverb", "channels": "stereo", "params": []},
-    ]});
-    let types = module_types(&payload);
-    assert_eq!(types.len(), 11);
-    let module_type = |type_name: &str, channels: &str| ModuleType {
-        type_name: type_name.to_string(),
-        channels: channels.to_string(),
-        defaults: Vec::new(),
+    let types = module_types(&registry_modules());
+    assert_eq!(types.len(), 12);
+    let channels = |type_name: &str| {
+        types
+            .iter()
+            .find(|module_type| module_type.type_name == type_name)
+            .map(|module_type| module_type.channels.as_str())
     };
-    assert_eq!(types[0], module_type("gain", "mono"));
-    assert_eq!(types[6], module_type("cabinet", "mono_to_stereo"));
-    assert_eq!(types[10], module_type("reverb", "stereo"));
-    assert_eq!(types[6].label(), "cabinet (mono_to_stereo)");
+    assert_eq!(channels("gain"), Some("mono"));
+    assert_eq!(channels("fuzz"), Some("mono"));
+    assert_eq!(channels("cabinet"), Some("mono_to_stereo"));
+    assert_eq!(channels("reverb"), Some("stereo"));
+    let cabinet = types.iter().find(|t| t.type_name == "cabinet").unwrap();
+    assert_eq!(cabinet.label(), "cabinet (mono_to_stereo)");
     assert!(module_types(&json!({})).is_empty());
-}
-
-#[test]
-fn param_default_from_modules_payload() {
-    let types = module_types(&json!({"modules": [
-        {"type": "delay", "channels": "stereo", "params": [
-            {"name": "time", "min": 1.0, "max": 2000.0, "default": 350.0, "unit": "ms", "integer": false},
-            {"name": "pingpong", "min": 0.0, "max": 1.0, "default": 0.0, "unit": "", "integer": true},
-        ]},
-    ]}));
-    assert_eq!(param_default(&types, "delay", "time"), Some(350.0));
-    assert_eq!(param_default(&types, "delay", "pingpong"), Some(0.0));
-    assert_eq!(param_default(&types, "delay", "feedback"), None);
-    assert_eq!(param_default(&types, "reverb", "time"), None);
 }
 
 #[test]
@@ -671,20 +693,7 @@ fn knob_integer_rounds() {
 
 #[test]
 fn accent_table_covers_all_types() {
-    let types = module_types(&json!({"modules": [
-        {"type": "gain", "channels": "mono", "params": []},
-        {"type": "gate", "channels": "mono", "params": []},
-        {"type": "compressor", "channels": "mono", "params": []},
-        {"type": "drive", "channels": "mono", "params": []},
-        {"type": "fuzz", "channels": "mono", "params": []},
-        {"type": "preamp", "channels": "mono", "params": []},
-        {"type": "tonestack", "channels": "mono", "params": []},
-        {"type": "cabinet", "channels": "mono_to_stereo", "params": []},
-        {"type": "delay", "channels": "stereo", "params": []},
-        {"type": "chorus", "channels": "stereo", "params": []},
-        {"type": "flanger", "channels": "stereo", "params": []},
-        {"type": "reverb", "channels": "stereo", "params": []},
-    ]}));
+    let types = module_types(&registry_modules());
     let accents: Vec<_> = types
         .iter()
         .map(|module_type| accent_for(&module_type.type_name))
@@ -694,4 +703,19 @@ fn accent_table_covers_all_types() {
         assert!(!accents[index + 1..].contains(accent), "{:?}", types[index]);
     }
     assert_eq!(accent_for("theremin"), NEUTRAL_ACCENT);
+}
+
+#[test]
+fn accent_greys_are_distinct() {
+    let greys = [accent_for("gate"), accent_for("gain"), NEUTRAL_ACCENT];
+    let far_apart = |(r1, g1, b1): (u8, u8, u8), (r2, g2, b2): (u8, u8, u8)| {
+        [(r1, r2), (g1, g2), (b1, b2)]
+            .iter()
+            .any(|(a, b)| a.abs_diff(*b) > 40)
+    };
+    for (index, grey) in greys.iter().enumerate() {
+        for other in &greys[index + 1..] {
+            assert!(far_apart(*grey, *other), "{grey:?} vs {other:?}");
+        }
+    }
 }

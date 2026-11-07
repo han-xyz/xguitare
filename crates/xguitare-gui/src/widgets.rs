@@ -1,5 +1,5 @@
 use egui::{Align, Color32, Layout, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
-use xguitare_gui::model::{METER_RED_DB, knob_value_from_drag, meter_fraction};
+use xguitare_gui::model::{METER_RED_DB, accent_for, knob_value_from_drag, meter_fraction};
 
 const METER_SIZE: Vec2 = Vec2::new(120.0, 12.0);
 const KNOB_DIAMETER: f32 = 48.0;
@@ -14,7 +14,7 @@ const ARC_SEGMENTS: usize = 48;
 pub struct KnobSpec<'a> {
     pub min: f32,
     pub max: f32,
-    pub default: Option<f32>,
+    pub default: f32,
     pub integer: bool,
     pub label: &'a str,
     pub suffix: &'a str,
@@ -24,6 +24,11 @@ pub struct KnobResponse {
     pub changed: bool,
     pub drag_stopped: bool,
     pub reset: bool,
+}
+
+pub fn accent(type_name: &str) -> Color32 {
+    let (r, g, b) = accent_for(type_name);
+    Color32::from_rgb(r, g, b)
 }
 
 pub fn knob(ui: &mut Ui, value: &mut f32, spec: &KnobSpec) -> KnobResponse {
@@ -48,9 +53,9 @@ pub fn knob(ui: &mut Ui, value: &mut f32, spec: &KnobSpec) -> KnobResponse {
             let next = knob_value_from_drag(unrounded, min, max, dy, fine, false);
             ui.data_mut(|data| data.insert_temp(unrounded_id, next));
         }
-        let reset = response.double_clicked() && spec.default.is_some();
-        if let Some(default) = spec.default.filter(|_| reset) {
-            *value = default;
+        let reset = response.double_clicked();
+        if reset {
+            *value = spec.default;
         }
         paint_knob(ui, rect, knob_fraction(*value, spec), response.hovered());
         ui.label(knob_text(*value, spec));
