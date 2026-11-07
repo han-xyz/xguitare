@@ -80,7 +80,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     )
     .map_err(DaemonError::Jack)?;
     let connections = session.connect(&config.ports);
-    let sample_rate = shared.sample_rate.load(Ordering::Relaxed) as f32;
+    let sample_rate = session.built_sample_rate() as f32;
     let tuner = Tuner::new(tap, sample_rate, config.tuner_reference_hz);
     let state = Arc::new(Mutex::new(EngineState {
         bank,

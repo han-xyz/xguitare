@@ -31,6 +31,7 @@ pub enum JackError {
 pub struct Session {
     client: AsyncClient<Notifications, Process>,
     max_frames: usize,
+    built_sample_rate: u32,
 }
 
 /// Opens the JACK client, requests `buffer_size`, builds the Rack with the effective sample rate and buffer size, and activates it; the audio thread then takes Commands from `queues`.
@@ -51,7 +52,8 @@ pub fn start(
         warn!("cannot set buffer size {buffer_size}: {err}");
     }
     let max_frames = prepared_max_frames(buffer_size, client.buffer_size());
-    let sample_rate = client.sample_rate() as f32;
+    let built_sample_rate = client.sample_rate();
+    let sample_rate = built_sample_rate as f32;
     let rack = Box::new(build_rack(sample_rate, max_frames));
     let process = Process {
         switcher: RackSwitcher::new(
@@ -86,12 +88,21 @@ pub fn start(
     if effective as usize != max_frames {
         info!("buffer size {effective} differs from prepared {max_frames}; re-preparing");
     }
-    Ok(Session { client, max_frames })
+    Ok(Session {
+        client,
+        max_frames,
+        built_sample_rate,
+    })
 }
 
 impl Session {
     pub fn max_frames(&self) -> usize {
         self.max_frames
+    }
+
+    /// The rate the first Rack was built at; the JACK rate read later can differ, since pipewire-jack may report a passing rate while the ports connect.
+    pub fn built_sample_rate(&self) -> u32 {
+        self.built_sample_rate
     }
 
     /// Connects the Daemon's ports per `ports` and returns the `(from, to)` pairs that succeeded.
