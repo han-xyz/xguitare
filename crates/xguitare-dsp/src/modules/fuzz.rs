@@ -15,7 +15,7 @@ const TONE_LOW_PASS_HZ: f32 = 400.0;
 const TONE_HIGH_PASS_HZ: f32 = 1500.0;
 const OVERSAMPLING: f32 = 4.0;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "fuzz",
     channels: Channels::Mono,
     params: &[

@@ -14,7 +14,7 @@ const BIAS_SCALE: f32 = 0.3;
 const DC_BLOCK_HZ: f32 = 10.0;
 const OVERSAMPLING: f32 = 4.0;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "preamp",
     channels: Channels::Mono,
     params: &[

@@ -14,7 +14,7 @@ const TUNING_RATE: f32 = 44_100.0;
 const FIXED_GAIN: f32 = 0.015;
 const ALLPASS_FEEDBACK: f32 = 0.5;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "reverb",
     channels: Channels::Stereo,
     params: &[

@@ -11,7 +11,7 @@ const MIX: usize = 3;
 const MIN_DELAY_MS: f32 = 0.5;
 const MAX_SPAN_MS: f32 = 9.5;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "flanger",
     channels: Channels::Stereo,
     params: &[

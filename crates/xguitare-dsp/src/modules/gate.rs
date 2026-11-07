@@ -7,7 +7,7 @@ const RELEASE: usize = 2;
 const HYSTERESIS: usize = 3;
 const ENVELOPE_DECAY_SECONDS: f32 = 0.05;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "gate",
     channels: Channels::Mono,
     params: &[

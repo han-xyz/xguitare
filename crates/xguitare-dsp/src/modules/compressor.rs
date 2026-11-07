@@ -9,7 +9,7 @@ const RELEASE: usize = 3;
 const MAKEUP: usize = 4;
 const KNEE_DB: f32 = 6.0;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "compressor",
     channels: Channels::Mono,
     params: &[

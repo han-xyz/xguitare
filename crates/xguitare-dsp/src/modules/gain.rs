@@ -4,7 +4,7 @@ use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const LEVEL: usize = 0;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "gain",
     channels: Channels::Mono,
     params: &[ParamSpec {

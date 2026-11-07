@@ -11,7 +11,7 @@ const LOW_CUT: usize = 1;
 const HIGH_CUT: usize = 2;
 const BUTTERWORTH_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "cabinet",
     channels: Channels::MonoToStereo,
     params: &[

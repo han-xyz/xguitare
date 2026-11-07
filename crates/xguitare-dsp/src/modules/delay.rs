@@ -8,7 +8,7 @@ const MIX: usize = 2;
 const PINGPONG: usize = 3;
 const TIME_SMOOTHING_SECONDS: f32 = 0.05;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "delay",
     channels: Channels::Stereo,
     params: &[

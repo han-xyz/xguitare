@@ -11,7 +11,7 @@ const LEVEL: usize = 2;
 const HIGH_PASS_HZ: f32 = 720.0;
 const OVERSAMPLING: f32 = 4.0;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "drive",
     channels: Channels::Mono,
     params: &[

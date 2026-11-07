@@ -14,7 +14,7 @@ const C1: f64 = 250e-12;
 const C2: f64 = 20e-9;
 const C3: f64 = 20e-9;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "tonestack",
     channels: Channels::Mono,
     params: &[

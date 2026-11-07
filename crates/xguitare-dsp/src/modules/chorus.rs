@@ -11,7 +11,7 @@ const LINE_MS: f32 = 40.0;
 const BASE_MS: f32 = 15.0;
 const MAX_DEPTH_MS: f32 = 5.0;
 
-static SPEC: ModuleSpec = ModuleSpec {
+pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "chorus",
     channels: Channels::Stereo,
     params: &[
