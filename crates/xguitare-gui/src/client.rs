@@ -49,6 +49,7 @@ struct Client {
     revision: Option<u64>,
     modules_fetched: bool,
     modules_warned: bool,
+    tuner_answered: bool,
     snapshot: Snapshot,
 }
 
@@ -66,6 +67,7 @@ impl Client {
             revision: None,
             modules_fetched: false,
             modules_warned: false,
+            tuner_answered: false,
             snapshot: Snapshot {
                 link: Link::Disconnected {
                     since: Instant::now(),
@@ -73,6 +75,7 @@ impl Client {
                 status: None,
                 bank: None,
                 params: None,
+                tuner: None,
                 module_types: Vec::new(),
                 last_message: None,
                 failed_set: None,
@@ -140,6 +143,9 @@ impl Client {
         let (requests, quit) = requests_until_quit(queued);
         for req in requests {
             let response = self.request(&req);
+            if let (Request::Mute { .. }, Ok(Response::Ok(payload))) = (&req, &response) {
+                log_mute(payload);
+            }
             if let Some(param) = failed_set(&req, &response) {
                 self.snapshot.failed_set = Some((param, Instant::now()));
             }
@@ -162,6 +168,26 @@ impl Client {
             Ok(Response::Err { error }) => warn!("status: {error}"),
             Err(_) => {}
         }
+        if self.connection.is_some() {
+            self.poll_tuner();
+        }
+    }
+
+    fn poll_tuner(&mut self) {
+        self.snapshot.tuner = match self.request(&Request::Tuner) {
+            Ok(Response::Ok(payload)) => {
+                if !self.tuner_answered {
+                    info!("tuner readings available");
+                    self.tuner_answered = true;
+                }
+                Some(payload)
+            }
+            Ok(Response::Err { error }) => {
+                warn!("tuner: {error}");
+                None
+            }
+            Err(_) => None,
+        };
     }
 
     fn connect(&mut self, now: Instant) {
@@ -267,6 +293,7 @@ impl Client {
         self.revision = None;
         self.modules_fetched = false;
         self.snapshot.status = None;
+        self.snapshot.tuner = None;
         self.snapshot.link = Link::Disconnected {
             since: Instant::now(),
         };
@@ -350,6 +377,14 @@ impl Client {
         if let Err(err) = child.kill().and_then(|()| child.wait().map(drop)) {
             warn!("cannot kill daemon: {err}");
         }
+    }
+}
+
+fn log_mute(payload: &Value) {
+    if payload["muted"].as_bool() == Some(true) {
+        info!("muted");
+    } else {
+        info!("unmuted");
     }
 }
 

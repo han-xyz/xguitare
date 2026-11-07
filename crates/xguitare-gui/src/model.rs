@@ -16,6 +16,8 @@ pub const INVALID_PRESET: &str = "invalid preset";
 pub const KNOB_DRAG_PX: f32 = 200.0;
 pub const KNOB_FINE_DRAG_PX: f32 = 2000.0;
 pub const NEUTRAL_ACCENT: (u8, u8, u8) = (120, 120, 120);
+pub const CENTS_SPAN: i64 = 50;
+pub const IN_TUNE_CENTS: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -24,13 +26,14 @@ pub enum Link {
     Starting { since: Instant },
 }
 
-/// What the client thread last saw; the payloads are the Control API's `status`, `list` and `get` replies as sent, `module_types` the `modules` reply of the current connection.
+/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get` and `tuner` replies as sent, `module_types` the `modules` reply of the current connection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub link: Link,
     pub status: Option<Value>,
     pub bank: Option<Value>,
     pub params: Option<Value>,
+    pub tuner: Option<Value>,
     pub module_types: Vec<ModuleType>,
     pub last_message: Option<(String, Instant)>,
     pub failed_set: Option<(String, Instant)>,
@@ -56,6 +59,7 @@ pub enum Command {
         id: String,
         to: usize,
     },
+    Mute(bool),
     Quit,
 }
 
@@ -272,11 +276,62 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             },
             Command::RackRemove { id } => Request::RackRemove { id },
             Command::RackMove { id, to } => Request::RackMove { id, to },
+            Command::Mute(on) => Request::Mute { on },
             Command::Quit => return (requests, true),
         };
         requests.push(req);
     }
     (requests, false)
+}
+
+/// Leaving with the Tuner open undoes the Mute it turned on before the client thread stops.
+pub fn quit_commands(tuner_open: bool, muted_by_us: bool) -> Vec<Command> {
+    if tuner_open && muted_by_us {
+        vec![Command::Mute(false), Command::Quit]
+    } else {
+        vec![Command::Quit]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TunerReading {
+    pub note: String,
+    pub hz: f64,
+    pub cents: i64,
+}
+
+/// The reading of a `tuner` payload; `None` unless it is confident.
+pub fn tuner_reading(payload: &Value) -> Option<TunerReading> {
+    if payload["confident"].as_bool() != Some(true) {
+        return None;
+    }
+    Some(TunerReading {
+        note: payload["note"].as_str()?.to_string(),
+        hz: payload["hz"].as_f64()?,
+        cents: payload["cents"].as_i64()?,
+    })
+}
+
+pub fn cents_fraction(cents: i64) -> f32 {
+    (cents as f32 / CENTS_SPAN as f32).clamp(-1.0, 1.0)
+}
+
+pub fn in_tune(cents: i64) -> bool {
+    cents.abs() <= IN_TUNE_CENTS
+}
+
+/// Opens or closes the Tuner view: (open after, command to send, whether the Mute is ours after). Opening mutes when `mute_default`; closing unmutes only a Mute this view turned on.
+pub fn tuner_toggle(
+    open_now: bool,
+    mute_default: bool,
+    muted_by_us: bool,
+) -> (bool, Option<Command>, bool) {
+    match (open_now, mute_default, muted_by_us) {
+        (false, true, _) => (true, Some(Command::Mute(true)), true),
+        (false, false, _) => (true, None, false),
+        (true, _, true) => (false, Some(Command::Mute(false)), false),
+        (true, _, false) => (false, None, false),
+    }
 }
 
 pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {

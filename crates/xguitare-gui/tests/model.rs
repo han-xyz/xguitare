@@ -13,10 +13,11 @@ use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
-    NEUTRAL_ACCENT, ParamRow, Throttle, accent_for, add_after, add_command, bank_rows,
-    counts_toward_spawn, failed_set, key_to_command, knob_value_from_drag, meter_fraction,
-    module_types, move_target, param_rows, peak_fraction, rack_channels, refresh_decision,
-    requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
+    NEUTRAL_ACCENT, ParamRow, Throttle, TunerReading, accent_for, add_after, add_command,
+    bank_rows, cents_fraction, counts_toward_spawn, failed_set, in_tune, key_to_command,
+    knob_value_from_drag, meter_fraction, module_types, move_target, param_rows, peak_fraction,
+    quit_commands, rack_channels, refresh_decision, requests_until_quit, response_text,
+    spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -722,4 +723,79 @@ fn accent_greys_are_distinct() {
             assert!(far_apart(*grey, *other), "{grey:?} vs {other:?}");
         }
     }
+}
+
+#[test]
+fn tuner_reading_requires_confident() {
+    assert_eq!(
+        tuner_reading(&json!({"ok":true,"hz":41.2,"note":"E1","cents":-3,"confident":true})),
+        Some(TunerReading {
+            note: "E1".to_string(),
+            hz: 41.2,
+            cents: -3,
+        })
+    );
+    assert_eq!(
+        tuner_reading(&json!({"ok":true,"hz":41.2,"note":"E1","cents":-3,"confident":false})),
+        None
+    );
+    assert_eq!(
+        tuner_reading(&json!({"ok":true,"hz":null,"note":null,"cents":null,"confident":false})),
+        None
+    );
+}
+
+#[test]
+fn cents_fraction_clamps() {
+    assert_eq!(cents_fraction(0), 0.0);
+    assert_eq!(cents_fraction(25), 0.5);
+    assert_eq!(cents_fraction(-50), -1.0);
+    assert_eq!(cents_fraction(80), 1.0);
+    assert_eq!(cents_fraction(-80), -1.0);
+}
+
+#[test]
+fn in_tune_within_three() {
+    assert!(in_tune(0));
+    assert!(in_tune(3));
+    assert!(in_tune(-3));
+    assert!(!in_tune(4));
+    assert!(!in_tune(-4));
+}
+
+#[test]
+fn tuner_toggle_mutes_and_unmutes() {
+    assert_eq!(
+        tuner_toggle(false, true, false),
+        (true, Some(Command::Mute(true)), true)
+    );
+    assert_eq!(tuner_toggle(false, false, false), (true, None, false));
+    assert_eq!(
+        tuner_toggle(true, true, true),
+        (false, Some(Command::Mute(false)), false)
+    );
+    assert_eq!(tuner_toggle(true, true, false), (false, None, false));
+}
+
+#[test]
+fn quit_with_tuner_open_unmutes_first() {
+    assert_eq!(
+        quit_commands(true, true),
+        vec![Command::Mute(false), Command::Quit]
+    );
+    assert_eq!(quit_commands(true, false), vec![Command::Quit]);
+    assert_eq!(quit_commands(false, false), vec![Command::Quit]);
+    let (requests, quit) = requests_until_quit(quit_commands(true, true));
+    assert_eq!((requests, quit), (vec![Request::Mute { on: false }], true));
+}
+
+#[test]
+fn mute_command_maps_to_request() {
+    assert_eq!(
+        requests_until_quit(vec![Command::Mute(true), Command::Mute(false)]),
+        (
+            vec![Request::Mute { on: true }, Request::Mute { on: false }],
+            false
+        )
+    );
 }

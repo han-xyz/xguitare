@@ -7,8 +7,9 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use egui::{
-    Button, CentralPanel, Color32, ComboBox, CornerRadius, Event, Frame, Key, Margin, Modifiers,
-    Panel, Rect, RichText, ScrollArea, Sides, Theme, Ui, Visuals, vec2,
+    Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CornerRadius, Event, Frame, Key,
+    Layout, Margin, Modifiers, Panel, Rect, RichText, ScrollArea, Sides, TextStyle, Theme, Ui,
+    Visuals, vec2,
 };
 use serde_json::Value;
 use tracing::error;
@@ -16,8 +17,9 @@ use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    SET_INTERVAL, Snapshot, Throttle, add_command, bank_rows, key_to_command, link_text,
-    move_target, param_rows, peak_fraction, rack_channels, status_line, unit_suffix,
+    SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command, bank_rows, cents_fraction,
+    in_tune, key_to_command, link_text, move_target, param_rows, peak_fraction, quit_commands,
+    rack_channels, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
 
 use crate::widgets::{self, KnobSpec};
@@ -37,6 +39,9 @@ const PLATE_RADIUS: u8 = 4;
 const PLATE_MARGIN: Margin = Margin::symmetric(6, 2);
 const AMP_LABEL: &str = "amp";
 const AMP_TYPES: [&str; 2] = ["preamp", "tonestack"];
+const NOTE_SIZE: f32 = 96.0;
+const NO_SIGNAL_SIZE: f32 = 40.0;
+const NO_SIGNAL: &str = "no signal";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -58,6 +63,9 @@ pub struct App {
     throttle: Throttle,
     locals: HashMap<String, f64>,
     feedback: Feedback,
+    tuner_open: bool,
+    muted_by_us: bool,
+    tuner_mute: bool,
 }
 
 impl App {
@@ -75,6 +83,7 @@ impl App {
                 ..Visuals::dark()
             },
         );
+        let tuner_mute = config.tuner_mute;
         let (commands, snapshots, client) =
             client::spawn(config, config_path, Arc::clone(&stop), move || {
                 ctx.request_repaint()
@@ -90,6 +99,7 @@ impl App {
                 status: None,
                 bank: None,
                 params: None,
+                tuner: None,
                 module_types: Vec::new(),
                 last_message: None,
                 failed_set: None,
@@ -98,6 +108,9 @@ impl App {
             throttle: Throttle::default(),
             locals: HashMap::new(),
             feedback: Feedback::default(),
+            tuner_open: false,
+            muted_by_us: false,
+            tuner_mute,
         }
     }
 }
@@ -172,8 +185,13 @@ impl eframe::App for App {
             revision: revision(snapshot),
             now,
         };
+        let mut tuner = Tuner {
+            open: &mut self.tuner_open,
+            muted_by_us: &mut self.muted_by_us,
+            mute_default: self.tuner_mute,
+        };
         CentralPanel::default().show(ui, |ui| {
-            commands.extend(preset_panel(ui, snapshot, &mut knobs))
+            commands.extend(preset_panel(ui, snapshot, &mut knobs, &mut tuner))
         });
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
@@ -187,7 +205,9 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         // An Err means the client thread has already ended; joining it is still right.
-        let _ = self.commands.send(Command::Quit);
+        for command in quit_commands(self.tuner_open, self.muted_by_us) {
+            let _ = self.commands.send(command);
+        }
         if let Some(client) = self.client.take()
             && client.join().is_err()
         {
@@ -267,7 +287,28 @@ fn revision(snapshot: &Snapshot) -> u64 {
         .unwrap_or_default()
 }
 
-fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, knobs: &mut Knobs) -> Vec<Command> {
+struct Tuner<'a> {
+    open: &'a mut bool,
+    muted_by_us: &'a mut bool,
+    mute_default: bool,
+}
+
+impl Tuner<'_> {
+    fn toggle(&mut self) -> Option<Command> {
+        let (open, command, muted_by_us) =
+            tuner_toggle(*self.open, self.mute_default, *self.muted_by_us);
+        *self.open = open;
+        *self.muted_by_us = muted_by_us;
+        command
+    }
+}
+
+fn preset_panel(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    knobs: &mut Knobs,
+    tuner: &mut Tuner,
+) -> Vec<Command> {
     let mut commands = Vec::new();
     let preset = snapshot
         .status
@@ -281,12 +322,56 @@ fn preset_panel(ui: &mut Ui, snapshot: &Snapshot, knobs: &mut Knobs) -> Vec<Comm
         ui.label(preset.unwrap_or(NO_PRESET));
         let rack = rack_channels(&modules, &snapshot.module_types);
         commands.extend(add_combo(ui, &snapshot.module_types, &rack));
+        if ui.button("Tuner").clicked() {
+            commands.extend(tuner.toggle());
+        }
     });
+    if *tuner.open {
+        commands.extend(tuner_view(ui, snapshot, tuner));
+        return commands;
+    }
     ScrollArea::vertical().show(ui, |ui| {
         for (index, (module, rows)) in modules.iter().enumerate() {
             let place = (index, modules.len());
             commands.extend(module_card(ui, module, rows, place, knobs));
             ui.add_space(CARD_GAP);
+        }
+    });
+    commands
+}
+
+fn tuner_view(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
+    let muted = snapshot
+        .status
+        .as_ref()
+        .and_then(|status| status["muted"].as_bool());
+    ui.vertical_centered(|ui| {
+        match &reading {
+            Some(reading) => {
+                let colour = widgets::tune_colour(in_tune(reading.cents));
+                ui.label(RichText::new(&reading.note).size(NOTE_SIZE).color(colour));
+                widgets::cents_arc(ui, Some(cents_fraction(reading.cents)), colour);
+                ui.label(RichText::new(format!("{:.1} Hz", reading.hz)).color(colour));
+            }
+            None => {
+                ui.label(RichText::new(NO_SIGNAL).size(NO_SIGNAL_SIZE));
+                widgets::cents_arc(ui, None, Color32::GRAY);
+            }
+        }
+        let mut checked = muted.unwrap_or_default();
+        if ui
+            .add_enabled(muted.is_some(), Checkbox::new(&mut checked, "Mute"))
+            .changed()
+        {
+            commands.push(Command::Mute(checked));
+            if !checked {
+                *tuner.muted_by_us = false;
+            }
+        }
+        if ui.button("Close").clicked() {
+            commands.extend(tuner.toggle());
         }
     });
     commands
@@ -442,13 +527,25 @@ fn status_bar(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instan
             ui.separator();
             ui.label(text);
         }
-        let Some(status) = &snapshot.status else {
-            return;
-        };
-        ui.separator();
-        ui.label(status_line(status));
-        ui.separator();
-        widgets::meter(ui, "in", peak_fraction(status, "input_peak_db"));
-        widgets::meter(ui, "out", peak_fraction(status, "output_peak_db"));
+        if let Some(status) = &snapshot.status {
+            ui.separator();
+            ui.label(status_line(status));
+            ui.separator();
+            widgets::meter(ui, "in", peak_fraction(status, "input_peak_db"));
+            widgets::meter(ui, "out", peak_fraction(status, "output_peak_db"));
+        }
+        if let Some(reading) = snapshot.tuner.as_ref().and_then(tuner_reading) {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                tuner_strip(ui, &reading)
+            });
+        }
     });
+}
+
+/// Laid out right to left: the bar at the window's edge, the text before it.
+fn tuner_strip(ui: &mut Ui, reading: &TunerReading) {
+    let colour = widgets::tune_colour(in_tune(reading.cents));
+    widgets::cents_bar(ui, cents_fraction(reading.cents), colour);
+    let text = format!("{}  {} ct", reading.note, reading.cents);
+    ui.label(RichText::new(text).text_style(TextStyle::Monospace));
 }

@@ -10,6 +10,15 @@ const KNOB_POINTER_WIDTH: f32 = 2.5;
 const ARC_START_DEG: f32 = 135.0;
 const ARC_SWEEP_DEG: f32 = 270.0;
 const ARC_SEGMENTS: usize = 48;
+const CENTS_BAR_SIZE: Vec2 = Vec2::new(120.0, 10.0);
+const CENTS_TICK_WIDTH: f32 = 1.5;
+const CENTS_ARC_DIAMETER: f32 = 160.0;
+const CENTS_ARC_WIDTH: f32 = 4.0;
+const CENTS_NEEDLE_WIDTH: f32 = 3.0;
+const CENTS_ARC_START_DEG: f32 = 180.0;
+const CENTS_ARC_SWEEP_DEG: f32 = 180.0;
+const IN_TUNE_COLOUR: Color32 = Color32::GREEN;
+const OUT_OF_TUNE_COLOUR: Color32 = Color32::from_rgb(255, 176, 0);
 
 pub struct KnobSpec<'a> {
     pub min: f32,
@@ -29,6 +38,62 @@ pub struct KnobResponse {
 pub fn accent(type_name: &str) -> Color32 {
     let (r, g, b) = accent_for(type_name);
     Color32::from_rgb(r, g, b)
+}
+
+pub fn tune_colour(in_tune: bool) -> Color32 {
+    if in_tune {
+        IN_TUNE_COLOUR
+    } else {
+        OUT_OF_TUNE_COLOUR
+    }
+}
+
+/// `fraction` is −1..=1, filled from the centre toward its sign.
+pub fn cents_bar(ui: &mut Ui, fraction: f32, colour: Color32) {
+    let (rect, _) = ui.allocate_exact_size(CENTS_BAR_SIZE, Sense::hover());
+    let center_x = rect.center().x;
+    let end_x = center_x + rect.width() / 2.0 * fraction;
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, Color32::DARK_GRAY);
+    painter.rect_filled(
+        Rect::from_x_y_ranges(center_x.min(end_x)..=center_x.max(end_x), rect.y_range()),
+        0.0,
+        colour,
+    );
+    painter.vline(
+        center_x,
+        rect.y_range(),
+        Stroke::new(CENTS_TICK_WIDTH, Color32::WHITE),
+    );
+}
+
+/// A half circle from −50 cents at the left to +50 at the right; the needle only when `fraction` is `Some`.
+pub fn cents_arc(ui: &mut Ui, fraction: Option<f32>, colour: Color32) {
+    let size = vec2(
+        CENTS_ARC_DIAMETER,
+        CENTS_ARC_DIAMETER / 2.0 + CENTS_ARC_WIDTH,
+    );
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let center = pos2(rect.center().x, rect.bottom() - CENTS_ARC_WIDTH / 2.0);
+    let radius = CENTS_ARC_DIAMETER / 2.0 - CENTS_ARC_WIDTH / 2.0;
+    let painter = ui.painter();
+    painter.line(
+        arc_points(
+            center,
+            radius,
+            CENTS_ARC_START_DEG,
+            CENTS_ARC_START_DEG + CENTS_ARC_SWEEP_DEG,
+        ),
+        Stroke::new(CENTS_ARC_WIDTH, ui.visuals().extreme_bg_color),
+    );
+    let Some(fraction) = fraction else {
+        return;
+    };
+    let needle_deg = CENTS_ARC_START_DEG + CENTS_ARC_SWEEP_DEG * (fraction + 1.0) / 2.0;
+    painter.line_segment(
+        [center, point_at(center, radius, needle_deg)],
+        Stroke::new(CENTS_NEEDLE_WIDTH, colour),
+    );
 }
 
 pub fn knob(ui: &mut Ui, value: &mut f32, spec: &KnobSpec) -> KnobResponse {
