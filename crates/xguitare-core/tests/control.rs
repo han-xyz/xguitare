@@ -755,8 +755,13 @@ fn rack_add_after_inserts_at_position() {
     let (mut state, _audio, _dir) = amp_state("rack-add-after");
     ok(handle(&mut state, rack_add("gate", Some("gain"))));
     assert_eq!(ids(&state), ["gain", "gate", "cabinet"]);
-    ok(handle(&mut state, rack_add("drive", None)));
-    assert_eq!(ids(&state), ["drive", "gain", "gate", "cabinet"]);
+}
+
+#[test]
+fn rack_add_without_after_appends() {
+    let (mut state, _audio, _dir) = amp_state("rack-add-without-after");
+    ok(handle(&mut state, rack_add("delay", None)));
+    assert_eq!(ids(&state), ["gain", "cabinet", "delay"]);
 }
 
 #[test]
@@ -777,7 +782,7 @@ fn rack_add_suffixes_duplicate_id() {
 fn rack_add_layout_error_changes_nothing() {
     let (mut state, mut audio, _dir) = amp_state("rack-add-layout");
     assert_eq!(
-        error(handle(&mut state, rack_add("delay", None))),
+        error(handle(&mut state, rack_add("delay", Some("gain")))),
         "stereo module 'delay' before the cabinet"
     );
     assert_eq!(ids(&state), ["gain", "cabinet"]);
@@ -848,14 +853,14 @@ fn save_after_rack_edit_round_trips() {
     let (mut state, _audio, _dir) = amp_state("rack-save");
     ok(handle(&mut state, rack_add("delay", Some("cabinet"))));
     ok(handle(&mut state, rack_add("delay", Some("delay"))));
-    ok(handle(&mut state, rack_add("gate", None)));
+    ok(handle(&mut state, rack_add("gate", Some("gain"))));
     ok(handle(&mut state, Request::Save));
     let file = state.config.bank_dir.join("01-clean.toml");
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
     let saved_ids: Vec<String> = saved.modules.iter().map(|m| m.id.clone()).collect();
     assert_eq!(saved_ids, ids(&state));
     let types: Vec<&str> = saved.modules.iter().map(|m| m.type_name.as_str()).collect();
-    assert_eq!(types, ["gate", "gain", "cabinet", "delay", "delay"]);
+    assert_eq!(types, ["gain", "gate", "cabinet", "delay", "delay"]);
 }
 
 #[test]

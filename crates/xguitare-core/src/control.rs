@@ -347,7 +347,7 @@ fn rack_add(
             .spec(type_name)
             .ok_or_else(|| format!("unknown module type '{type_name}'"))?;
         let index = match after {
-            None => 0,
+            None => modules.len(),
             Some(after) => module_index(modules, after)? + 1,
         };
         let ir = if type_name == CABINET_TYPE {

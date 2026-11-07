@@ -206,7 +206,7 @@ $ xguitare save
 saved /home/you/.config/xguitare/bank/03-lead.toml
 ```
 
-`modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` the Module goes to the front; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file:
+`modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file:
 
 ```console
 $ xguitare modules

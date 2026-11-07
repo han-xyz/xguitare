@@ -228,7 +228,7 @@ Errors: none besides the transport errors.
 
 ## rack_add
 
-Inserts a Module with default Parameters into the active Preset, rebuilds the Rack from it and swaps it in with a crossfade. `after` is the id of the Module to insert after; `null` or omitted inserts at the front. The new Module's id is its type, or `<type>-2`, `<type>-3`… when that id is taken. A cabinet gets `ir = "default-cab.wav"`, or `"bass-cab.wav"` when only that file is in the Bank directory. The change is not written to the Preset file until `save`.
+Inserts a Module with default Parameters into the active Preset, rebuilds the Rack from it and swaps it in with a crossfade. `after` is the id of the Module to insert after; `null` or omitted appends it at the end; `rack_move` places it anywhere else. The new Module's id is its type, or `<type>-2`, `<type>-3`… when that id is taken. A cabinet gets `ir = "default-cab.wav"`, or `"bass-cab.wav"` when only that file is in the Bank directory. The change is not written to the Preset file until `save`.
 
 Request:
 

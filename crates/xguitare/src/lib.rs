@@ -57,7 +57,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum RackCmd {
-    /// Add a Module with default Parameters, after <id> or at the front
+    /// Add a Module with default Parameters, after <id> or at the end
     Add {
         #[arg(value_name = "TYPE")]
         type_name: String,
