@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::build::{build_rack, swap_rack};
 use crate::control::EngineState;
-use crate::engine::Command;
 use crate::{Bank, BankEntry};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,13 +82,7 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
         return vec![Action::Nothing];
     }
     let file = state.bank.entries[program].file().to_path_buf();
-    let built = preset.build(
-        state.sample_rate,
-        state.max_frames,
-        &state.config.ir_dir,
-        &state.config.bank_dir,
-        state.config.ir_max_ms,
-    );
+    let built = build_rack(&state.config, state.sample_rate, state.max_frames, &preset);
     let (rack, warnings) = match built {
         Ok(built) => built,
         Err(err) => {
@@ -102,13 +96,7 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
         .iter()
         .map(|warning| Action::Warn(warning.to_string()))
         .collect();
-    state.queues.drain_from_audio();
-    if state
-        .queues
-        .commands
-        .push(Command::SwapRack(Box::new(rack)))
-        .is_err()
-    {
+    if swap_rack(&mut state.queues, rack).is_err() {
         actions.push(Action::EngineBusy { file });
         return actions;
     }

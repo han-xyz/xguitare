@@ -11,6 +11,7 @@ use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
+use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
 use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
 use crate::firstrun::{BASS_IR, DEFAULT_IR};
 use crate::preset::{CABINET_TYPE, is_relative_name, shortest_f64};
@@ -21,7 +22,6 @@ use crate::{
 };
 use crate::{ResolveError, resolve};
 
-const ENGINE_BUSY: &str = "engine busy";
 const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";
 const NANOS_PER_MICRO: u64 = 1_000;
@@ -154,14 +154,7 @@ pub enum Reprepare {
 pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare, String> {
     let max_frames = buffer_size as usize;
     let built = state.active.as_ref().map(|(_, preset)| {
-        preset
-            .build(
-                state.sample_rate,
-                max_frames,
-                &state.config.ir_dir,
-                &state.config.bank_dir,
-                state.config.ir_max_ms,
-            )
+        build_rack(&state.config, state.sample_rate, max_frames, preset)
             .map_err(|err| (preset.name.clone(), err.to_string()))
     });
     let (rack, outcome) = match built {
@@ -175,7 +168,7 @@ pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare,
             Reprepare::Built(Vec::new()),
         ),
     };
-    swap_rack(state, rack)?;
+    swap_rack(&mut state.queues, rack)?;
     state.revision += 1;
     if let Reprepare::Passthrough { .. } = outcome {
         state.active = None;
@@ -291,14 +284,7 @@ fn install_preset(
 }
 
 fn build_preset(state: &EngineState, preset: &Preset) -> Result<(Rack, Vec<BuildWarning>), String> {
-    preset
-        .build(
-            state.sample_rate,
-            state.max_frames,
-            &state.config.ir_dir,
-            &state.config.bank_dir,
-            state.config.ir_max_ms,
-        )
+    build_rack(&state.config, state.sample_rate, state.max_frames, preset)
         .map_err(|err| err.to_string())
 }
 
@@ -309,7 +295,7 @@ fn swap_in(
     preset: Preset,
     rack: Rack,
 ) -> Result<(), String> {
-    swap_rack(state, rack)?;
+    swap_rack(&mut state.queues, rack)?;
     state.revision += 1;
     state.active = Some((file, preset));
     Ok(())
@@ -320,15 +306,6 @@ pub fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
     let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
     rack.prepare(sample_rate, max_frames);
     rack
-}
-
-fn swap_rack(state: &mut EngineState, rack: Rack) -> Result<(), String> {
-    state.queues.drain_from_audio();
-    state
-        .queues
-        .commands
-        .push(Command::SwapRack(Box::new(rack)))
-        .map_err(|_| ENGINE_BUSY.to_string())
 }
 
 fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, String> {

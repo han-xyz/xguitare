@@ -1,5 +1,6 @@
 mod address;
 mod bank;
+pub mod build;
 mod config;
 pub mod control;
 pub mod engine;

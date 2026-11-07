@@ -14,6 +14,7 @@ use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
+use xguitare_core::build;
 use xguitare_core::control::{
     EngineState, Reprepare, Request, Response, handle, needs_reprepare, passthrough_rack, reprepare,
 };
@@ -157,13 +158,7 @@ fn build_rack(
     max_frames: usize,
     config: &Config,
 ) -> Option<Rack> {
-    match preset.build(
-        sample_rate,
-        max_frames,
-        &config.ir_dir,
-        &config.bank_dir,
-        config.ir_max_ms,
-    ) {
+    match build::build_rack(config, sample_rate, max_frames, preset) {
         Ok((rack, warnings)) => {
             for warning in &warnings {
                 warn!("{warning}");
