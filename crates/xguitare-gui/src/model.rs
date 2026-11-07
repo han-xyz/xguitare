@@ -44,6 +44,7 @@ pub enum Command {
     RackAdd {
         type_name: String,
         after: Option<String>,
+        at: Option<usize>,
     },
     RackRemove {
         id: String,
@@ -129,6 +130,16 @@ pub fn add_after(rack: &[(String, String)], new_channels: &str) -> Option<String
     after.map(|(id, _)| id.clone())
 }
 
+/// Adds `module_type` where [`add_after`] places it; its front is position 0, as `after: null` would append.
+pub fn add_command(rack: &[(String, String)], module_type: &ModuleType) -> Command {
+    let after = add_after(rack, &module_type.channels);
+    Command::RackAdd {
+        type_name: module_type.type_name.clone(),
+        at: after.is_none().then_some(0),
+        after,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BankRow {
     pub program: usize,
@@ -211,10 +222,14 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::Load(preset) => Request::Load { preset },
             Command::Set { param, value } => Request::Set { param, value },
             Command::Save => Request::Save,
-            Command::RackAdd { type_name, after } => Request::RackAdd {
+            Command::RackAdd {
+                type_name,
+                after,
+                at,
+            } => Request::RackAdd {
                 r#type: type_name,
                 after,
-                at: None,
+                at,
             },
             Command::RackRemove { id } => Request::RackRemove { id },
             Command::RackMove { id, to } => Request::RackMove { id, to },

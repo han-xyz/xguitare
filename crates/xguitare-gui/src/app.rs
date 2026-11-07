@@ -14,8 +14,8 @@ use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    SET_INTERVAL, Snapshot, Throttle, add_after, bank_rows, key_to_command, link_text, move_target,
-    param_rows, peak_fraction, rack_channels, status_line, unit_suffix,
+    SET_INTERVAL, Snapshot, Throttle, add_command, bank_rows, key_to_command, link_text,
+    move_target, param_rows, peak_fraction, rack_channels, status_line, unit_suffix,
 };
 
 use crate::widgets;
@@ -292,10 +292,7 @@ fn add_combo(
         .show_ui(ui, |ui| {
             for module_type in module_types {
                 if ui.selectable_label(false, module_type.label()).clicked() {
-                    added = Some(Command::RackAdd {
-                        type_name: module_type.type_name.clone(),
-                        after: add_after(rack, &module_type.channels),
-                    });
+                    added = Some(add_command(rack, module_type));
                 }
             }
         });

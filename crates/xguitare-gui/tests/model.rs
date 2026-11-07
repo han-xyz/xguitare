@@ -7,7 +7,7 @@ use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    Throttle, add_after, bank_rows, counts_toward_spawn, failed_set, key_to_command,
+    Throttle, add_after, add_command, bank_rows, counts_toward_spawn, failed_set, key_to_command,
     meter_fraction, module_types, move_target, param_rows, peak_fraction, rack_channels,
     refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, unit_suffix,
 };
@@ -49,6 +49,12 @@ fn commands_before_quit_are_sent_in_order() {
         Command::RackAdd {
             type_name: "delay".to_string(),
             after: Some("reverb".to_string()),
+            at: None,
+        },
+        Command::RackAdd {
+            type_name: "gate".to_string(),
+            after: None,
+            at: Some(0),
         },
         Command::RackMove {
             id: "delay".to_string(),
@@ -70,6 +76,11 @@ fn commands_before_quit_are_sent_in_order() {
             r#type: "delay".to_string(),
             after: Some("reverb".to_string()),
             at: None,
+        },
+        Request::RackAdd {
+            r#type: "gate".to_string(),
+            after: None,
+            at: Some(0),
         },
         Request::RackMove {
             id: "delay".to_string(),
@@ -522,6 +533,25 @@ fn add_after_stereo_appends() {
 fn add_after_empty_rack_is_front() {
     assert_eq!(add_after(&[], "mono"), None);
     assert_eq!(add_after(&[], "stereo"), None);
+    let gate = ModuleType {
+        type_name: "gate".to_string(),
+        channels: "mono".to_string(),
+    };
+    let front = Command::RackAdd {
+        type_name: "gate".to_string(),
+        after: None,
+        at: Some(0),
+    };
+    assert_eq!(add_command(&[], &gate), front);
+    assert_eq!(add_command(&clean_rack()[2..], &gate), front);
+    assert_eq!(
+        add_command(&clean_rack(), &gate),
+        Command::RackAdd {
+            type_name: "gate".to_string(),
+            after: Some("amp".to_string()),
+            at: None,
+        }
+    );
 }
 
 #[test]
