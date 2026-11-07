@@ -13,6 +13,8 @@ const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
 pub const SOCKET_DIR_MODE: u32 = 0o700;
 const TUNER_REFERENCE_HZ: std::ops::RangeInclusive<f32> = 400.0..=480.0;
+const CROSSFADE_MS_MAX: f32 = 1000.0;
+const IR_MAX_MS_MAX: f32 = 10000.0;
 pub const AUTO_PORT: &str = "auto";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,6 +77,12 @@ pub enum ConfigError {
         path: PathBuf,
     },
     TunerReference {
+        path: PathBuf,
+    },
+    CrossfadeMs {
+        path: PathBuf,
+    },
+    IrMaxMs {
         path: PathBuf,
     },
 }
@@ -155,6 +163,22 @@ impl Config {
             .is_some_and(|hz| !TUNER_REFERENCE_HZ.contains(&hz))
         {
             return Err(ConfigError::TunerReference {
+                path: path.to_path_buf(),
+            });
+        }
+        if file
+            .crossfade_ms
+            .is_some_and(|ms| !is_above_zero_at_most(ms, CROSSFADE_MS_MAX))
+        {
+            return Err(ConfigError::CrossfadeMs {
+                path: path.to_path_buf(),
+            });
+        }
+        if file
+            .ir_max_ms
+            .is_some_and(|ms| !is_above_zero_at_most(ms, IR_MAX_MS_MAX))
+        {
+            return Err(ConfigError::IrMaxMs {
                 path: path.to_path_buf(),
             });
         }
@@ -273,6 +297,10 @@ impl fmt::Display for SocketDirError {
 
 impl std::error::Error for SocketDirError {}
 
+fn is_above_zero_at_most(value: f32, max: f32) -> bool {
+    value > 0.0 && value <= max
+}
+
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -298,6 +326,16 @@ impl fmt::Display for ConfigError {
             ConfigError::TunerReference { path } => write!(
                 f,
                 "{}: tuner_reference_hz must be between 400 and 480",
+                path.display()
+            ),
+            ConfigError::CrossfadeMs { path } => write!(
+                f,
+                "{}: crossfade_ms must be above 0 and at most {CROSSFADE_MS_MAX}",
+                path.display()
+            ),
+            ConfigError::IrMaxMs { path } => write!(
+                f,
+                "{}: ir_max_ms must be above 0 and at most {IR_MAX_MS_MAX}",
                 path.display()
             ),
         }

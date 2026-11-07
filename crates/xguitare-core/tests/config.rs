@@ -130,6 +130,28 @@ fn buffer_size_out_of_range() {
 }
 
 #[test]
+fn crossfade_ms_and_ir_max_ms_validated() {
+    for (key, max, above) in [
+        ("crossfade_ms", 1000, "1000.5"),
+        ("ir_max_ms", 10000, "10000.5"),
+    ] {
+        for value in ["-1.0", "0.0", "nan", "inf", above] {
+            let path = config_file(&format!("{key}-{value}"), &format!("{key} = {value}\n"));
+            assert_eq!(
+                Config::load(Some(&path)).unwrap_err().to_string(),
+                format!(
+                    "{}: {key} must be above 0 and at most {max}",
+                    path.display()
+                ),
+                "{value}"
+            );
+        }
+        let path = config_file(&format!("{key}-max"), &format!("{key} = {max}.0\n"));
+        assert!(Config::load(Some(&path)).is_ok(), "{key} = {max}");
+    }
+}
+
+#[test]
 fn tuner_keys_parse() {
     let path = config_file("tuner", "tuner_reference_hz = 442.0\ntuner_mute = false\n");
     let config = Config::load(Some(&path)).unwrap();
