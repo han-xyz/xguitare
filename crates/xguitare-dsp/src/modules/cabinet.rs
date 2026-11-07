@@ -145,10 +145,11 @@ impl Module for Cabinet {
                 self.low_cut_hz = value.round();
                 self.update_cuts();
             }
-            _ => {
+            HIGH_CUT => {
                 self.high_cut_hz = value.round();
                 self.update_cuts();
             }
+            _ => unreachable!("cabinet has no parameter {idx}"),
         }
     }
 
@@ -156,7 +157,8 @@ impl Module for Cabinet {
         match idx {
             LEVEL => self.level_db,
             LOW_CUT => self.low_cut_hz,
-            _ => self.high_cut_hz,
+            HIGH_CUT => self.high_cut_hz,
+            _ => unreachable!("cabinet has no parameter {idx}"),
         }
     }
 
