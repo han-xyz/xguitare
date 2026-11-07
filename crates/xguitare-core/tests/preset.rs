@@ -23,7 +23,9 @@ fn assert_passthrough_with_ir_warning(bank_dir: &Path, file: &str) {
         "name = \"X\"\n[[module]]\ntype = \"cabinet\"\nid = \"cab\"\nir = \"{file}\"\n"
     ))
     .unwrap();
-    let (mut rack, warnings) = preset.build(48_000.0, 128, bank_dir, 100.0).unwrap();
+    let (mut rack, warnings) = preset
+        .build(48_000.0, 128, bank_dir, bank_dir, 100.0)
+        .unwrap();
     assert_eq!(warnings.len(), 1);
     let BuildWarning::Ir { id, error } = &warnings[0];
     assert_eq!(id, "cab");
@@ -109,7 +111,9 @@ fn build_gain_preset_runs() {
     let preset =
         Preset::parse("name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = -6\n")
             .unwrap();
-    let (mut rack, warnings) = preset.build(48_000.0, 128, Path::new("."), 100.0).unwrap();
+    let (mut rack, warnings) = preset
+        .build(48_000.0, 128, Path::new("."), Path::new("."), 100.0)
+        .unwrap();
     assert!(warnings.is_empty());
     let input = [0.5; 128];
     let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
@@ -143,7 +147,9 @@ fn zero_length_ir_builds_passthrough_with_warning() {
 fn full_chain_parses_and_builds() {
     let preset = Preset::parse(include_str!("fixtures/full-chain.toml")).unwrap();
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let (mut rack, warnings) = preset.build(48_000.0, 128, &fixtures, 100.0).unwrap();
+    let (mut rack, warnings) = preset
+        .build(48_000.0, 128, &fixtures, &fixtures, 100.0)
+        .unwrap();
     assert!(
         matches!(warnings.as_slice(), [BuildWarning::Ir { id, .. }] if id == "cabinet"),
         "{warnings:?}"
@@ -192,7 +198,9 @@ fn build_starts_at_preset_values() {
         "name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 6.0206\n",
     )
     .unwrap();
-    let (mut rack, _) = preset.build(48_000.0, 128, Path::new("."), 100.0).unwrap();
+    let (mut rack, _) = preset
+        .build(48_000.0, 128, Path::new("."), Path::new("."), 100.0)
+        .unwrap();
     let input: Vec<f32> = (0..128)
         .map(|i| 0.25 * (std::f32::consts::TAU * 1_000.0 * i as f32 / 48_000.0).sin())
         .collect();
@@ -245,4 +253,62 @@ fn ir_path_outside_bank_is_error() {
     }
     let preset = cabinet("irs/cab.wav").unwrap();
     assert_eq!(preset.modules[0].ir.as_deref(), Some("irs/cab.wav"));
+}
+
+fn write_impulse(path: &Path) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for sample in [1.0_f32, 0.5, 0.25] {
+        writer.write_sample(sample).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+#[test]
+fn ir_resolves_ir_dir_then_bank() {
+    let preset = Preset::parse(
+        "name = \"X\"\n[[module]]\ntype = \"cabinet\"\nid = \"cab\"\nir = \"cabs/x.wav\"\n",
+    )
+    .unwrap();
+    let build_warnings = |test: &str, in_ir_dir: Option<bool>, in_bank: bool| {
+        let dir = temp_dir(test);
+        let (ir_dir, bank_dir) = (dir.0.join("irs"), dir.0.join("bank"));
+        fs::create_dir_all(&ir_dir).unwrap();
+        fs::create_dir_all(&bank_dir).unwrap();
+        match in_ir_dir {
+            Some(true) => write_impulse(&ir_dir.join("cabs/x.wav")),
+            Some(false) => {
+                fs::create_dir_all(ir_dir.join("cabs")).unwrap();
+                fs::write(ir_dir.join("cabs/x.wav"), "").unwrap();
+            }
+            None => {}
+        }
+        if in_bank {
+            write_impulse(&bank_dir.join("cabs/x.wav"));
+        }
+        let (_, warnings) = preset
+            .build(48_000.0, 128, &ir_dir, &bank_dir, 100.0)
+            .unwrap();
+        (warnings, ir_dir.join("cabs/x.wav"))
+    };
+    assert_eq!(build_warnings("ir-only-ir-dir", Some(true), false).0, []);
+    assert_eq!(build_warnings("ir-only-bank", None, true).0, []);
+    for (test, in_ir_dir, in_bank) in [("ir-both", Some(false), true), ("ir-neither", None, false)]
+    {
+        let (warnings, ir_path) = build_warnings(test, in_ir_dir, in_bank);
+        let [BuildWarning::Ir { id, error }] = warnings.as_slice() else {
+            panic!("{test}: {warnings:?}");
+        };
+        assert_eq!(id, "cab");
+        assert!(
+            error.starts_with(&format!("{}: ", ir_path.display())),
+            "{test}: {error}"
+        );
+    }
 }

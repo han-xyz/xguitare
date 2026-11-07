@@ -157,7 +157,13 @@ fn build_rack(
     max_frames: usize,
     config: &Config,
 ) -> Option<Rack> {
-    match preset.build(sample_rate, max_frames, &config.bank_dir, config.ir_max_ms) {
+    match preset.build(
+        sample_rate,
+        max_frames,
+        &config.ir_dir,
+        &config.bank_dir,
+        config.ir_max_ms,
+    ) {
         Ok((rack, warnings)) => {
             for warning in &warnings {
                 warn!("{warning}");

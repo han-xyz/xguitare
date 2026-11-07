@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use xguitare_dsp::modules::cabinet::Cabinet;
@@ -154,6 +154,7 @@ impl Preset {
         &self,
         sample_rate: f32,
         max_frames: usize,
+        ir_dir: &Path,
         bank_dir: &Path,
         ir_max_ms: f32,
     ) -> Result<(Rack, Vec<BuildWarning>), BuildError> {
@@ -162,11 +163,13 @@ impl Preset {
         let mut warnings = Vec::new();
         for preset_module in &self.modules {
             let mut module: Box<dyn Module> = if preset_module.type_name == CABINET_TYPE {
-                let ir = match preset_module
-                    .ir
-                    .as_deref()
-                    .map(|file| load_ir(&bank_dir.join(file), sample_rate as u32, ir_max_ms))
-                {
+                let ir = match preset_module.ir.as_deref().map(|file| {
+                    load_ir(
+                        &ir_path(ir_dir, bank_dir, file),
+                        sample_rate as u32,
+                        ir_max_ms,
+                    )
+                }) {
                     Some(Ok(ir)) => Some(ir),
                     Some(Err(error)) => {
                         warnings.push(BuildWarning::Ir {
@@ -223,7 +226,7 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
     if entry.type_name == CABINET_TYPE && entry.ir.is_none() {
         return Err(PresetError::MissingIr(id));
     }
-    if entry.ir.as_deref().is_some_and(|ir| !is_inside_bank(ir)) {
+    if entry.ir.as_deref().is_some_and(|ir| !is_relative_name(ir)) {
         return Err(PresetError::IrOutsideBank(id));
     }
     let params = spec
@@ -245,7 +248,18 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
     })
 }
 
-fn is_inside_bank(ir: &str) -> bool {
+/// `ir_dir/<ir>` when it exists, else `bank_dir/<ir>`; neither existing gives the `ir_dir` path, so the load error names it.
+fn ir_path(ir_dir: &Path, bank_dir: &Path, ir: &str) -> PathBuf {
+    let in_ir_dir = ir_dir.join(ir);
+    let in_bank = bank_dir.join(ir);
+    if !in_ir_dir.exists() && in_bank.exists() {
+        in_bank
+    } else {
+        in_ir_dir
+    }
+}
+
+pub(crate) fn is_relative_name(ir: &str) -> bool {
     // Checked on the text, not `Path::components`, which silently drops interior `.` and empty segments.
     !ir.is_empty()
         && ir

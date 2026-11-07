@@ -5,6 +5,7 @@ pub mod control;
 pub mod engine;
 pub mod firstrun;
 mod ir;
+mod irdir;
 pub mod ports;
 mod preset;
 mod registry;
@@ -17,6 +18,7 @@ pub use config::{
     AUTO_PORT, BankKind, Config, ConfigError, Ports, SocketDirError, secure_socket_dir,
 };
 pub use ir::{IrError, load_ir};
+pub use irdir::list_irs;
 pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
 

@@ -1003,3 +1003,171 @@ fn revision_unchanged_by_mute() {
     ok(handle(&mut state, Request::Mute { on: false }));
     assert_eq!(revision(&mut state), before);
 }
+
+fn rack_ir(ir: &str, id: Option<&str>) -> Request {
+    Request::RackIr {
+        ir: ir.to_string(),
+        id: id.map(str::to_string),
+    }
+}
+
+fn write_impulse(path: &Path) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for sample in [1.0_f32, 0.5, 0.25] {
+        writer.write_sample(sample).unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+fn ir_state(test: &str) -> (EngineState, AudioQueues, TempDir) {
+    let (mut state, audio, dir) = amp_state(test);
+    state.config.ir_dir = dir.0.join("irs");
+    write_impulse(&state.config.ir_dir.join("cabs/x.wav"));
+    (state, audio, dir)
+}
+
+fn active_ir(state: &EngineState) -> Option<String> {
+    let (_, preset) = state.active.as_ref().unwrap();
+    preset.modules[1].ir.clone()
+}
+
+#[test]
+fn ir_list_recursive_sorted() {
+    let (mut state, _audio, dir) = state("ir-list");
+    let irs = dir.0.join("irs");
+    for file in [
+        "bass-cab.wav",
+        "Loud.WAV",
+        "celestion/v30.wav",
+        "celestion/old/g12.wav",
+        ".hidden/x.wav",
+        ".dot.wav",
+        "notes.txt",
+    ] {
+        let path = irs.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "").unwrap();
+    }
+    std::os::unix::fs::symlink(irs.join("bass-cab.wav"), irs.join("link.wav")).unwrap();
+    state.config.ir_dir = irs.clone();
+    assert_eq!(
+        ok(handle(&mut state, Request::IrList)),
+        json!({
+            "ir_dir": irs.display().to_string(),
+            "irs": [
+                "Loud.WAV",
+                "bass-cab.wav",
+                "celestion/old/g12.wav",
+                "celestion/v30.wav",
+                "link.wav"
+            ],
+        })
+    );
+}
+
+#[test]
+fn ir_list_missing_dir_error() {
+    let (mut state, _audio, dir) = state("ir-list-missing");
+    state.config.ir_dir = dir.0.join("absent");
+    assert_eq!(
+        error(handle(&mut state, Request::IrList)),
+        format!(
+            "ir_dir {}: No such file or directory (os error 2)",
+            state.config.ir_dir.display()
+        )
+    );
+}
+
+#[test]
+fn rack_ir_swaps_and_bumps_revision() {
+    let (mut state, mut audio, _dir) = ir_state("rack-ir");
+    let payload = ok(handle(&mut state, rack_ir("cabs/x.wav", Some("cabinet"))));
+    assert_eq!(payload, json!({"id": "cabinet", "ir": "cabs/x.wav"}));
+    assert!(matches!(audio.commands.pop(), Ok(Command::SwapRack(_))));
+    assert_eq!(active_ir(&state).as_deref(), Some("cabs/x.wav"));
+    assert_eq!(revision(&mut state), 2);
+}
+
+#[test]
+fn rack_ir_first_cabinet_when_id_omitted() {
+    let (mut state, _audio, _dir) = ir_state("rack-ir-first");
+    let (line, warnings) = handle_line(&mut state, r#"{"cmd":"rack_ir","ir":"cabs/x.wav"}"#);
+    assert_eq!(warnings, []);
+    assert_eq!(
+        serde_json::from_str::<Value>(&line).unwrap(),
+        json!({"ok": true, "id": "cabinet", "ir": "cabs/x.wav"})
+    );
+    assert_eq!(active_ir(&state).as_deref(), Some("cabs/x.wav"));
+}
+
+#[test]
+fn rack_ir_errors_verbatim() {
+    let (mut state, _audio, _dir) = state("rack-ir-no-cabinet");
+    assert_eq!(
+        error(handle(&mut state, rack_ir("cabs/x.wav", None))),
+        "no cabinet module"
+    );
+    let (mut state, mut audio, _dir) = ir_state("rack-ir-errors");
+    ok(handle(&mut state, rack_add_at("gate", 0)));
+    while audio.commands.pop().is_ok() {}
+    let before = ok(handle(&mut state, Request::Get { param: None }));
+    let bad = state.config.ir_dir.join("bad.wav");
+    fs::write(&bad, "").unwrap();
+    let loader_error = xguitare_core::load_ir(&bad, 48_000, 100.0)
+        .unwrap_err()
+        .to_string();
+    for (req, expected) in [
+        (
+            rack_ir("cabs/x.wav", Some("x")),
+            "no module 'x'".to_string(),
+        ),
+        (
+            rack_ir("cabs/x.wav", Some("gate")),
+            "module 'gate' is not a cabinet".to_string(),
+        ),
+        (
+            rack_ir("../x.wav", None),
+            "invalid ir name '../x.wav'".to_string(),
+        ),
+        (rack_ir("bad.wav", None), loader_error),
+    ] {
+        assert_eq!(error(handle(&mut state, req)), expected);
+    }
+    assert_eq!(ok(handle(&mut state, Request::Get { param: None })), before);
+    assert!(audio.commands.pop().is_err(), "SwapRack pushed");
+    assert_eq!(revision(&mut state), 2);
+}
+
+#[test]
+fn save_after_rack_ir_round_trips() {
+    let (mut state, _audio, _dir) = ir_state("rack-ir-save");
+    ok(handle(&mut state, rack_ir("cabs/x.wav", None)));
+    ok(handle(&mut state, Request::Save));
+    let file = state.config.bank_dir.join("01-clean.toml");
+    let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved.modules[1].ir.as_deref(), Some("cabs/x.wav"));
+    let (_, live) = state.active.as_ref().unwrap();
+    assert_eq!(saved, *live);
+}
+
+#[test]
+fn get_cabinet_carries_ir() {
+    let (mut state, _audio, _dir) = amp_state("get-cabinet-ir");
+    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let params = all["params"].as_array().unwrap();
+    assert!(params.iter().any(|p| p["module"] == "cabinet"));
+    for param in params {
+        if param["module"] == "cabinet" {
+            assert_eq!(param["ir"], "default-cab.wav", "{param}");
+        } else {
+            assert!(param.get("ir").is_none(), "{param}");
+        }
+    }
+}

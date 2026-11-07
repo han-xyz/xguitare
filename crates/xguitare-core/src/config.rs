@@ -22,6 +22,8 @@ pub struct Config {
     pub buffer_size: u32,
     pub crossfade_ms: f32,
     pub ir_max_ms: f32,
+    /// The IR directory: where a Preset's Cabinet IR names are looked up first, before `bank_dir`.
+    pub ir_dir: PathBuf,
     pub socket: PathBuf,
     /// True when `$XDG_RUNTIME_DIR` is unset and `socket` is the `/tmp/xguitare-<uid>` fallback.
     pub socket_is_fallback: bool,
@@ -86,6 +88,7 @@ struct ConfigFile {
     buffer_size: Option<u32>,
     crossfade_ms: Option<f32>,
     ir_max_ms: Option<f32>,
+    ir_dir: Option<PathBuf>,
     socket: Option<PathBuf>,
     ports: Option<PortsFile>,
     tuner_reference_hz: Option<f32>,
@@ -163,8 +166,10 @@ impl Config {
             Some(dir) => (dir.to_path_buf(), false),
             None => (fallback_runtime_dir()?, true),
         };
+        let bank_dir = dirs.config_dir().join("bank");
         Ok(Config {
-            bank_dir: dirs.config_dir().join("bank"),
+            ir_dir: bank_dir.clone(),
+            bank_dir,
             bank_kind: BankKind::default(),
             buffer_size: 128,
             crossfade_ms: 20.0,
@@ -190,8 +195,10 @@ impl Config {
             },
             None => self.ports,
         };
+        let bank_dir = file.bank_dir.unwrap_or(self.bank_dir);
         Config {
-            bank_dir: file.bank_dir.unwrap_or(self.bank_dir),
+            ir_dir: file.ir_dir.unwrap_or_else(|| bank_dir.clone()),
+            bank_dir,
             bank_kind: file.bank_kind.unwrap_or(self.bank_kind),
             buffer_size: file.buffer_size.unwrap_or(self.buffer_size),
             crossfade_ms: file.crossfade_ms.unwrap_or(self.crossfade_ms),

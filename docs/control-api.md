@@ -42,7 +42,7 @@ Response:
 | `sample_rate` | JACK sample rate in Hz. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove` and `rack_move`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status`, in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
@@ -167,6 +167,7 @@ Response:
 | `params[].min`, `params[].max` | The Parameter's range. |
 | `params[].default` | The value a new Module of this type starts with. |
 | `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`); the Module rounds other values. |
+| `params[].ir` | Cabinet entries only: the Module's Cabinet IR name, as in the Preset's `ir` (`null` when it has none). Other Modules' entries have no `ir` key. |
 
 Errors:
 
@@ -307,6 +308,66 @@ Response:
 | `to` | Its position now. |
 
 Errors: `no module '<id>'`, `no preset loaded`, `engine busy`, and the layout errors of `rack_add`; on any of them nothing changes.
+
+## ir_list
+
+Lists the Cabinet IRs in the IR directory (config key `ir_dir`, default the Bank directory): every regular file whose extension is `.wav` in any case, in all subdirectories. Names starting with `.` are skipped, files and directories alike. A symlink is followed, except one inside a directory that was itself reached through a symlink. The directory is read on every request.
+
+Request:
+
+```json
+{"cmd":"ir_list"}
+```
+
+Response:
+
+```json
+{"ok":true,"ir_dir":"/home/you/.config/xguitare/bank","irs":["Loud.WAV","bass-cab.wav","celestion/v30.wav"]}
+```
+
+| Key | Value |
+| --- | --- |
+| `ir_dir` | The IR directory listed. |
+| `irs` | Each Cabinet IR's path relative to `ir_dir`, `/`-separated, sorted bytewise (upper case before lower case); the name `rack_ir` and a Preset's `ir` take. Empty when there is none. |
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `ir_dir <path>: <reason>` | The IR directory or one of its subdirectories cannot be read, e.g. `ir_dir /srv/irs: No such file or directory (os error 2)`. |
+
+## rack_ir
+
+Sets the Cabinet IR of a cabinet Module in the active Preset, rebuilds the Rack from it and swaps it in with a crossfade, as `rack_add` does. `ir` is looked up as `<ir_dir>/<ir>` and, when that file does not exist, as `<bank directory>/<ir>`. `id` is optional: omitted, the first cabinet Module is used. Unlike `load`, which runs a cabinet whose IR fails to load as a passthrough and warns, `rack_ir` fails and changes nothing. The change is not written to the Preset file until `save`.
+
+Request:
+
+```json
+{"cmd":"rack_ir","ir":"celestion/v30.wav","id":"cabinet"}
+```
+
+Response:
+
+```json
+{"ok":true,"id":"cabinet","ir":"celestion/v30.wav"}
+```
+
+| Key | Value |
+| --- | --- |
+| `id` | The cabinet Module's id. |
+| `ir` | Its Cabinet IR name now. |
+
+Errors (on any of them nothing changes and the Revision stays):
+
+| `error` | When |
+| --- | --- |
+| `no cabinet module` | `id` is omitted and the active Preset has no cabinet. |
+| `no module '<id>'` | The active Preset has no Module with that id. |
+| `module '<id>' is not a cabinet` | The Module with that id is not a cabinet, e.g. `module 'gate' is not a cabinet`. |
+| `invalid ir name '<ir>'` | `ir` is empty, absolute, or has a `.`, `..` or empty path segment, e.g. `invalid ir name '../x.wav'`. |
+| `<path>: <reason>` | The IR file cannot be loaded, e.g. `/srv/irs/bad.wav: unsupported wav format: 8-bit int`; `<path>` is the `ir_dir` path when the file is in neither directory. |
+| `no preset loaded` | No Preset is active. |
+| `engine busy` | The audio thread's command queue is full; retry. |
 
 ## tuner
 

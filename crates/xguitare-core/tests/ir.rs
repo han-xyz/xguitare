@@ -28,9 +28,15 @@ fn temp_dir(test: &str) -> TempDir {
 }
 
 fn ramp() -> Vec<f32> {
-    (0..RAMP_LEN)
+    let ramp: Vec<f32> = (0..RAMP_LEN)
         .map(|n| n as f32 / RAMP_LEN as f32 - 0.5)
-        .collect()
+        .collect();
+    let norm = energy(&ramp).sqrt();
+    ramp.iter().map(|s| s / norm).collect()
+}
+
+fn energy(samples: &[f32]) -> f32 {
+    samples.iter().map(|s| s * s).sum()
 }
 
 fn spec(channels: u16, sample_rate: u32, bits: u16, format: SampleFormat) -> WavSpec {
@@ -120,8 +126,8 @@ fn loads_stereo() {
     let ir = load_ir(&path, 48_000, 1000.0).unwrap();
     assert_ramp(&ir.left);
     let right = ir.right.expect("stereo file has a right channel");
-    let negated: Vec<f32> = ramp().iter().map(|s| -s).collect();
-    assert_eq!(right, negated);
+    let negated: Vec<f32> = right.iter().map(|s| -s).collect();
+    assert_ramp(&negated);
 }
 
 #[test]
@@ -144,6 +150,28 @@ fn truncates_to_max_ms() {
     );
     let ir = load_ir(&path, 48_000, 100.0).unwrap();
     assert_eq!(ir.left.len(), 4800);
+}
+
+#[test]
+fn load_ir_has_unit_energy() {
+    let dir = temp_dir("unit-energy");
+    let path = dir.join("ir.wav");
+    let interleaved: Vec<f32> = [0.5_f32; 40].iter().flat_map(|s| [*s, s / 2.0]).collect();
+    write_float(
+        &path,
+        spec(2, 48_000, 32, SampleFormat::Float),
+        &interleaved,
+    );
+    let ir = load_ir(&path, 48_000, 1000.0).unwrap();
+    assert!(
+        (energy(&ir.left) - 1.0).abs() <= 1e-4,
+        "{}",
+        energy(&ir.left)
+    );
+    let right = ir.right.expect("stereo file has a right channel");
+    for (left, right) in ir.left.iter().zip(&right) {
+        assert!((right - left / 2.0).abs() <= 1e-6, "{left} {right}");
+    }
 }
 
 #[test]

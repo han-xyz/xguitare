@@ -13,10 +13,11 @@ pub use serde_json::Value;
 
 use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
 use crate::firstrun::{BASS_IR, DEFAULT_IR};
-use crate::preset::{CABINET_TYPE, shortest_f64};
+use crate::preset::{CABINET_TYPE, is_relative_name, shortest_f64};
 use crate::tuner::Tuner;
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
+    list_irs,
 };
 use crate::{ResolveError, resolve};
 
@@ -28,6 +29,7 @@ const SILENCE_DB: f32 = -120.0;
 const CABINET_IRS: [&str; 2] = [DEFAULT_IR, BASS_IR];
 const CABINET_NEEDS_IR: &str = "cabinet needs an ir; add one in the preset file";
 const AFTER_OR_AT: &str = "give either after or at";
+const NO_CABINET: &str = "no cabinet module";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -61,6 +63,11 @@ pub enum Request {
     Tuner,
     Mute {
         on: bool,
+    },
+    IrList,
+    RackIr {
+        ir: String,
+        id: Option<String>,
     },
 }
 
@@ -103,6 +110,8 @@ pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarn
         Request::RackMove { id, to } => rack_move(state, &id, to, &mut warnings),
         Request::Tuner => Ok(tuner(state)),
         Request::Mute { on } => Ok(mute(state, on)),
+        Request::IrList => ir_list(state),
+        Request::RackIr { ir, id } => rack_ir(state, &ir, id.as_deref(), &mut warnings),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
@@ -149,6 +158,7 @@ pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare,
             .build(
                 state.sample_rate,
                 max_frames,
+                &state.config.ir_dir,
                 &state.config.bank_dir,
                 state.config.ir_max_ms,
             )
@@ -275,15 +285,30 @@ fn install_preset(
     preset: Preset,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
-    let (rack, build_warnings) = preset
+    let (rack, build_warnings) = build_preset(state, &preset)?;
+    *warnings = build_warnings;
+    swap_in(state, file, preset, rack)
+}
+
+fn build_preset(state: &EngineState, preset: &Preset) -> Result<(Rack, Vec<BuildWarning>), String> {
+    preset
         .build(
             state.sample_rate,
             state.max_frames,
+            &state.config.ir_dir,
             &state.config.bank_dir,
             state.config.ir_max_ms,
         )
-        .map_err(|err| err.to_string())?;
-    *warnings = build_warnings;
+        .map_err(|err| err.to_string())
+}
+
+/// Swaps `rack`, built from `preset`, in and makes `preset` the active Preset; on an error the state is unchanged.
+fn swap_in(
+    state: &mut EngineState,
+    file: PathBuf,
+    preset: Preset,
+    rack: Rack,
+) -> Result<(), String> {
     swap_rack(state, rack)?;
     state.revision += 1;
     state.active = Some((file, preset));
@@ -340,13 +365,18 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
         return Err(ACTIVE_REMOVED.to_string());
     }
     let tmp = file.with_extension("toml.tmp");
-    fs::write(&tmp, preset.to_toml())
+    let text = preset.to_toml();
+    fs::write(&tmp, &text)
         .and_then(|()| fs::rename(&tmp, file))
         .map_err(|err| {
             let _ = fs::remove_file(&tmp);
             format!("cannot save {}: {err}", file.display())
         })?;
     let payload = json!({"path": file.display().to_string()});
+    let saved = Preset::parse(&text).expect("a saved Preset parses back");
+    if let Some((_, active)) = state.active.as_mut() {
+        *active = saved;
+    }
     state.revision += 1;
     Ok(payload)
 }
@@ -459,6 +489,52 @@ fn edit_rack(
     Ok(payload)
 }
 
+fn ir_list(state: &EngineState) -> Result<Value, String> {
+    let irs = list_irs(&state.config.ir_dir)?;
+    Ok(json!({"ir_dir": state.config.ir_dir.display().to_string(), "irs": irs}))
+}
+
+/// Sets the cabinet's `ir` and swaps the rebuilt Rack in; an IR that fails to load is an error and changes nothing.
+fn rack_ir(
+    state: &mut EngineState,
+    ir: &str,
+    id: Option<&str>,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<Value, String> {
+    let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
+    let index = cabinet_index(&preset.modules, id)?;
+    if !is_relative_name(ir) {
+        return Err(format!("invalid ir name '{ir}'"));
+    }
+    let (file, mut preset) = (file.clone(), preset.clone());
+    preset.modules[index].ir = Some(ir.to_string());
+    let id = preset.modules[index].id.clone();
+    let (rack, build_warnings) = build_preset(state, &preset)?;
+    if let Some(error) = build_warnings
+        .iter()
+        .find_map(|BuildWarning::Ir { id: module, error }| (*module == id).then_some(error))
+    {
+        return Err(error.clone());
+    }
+    *warnings = build_warnings;
+    swap_in(state, file, preset, rack)?;
+    Ok(json!({"id": id, "ir": ir}))
+}
+
+fn cabinet_index(modules: &[PresetModule], id: Option<&str>) -> Result<usize, String> {
+    let Some(id) = id else {
+        return modules
+            .iter()
+            .position(|m| m.type_name == CABINET_TYPE)
+            .ok_or_else(|| NO_CABINET.to_string());
+    };
+    let index = module_index(modules, id)?;
+    if modules[index].type_name != CABINET_TYPE {
+        return Err(format!("module '{id}' is not a cabinet"));
+    }
+    Ok(index)
+}
+
 fn module_index(modules: &[PresetModule], id: &str) -> Result<usize, String> {
     modules
         .iter()
@@ -511,7 +587,7 @@ fn get(state: &EngineState, key: Option<&str>) -> Result<Value, String> {
 fn param_json(module: &PresetModule, param: usize) -> Value {
     let spec = param_spec(module, param);
     let (name, value) = &module.params[param];
-    json!({
+    let mut entry = json!({
         "module": module.id,
         "type": module.type_name,
         "param": name,
@@ -521,7 +597,11 @@ fn param_json(module: &PresetModule, param: usize) -> Value {
         "max": shortest_f64(spec.max),
         "default": shortest_f64(spec.default),
         "integer": spec.integer,
-    })
+    });
+    if module.type_name == CABINET_TYPE {
+        entry["ir"] = json!(module.ir);
+    }
+    entry
 }
 
 fn param_spec(module: &PresetModule, param: usize) -> &'static ParamSpec {

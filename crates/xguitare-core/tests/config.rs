@@ -154,3 +154,23 @@ fn tuner_reference_out_of_range() {
         );
     }
 }
+
+#[test]
+fn ir_dir_defaults_to_bank_dir() {
+    let config = Config::load(Some(&config_file("ir-dir-default", ""))).unwrap();
+    assert_eq!(config.ir_dir, config.bank_dir);
+    let path = config_file("ir-dir-bank", "bank_dir = \"/srv/xg/bank\"\n");
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/bank"));
+}
+
+#[test]
+fn ir_dir_parses() {
+    let path = config_file(
+        "ir-dir",
+        "bank_dir = \"/srv/xg/bank\"\nir_dir = \"/srv/xg/irs\"\n",
+    );
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/irs"));
+    assert_eq!(config.bank_dir, PathBuf::from("/srv/xg/bank"));
+}

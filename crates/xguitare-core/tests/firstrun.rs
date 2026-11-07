@@ -52,7 +52,7 @@ fn guitar_bank_unchanged() {
         let BankEntry::Valid { preset, .. } = entry else {
             panic!("invalid starter preset: {entry:?}");
         };
-        let (_, warnings) = preset.build(48_000.0, 128, &dir, 100.0).unwrap();
+        let (_, warnings) = preset.build(48_000.0, 128, &dir, &dir, 100.0).unwrap();
         assert!(warnings.is_empty(), "{}: {warnings:?}", preset.name);
         names.push(preset.name.as_str());
     }
@@ -93,7 +93,7 @@ fn bass_bank_seeds_five_presets_and_ir() {
         let BankEntry::Valid { preset, .. } = entry else {
             panic!("invalid bass preset: {entry:?}");
         };
-        let (_, warnings) = preset.build(48_000.0, 128, &dir, 100.0).unwrap();
+        let (_, warnings) = preset.build(48_000.0, 128, &dir, &dir, 100.0).unwrap();
         assert!(warnings.is_empty(), "{}: {warnings:?}", preset.name);
         names.push(preset.name.as_str());
     }
@@ -191,4 +191,26 @@ fn trailing_slash_bank_dir_still_creates_bank() {
         .collect();
     siblings.sort();
     assert_eq!(siblings, ["bank", "bank.tmp"]);
+}
+
+#[test]
+fn starter_banks_build_without_warnings() {
+    let mut built = 0;
+    for (test, kind) in [
+        ("starter-guitar", BankKind::Guitar),
+        ("starter-bass", BankKind::Bass),
+    ] {
+        let temp = temp_dir(test);
+        let dir = temp.0.join("bank");
+        ensure_bank(&dir, kind, 48_000).unwrap();
+        for entry in &Bank::load_dir(&dir).unwrap().entries {
+            let BankEntry::Valid { preset, .. } = entry else {
+                panic!("invalid starter preset: {entry:?}");
+            };
+            let (_, warnings) = preset.build(48_000.0, 128, &dir, &dir, 100.0).unwrap();
+            assert!(warnings.is_empty(), "{}: {warnings:?}", preset.name);
+            built += 1;
+        }
+    }
+    assert_eq!(built, 10);
 }

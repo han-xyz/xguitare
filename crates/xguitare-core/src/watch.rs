@@ -85,6 +85,7 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
     let built = preset.build(
         state.sample_rate,
         state.max_frames,
+        &state.config.ir_dir,
         &state.config.bank_dir,
         state.config.ir_max_ms,
     );

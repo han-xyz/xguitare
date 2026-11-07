@@ -189,6 +189,9 @@ fn render(req: &Request, payload: &Value) -> String {
                 "unmuted\n".to_string()
             }
         }
+        Request::IrList | Request::RackIr { .. } => {
+            unreachable!("no CLI subcommand sends {req:?} yet")
+        }
     }
 }
 

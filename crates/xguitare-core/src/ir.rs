@@ -23,7 +23,7 @@ pub enum IrError {
     },
 }
 
-/// Reads a 16/24/32-bit PCM or 32-bit float wav with one or two channels, resampled to `engine_rate` and truncated to `max_ms`.
+/// Reads a 16/24/32-bit PCM or 32-bit float wav with one or two channels, resampled to `engine_rate`, truncated to `max_ms` and normalised to unit energy.
 pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, IrError> {
     let hound_error = |error| IrError::from_hound(path, error);
     let reader = WavReader::open(path).map_err(hound_error)?;
@@ -67,21 +67,23 @@ pub fn load_ir(path: &Path, engine_rate: u32, max_ms: f32) -> Result<CabinetIr, 
         }
         Ok(channel)
     };
-    match spec.channels {
-        1 => Ok(CabinetIr {
+    let mut ir = match spec.channels {
+        1 => CabinetIr {
             left: fit(samples)?,
             right: None,
-        }),
+        },
         2 => {
             let left = samples.iter().step_by(2).copied().collect();
             let right = samples.iter().skip(1).step_by(2).copied().collect();
-            Ok(CabinetIr {
+            CabinetIr {
                 left: fit(left)?,
                 right: Some(fit(right)?),
-            })
+            }
         }
-        n => Err(IrError::unsupported(path, format!("{n} channels"))),
-    }
+        n => return Err(IrError::unsupported(path, format!("{n} channels"))),
+    };
+    ir.normalise();
+    Ok(ir)
 }
 
 impl IrError {
