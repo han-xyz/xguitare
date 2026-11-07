@@ -188,7 +188,7 @@ $ xguitare set preamp.gain 150
 preamp.gain = 100 (clamped)
 ```
 
-`get` shows Parameters: all of them, one Module's, or one:
+`get` shows Parameters: all of them, one Module's, or one. A cabinet's lines end with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none):
 
 ```console
 $ xguitare get preamp
@@ -368,7 +368,7 @@ When the audio server changes the sample rate while the Daemon runs, the Daemon 
 
 **Clicks and dropouts (xruns).** `xguitare status` counts them in `xruns`, and the Daemon logs `xruns: N (+n)` at most once a second. `callback_max_us` is the longest audio callback so far; at 128 frames and 48 kHz a period is 2666 µs, and a callback near that is too slow. Use a larger buffer: force the quantum to 256 with the command above; the Daemon re-prepares within a second. Set `buffer_size = 256` in the config so the next start asks for it. Closing other audio-heavy programs or using a Preset with fewer Modules also helps.
 
-**`error: daemon already running at /run/user/1000/xguitare/xguitare.sock`.** `xguitare run` found another Daemon answering on the socket. Stop that one (Ctrl-C in its terminal, or `pkill -x xguitare`), or use it with the CLI. A socket file left by a crashed Daemon is removed automatically.
+**`error: another Daemon is running`.** `xguitare run` found another Daemon holding the socket's lock file (`xguitare.sock.lock` beside the socket). Stop that one (Ctrl-C in its terminal, or `pkill -x xguitare`), or use it with the CLI. A socket file left by a crashed Daemon is removed automatically.
 
 **`error: daemon not running (socket ...)`.** A CLI command found no Daemon. Start one with `xguitare run`.
 

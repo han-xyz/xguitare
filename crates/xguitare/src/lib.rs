@@ -54,7 +54,7 @@ enum Cmd {
     /// List the Module types, their channels and Parameters
     Modules,
     /// Edit the live Rack's layout
-    #[command(subcommand)]
+    #[command(subcommand, arg_required_else_help = false)]
     Rack(RackCmd),
     /// List or load Cabinet IRs
     #[command(subcommand, arg_required_else_help = false)]

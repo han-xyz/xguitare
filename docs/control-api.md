@@ -9,6 +9,9 @@ The protocol a client uses to inspect and change the running Daemon: which Prese
 - The connection stays open after a response; send the next request on it, or close it. The CLI opens one connection per command.
 - A line that is not a valid request (malformed JSON, an unknown `cmd`, a missing or wrongly typed field, an empty line) gets an error response starting with `invalid request: ` followed by the JSON parser's message, and the connection stays open.
 - A line longer than 64 KiB gets `{"ok":false,"error":"request too long"}` and the Daemon closes the connection.
+- The Daemon serves at most 32 connections at once. One more gets `{"ok":false,"error":"too many connections"}`, without sending a request, and is closed.
+- A connection that sends nothing for 300 seconds is closed by the Daemon; a client that keeps one open reconnects.
+- One Daemon per socket: the Daemon holds an exclusive `flock` on `<socket>.lock` (e.g. `xguitare.sock.lock`) while it runs, and a second Daemon on the same socket exits with `error: another Daemon is running`.
 
 Every response has a boolean `ok`. On success it carries the request's payload keys next to `"ok":true`; on failure it is exactly `{"ok":false,"error":"<message>"}`. Key order in responses is not significant.
 
@@ -18,6 +21,7 @@ Errors any request can return:
 | --- | --- |
 | `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `ir_list`, `rack_ir` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
+| `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
 Parameter addresses are `<module id>.<param name>`, e.g. `preamp.gain`. A Module's id is its `id` in the Preset file, or its type when the file gives none.
 

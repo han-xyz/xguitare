@@ -162,18 +162,7 @@ fn render(req: &Request, payload: &Value) -> String {
                 text(&payload["value"])
             )
         }
-        Request::Get { .. } => items(&payload["params"])
-            .map(|param| {
-                let line = format!(
-                    "{}.{} = {} {}",
-                    text(&param["module"]),
-                    text(&param["param"]),
-                    text(&param["value"]),
-                    text(&param["unit"])
-                );
-                format!("{}\n", line.trim_end())
-            })
-            .collect(),
+        Request::Get { .. } => render_get(payload),
         Request::Save => format!("saved {}\n", text(&payload["path"])),
         Request::Modules => render_modules(payload),
         Request::RackAdd { .. } => format!("added {}\n", text(&payload["id"])),
@@ -198,6 +187,34 @@ fn render(req: &Request, payload: &Value) -> String {
             format!("ir {} {}\n", text(&payload["id"]), text(&payload["ir"]))
         }
     }
+}
+
+/// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR.
+fn render_get(payload: &Value) -> String {
+    let params: Vec<&Value> = items(&payload["params"]).collect();
+    let mut lines = String::new();
+    for (index, param) in params.iter().enumerate() {
+        let module = text(&param["module"]);
+        let line = format!(
+            "{module}.{} = {} {}",
+            text(&param["param"]),
+            text(&param["value"]),
+            text(&param["unit"])
+        );
+        lines.push_str(&format!("{}\n", line.trim_end()));
+        let is_last_of_module = params
+            .get(index + 1)
+            .is_none_or(|next| next["module"] != param["module"]);
+        if let Some(ir) = param.get("ir").filter(|_| is_last_of_module) {
+            let name = if ir.is_null() {
+                "none".to_string()
+            } else {
+                text(ir)
+            };
+            lines.push_str(&format!("{module}.ir = {name}\n"));
+        }
+    }
+    lines
 }
 
 fn render_status(payload: &Value) -> String {

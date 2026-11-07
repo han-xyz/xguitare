@@ -604,3 +604,27 @@ fn ir_alone_is_usage_error() {
     assert!(out.requests.is_empty());
     assert!(out.stdout.is_empty());
 }
+
+#[test]
+fn get_cabinet_prints_ir() {
+    let out = cli(
+        &["get", "cabinet"],
+        reply(
+            r#"{"ok":true,"params":[{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","ir":"celestion/v30.wav"},{"module":"cabinet","type":"cabinet","param":"low_cut","value":80.0,"unit":"Hz","ir":"celestion/v30.wav"},{"module":"cab-2","type":"cabinet","param":"level","value":-1.0,"unit":"dB","ir":null}]}"#,
+        ),
+    );
+    assert_eq!(
+        out.stdout,
+        "cabinet.level = 0 dB\ncabinet.low_cut = 80 Hz\ncabinet.ir = celestion/v30.wav\ncab-2.level = -1 dB\ncab-2.ir = none\n"
+    );
+}
+
+#[test]
+fn rack_alone_is_error_line() {
+    let out = cli(&["rack"], reply(r#"{"ok":true}"#));
+    assert_eq!(out.code, 1);
+    assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
+    assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
+    assert!(out.requests.is_empty());
+    assert!(out.stdout.is_empty());
+}

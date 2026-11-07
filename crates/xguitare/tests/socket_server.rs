@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
-use xguitare::socket_server::bind;
+use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
 use xguitare_core::control::EngineState;
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
@@ -30,10 +31,14 @@ impl Drop for Server {
 }
 
 fn server(test: &str) -> Server {
+    server_with(test, MAX_CONNECTIONS, IDLE_TIMEOUT)
+}
+
+fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Server {
     let dir = PathBuf::from(format!("/tmp/xguitare-srv-{}-{test}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     let path = dir.join("s.sock");
-    let socket = bind(&path).unwrap();
+    let socket = bind(&path, max_connections, idle_timeout).unwrap();
     let (queues, audio, tap) = engine_queues(64);
     let config = empty_config(&dir);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
@@ -119,13 +124,70 @@ fn regular_file_at_socket_path_is_refused_and_kept() {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("s.sock");
     fs::write(&path, "mine").unwrap();
-    let error = bind(&path).err().unwrap();
+    let error = bind(&path, MAX_CONNECTIONS, IDLE_TIMEOUT).err().unwrap();
     assert_eq!(
         error.to_string(),
         format!("socket path {} exists and is not a socket", path.display())
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
     fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn second_daemon_refused() {
+    let server = server("second");
+    let error = bind(&server.path, MAX_CONNECTIONS, IDLE_TIMEOUT)
+        .err()
+        .unwrap();
+    assert_eq!(error.to_string(), "another Daemon is running");
+    let stream = UnixStream::connect(&server.path).unwrap();
+    let reply = request(&stream, r#"{"cmd":"list"}"#);
+    assert!(reply.starts_with("{\"ok\":true,"), "{reply}");
+}
+
+#[test]
+fn connection_cap_refuses_extra() {
+    let server = server_with("cap", 2, IDLE_TIMEOUT);
+    let first = UnixStream::connect(&server.path).unwrap();
+    let second = UnixStream::connect(&server.path).unwrap();
+    for stream in [&first, &second] {
+        assert!(request(stream, r#"{"cmd":"list"}"#).starts_with("{\"ok\":true,"));
+    }
+    let extra = UnixStream::connect(&server.path).unwrap();
+    extra
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut reader = BufReader::new(&extra);
+    let mut reply = String::new();
+    reader.read_line(&mut reply).unwrap();
+    assert_eq!(reply, "{\"ok\":false,\"error\":\"too many connections\"}\n");
+    let mut rest = Vec::new();
+    assert_eq!(reader.read_to_end(&mut rest).unwrap(), 0);
+    drop(first);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let stream = UnixStream::connect(&server.path).unwrap();
+        let reply = request(&stream, r#"{"cmd":"list"}"#);
+        if reply.starts_with("{\"ok\":true,") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "slot not freed: {reply}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn idle_connection_closed() {
+    let server = server_with("idle-closed", MAX_CONNECTIONS, Duration::from_millis(300));
+    let mut stream = UnixStream::connect(&server.path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    assert!(request(&stream, r#"{"cmd":"list"}"#).starts_with("{\"ok\":true,"));
+    let started = Instant::now();
+    let mut rest = Vec::new();
+    assert_eq!(stream.read_to_end(&mut rest).unwrap(), 0);
+    assert!(started.elapsed() >= Duration::from_millis(300));
 }
 
 fn empty_config(dir: &Path) -> Config {

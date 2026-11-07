@@ -1,13 +1,13 @@
 use std::fmt;
-use std::fs::{self, DirBuilder};
+use std::fs::{self, DirBuilder, File, OpenOptions, TryLockError};
 use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tracing::warn;
 use xguitare_core::control::{EngineState, handle_line};
@@ -18,19 +18,31 @@ const READ_TICK: Duration = Duration::from_secs(1);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LINE: usize = 64 * 1024;
 const TOO_LONG: &str = r#"{"ok":false,"error":"request too long"}"#;
+const TOO_MANY: &str = r#"{"ok":false,"error":"too many connections"}"#;
+const LOCK_FILE_MODE: u32 = 0o600;
+
+/// The Daemon's cap on concurrent control connections.
+pub const MAX_CONNECTIONS: usize = 32;
+/// How long the Daemon keeps a control connection that sends nothing.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug)]
 pub enum SocketError {
+    AnotherDaemon,
+    Lock(PathBuf, io::Error),
     AlreadyRunning(PathBuf),
     NotASocket(PathBuf),
     Bind(PathBuf, io::Error),
     Spawn(io::Error),
 }
 
-/// The bound control socket; dropping it removes the socket file.
+/// The bound control socket; dropping it removes the socket file and releases the Daemon lock.
 pub struct ControlSocket {
     listener: UnixListener,
     path: PathBuf,
+    max_connections: usize,
+    idle_timeout: Duration,
+    _daemon_lock: File,
 }
 
 /// Creates the `/tmp` fallback directory of `socket` if missing and refuses it unless it is ours and private (see `secure_socket_dir`).
@@ -43,9 +55,18 @@ pub fn secure_fallback_dir(socket: &Path) -> Result<(), SocketDirError> {
     secure_socket_dir(dir)
 }
 
-/// Binds the Control API socket at `path`, refusing when a Daemon already answers there or the path is not a socket, and replacing a stale socket.
-pub fn bind(path: &Path) -> Result<ControlSocket, SocketError> {
+/// Binds the Control API socket at `path`, refusing when another Daemon holds `<path>.lock`, a Daemon already answers there or the path is not a socket, and replacing a stale socket.
+/// Each connection past `max_connections` gets one `too many connections` error line and is closed; a connection that sends nothing for `idle_timeout` is closed.
+pub fn bind(
+    path: &Path,
+    max_connections: usize,
+    idle_timeout: Duration,
+) -> Result<ControlSocket, SocketError> {
     let bind_error = |err| SocketError::Bind(path.to_path_buf(), err);
+    if let Some(dir) = path.parent() {
+        create_socket_dir(dir).map_err(bind_error)?;
+    }
+    let daemon_lock = lock_daemon(path)?;
     match fs::symlink_metadata(path) {
         Ok(metadata) if !metadata.file_type().is_socket() => {
             return Err(SocketError::NotASocket(path.to_path_buf()));
@@ -59,15 +80,34 @@ pub fn bind(path: &Path) -> Result<ControlSocket, SocketError> {
         Err(err) if err.kind() == ErrorKind::NotFound => {}
         Err(err) => return Err(bind_error(err)),
     }
-    if let Some(dir) = path.parent() {
-        create_socket_dir(dir).map_err(bind_error)?;
-    }
     let listener = UnixListener::bind(path).map_err(bind_error)?;
     listener.set_nonblocking(true).map_err(bind_error)?;
     Ok(ControlSocket {
         listener,
         path: path.to_path_buf(),
+        max_connections,
+        idle_timeout,
+        _daemon_lock: daemon_lock,
     })
+}
+
+fn lock_daemon(socket: &Path) -> Result<File, SocketError> {
+    let mut lock_path = socket.as_os_str().to_owned();
+    lock_path.push(".lock");
+    let lock_path = PathBuf::from(lock_path);
+    let lock_error = |err| SocketError::Lock(lock_path.clone(), err);
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(LOCK_FILE_MODE)
+        .open(&lock_path)
+        .map_err(lock_error)?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => Err(SocketError::AnotherDaemon),
+        Err(TryLockError::Error(err)) => Err(lock_error(err)),
+    }
 }
 
 impl ControlSocket {
@@ -85,16 +125,26 @@ impl ControlSocket {
 
     fn accept_until_stopped(self, state: &Arc<Mutex<EngineState>>, stop: &Arc<AtomicBool>) {
         let mut accepted: u64 = 0;
+        let open = Arc::new(AtomicUsize::new(0));
         while !stop.load(Ordering::Relaxed) {
             match self.listener.accept() {
                 Ok((stream, _)) => {
+                    if open.load(Ordering::Relaxed) >= self.max_connections {
+                        refuse(&stream);
+                        continue;
+                    }
                     accepted += 1;
+                    let slot = ConnectionSlot::take(&open);
                     let state = Arc::clone(state);
                     let stop = Arc::clone(stop);
+                    let idle_timeout = self.idle_timeout;
                     // Connection threads are never joined: each sees `stop` within READ_TICK, and process exit ends any still writing.
                     let spawned = thread::Builder::new()
                         .name(format!("control-{accepted}"))
-                        .spawn(move || serve_connection(&stream, &state, &stop));
+                        .spawn(move || {
+                            let _slot = slot;
+                            serve_connection(&stream, &state, &stop, idle_timeout);
+                        });
                     if let Err(err) = spawned {
                         warn!("cannot start control connection thread: {err}");
                     }
@@ -117,6 +167,28 @@ impl Drop for ControlSocket {
     }
 }
 
+/// One open control connection, counted while it lives.
+struct ConnectionSlot(Arc<AtomicUsize>);
+
+impl ConnectionSlot {
+    fn take(open: &Arc<AtomicUsize>) -> Self {
+        open.fetch_add(1, Ordering::Relaxed);
+        ConnectionSlot(Arc::clone(open))
+    }
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+fn refuse(mut stream: &UnixStream) {
+    if let Err(err) = stream.write_all(format!("{TOO_MANY}\n").as_bytes()) {
+        warn!("cannot refuse control connection: {err}");
+    }
+}
+
 fn create_socket_dir(dir: &Path) -> io::Result<()> {
     DirBuilder::new()
         .recursive(true)
@@ -124,8 +196,13 @@ fn create_socket_dir(dir: &Path) -> io::Result<()> {
         .create(dir)
 }
 
-fn serve_connection(stream: &UnixStream, state: &Mutex<EngineState>, stop: &AtomicBool) {
-    match answer_lines(stream, state, stop) {
+fn serve_connection(
+    stream: &UnixStream,
+    state: &Mutex<EngineState>,
+    stop: &AtomicBool,
+    idle_timeout: Duration,
+) {
+    match answer_lines(stream, state, stop, idle_timeout) {
         Err(err) if !matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
             warn!("control connection: {err}");
         }
@@ -137,18 +214,27 @@ fn answer_lines(
     stream: &UnixStream,
     state: &Mutex<EngineState>,
     stop: &AtomicBool,
+    idle_timeout: Duration,
 ) -> io::Result<()> {
     stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(READ_TICK))?;
+    stream.set_read_timeout(Some(READ_TICK.min(idle_timeout)))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let mut reader = BufReader::new(stream);
     let mut writer = stream;
     let mut line = Vec::new();
+    let mut last_read = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let limit = (MAX_LINE + 1 - line.len()) as u64;
+        let read_before = line.len();
         match (&mut reader).take(limit).read_until(b'\n', &mut line) {
-            Ok(_) => {}
+            Ok(_) => last_read = Instant::now(),
             Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                if line.len() > read_before {
+                    last_read = Instant::now();
+                }
+                if last_read.elapsed() >= idle_timeout {
+                    return Ok(());
+                }
                 continue;
             }
             Err(err) => return Err(err),
@@ -179,6 +265,8 @@ fn answer_lines(
 impl fmt::Display for SocketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            SocketError::AnotherDaemon => write!(f, "another Daemon is running"),
+            SocketError::Lock(path, err) => write!(f, "cannot lock {}: {err}", path.display()),
             SocketError::AlreadyRunning(path) => {
                 write!(f, "daemon already running at {}", path.display())
             }

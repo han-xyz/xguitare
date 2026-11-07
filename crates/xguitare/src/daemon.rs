@@ -50,7 +50,12 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         warn!("XDG_RUNTIME_DIR unset, using {}", config.socket.display());
         socket_server::secure_fallback_dir(&config.socket).map_err(DaemonError::SocketDir)?;
     }
-    let socket = socket_server::bind(&config.socket).map_err(DaemonError::Socket)?;
+    let socket = socket_server::bind(
+        &config.socket,
+        socket_server::MAX_CONNECTIONS,
+        socket_server::IDLE_TIMEOUT,
+    )
+    .map_err(DaemonError::Socket)?;
     create_starter_bank(&config.bank_dir, config.bank_kind);
     let bank = load_bank(&config.bank_dir);
     let preset = first_preset(&bank);
