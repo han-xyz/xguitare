@@ -204,14 +204,32 @@ fn serve_connection(
     stop: &AtomicBool,
     idle_timeout: Duration,
 ) {
-    let connection = open_connection(&mut lock(state));
-    match answer_lines(stream, state, connection, stop, idle_timeout) {
+    let connection = OpenConnection::open(state);
+    match answer_lines(stream, state, connection.id, stop, idle_timeout) {
         Err(err) if !matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
             warn!("control connection: {err}");
         }
         _ => {}
     }
-    close_connection(&mut lock(state), connection);
+}
+
+/// A connection's peak meter, closed when the connection thread ends, by return or panic.
+struct OpenConnection<'a> {
+    state: &'a Mutex<EngineState>,
+    id: ConnectionId,
+}
+
+impl<'a> OpenConnection<'a> {
+    fn open(state: &'a Mutex<EngineState>) -> Self {
+        let id = open_connection(&mut lock(state));
+        OpenConnection { state, id }
+    }
+}
+
+impl Drop for OpenConnection<'_> {
+    fn drop(&mut self) {
+        close_connection(&mut lock(self.state), self.id);
+    }
 }
 
 fn lock(state: &Mutex<EngineState>) -> MutexGuard<'_, EngineState> {

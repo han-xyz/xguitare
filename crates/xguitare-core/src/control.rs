@@ -4,7 +4,7 @@ use std::io::{self, ErrorKind, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::de::{Deserializer, Error as _};
 use serde::ser::{SerializeMap, Serializer};
@@ -104,11 +104,20 @@ pub struct ConnectionId(u64);
 
 const IN_PROCESS: ConnectionId = ConnectionId(0);
 
-/// For each open connection, the largest input and output peaks since its previous `status`.
-#[derive(Debug, Default)]
+/// For each open connection, and for `handle`'s in-process caller, the largest input and output peaks since its previous `status`.
+#[derive(Debug)]
 pub struct PeakMeters {
     opened: u64,
     meters: HashMap<ConnectionId, Peaks>,
+}
+
+impl Default for PeakMeters {
+    fn default() -> Self {
+        PeakMeters {
+            opened: 0,
+            meters: HashMap::from([(IN_PROCESS, Peaks::default())]),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -140,12 +149,12 @@ fn drain_peaks(state: &mut EngineState) {
 }
 
 fn take_peaks(state: &mut EngineState, connection: ConnectionId) -> Peaks {
-    state.peaks.meters.entry(connection).or_default();
     drain_peaks(state);
     state
         .peaks
         .meters
-        .insert(connection, Peaks::default())
+        .get_mut(&connection)
+        .map(std::mem::take)
         .unwrap_or_default()
 }
 
@@ -463,17 +472,20 @@ fn write_through(path: &Path, text: &str) -> io::Result<()> {
         Err(err) if err.kind() == ErrorKind::NotFound => None,
         Err(err) => return Err(err),
     };
-    let tmp = target.with_extension("toml.tmp");
+    let tmp = temp_path(&target);
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options
+        .write(true)
+        .create_new(true)
+        .custom_flags(libc::O_NOFOLLOW);
     if let Some(permissions) = &permissions {
         options.mode(permissions.mode());
     }
-    let written = options
-        .open(&tmp)
-        .and_then(|mut file| file.write_all(text.as_bytes()))
+    let mut file = options.open(&tmp)?;
+    let written = file
+        .write_all(text.as_bytes())
         .and_then(|()| match permissions {
-            Some(permissions) => fs::set_permissions(&tmp, permissions),
+            Some(permissions) => file.set_permissions(permissions),
             None => Ok(()),
         })
         .and_then(|()| fs::rename(&tmp, &target));
@@ -481,6 +493,15 @@ fn write_through(path: &Path, text: &str) -> io::Result<()> {
         let _ = fs::remove_file(&tmp);
     }
     written
+}
+
+/// `<file name>.<pid>.<n>.tmp` beside `target`, unique within this process.
+fn temp_path(target: &Path) -> PathBuf {
+    static SAVES: AtomicU64 = AtomicU64::new(0);
+    let n = SAVES.fetch_add(1, Ordering::Relaxed);
+    let mut name = target.file_name().unwrap_or_default().to_owned();
+    name.push(format!(".{}.{n}.tmp", std::process::id()));
+    target.with_file_name(name)
 }
 
 fn modules() -> Value {

@@ -26,22 +26,21 @@ pub enum ClientError {
 
 /// Connects to the Daemon's socket once per request: one request line out, one response line back.
 pub struct UnixSocketTransport {
-    path: PathBuf,
+    config: Config,
 }
 
 impl UnixSocketTransport {
-    pub fn from_config(config: &Config) -> Result<Self, ClientError> {
-        check_socket_dir(config)?;
-        Ok(UnixSocketTransport {
-            path: config.socket.clone(),
-        })
+    pub fn from_config(config: &Config) -> Self {
+        UnixSocketTransport {
+            config: config.clone(),
+        }
     }
 }
 
 impl Transport for UnixSocketTransport {
     fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
-        let mut reader = connect(&self.path, DAEMON_TIMEOUT, DAEMON_TIMEOUT)?;
-        exchange(&mut reader, req, &self.path)
+        let mut reader = connect(&self.config, DAEMON_TIMEOUT, DAEMON_TIMEOUT)?;
+        exchange(&mut reader, req, &self.config.socket)
     }
 }
 
@@ -53,8 +52,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn connect(config: &Config) -> Result<Connection, ClientError> {
-        check_socket_dir(config)?;
-        let reader = connect(&config.socket, READ_TIMEOUT, WRITE_TIMEOUT)?;
+        let reader = connect(config, READ_TIMEOUT, WRITE_TIMEOUT)?;
         Ok(Connection {
             path: config.socket.clone(),
             reader: Some(reader),
@@ -109,26 +107,28 @@ impl Transport for Reconnecting {
     }
 }
 
-fn check_socket_dir(config: &Config) -> Result<(), ClientError> {
-    let fallback_dir = config
-        .socket
-        .parent()
-        .filter(|dir| config.socket_is_fallback && dir.symlink_metadata().is_ok());
-    match fallback_dir {
-        Some(dir) => {
-            let uid = current_uid().map_err(ClientError::Io)?;
-            check_private_dir(dir, uid)
-                .map_err(|err| ClientError::InsecureSocketDir(err.to_string()))
+/// Before each connect to the `/tmp` fallback socket: a missing directory means no Daemon, and an existing one must be ours and 0700.
+fn check_fallback_dir(config: &Config) -> Result<(), ClientError> {
+    let Some(dir) = config.socket.parent().filter(|_| config.socket_is_fallback) else {
+        return Ok(());
+    };
+    match dir.symlink_metadata() {
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            return Err(ClientError::NotRunning(config.socket.clone()));
         }
-        None => Ok(()),
+        _ => {}
     }
+    let uid = current_uid().map_err(ClientError::Io)?;
+    check_private_dir(dir, uid).map_err(|err| ClientError::InsecureSocketDir(err.to_string()))
 }
 
 fn connect(
-    path: &Path,
+    config: &Config,
     read_timeout: Duration,
     write_timeout: Duration,
 ) -> Result<BufReader<UnixStream>, ClientError> {
+    check_fallback_dir(config)?;
+    let path = &config.socket;
     let stream = UnixStream::connect(path).map_err(|err| match err.kind() {
         ErrorKind::NotFound | ErrorKind::ConnectionRefused => {
             ClientError::NotRunning(path.to_path_buf())

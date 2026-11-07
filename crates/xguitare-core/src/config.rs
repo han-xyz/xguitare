@@ -289,7 +289,7 @@ fn socket_dir_error(dir: &Path, reason: String) -> SocketDirError {
     }
 }
 
-/// This process's real uid, read from `/proc/self`.
+/// This process's effective uid, the owner of `/proc/self`.
 pub fn current_uid() -> std::io::Result<u32> {
     Ok(fs::metadata("/proc/self")?.uid())
 }

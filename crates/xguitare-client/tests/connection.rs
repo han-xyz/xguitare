@@ -121,7 +121,9 @@ fn symlinked_fallback_dir_is_refused() {
     let err = Connection::connect(&config).err().unwrap();
     assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
     assert_eq!(err.to_string(), refusal);
-    let err = UnixSocketTransport::from_config(&config).err().unwrap();
+    let err = UnixSocketTransport::from_config(&config)
+        .request(&Request::Status)
+        .unwrap_err();
     assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
     assert_eq!(err.to_string(), refusal);
 }
@@ -144,7 +146,9 @@ fn client_refuses_foreign_fallback_dir() {
     let err = Connection::connect(&config).err().unwrap();
     assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
     assert_eq!(err.to_string(), refusal);
-    let err = UnixSocketTransport::from_config(&config).err().unwrap();
+    let err = UnixSocketTransport::from_config(&config)
+        .request(&Request::Status)
+        .unwrap_err();
     assert_eq!(err.to_string(), refusal);
     assert_eq!(fs::metadata(&fallback).unwrap().mode() & 0o777, 0o755);
 
@@ -159,6 +163,33 @@ fn client_refuses_foreign_fallback_dir() {
             "refusing socket directory {}: owned by uid {uid}, not {}",
             fallback.display(),
             uid + 1
+        )
+    );
+}
+
+#[test]
+fn fallback_dir_checked_on_every_request() {
+    let dir = TempDir::new("fallback-every-request");
+    let fallback = dir.path.join("fallback");
+    let config = Config {
+        socket: fallback.join("s.sock"),
+        socket_is_fallback: true,
+        ..dir.config()
+    };
+    let mut transport = UnixSocketTransport::from_config(&config);
+    let err = transport.request(&Request::Status).unwrap_err();
+    assert!(matches!(&err, ClientError::NotRunning(_)), "{err:?}");
+    let err = Connection::connect(&config).err().unwrap();
+    assert!(matches!(&err, ClientError::NotRunning(_)), "{err:?}");
+
+    fs::create_dir(&fallback).unwrap();
+    fs::set_permissions(&fallback, fs::Permissions::from_mode(0o755)).unwrap();
+    let err = transport.request(&Request::Status).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "refusing socket directory {}: mode 0755, not 0700",
+            fallback.display()
         )
     );
 }

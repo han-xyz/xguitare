@@ -155,7 +155,7 @@ fn run_client(
     let mut transport: Box<dyn Transport> = if stops_on_signal {
         Box::new(Reconnecting::new(config.clone()))
     } else {
-        Box::new(UnixSocketTransport::from_config(&config).map_err(|err| err.to_string())?)
+        Box::new(UnixSocketTransport::from_config(&config))
     };
     let argv: Vec<String> = argv
         .iter()

@@ -493,6 +493,22 @@ fn save_through_symlink() {
 }
 
 #[test]
+fn save_does_not_follow_planted_tmp_link() {
+    let (mut state, _audio, dir) = state("save-planted-link");
+    let victim = dir.0.join("victim.txt");
+    fs::write(&victim, "keep").unwrap();
+    let victim_mode = fs::metadata(&victim).unwrap().mode();
+    for n in 0..1024 {
+        let name = format!("01-clean.toml.{}.{n}.tmp", std::process::id());
+        std::os::unix::fs::symlink(&victim, state.config.bank_dir.join(name)).unwrap();
+    }
+    let message = error(handle(&mut state, Request::Save));
+    assert!(message.starts_with("cannot save "), "{message}");
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    assert_eq!(fs::metadata(&victim).unwrap().mode(), victim_mode);
+}
+
+#[test]
 fn save_without_preset_is_error() {
     let (mut state, _audio, _dir) = state("save-without-preset");
     state.active = None;
