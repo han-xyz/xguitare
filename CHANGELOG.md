@@ -32,8 +32,6 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - `crossfade_ms` (above 0 to 1000) and `ir_max_ms` (above 0 to 10000) out of range, NaN or infinite are refused when the config loads.
 - Cabinet `level` changes are smoothed, and a preamp `stages` change no longer jumps in level.
 - The CLI and the GUI refuse a fallback socket directory that is not yours or not mode 0700.
-- The Daemon no longer rebuilds the Rack at start for a sample-rate change that did not happen.
-- The Daemon removes the socket lock file when it exits cleanly.
 
 ### Known
 

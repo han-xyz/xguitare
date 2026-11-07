@@ -52,7 +52,6 @@ pub fn start(
     }
     let max_frames = prepared_max_frames(buffer_size, client.buffer_size());
     let sample_rate = client.sample_rate() as f32;
-    eprintln!("DBG pre-activate rate {sample_rate}");
     let rack = Box::new(build_rack(sample_rate, max_frames));
     let process = Process {
         switcher: RackSwitcher::new(
@@ -162,7 +161,6 @@ impl NotificationHandler for Notifications {
     }
 
     fn sample_rate(&mut self, _: &Client, srate: Frames) -> Control {
-        eprintln!("DBG notify rate {srate}");
         self.shared.sample_rate.store(srate, Ordering::Relaxed);
         Control::Continue
     }
