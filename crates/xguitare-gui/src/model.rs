@@ -26,7 +26,7 @@ pub enum Link {
     Starting { since: Instant },
 }
 
-/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get` and `tuner` replies as sent, `module_types` the `modules` reply of the current connection.
+/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get` and `tuner` replies as sent, `module_types` the `modules` reply of the current connection, `irs` the last `ir_list` reply's names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub link: Link,
@@ -35,6 +35,7 @@ pub struct Snapshot {
     pub params: Option<Value>,
     pub tuner: Option<Value>,
     pub module_types: Vec<ModuleType>,
+    pub irs: Vec<String>,
     pub last_message: Option<(String, Instant)>,
     pub failed_set: Option<(String, Instant)>,
 }
@@ -60,6 +61,12 @@ pub enum Command {
         to: usize,
     },
     Mute(bool),
+    RackIr {
+        id: String,
+        ir: String,
+    },
+    /// Sends nothing itself: the client thread fetches `ir_list` again on its next tick.
+    RefreshIrs,
     Quit,
 }
 
@@ -73,6 +80,25 @@ impl ModuleType {
     pub fn label(&self) -> String {
         format!("{} ({})", self.type_name, self.channels)
     }
+}
+
+pub fn ir_names(ir_list_payload: &Value) -> Vec<String> {
+    ir_list_payload["irs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|name| name.as_str().map(str::to_string))
+        .collect()
+}
+
+/// The Cabinet IR name of Module `id` in a `get` payload, read from its first entry.
+pub fn cabinet_ir(get_payload: &Value, id: &str) -> Option<String> {
+    get_payload["params"]
+        .as_array()?
+        .iter()
+        .find(|entry| entry["module"].as_str() == Some(id))?["ir"]
+        .as_str()
+        .map(str::to_string)
 }
 
 pub fn module_types(modules_payload: &Value) -> Vec<ModuleType> {
@@ -277,6 +303,8 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::RackRemove { id } => Request::RackRemove { id },
             Command::RackMove { id, to } => Request::RackMove { id, to },
             Command::Mute(on) => Request::Mute { on },
+            Command::RackIr { id, ir } => Request::RackIr { ir, id: Some(id) },
+            Command::RefreshIrs => continue,
             Command::Quit => return (requests, true),
         };
         requests.push(req);

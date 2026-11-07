@@ -14,9 +14,9 @@ use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
     NEUTRAL_ACCENT, ParamRow, Throttle, TunerReading, accent_for, add_after, add_command,
-    bank_rows, cents_fraction, cents_text, counts_toward_spawn, failed_set, in_tune,
-    key_to_command, knob_value_from_drag, meter_fraction, module_types, move_target, param_rows,
-    peak_fraction, quit_commands, rack_channels, refresh_decision, requests_until_quit,
+    bank_rows, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, failed_set, in_tune,
+    ir_names, key_to_command, knob_value_from_drag, meter_fraction, module_types, move_target,
+    param_rows, peak_fraction, quit_commands, rack_channels, refresh_decision, requests_until_quit,
     response_text, spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
 
@@ -805,4 +805,48 @@ fn cents_text_is_signed() {
     assert_eq!(cents_text(3), "+3 ct");
     assert_eq!(cents_text(-3), "-3 ct");
     assert_eq!(cents_text(0), "+0 ct");
+}
+
+#[test]
+fn ir_names_from_payload() {
+    let payload = json!({"ok": true, "ir_dir": "/srv/irs", "irs": ["Loud.WAV", "bass-cab.wav", "celestion/v30.wav"]});
+    assert_eq!(
+        ir_names(&payload),
+        vec!["Loud.WAV", "bass-cab.wav", "celestion/v30.wav"]
+    );
+    assert!(ir_names(&json!({"ok": true, "ir_dir": "/srv/irs", "irs": []})).is_empty());
+}
+
+#[test]
+fn cabinet_ir_from_get() {
+    let payload = json!({"params": [
+        {"module": "preamp", "type": "preamp", "param": "gain", "value": 40.0},
+        {"module": "cabinet", "type": "cabinet", "param": "mix", "value": 1.0, "ir": "cabs/x.wav"},
+        {"module": "cabinet", "type": "cabinet", "param": "low_cut", "value": 80.0, "ir": "cabs/x.wav"},
+        {"module": "cab2", "type": "cabinet", "param": "mix", "value": 1.0, "ir": null},
+    ]});
+    assert_eq!(
+        cabinet_ir(&payload, "cabinet"),
+        Some("cabs/x.wav".to_string())
+    );
+    assert_eq!(cabinet_ir(&payload, "cab2"), None);
+    assert_eq!(cabinet_ir(&payload, "preamp"), None);
+    assert_eq!(cabinet_ir(&payload, "delay"), None);
+}
+
+#[test]
+fn rack_ir_command_maps_to_request() {
+    assert_eq!(
+        requests_until_quit(vec![Command::RackIr {
+            id: "cabinet".to_string(),
+            ir: "cabs/x.wav".to_string(),
+        }]),
+        (
+            vec![Request::RackIr {
+                ir: "cabs/x.wav".to_string(),
+                id: Some("cabinet".to_string()),
+            }],
+            false
+        )
+    );
 }

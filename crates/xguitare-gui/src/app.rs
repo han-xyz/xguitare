@@ -17,14 +17,17 @@ use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command, bank_rows, cents_fraction,
-    cents_text, in_tune, key_to_command, link_text, move_target, param_rows, peak_fraction,
-    quit_commands, rack_channels, status_line, tuner_reading, tuner_toggle, unit_suffix,
+    SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command, bank_rows, cabinet_ir,
+    cents_fraction, cents_text, in_tune, key_to_command, link_text, move_target, param_rows,
+    peak_fraction, quit_commands, rack_channels, status_line, tuner_reading, tuner_toggle,
+    unit_suffix,
 };
 
 use crate::widgets::{self, KnobSpec};
 
 const NO_PRESET: &str = "no preset";
+const NO_IR: &str = "none";
+const CABINET: &str = "cabinet";
 const BANK_WIDTH: f32 = 220.0;
 const PANEL_FILL: Color32 = Color32::from_rgb(28, 26, 24);
 const CARD_FILL: Color32 = Color32::from_rgb(40, 37, 34);
@@ -101,6 +104,7 @@ impl App {
                 params: None,
                 tuner: None,
                 module_types: Vec::new(),
+                irs: Vec::new(),
                 last_message: None,
                 failed_set: None,
             },
@@ -335,7 +339,11 @@ fn preset_panel(
     ScrollArea::vertical().show(ui, |ui| {
         for (index, (module, rows)) in modules.iter().enumerate() {
             let place = (index, modules.len());
-            commands.extend(module_card(ui, module, rows, place, knobs));
+            let ir_choice = snapshot.params.as_ref().map(|params| IrChoice {
+                current: cabinet_ir(params, module),
+                irs: &snapshot.irs,
+            });
+            commands.extend(module_card(ui, module, rows, place, ir_choice, knobs));
             ui.add_space(CARD_GAP);
         }
     });
@@ -384,9 +392,11 @@ fn module_card(
     module: &str,
     rows: &[ParamRow],
     (index, len): (usize, usize),
+    ir_choice: Option<IrChoice>,
     knobs: &mut Knobs,
 ) -> Vec<Command> {
     let type_name = rows.first().map_or("", |row| row.module_type.as_str());
+    let ir_choice = ir_choice.filter(|_| type_name == CABINET);
     let is_amp = AMP_TYPES.contains(&type_name);
     let band = if is_amp { AMP_BAND_HEIGHT } else { BAND_HEIGHT };
     let card = Frame::new()
@@ -408,6 +418,9 @@ fn module_card(
                 |ui| module_buttons(ui, module, index, len),
             );
             let mut commands: Vec<Command> = clicked.into_iter().collect();
+            if let Some(ir_choice) = &ir_choice {
+                commands.extend(ir_row(ui, module, ir_choice));
+            }
             ui.horizontal_wrapped(|ui| {
                 commands.extend(rows.iter().filter_map(|row| param_knob(ui, row, knobs)));
             });
@@ -425,6 +438,42 @@ fn module_card(
         widgets::accent(type_name),
     );
     card.inner
+}
+
+struct IrChoice<'a> {
+    current: Option<String>,
+    irs: &'a [String],
+}
+
+/// Opening the combo refetches `ir_list`, so that a Cabinet IR copied into the IR directory shows without a reconnect.
+fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
+    let mut commands = Vec::new();
+    ui.horizontal(|ui| {
+        ui.label("IR");
+        let salt = ("ir", module);
+        let id = ui.make_persistent_id(salt);
+        let was_open = ComboBox::is_open(ui.ctx(), id);
+        let current = ir_choice.current.as_deref();
+        ComboBox::from_id_salt(salt)
+            .selected_text(current.unwrap_or(NO_IR))
+            .show_ui(ui, |ui| {
+                for name in ir_choice.irs {
+                    if ui
+                        .selectable_label(current == Some(name.as_str()), name)
+                        .clicked()
+                    {
+                        commands.push(Command::RackIr {
+                            id: module.to_string(),
+                            ir: name.clone(),
+                        });
+                    }
+                }
+            });
+        if !was_open && ComboBox::is_open(ui.ctx(), id) {
+            commands.push(Command::RefreshIrs);
+        }
+    });
+    commands
 }
 
 fn label_plate(ui: &mut Ui, text: &str) {

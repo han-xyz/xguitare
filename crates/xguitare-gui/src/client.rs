@@ -10,7 +10,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::model::{
-    Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, module_types,
+    Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, ir_names, module_types,
     refresh_decision, requests_until_quit, response_text, spawn_policy,
 };
 use serde_json::Value;
@@ -49,6 +49,7 @@ struct Client {
     revision: Option<u64>,
     modules_fetched: bool,
     modules_warned: bool,
+    irs_fetched: bool,
     tuner_answered: bool,
     snapshot: Snapshot,
 }
@@ -67,6 +68,7 @@ impl Client {
             revision: None,
             modules_fetched: false,
             modules_warned: false,
+            irs_fetched: false,
             tuner_answered: false,
             snapshot: Snapshot {
                 link: Link::Disconnected {
@@ -77,6 +79,7 @@ impl Client {
                 params: None,
                 tuner: None,
                 module_types: Vec::new(),
+                irs: Vec::new(),
                 last_message: None,
                 failed_set: None,
             },
@@ -146,12 +149,18 @@ impl Client {
                 Err(TryRecvError::Disconnected) => break true,
             }
         };
+        if queued.contains(&Command::RefreshIrs) {
+            self.irs_fetched = false;
+        }
         let (requests, quit) = requests_until_quit(queued);
         let sent = requests.len();
         for req in requests {
             let response = self.request(&req);
             if let (Request::Mute { .. }, Ok(Response::Ok(payload))) = (&req, &response) {
                 log_mute(payload);
+            }
+            if let Request::RackIr { .. } = &req {
+                log_rack_ir(&response);
             }
             if let Some(param) = failed_set(&req, &response) {
                 self.snapshot.failed_set = Some((param, Instant::now()));
@@ -235,6 +244,12 @@ impl Client {
                 return;
             }
         }
+        if !self.irs_fetched {
+            self.fetch_irs();
+            if self.connection.is_none() {
+                return;
+            }
+        }
         self.failures = 0;
         let revision = status["revision"].as_u64().unwrap_or(0);
         self.snapshot.status = Some(status);
@@ -254,6 +269,24 @@ impl Client {
                 if !self.modules_warned {
                     warn!("modules: {error}; retrying");
                     self.modules_warned = true;
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// Fetched once whatever the answer, so that an unreadable IR directory shows one error, not one per tick.
+    fn fetch_irs(&mut self) {
+        let response = self.request(&Request::IrList);
+        self.irs_fetched = true;
+        match response {
+            Ok(Response::Ok(payload)) => {
+                self.snapshot.irs = ir_names(&payload);
+                info!("ir_list: {} irs", self.snapshot.irs.len());
+            }
+            Ok(Response::Err { .. }) => {
+                if let Some(text) = response_text(&Request::IrList, response) {
+                    self.snapshot.last_message = Some((text, Instant::now()));
                 }
             }
             Err(_) => {}
@@ -302,6 +335,7 @@ impl Client {
         self.connection = None;
         self.revision = None;
         self.modules_fetched = false;
+        self.irs_fetched = false;
         self.snapshot.status = None;
         self.snapshot.tuner = None;
         self.snapshot.link = Link::Disconnected {
@@ -395,6 +429,18 @@ fn log_mute(payload: &Value) {
         info!("muted");
     } else {
         info!("unmuted");
+    }
+}
+
+fn log_rack_ir(response: &Result<Response, ClientError>) {
+    match response {
+        Ok(Response::Ok(payload)) => info!(
+            "rack_ir: {} ir {}",
+            payload["id"].as_str().unwrap_or_default(),
+            payload["ir"].as_str().unwrap_or_default()
+        ),
+        Ok(Response::Err { error }) => info!("rack_ir: error: {error}"),
+        Err(err) => info!("rack_ir: error: {err}"),
     }
 }
 
