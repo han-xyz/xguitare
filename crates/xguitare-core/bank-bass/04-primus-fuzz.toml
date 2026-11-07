@@ -29,3 +29,6 @@ treble = 45
 [[module]]
 type = "cabinet"
 ir = "bass-cab.wav"
+
+[module.params]
+level = 12.0

@@ -28,6 +28,9 @@ treble = 60
 type = "cabinet"
 ir = "bass-cab.wav"
 
+[module.params]
+level = 12.0
+
 [[module]]
 type = "delay"
 [module.params]

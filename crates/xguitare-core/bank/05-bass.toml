@@ -23,6 +23,9 @@ treble = 35
 type = "cabinet"
 ir = "default-cab.wav"
 
+[module.params]
+level = 12.0
+
 [[module]]
 type = "reverb"
 [module.params]

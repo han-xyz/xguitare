@@ -30,6 +30,9 @@ treble = 55
 type = "cabinet"
 ir = "default-cab.wav"
 
+[module.params]
+level = 12.0
+
 [[module]]
 type = "delay"
 [module.params]

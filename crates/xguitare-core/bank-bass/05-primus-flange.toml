@@ -24,6 +24,9 @@ treble = 50
 type = "cabinet"
 ir = "bass-cab.wav"
 
+[module.params]
+level = 12.0
+
 [[module]]
 type = "flanger"
 [module.params]
