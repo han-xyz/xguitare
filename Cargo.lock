@@ -4784,7 +4784,6 @@ dependencies = [
  "assert_no_alloc",
  "directories",
  "hound",
- "libc",
  "rtrb",
  "serde",
  "serde_json",

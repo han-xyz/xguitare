@@ -11,7 +11,6 @@ directories = "6.0.0"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.2.1"
 hound = "3.5.1"
-libc = "0.2.191"
 rtrb = "0.4.1"
 serde_json = "1.0.154"
 

@@ -493,13 +493,17 @@ fn save_through_symlink() {
     assert!(tmp_files(&elsewhere).is_empty());
 }
 
+const SAVES_IN_THIS_BINARY_BOUND: u64 = 1024;
+
 #[test]
 fn save_does_not_follow_planted_tmp_link() {
     let (mut state, _audio, dir) = state("save-planted-link");
     let victim = dir.0.join("victim.txt");
     fs::write(&victim, "keep").unwrap();
     let victim_mode = fs::metadata(&victim).unwrap().mode();
-    for n in 0..1024 {
+    // White-box on purpose: plants the private temp name `<file>.<pid>.<n>.tmp`. `n` counts
+    // saves across this whole test binary, so every value it can reach is planted.
+    for n in 0..SAVES_IN_THIS_BINARY_BOUND {
         let name = format!("01-clean.toml.{}.{n}.tmp", std::process::id());
         std::os::unix::fs::symlink(&victim, state.config.bank_dir.join(name)).unwrap();
     }

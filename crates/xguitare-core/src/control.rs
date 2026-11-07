@@ -488,10 +488,7 @@ fn write_through(path: &Path, text: &str) -> io::Result<()> {
     };
     let tmp = temp_path(&target);
     let mut options = OpenOptions::new();
-    options
-        .write(true)
-        .create_new(true)
-        .custom_flags(libc::O_NOFOLLOW);
+    options.write(true).create_new(true);
     if let Some(permissions) = &permissions {
         options.mode(permissions.mode());
     }
