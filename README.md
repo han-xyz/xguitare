@@ -5,7 +5,7 @@
 Low-latency guitar amp and effects rack for Linux, headless first.
 Rust, JACK API (runs natively on PipeWire via pipewire-jack), own DSP, TOML presets.
 
-One guitar in, stereo out. A Daemon runs the audio; the `xguitare` CLI talks to it over a Unix socket. The window [`xguitare-gui`](#gui) and any script can use the same socket: see [docs/control-api.md](docs/control-api.md).
+One guitar in, stereo out. A Daemon runs the audio; the `xguitare` CLI talks to it over a Unix socket. The window [`xguitare-gui`](#gui) and any script can use the same socket: see [docs/control-api.md](docs/control-api.md). Changes between versions are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
