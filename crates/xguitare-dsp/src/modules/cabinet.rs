@@ -3,12 +3,12 @@ use std::sync::Arc;
 use realfft::num_complex::Complex;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
+use crate::smooth::Smoother;
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const LEVEL: usize = 0;
 const LOW_CUT: usize = 1;
 const HIGH_CUT: usize = 2;
-const SMOOTHING_SECONDS: f32 = 0.005;
 const BUTTERWORTH_Q: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
 static SPEC: ModuleSpec = ModuleSpec {
@@ -69,9 +69,7 @@ pub struct Cabinet {
     ir: Option<CabinetIr>,
     convolver: Option<Convolver>,
     level_db: f32,
-    target: f32,
-    current: f32,
-    coeff: f32,
+    level: Smoother,
     sample_rate: f64,
     low_cut_hz: f32,
     high_cut_hz: f32,
@@ -87,9 +85,7 @@ impl Cabinet {
             ir,
             convolver: None,
             level_db,
-            target: db_to_linear(level_db),
-            current: db_to_linear(level_db),
-            coeff: 0.0,
+            level: Smoother::new(db_to_linear(level_db)),
             sample_rate: 0.0,
             low_cut_hz: SPEC.params[LOW_CUT].default,
             high_cut_hz: SPEC.params[HIGH_CUT].default,
@@ -120,14 +116,14 @@ impl Module for Cabinet {
     }
 
     fn prepare(&mut self, sample_rate: f32, max_frames: usize) {
-        self.coeff = (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp();
+        self.level.prepare(sample_rate);
         self.sample_rate = f64::from(sample_rate);
         self.update_cuts();
         self.convolver = self.ir.as_ref().map(|ir| Convolver::new(ir, max_frames));
     }
 
     fn reset(&mut self) {
-        self.current = self.target;
+        self.level.snap();
         self.high_pass.clear();
         self.low_pass.clear();
         if let Some(convolver) = &mut self.convolver {
@@ -141,7 +137,7 @@ impl Module for Cabinet {
         match idx {
             LEVEL => {
                 self.level_db = value;
-                self.target = db_to_linear(value);
+                self.level.set_target(db_to_linear(value));
             }
             LOW_CUT => {
                 self.low_cut_hz = value.round();
@@ -177,9 +173,9 @@ impl Module for Cabinet {
         self.high_pass.process(left, right);
         self.low_pass.process(left, right);
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
-            self.current = self.target + self.coeff * (self.current - self.target);
-            *l *= self.current;
-            *r *= self.current;
+            let level = self.level.next_value();
+            *l *= level;
+            *r *= level;
         }
     }
 }

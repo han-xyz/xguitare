@@ -263,3 +263,21 @@ fn normalise_zero_ir_is_noop() {
     ir.normalise();
     assert_eq!(ir, before);
 }
+
+#[test]
+fn cabinet_level_ramps() {
+    const SMOOTHING_FRAMES: f32 = 0.005 * SAMPLE_RATE;
+    let mut rack = cabinet_rack(None);
+    rack.module_mut(0).set_param(0, 20.0);
+    let (left, right) = run(&mut rack, &vec![1.0; 4800], BLOCK);
+    let limit = (10.0 - 1.0) / SMOOTHING_FRAMES;
+    for channel in [&left, &right] {
+        let steepest = channel
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).abs())
+            .fold(0.0, f32::max);
+        assert!(steepest <= limit, "step {steepest} above {limit}");
+        assert!(channel[0] < 1.1, "first sample {}", channel[0]);
+        assert!((channel[4799] - 10.0).abs() <= 1e-3, "{}", channel[4799]);
+    }
+}
