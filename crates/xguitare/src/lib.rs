@@ -56,6 +56,9 @@ enum Cmd {
     /// Edit the live Rack's layout
     #[command(subcommand)]
     Rack(RackCmd),
+    /// List or load Cabinet IRs
+    #[command(subcommand, arg_required_else_help = false)]
+    Ir(IrCmd),
     /// Print the Tuner reading; --watch keeps printing until Ctrl-C and, with tuner_mute, mutes meanwhile
     Tuner {
         #[arg(long)]
@@ -86,6 +89,18 @@ enum RackCmd {
     Remove { id: String },
     /// Move a Module to a zero-based position
     Move { id: String, to: usize },
+}
+
+#[derive(Subcommand)]
+enum IrCmd {
+    /// List the Cabinet IRs under the IR directory
+    List,
+    /// Load a Cabinet IR into the cabinet Module (the first one, or --id)
+    Set {
+        file: String,
+        #[arg(long)]
+        id: Option<String>,
+    },
 }
 
 /// Parses `argv` and runs the command; returns the process exit code (0 on success, `--help` and `--version`; 1 on any error, after one line on stderr).

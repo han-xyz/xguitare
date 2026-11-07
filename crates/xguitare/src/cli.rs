@@ -7,7 +7,7 @@ use std::time::Duration;
 use xguitare_client::Transport;
 use xguitare_core::control::{Request, Response, Value};
 
-use crate::{Cmd, MuteState, RackCmd, parse};
+use crate::{Cmd, IrCmd, MuteState, RackCmd, parse};
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
@@ -132,6 +132,8 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         },
         Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id },
         Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove { id, to },
+        Cmd::Ir(IrCmd::List) => Request::IrList,
+        Cmd::Ir(IrCmd::Set { file, id }) => Request::RackIr { ir: file, id },
         Cmd::Tuner { .. } => Request::Tuner,
         Cmd::Mute { state } => Request::Mute {
             on: matches!(state, MuteState::On),
@@ -189,8 +191,11 @@ fn render(req: &Request, payload: &Value) -> String {
                 "unmuted\n".to_string()
             }
         }
-        Request::IrList | Request::RackIr { .. } => {
-            unreachable!("no CLI subcommand sends {req:?} yet")
+        Request::IrList => items(&payload["irs"])
+            .map(|name| format!("{}\n", text(name)))
+            .collect(),
+        Request::RackIr { .. } => {
+            format!("ir {} {}\n", text(&payload["id"]), text(&payload["ir"]))
         }
     }
 }

@@ -529,3 +529,78 @@ fn tuner_watch_unmutes_after_error() {
     assert_eq!(out.requests.last(), Some(&Request::Mute { on: false }));
     assert_eq!(out.code, 1);
 }
+
+#[test]
+fn ir_list_prints_names() {
+    let out = cli(
+        &["ir", "list"],
+        reply(r#"{"ok":true,"ir_dir":"/srv/irs","irs":["bad.wav","cabs/x.wav"]}"#),
+    );
+    assert_eq!(out.requests, [Request::IrList]);
+    assert_eq!(out.stdout, "bad.wav\ncabs/x.wav\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn ir_list_empty_prints_nothing() {
+    let out = cli(
+        &["ir", "list"],
+        reply(r#"{"ok":true,"ir_dir":"/srv/irs","irs":[]}"#),
+    );
+    assert_eq!(out.stdout, "");
+    assert_eq!(out.stderr, "");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn ir_set_prints() {
+    let out = cli(
+        &["ir", "set", "cabs/x.wav"],
+        reply(r#"{"ok":true,"id":"cabinet","ir":"cabs/x.wav"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackIr {
+            ir: "cabs/x.wav".to_string(),
+            id: None,
+        }]
+    );
+    assert_eq!(out.stdout, "ir cabinet cabs/x.wav\n");
+    assert_eq!(out.code, 0);
+    let out = cli(
+        &["ir", "set", "cabs/x.wav", "--id", "cab-2"],
+        reply(r#"{"ok":true,"id":"cab-2","ir":"cabs/x.wav"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackIr {
+            ir: "cabs/x.wav".to_string(),
+            id: Some("cab-2".to_string()),
+        }]
+    );
+    assert_eq!(out.stdout, "ir cab-2 cabs/x.wav\n");
+}
+
+#[test]
+fn ir_set_error() {
+    let out = cli(
+        &["ir", "set", "bad.wav"],
+        reply(r#"{"ok":false,"error":"/srv/irs/bad.wav: unsupported wav format: 8-bit int"}"#),
+    );
+    assert_eq!(
+        out.stderr,
+        "error: /srv/irs/bad.wav: unsupported wav format: 8-bit int\n"
+    );
+    assert!(out.stdout.is_empty());
+    assert_eq!(out.code, 1);
+}
+
+#[test]
+fn ir_alone_is_usage_error() {
+    let out = cli(&["ir"], reply(r#"{"ok":true}"#));
+    assert_eq!(out.code, 1);
+    assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
+    assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
+    assert!(out.requests.is_empty());
+    assert!(out.stdout.is_empty());
+}
