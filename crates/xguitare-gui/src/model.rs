@@ -3,11 +3,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use xguitare_client::ClientError;
-use xguitare_core::control::{Request, Response};
+use xguitare_core::control::{Request, Response, SILENCE_DB};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
-pub const SILENCE_DB: f64 = -120.0;
 pub const METER_FLOOR_DB: f64 = -60.0;
 pub const METER_RED_DB: f64 = -6.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);

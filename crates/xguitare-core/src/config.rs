@@ -11,7 +11,7 @@ use crate::engine::SWITCHER_MAX_FRAMES;
 
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
-const SOCKET_DIR_MODE: u32 = 0o700;
+pub const SOCKET_DIR_MODE: u32 = 0o700;
 const TUNER_REFERENCE_HZ: std::ops::RangeInclusive<f32> = 400.0..=480.0;
 pub const AUTO_PORT: &str = "auto";
 

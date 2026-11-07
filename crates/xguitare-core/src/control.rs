@@ -27,7 +27,7 @@ use crate::{ResolveError, resolve};
 const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";
 const NANOS_PER_MICRO: u64 = 1_000;
-const SILENCE_DB: f32 = -120.0;
+pub const SILENCE_DB: f64 = -120.0;
 const CABINET_IRS: [&str; 2] = [DEFAULT_IR, BASS_IR];
 const CABINET_NEEDS_IR: &str = "cabinet needs an ir; add one in the preset file";
 const AFTER_OR_AT: &str = "give either after or at";
@@ -261,7 +261,7 @@ fn mute(state: &EngineState, on: bool) -> Value {
 }
 
 fn peak_db(peak: f32) -> f64 {
-    let db = (20.0 * f64::from(peak).log10()).max(f64::from(SILENCE_DB));
+    let db = (20.0 * f64::from(peak).log10()).max(SILENCE_DB);
     (db * 10.0).round() / 10.0
 }
 

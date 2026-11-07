@@ -11,14 +11,13 @@ use std::time::Duration;
 
 use tracing::warn;
 use xguitare_core::control::{EngineState, handle_line};
-use xguitare_core::{SocketDirError, secure_socket_dir};
+use xguitare_core::{SOCKET_DIR_MODE, SocketDirError, secure_socket_dir};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const READ_TICK: Duration = Duration::from_secs(1);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LINE: usize = 64 * 1024;
 const TOO_LONG: &str = r#"{"ok":false,"error":"request too long"}"#;
-const SOCKET_DIR_MODE: u32 = 0o700;
 
 #[derive(Debug)]
 pub enum SocketError {
