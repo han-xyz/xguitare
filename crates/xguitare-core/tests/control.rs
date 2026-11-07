@@ -1196,13 +1196,12 @@ fn tuner_after_rate_change_ignores_old_rate_samples() {
     }
     state.shared.sample_rate.store(96_000, Ordering::Relaxed);
     change_sample_rate(&mut state, 96_000).unwrap();
-    for n in 0..2048 {
+    for n in 0..16384 {
         let sample = 0.5 * (TAU * 110.0 * n as f32 / 96_000.0).sin();
         assert!(audio.tap.push(sample).is_ok());
     }
     state.tuner.tick();
-    let note = &ok(handle(&mut state, Request::Tuner))["note"];
-    assert!(note.is_null() || note == "A2", "{note}");
+    assert_eq!(ok(handle(&mut state, Request::Tuner))["note"], "A2");
 }
 
 #[test]
