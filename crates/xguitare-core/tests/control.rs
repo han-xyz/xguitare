@@ -1171,3 +1171,34 @@ fn get_cabinet_carries_ir() {
         }
     }
 }
+
+struct RestoreMode(PathBuf);
+
+impl Drop for RestoreMode {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+    }
+}
+
+#[test]
+fn ir_list_skips_unreadable_subdir() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let (mut state, _audio, dir) = state("ir-list-unreadable");
+    let irs = dir.0.join("irs");
+    let locked = irs.join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    fs::write(irs.join("a.wav"), "").unwrap();
+    fs::write(locked.join("b.wav"), "").unwrap();
+    let _restore = RestoreMode(locked.clone());
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    state.config.ir_dir = irs;
+    let is_root = fs::metadata("/proc/self").unwrap().uid() == 0;
+    if is_root {
+        return;
+    }
+    assert_eq!(
+        ok(handle(&mut state, Request::IrList))["irs"],
+        json!(["a.wav"])
+    );
+}

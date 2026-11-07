@@ -311,7 +311,7 @@ Errors: `no module '<id>'`, `no preset loaded`, `engine busy`, and the layout er
 
 ## ir_list
 
-Lists the Cabinet IRs in the IR directory (config key `ir_dir`, default the Bank directory): every regular file whose extension is `.wav` in any case, in all subdirectories. Names starting with `.` are skipped, files and directories alike. A symlink is followed, except one inside a directory that was itself reached through a symlink. The directory is read on every request.
+Lists the Cabinet IRs in the IR directory (config key `ir_dir`, default the Bank directory): every regular file whose extension is `.wav` in any case, in all subdirectories. Names starting with `.` or not valid UTF-8 are skipped, files and directories alike, and so is a subdirectory that cannot be read. A symlink is followed, except one inside a directory that was itself reached through a symlink. The directory is read on every request.
 
 Request:
 
@@ -334,11 +334,11 @@ Errors:
 
 | `error` | When |
 | --- | --- |
-| `ir_dir <path>: <reason>` | The IR directory or one of its subdirectories cannot be read, e.g. `ir_dir /srv/irs: No such file or directory (os error 2)`. |
+| `ir_dir <path>: <reason>` | The IR directory cannot be read, e.g. `ir_dir /srv/irs: No such file or directory (os error 2)`. |
 
 ## rack_ir
 
-Sets the Cabinet IR of a cabinet Module in the active Preset, rebuilds the Rack from it and swaps it in with a crossfade, as `rack_add` does. `ir` is looked up as `<ir_dir>/<ir>` and, when that file does not exist, as `<bank directory>/<ir>`. `id` is optional: omitted, the first cabinet Module is used. Unlike `load`, which runs a cabinet whose IR fails to load as a passthrough and warns, `rack_ir` fails and changes nothing. The change is not written to the Preset file until `save`.
+Sets the Cabinet IR of a cabinet Module in the active Preset, rebuilds the Rack from it and swaps it in with a crossfade, as `rack_add` does. `ir` is looked up as `<ir_dir>/<ir>` and, when that file does not exist, as `<Bank directory>/<ir>`. `id` is optional: omitted, the first cabinet Module is used. Unlike `load`, which runs a cabinet whose IR fails to load as a passthrough and warns, `rack_ir` fails and changes nothing. The change is not written to the Preset file until `save`.
 
 Request:
 
@@ -365,7 +365,7 @@ Errors (on any of them nothing changes and the Revision stays):
 | `no module '<id>'` | The active Preset has no Module with that id. |
 | `module '<id>' is not a cabinet` | The Module with that id is not a cabinet, e.g. `module 'gate' is not a cabinet`. |
 | `invalid ir name '<ir>'` | `ir` is empty, absolute, or has a `.`, `..` or empty path segment, e.g. `invalid ir name '../x.wav'`. |
-| `<path>: <reason>` | The IR file cannot be loaded, e.g. `/srv/irs/bad.wav: unsupported wav format: 8-bit int`; `<path>` is the `ir_dir` path when the file is in neither directory. |
+| `<path>: <reason>` | The Cabinet IR cannot be loaded, e.g. `/srv/irs/bad.wav: unsupported wav format: 8-bit int`; `<path>` is the `ir_dir` path when the file is in neither directory. |
 | `no preset loaded` | No Preset is active. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
