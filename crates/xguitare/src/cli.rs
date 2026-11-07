@@ -162,7 +162,7 @@ fn render(req: &Request, payload: &Value) -> String {
                 text(&payload["value"])
             )
         }
-        Request::Get { .. } => render_get(payload),
+        Request::Get { param } => render_get(payload, param.as_deref()),
         Request::Save => format!("saved {}\n", text(&payload["path"])),
         Request::Modules => render_modules(payload),
         Request::RackAdd { .. } => format!("added {}\n", text(&payload["id"])),
@@ -189,8 +189,9 @@ fn render(req: &Request, payload: &Value) -> String {
     }
 }
 
-/// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR.
-fn render_get(payload: &Value) -> String {
+/// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR; a `key` naming one Parameter gets no such line.
+fn render_get(payload: &Value, key: Option<&str>) -> String {
+    let names_one_param = key.is_some_and(|key| key.contains('.'));
     let params: Vec<&Value> = items(&payload["params"]).collect();
     let mut lines = String::new();
     for (index, param) in params.iter().enumerate() {
@@ -205,7 +206,10 @@ fn render_get(payload: &Value) -> String {
         let is_last_of_module = params
             .get(index + 1)
             .is_none_or(|next| next["module"] != param["module"]);
-        if let Some(ir) = param.get("ir").filter(|_| is_last_of_module) {
+        if let Some(ir) = param
+            .get("ir")
+            .filter(|_| is_last_of_module && !names_one_param)
+        {
             let name = if ir.is_null() {
                 "none".to_string()
             } else {

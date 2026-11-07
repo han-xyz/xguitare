@@ -620,6 +620,17 @@ fn get_cabinet_prints_ir() {
 }
 
 #[test]
+fn get_cabinet_param_prints_no_ir() {
+    let out = cli(
+        &["get", "cabinet.level"],
+        reply(
+            r#"{"ok":true,"params":[{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","ir":"celestion/v30.wav"}]}"#,
+        ),
+    );
+    assert_eq!(out.stdout, "cabinet.level = 0 dB\n");
+}
+
+#[test]
 fn rack_alone_is_error_line() {
     let out = cli(&["rack"], reply(r#"{"ok":true}"#));
     assert_eq!(out.code, 1);
