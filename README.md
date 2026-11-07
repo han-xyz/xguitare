@@ -226,16 +226,16 @@ $ xguitare rack remove delay
 removed delay
 ```
 
-`ir list` prints the Cabinet IRs in the IR directory, one name per line, and nothing when there are none. `ir set <file> [--id <module>]` loads one into the first cabinet Module, or the cabinet with that id, with a short crossfade. An IR that cannot be loaded is refused and nothing changes. `save` writes the new `ir` to the Preset file:
+`ir list` prints the Cabinet IRs in the IR directory, one name per line, and nothing when there are none. `ir set <file> [--id <module>]` loads one into the Rack's cabinet Module (`--id` names it when you need to) with a short crossfade. An IR that cannot be loaded is refused and nothing changes. `save` writes the new `ir` to the Preset file:
 
 ```console
 $ xguitare ir list
-bad.wav
-cabs/x.wav
-$ xguitare ir set cabs/x.wav
-ir cabinet cabs/x.wav
+default-cab.wav
+cabs/v30.wav
+$ xguitare ir set cabs/v30.wav
+ir cabinet cabs/v30.wav
 $ xguitare ir set nope.wav
-error: /tmp/xgv/irs/nope.wav: No such file or directory (os error 2)
+error: /home/you/.config/xguitare/bank/nope.wav: No such file or directory (os error 2)
 ```
 
 `tuner` prints the Tuner's reading of the dry input: the nearest note, the pitch and how many cents it is off (A4 at `tuner_reference_hz`), or `no signal`:
@@ -374,7 +374,7 @@ pw-metadata -n settings 0 clock.force-quantum 0
 
 **Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` name, which is looked up under the IR directory (`ir_dir`) and then the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
 
-**`ir set` says the file cannot be read.** The IR must be a 16/24/32-bit PCM or float wav with one or two channels.
+**`ir set` answers `error: <path>: Failed to read enough bytes` or another read error.** The IR must be a 16/24/32-bit PCM or float wav with one or two channels.
 
 ## License
 
