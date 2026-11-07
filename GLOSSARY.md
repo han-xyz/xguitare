@@ -25,8 +25,12 @@ An ordered collection of Presets; a Preset's position in it is its MIDI program 
 _Avoid_: set list, library, collection
 
 **Cabinet IR**:
-An impulse response audio file that the cabinet Module convolves the signal with.
+An impulse response audio file that the cabinet Module convolves the signal with, named in a Preset by its path under the IR directory (or the Bank directory).
 _Avoid_: cab sim, speaker model, IR file
+
+**IR directory**:
+The directory a Preset's Cabinet IR names are looked up in; the Bank directory unless the config names another.
+_Avoid_: IR library, IR folder, cab folder
 
 **Engine**:
 The real-time part that runs one Rack on the audio thread.
