@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{TempDir, answer, serve};
-use xguitare_client::{ClientError, Connection, Transport, UnixSocketTransport};
+use xguitare_client::{ClientError, Connection, Reconnecting, Transport, UnixSocketTransport};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 
@@ -136,5 +136,27 @@ fn connection_is_a_transport() {
         Response::from_line(STATUS).unwrap()
     );
     drop(connection);
+    server.join().unwrap();
+}
+
+#[test]
+fn reconnecting_recovers_after_error() {
+    let dir = TempDir::new("reconnecting");
+    let listener = UnixListener::bind(dir.socket()).unwrap();
+    let server = thread::spawn(move || {
+        let (first, _) = listener.accept().unwrap();
+        answer(&first, &[format!("{STATUS}\n")]);
+        drop(first);
+        let (second, _) = listener.accept().unwrap();
+        answer(&second, &[format!("{LIST}\n")]);
+    });
+    let mut transport = Reconnecting::new(dir.config());
+    assert!(transport.request(&Request::Status).is_ok());
+    assert!(transport.request(&Request::Status).is_err());
+    assert_eq!(
+        transport.request(&Request::List).unwrap(),
+        Response::from_line(LIST).unwrap()
+    );
+    drop(transport);
     server.join().unwrap();
 }

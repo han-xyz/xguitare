@@ -80,6 +80,35 @@ impl Transport for Connection {
     }
 }
 
+/// A `Connection` that reconnects on the request after an error; the failed request's error is returned unchanged and not retried.
+pub struct Reconnecting {
+    config: Config,
+    connection: Option<Connection>,
+}
+
+impl Reconnecting {
+    pub fn new(config: Config) -> Reconnecting {
+        Reconnecting {
+            config,
+            connection: None,
+        }
+    }
+}
+
+impl Transport for Reconnecting {
+    fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
+        let connection = match self.connection.as_mut() {
+            Some(connection) => connection,
+            None => self.connection.insert(Connection::connect(&self.config)?),
+        };
+        let response = connection.request(req);
+        if response.is_err() {
+            self.connection = None;
+        }
+        response
+    }
+}
+
 fn check_socket_dir(config: &Config) -> Result<(), ClientError> {
     let fallback_dir = config
         .socket

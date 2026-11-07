@@ -512,3 +512,20 @@ fn status_shows_muted() {
         out.stdout
     );
 }
+
+#[test]
+fn tuner_watch_unmutes_after_error() {
+    let out = cli_with(
+        &["tuner", "--watch"],
+        vec![
+            reply(r#"{"ok":true,"muted":true}"#),
+            reply(E1_READING),
+            Err(ClientError::Protocol("boom".into())),
+            reply(r#"{"ok":true,"muted":false}"#),
+        ],
+        watch_env(true),
+        None,
+    );
+    assert_eq!(out.requests.last(), Some(&Request::Mute { on: false }));
+    assert_eq!(out.code, 1);
+}
