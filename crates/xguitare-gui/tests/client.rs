@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -178,5 +178,25 @@ fn modules_transport_error_leaves_no_stale_status() {
         );
     }
     commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn mute_queued_after_stop_is_sent_before_the_thread_ends() {
+    let dir = temp_dir("stop-mute");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_record(listener, |cmd| match cmd {
+        "mute" => r#"{"ok":true,"muted":false}"#.to_string(),
+        _ => reply(cmd).to_string(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, _snapshots, handle) = client::spawn(config, None, Arc::clone(&stop), || {});
+    next_arrival(&received, "status");
+    stop.store(true, Ordering::Relaxed);
+    thread::sleep(client::TICK * 3);
+    let _ = commands.send(Command::Mute(false));
+    let _ = commands.send(Command::Quit);
+    next_arrival(&received, "mute");
     handle.join().unwrap();
 }

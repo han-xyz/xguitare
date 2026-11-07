@@ -12,7 +12,7 @@ use egui::{
     Visuals, vec2,
 };
 use serde_json::Value;
-use tracing::error;
+use tracing::{error, info};
 use xguitare_core::Config;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
@@ -205,7 +205,9 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         // An Err means the client thread has already ended; joining it is still right.
-        for command in quit_commands(self.tuner_open, self.muted_by_us) {
+        let commands = quit_commands(self.tuner_open, self.muted_by_us);
+        info!("quit: queued {commands:?}");
+        for command in commands {
             let _ = self.commands.send(command);
         }
         if let Some(client) = self.client.take()

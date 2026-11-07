@@ -91,7 +91,13 @@ impl Client {
     ) {
         let mut sent: Option<Snapshot> = None;
         let mut next_poll = Instant::now();
-        while !self.stop.load(Ordering::Relaxed) {
+        let mut stop_seen = false;
+        loop {
+            // The thread ends only on the UI's Quit, so that the unmute on_exit queues before it still goes out; a signal only wakes the UI to close the window.
+            if !stop_seen && self.stop.load(Ordering::Relaxed) {
+                stop_seen = true;
+                repaint();
+            }
             let now = Instant::now();
             if now >= next_poll {
                 self.poll(now);
@@ -141,6 +147,7 @@ impl Client {
             }
         };
         let (requests, quit) = requests_until_quit(queued);
+        let sent = requests.len();
         for req in requests {
             let response = self.request(&req);
             if let (Request::Mute { .. }, Ok(Response::Ok(payload))) = (&req, &response) {
@@ -152,6 +159,9 @@ impl Client {
             if let Some(text) = response_text(&req, response) {
                 self.snapshot.last_message = Some((text, Instant::now()));
             }
+        }
+        if quit {
+            info!("quit: sent {sent} final requests");
         }
         !quit && !ui_gone
     }
