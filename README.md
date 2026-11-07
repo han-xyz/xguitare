@@ -99,7 +99,7 @@ mix = 10
 
 - Each `[[module]]` is one Module of the Rack, in signal order. `type` is required. `id` is optional and defaults to the type; give one when a Preset has two Modules of the same type (ids must be unique). The CLI addresses Parameters as `<id>.<param>`.
 - Omitted Parameters take their defaults; values outside a Parameter's range are clamped.
-- `cabinet` needs `ir`: a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo) relative to the Bank directory. The path must stay inside the Bank directory: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
+- `cabinet` needs `ir`: the name of a Cabinet IR, a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo). The name is looked up under the IR directory (config `ir_dir`, default the Bank directory) and, when no file of that name is there, under the Bank directory. It must be a relative name: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. Every IR is normalised to unit energy on load, so IRs sit at one loudness and `level` balances the cabinet against the rest; the starter Presets were not re-tuned. `xguitare ir list` shows the names in the IR directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
 
 Modules and Parameters (`min..max default unit`):
 
@@ -111,7 +111,7 @@ Modules and Parameters (`min..max default unit`):
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `preamp` | `gain` 0..100 40 %, `bias` −1..1 0, `master` −60..0 −12 dB, `stages` 1..4 3 |
 | `tonestack` | `bass`, `middle`, `treble` 0..100 50 % |
-| `cabinet` | `level` −20..20 0 dB |
+| `cabinet` | `level` −20..20 0 dB, `low_cut` 20..300 20 Hz, `high_cut` 2000..20000 20000 Hz |
 | `delay` | `time` 10..2000 400 ms, `feedback` 0..95 35 %, `mix` 0..100 25 %, `pingpong` 0..1 0 |
 | `chorus` | `rate` 0.1..5 1 Hz, `depth` 0..100 50 %, `mix` 0..100 40 % |
 | `flanger` | `rate` 0.05..5 0.3 Hz, `depth` 0..100 60 %, `feedback` −95..95 50 %, `mix` 0..100 50 % |
@@ -226,6 +226,18 @@ $ xguitare rack remove delay
 removed delay
 ```
 
+`ir list` prints the Cabinet IRs in the IR directory, one name per line, and nothing when there are none. `ir set <file> [--id <module>]` loads one into the first cabinet Module, or the cabinet with that id, with a short crossfade. An IR that cannot be loaded is refused and nothing changes. `save` writes the new `ir` to the Preset file:
+
+```console
+$ xguitare ir list
+bad.wav
+cabs/x.wav
+$ xguitare ir set cabs/x.wav
+ir cabinet cabs/x.wav
+$ xguitare ir set nope.wav
+error: /tmp/xgv/irs/nope.wav: No such file or directory (os error 2)
+```
+
 `tuner` prints the Tuner's reading of the dry input: the nearest note, the pitch and how many cents it is off (A4 at `tuner_reference_hz`), or `no signal`:
 
 ```console
@@ -299,6 +311,7 @@ Optional file: `~/.config/xguitare/config.toml` (`$XDG_CONFIG_HOME/xguitare/conf
 ```toml
 bank_dir = "/home/you/.config/xguitare/bank"   # default: <config dir>/bank
 bank_kind = "guitar"                           # starter Bank for a missing bank_dir: "guitar" or "bass"
+ir_dir = "/home/you/.config/xguitare/bank"     # default: the Bank directory; where Preset `ir` names are looked up first
 buffer_size = 128                              # frames per JACK period requested at start, 1 to 8192
 crossfade_ms = 20                              # Preset switch crossfade
 ir_max_ms = 100                                # cabinet IRs are cut to this length
@@ -357,7 +370,9 @@ pw-metadata -n settings 0 clock.force-quantum 0
 
 **Silent output after a tuner client died.** Mute stays on when the client that turned it on is killed before it can turn it off; `xguitare status` shows `muted: true`. Run `xguitare mute off`.
 
-**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` path, which is relative to the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
+**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` name, which is looked up under the IR directory (`ir_dir`) and then the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
+
+**`ir set` says the file cannot be read.** The IR must be a 16/24/32-bit PCM or float wav with one or two channels.
 
 ## License
 
