@@ -7,6 +7,7 @@ mod rack;
 pub mod resample;
 pub mod smooth;
 pub mod synth_ir;
+pub mod tuner;
 
 pub use modules::chorus::Chorus;
 pub use modules::compressor::Compressor;
