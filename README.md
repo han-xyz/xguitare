@@ -83,6 +83,9 @@ treble = 55
 type = "cabinet"
 ir = "default-cab.wav"
 
+[module.params]
+level = 12.0
+
 [[module]]
 type = "delay"
 [module.params]
@@ -99,7 +102,7 @@ mix = 10
 
 - Each `[[module]]` is one Module of the Rack, in signal order. `type` is required. `id` is optional and defaults to the type; give one when a Preset has two Modules of the same type (ids must be unique). The CLI addresses Parameters as `<id>.<param>`.
 - Omitted Parameters take their defaults; values outside a Parameter's range are clamped.
-- `cabinet` needs `ir`: the name of a Cabinet IR, a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo). The name is looked up under the IR directory (config `ir_dir`, default the Bank directory) and, when no file of that name is there, under the Bank directory. Only the first `ir_max_ms` of the file is read, and an IR with a NaN or infinite sample is refused. It must be a relative name: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. Every IR is normalised to unit energy on load (a stereo IR to unit energy per channel on average, so it plays as loud in total as a mono IR), so IRs sit at one loudness and `level` balances the cabinet against the rest. Banks created before this version sound about 12 dB quieter; raise the cabinet `level` to compensate (the starter Presets now carry `level = 12`). `xguitare ir list` shows the names in the IR directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
+- `cabinet` needs `ir`: the name of a Cabinet IR, a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo). The name is looked up under the IR directory (config `ir_dir`, default the Bank directory) and, when no file of that name is there, under the Bank directory. Only the first `ir_max_ms` of the file is read, and an IR with a NaN or infinite sample is refused. It must be a relative name: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. Every IR is normalised to unit energy on load (a stereo IR to unit energy per channel on average, so it plays as loud in total as a mono IR), so IRs sit at one loudness and `level` balances the cabinet against the rest. `xguitare ir list` shows the names in the IR directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
 
 Modules and Parameters (`min..max default unit`):
 
@@ -373,8 +376,6 @@ When the audio server changes the sample rate while the Daemon runs, the Daemon 
 **`error: daemon not running (socket ...)`.** A CLI command found no Daemon. Start one with `xguitare run`.
 
 **Silent output after a tuner client died.** Mute stays on when the client that turned it on is killed before it can turn it off; `xguitare status` shows `muted: true`. Run `xguitare mute off`.
-
-**Everything got quieter after an update.** Cabinet IRs are now normalised to unit energy on load, which makes the old starter IRs about 12 dB quieter. Raise the cabinet `level` in your Presets (about 12, maximum 20); the starter Presets now carry `level = 12`.
 
 **Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` name, which is looked up under the IR directory (`ir_dir`) and then the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
 

@@ -1,0 +1,36 @@
+# Changelog
+
+All notable changes to xguitare are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## Unreleased
+
+### Added
+
+- The Daemon follows a sample-rate change of the audio server: it rebuilds the Rack (Cabinet IRs resampled) and the Tuner at the new rate, logs `sample rate changed: 48000 -> 96000`, and `status` shows the new `sample_rate`.
+- `get` on a cabinet ends with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none).
+- The Daemon serves at most 32 connections at once; one more gets `too many connections` and is closed. A connection idle for 300 seconds is closed.
+- One Daemon per socket: a second `xguitare run` on the same socket exits with `error: another Daemon is running`.
+
+### Changed
+
+- Cabinet IRs are normalised to unit energy on load, so Banks created before this change sound about 12 dB quieter. Raise the cabinet `level` in your Presets (about 12, maximum 20); the starter Presets carry `level = 12`.
+- A stereo Cabinet IR is normalised over both channels, so it plays as loud in total as a mono IR; a right-only IR is no longer boosted.
+- Only the first `ir_max_ms` of a Cabinet IR file is read.
+- `set` rounds the value of an integer Parameter (`preamp.stages`, `delay.pingpong`, `cabinet.low_cut`, `cabinet.high_cut`) before clamping, so `set cabinet.low_cut 150.4` answers and saves 150.
+- Mute fades over 10 ms at any sample rate.
+- A Preset switch that arrives during a crossfade waits for it to end and then crossfades; of several, only the newest runs.
+- `status` peaks are kept per connection, so the GUI and the CLI no longer reset each other's.
+- `save` keeps the Preset file's permissions and writes through a symlink to its target.
+- The Daemon keeps running when a GUI that started it crashes; closing the window cleanly still stops it.
+
+### Fixed
+
+- A Cabinet IR with a NaN or infinite sample is refused with `ir <name>: non-finite sample`.
+- `rack_add cabinet` finds `default-cab.wav` or `bass-cab.wav` under the IR directory as well as the Bank directory.
+- An IR path error names both directories it looked in.
+- `crossfade_ms` (above 0 to 1000) and `ir_max_ms` (above 0 to 10000) out of range, NaN or infinite are refused when the config loads.
+- Cabinet `level` changes are smoothed, and a preamp `stages` change no longer jumps in level.
+
+### Known
+
+- Some crates under eframe/winit are unmaintained: ttf-parser (RUSTSEC-2026-0192) and zbus_names, zvariant, zvariant_derive (RUSTSEC-2026-0370, RUSTSEC-2026-0371, RUSTSEC-2026-0372). They are transitive; nothing to do until egui moves off them.
