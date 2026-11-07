@@ -28,6 +28,12 @@ impl Tuner {
         }
     }
 
+    /// Restarts the Detector at `sample_rate`, dropping the samples it holds and the last reading.
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.detector = Detector::new(sample_rate);
+        self.last = None;
+    }
+
     /// Feeds every sample waiting in the tap to the Detector and replaces the reading; `None` when no pitch is detected.
     pub fn tick(&mut self) {
         if let Ok(chunk) = self.tap.read_chunk(self.tap.slots()) {

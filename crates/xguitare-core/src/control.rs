@@ -153,18 +153,37 @@ pub enum Reprepare {
 /// Rebuilds the active Preset's Rack, or the empty passthrough Rack when none is active or the build fails, for `buffer_size` frames and pushes it as a `SwapRack`; fails only with `engine busy`, leaving the state unchanged.
 pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare, String> {
     let max_frames = buffer_size as usize;
+    let outcome = rebuild(state, state.sample_rate, max_frames)?;
+    state.max_frames = max_frames;
+    Ok(outcome)
+}
+
+/// Rebuilds the live Rack as `reprepare` does, IRs resampled, and the Tuner at `sample_rate`; fails only with `engine busy`, leaving the state unchanged.
+pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
+    let sample_rate = sample_rate as f32;
+    let outcome = rebuild(state, sample_rate, state.max_frames)?;
+    state.sample_rate = sample_rate;
+    state.tuner.set_sample_rate(sample_rate);
+    Ok(outcome)
+}
+
+fn rebuild(
+    state: &mut EngineState,
+    sample_rate: f32,
+    max_frames: usize,
+) -> Result<Reprepare, String> {
     let built = state.active.as_ref().map(|(_, preset)| {
-        build_rack(&state.config, state.sample_rate, max_frames, preset)
+        build_rack(&state.config, sample_rate, max_frames, preset)
             .map_err(|err| (preset.name.clone(), err.to_string()))
     });
     let (rack, outcome) = match built {
         Some(Ok((rack, warnings))) => (rack, Reprepare::Built(warnings)),
         Some(Err((preset, error))) => (
-            passthrough_rack(state.sample_rate, max_frames),
+            passthrough_rack(sample_rate, max_frames),
             Reprepare::Passthrough { preset, error },
         ),
         None => (
-            passthrough_rack(state.sample_rate, max_frames),
+            passthrough_rack(sample_rate, max_frames),
             Reprepare::Built(Vec::new()),
         ),
     };
@@ -173,7 +192,6 @@ pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare,
     if let Reprepare::Passthrough { .. } = outcome {
         state.active = None;
     }
-    state.max_frames = max_frames;
     Ok(outcome)
 }
 

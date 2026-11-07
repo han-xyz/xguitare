@@ -166,6 +166,11 @@ impl NotificationHandler for Notifications {
         self.shared.xruns.fetch_add(1, Ordering::Relaxed);
         Control::Continue
     }
+
+    fn sample_rate(&mut self, _: &Client, srate: Frames) -> Control {
+        self.shared.sample_rate.store(srate, Ordering::Relaxed);
+        Control::Continue
+    }
 }
 
 struct Process {

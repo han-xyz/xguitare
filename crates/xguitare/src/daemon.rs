@@ -16,7 +16,8 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::build;
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, handle, needs_reprepare, passthrough_rack, reprepare,
+    EngineState, Reprepare, Request, Response, change_sample_rate, handle, needs_reprepare,
+    passthrough_rack, reprepare,
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
@@ -339,6 +340,7 @@ fn watch_until_stopped(
         thread::sleep(POLL_INTERVAL);
         {
             let mut state = state_guard(state);
+            follow_sample_rate(&mut state);
             state.tuner.tick();
             apply_bank_changes(&mut state, bank_watch);
             apply_program_changes(&mut state);
@@ -380,6 +382,32 @@ fn watch_until_stopped(
         if reprepares {
             reprepare_rack(&mut state, buffer_size);
         }
+    }
+}
+
+fn follow_sample_rate(state: &mut EngineState) {
+    let old = state.sample_rate as u32;
+    let new = state.shared.sample_rate.load(Ordering::Relaxed);
+    if new == old {
+        return;
+    }
+    match change_sample_rate(state, new) {
+        Ok(outcome) => {
+            info!("sample rate changed: {old} -> {new}");
+            match outcome {
+                Reprepare::Built(warnings) => {
+                    for warning in &warnings {
+                        warn!("{warning}");
+                    }
+                }
+                Reprepare::Passthrough { preset, error } => {
+                    error!(
+                        "rebuild of '{preset}' at {new} Hz failed: {error}; running passthrough"
+                    );
+                }
+            }
+        }
+        Err(err) => warn!("cannot rebuild rack at {new} Hz: {err}; retrying"),
     }
 }
 

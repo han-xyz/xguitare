@@ -6,7 +6,8 @@ use std::sync::atomic::Ordering;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, handle, handle_line, needs_reprepare, reprepare,
+    EngineState, Reprepare, Request, Response, change_sample_rate, handle, handle_line,
+    needs_reprepare, reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, SWITCHER_MAX_FRAMES, engine_queues, raise_peak,
@@ -495,6 +496,33 @@ fn reprepare_swaps_in_active_preset_at_new_size() {
     };
     assert_eq!(rack.max_frames(), 256);
     assert_eq!(rack.modules()[0].0, "gain");
+}
+
+#[test]
+fn sample_rate_change_rebuilds() {
+    let (mut state, mut audio, _dir) = state("sample-rate-change");
+    state.shared.sample_rate.store(96_000, Ordering::Relaxed);
+    assert_eq!(
+        change_sample_rate(&mut state, 96_000).unwrap(),
+        Reprepare::Built(Vec::new())
+    );
+    let Ok(Command::SwapRack(rack)) = audio.commands.pop() else {
+        panic!("expected SwapRack");
+    };
+    assert_eq!(rack.modules()[0].0, "gain");
+    assert_eq!(rack.max_frames(), 128);
+    assert_eq!(
+        ok(handle(&mut state, Request::Status))["sample_rate"],
+        96_000
+    );
+    for n in 0..16384 {
+        let sample = 0.5 * (TAU * 110.0 * n as f32 / 96_000.0).sin();
+        assert!(audio.tap.push(sample).is_ok());
+    }
+    state.tuner.tick();
+    let payload = ok(handle(&mut state, Request::Tuner));
+    assert_eq!(payload["note"], "A2");
+    assert_eq!(payload["hz"], 110.0);
 }
 
 #[test]

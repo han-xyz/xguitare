@@ -364,6 +364,8 @@ pw-metadata -n settings 0 clock.force-quantum 128
 pw-metadata -n settings 0 clock.force-quantum 0
 ```
 
+When the audio server changes the sample rate while the Daemon runs, the Daemon rebuilds the Rack (Cabinet IRs resampled) and the Tuner at the new rate within 100 ms and logs `sample rate changed: 48000 -> 96000`; `xguitare status` shows the new `sample_rate`.
+
 **Clicks and dropouts (xruns).** `xguitare status` counts them in `xruns`, and the Daemon logs `xruns: N (+n)` at most once a second. `callback_max_us` is the longest audio callback so far; at 128 frames and 48 kHz a period is 2666 µs, and a callback near that is too slow. Use a larger buffer: force the quantum to 256 with the command above; the Daemon re-prepares within a second. Set `buffer_size = 256` in the config so the next start asks for it. Closing other audio-heavy programs or using a Preset with fewer Modules also helps.
 
 **`error: daemon already running at /run/user/1000/xguitare/xguitare.sock`.** `xguitare run` found another Daemon answering on the socket. Stop that one (Ctrl-C in its terminal, or `pkill -x xguitare`), or use it with the CLI. A socket file left by a crashed Daemon is removed automatically.
