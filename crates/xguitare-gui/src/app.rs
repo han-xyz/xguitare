@@ -18,8 +18,8 @@ use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
     SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command, bank_rows, cents_fraction,
-    in_tune, key_to_command, link_text, move_target, param_rows, peak_fraction, quit_commands,
-    rack_channels, status_line, tuner_reading, tuner_toggle, unit_suffix,
+    cents_text, in_tune, key_to_command, link_text, move_target, param_rows, peak_fraction,
+    quit_commands, rack_channels, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
 
 use crate::widgets::{self, KnobSpec};
@@ -548,6 +548,6 @@ fn status_bar(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instan
 fn tuner_strip(ui: &mut Ui, reading: &TunerReading) {
     let colour = widgets::tune_colour(in_tune(reading.cents));
     widgets::cents_bar(ui, cents_fraction(reading.cents), colour);
-    let text = format!("{}  {} ct", reading.note, reading.cents);
+    let text = format!("{}  {}", reading.note, cents_text(reading.cents));
     ui.label(RichText::new(text).text_style(TextStyle::Monospace));
 }

@@ -14,10 +14,10 @@ use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
     NEUTRAL_ACCENT, ParamRow, Throttle, TunerReading, accent_for, add_after, add_command,
-    bank_rows, cents_fraction, counts_toward_spawn, failed_set, in_tune, key_to_command,
-    knob_value_from_drag, meter_fraction, module_types, move_target, param_rows, peak_fraction,
-    quit_commands, rack_channels, refresh_decision, requests_until_quit, response_text,
-    spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
+    bank_rows, cents_fraction, cents_text, counts_toward_spawn, failed_set, in_tune,
+    key_to_command, knob_value_from_drag, meter_fraction, module_types, move_target, param_rows,
+    peak_fraction, quit_commands, rack_channels, refresh_decision, requests_until_quit,
+    response_text, spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -798,4 +798,11 @@ fn mute_command_maps_to_request() {
             false
         )
     );
+}
+
+#[test]
+fn cents_text_is_signed() {
+    assert_eq!(cents_text(3), "+3 ct");
+    assert_eq!(cents_text(-3), "-3 ct");
+    assert_eq!(cents_text(0), "+0 ct");
 }

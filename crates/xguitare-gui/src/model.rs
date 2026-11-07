@@ -316,6 +316,10 @@ pub fn cents_fraction(cents: i64) -> f32 {
     (cents as f32 / CENTS_SPAN as f32).clamp(-1.0, 1.0)
 }
 
+pub fn cents_text(cents: i64) -> String {
+    format!("{cents:+} ct")
+}
+
 pub fn in_tune(cents: i64) -> bool {
     cents.abs() <= IN_TUNE_CENTS
 }
