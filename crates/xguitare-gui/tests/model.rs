@@ -9,6 +9,7 @@ use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_core::control::{EngineState, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
@@ -35,6 +36,8 @@ fn registry_modules(test: &str) -> serde_json::Value {
     let path = dir.0.join("config.toml");
     fs::write(&path, "").unwrap();
     let config = Config::load(Some(&path)).unwrap();
+    let (queues, _, tap) = engine_queues(1);
+    let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let mut state = EngineState {
         bank: Bank {
             dir: dir.0.clone(),
@@ -42,7 +45,8 @@ fn registry_modules(test: &str) -> serde_json::Value {
         },
         active: None,
         shared: Arc::new(EngineShared::default()),
-        queues: engine_queues(1).0,
+        queues,
+        tuner,
         config,
         connections: Vec::new(),
         sample_rate: 48_000.0,

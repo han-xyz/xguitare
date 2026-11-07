@@ -9,6 +9,7 @@ use std::thread::JoinHandle;
 use xguitare::socket_server::bind;
 use xguitare_core::control::EngineState;
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
+use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 
 struct Server {
@@ -33,7 +34,9 @@ fn server(test: &str) -> Server {
     let _ = fs::remove_dir_all(&dir);
     let path = dir.join("s.sock");
     let socket = bind(&path).unwrap();
-    let (queues, audio) = engine_queues(64);
+    let (queues, audio, tap) = engine_queues(64);
+    let config = empty_config(&dir);
+    let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let state = EngineState {
         bank: Bank {
             dir: dir.clone(),
@@ -42,7 +45,8 @@ fn server(test: &str) -> Server {
         active: None,
         shared: Arc::new(EngineShared::default()),
         queues,
-        config: empty_config(&dir),
+        tuner,
+        config,
         connections: Vec::new(),
         sample_rate: 48_000.0,
         max_frames: 128,

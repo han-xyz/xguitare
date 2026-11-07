@@ -103,6 +103,7 @@ fn render(req: &Request, payload: &Value) -> String {
             text(&payload["id"]),
             text(&payload["to"])
         ),
+        Request::Tuner | Request::Mute { .. } => unreachable!("no CLI command sends {req:?} yet"),
     }
 }
 

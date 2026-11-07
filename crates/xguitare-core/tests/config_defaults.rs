@@ -14,4 +14,6 @@ fn defaults_when_missing() {
     assert_eq!(config.ports.output_right, "auto");
     assert_eq!(config.bank_dir, home.join("xguitare/bank"));
     assert!(config.socket.ends_with("xguitare.sock"));
+    assert_eq!(config.tuner_reference_hz, 440.0);
+    assert!(config.tuner_mute);
 }

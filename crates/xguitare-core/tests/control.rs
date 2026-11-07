@@ -1,3 +1,4 @@
+use std::f32::consts::TAU;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use xguitare_core::control::{
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, SWITCHER_MAX_FRAMES, engine_queues, raise_peak,
 };
+use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, ModuleRegistry, Preset, PresetModule};
 
 const QUEUE_CAPACITY: usize = 64;
@@ -55,12 +57,14 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     shared.callback_ns_last.store(90_000, Ordering::Relaxed);
     let mut config = empty_config(&dir.0);
     config.bank_dir = dir.0.clone();
-    let (queues, audio) = engine_queues(QUEUE_CAPACITY);
+    let (queues, audio, tap) = engine_queues(QUEUE_CAPACITY);
+    let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let state = EngineState {
         bank,
         active,
         shared,
         queues,
+        tuner,
         config,
         connections: vec![("system:capture_1".to_string(), "xguitare:in".to_string())],
         sample_rate: 48_000.0,
@@ -121,6 +125,7 @@ fn status_reports_fields() {
             "buffer_size": 128,
             "prepared_frames": 128,
             "revision": 1,
+            "muted": false,
             "input_peak_db": -120.0,
             "output_peak_db": -120.0,
             "xruns": 3,
@@ -938,4 +943,63 @@ fn rack_edit_without_preset_is_error() {
     ] {
         assert_eq!(error(handle(&mut state, req)), "no preset loaded");
     }
+}
+
+#[test]
+fn tuner_null_before_tick() {
+    let (mut state, _audio, _dir) = state("tuner-null");
+    let (line, _) = handle_line(&mut state, r#"{"cmd":"tuner"}"#);
+    assert_eq!(
+        serde_json::from_str::<Value>(&line).unwrap(),
+        json!({"ok": true, "hz": null, "note": null, "cents": null, "confident": false})
+    );
+}
+
+#[test]
+fn tuner_reports_a2_after_tick() {
+    let (mut state, mut audio, _dir) = state("tuner-a2");
+    for n in 0..8192 {
+        let sample = 0.5 * (TAU * 110.0 * n as f32 / 48_000.0).sin();
+        assert!(audio.tap.push(sample).is_ok());
+    }
+    state.tuner.tick();
+    let payload = ok(handle(&mut state, Request::Tuner));
+    assert_eq!(payload["note"], "A2");
+    assert_eq!(payload["hz"], 110.0);
+    assert!(payload["cents"].as_i64().unwrap().abs() <= 1, "{payload}");
+    assert_eq!(payload["confident"], true);
+}
+
+#[test]
+fn mute_on_off_and_status() {
+    let (mut state, _audio, _dir) = state("mute");
+    let (line, _) = handle_line(&mut state, r#"{"cmd":"mute","on":true}"#);
+    assert_eq!(line, r#"{"ok":true,"muted":true}"#);
+    assert!(state.shared.muted.load(Ordering::Relaxed));
+    assert_eq!(ok(handle(&mut state, Request::Status))["muted"], true);
+    let payload = ok(handle(&mut state, Request::Mute { on: false }));
+    assert_eq!(payload, json!({"muted": false}));
+    assert!(!state.shared.muted.load(Ordering::Relaxed));
+    assert_eq!(ok(handle(&mut state, Request::Status))["muted"], false);
+}
+
+#[test]
+fn mute_without_on_is_invalid_request() {
+    let (mut state, _audio, _dir) = state("mute-no-on");
+    for line in [r#"{"cmd":"mute"}"#, r#"{"cmd":"mute","on":"yes"}"#] {
+        let response: Value = serde_json::from_str(&handle_line(&mut state, line).0).unwrap();
+        assert_eq!(response["ok"], false);
+        let message = response["error"].as_str().unwrap();
+        assert!(message.starts_with("invalid request: "), "{message}");
+    }
+    assert!(!state.shared.muted.load(Ordering::Relaxed));
+}
+
+#[test]
+fn revision_unchanged_by_mute() {
+    let (mut state, _audio, _dir) = state("mute-revision");
+    let before = revision(&mut state);
+    ok(handle(&mut state, Request::Mute { on: true }));
+    ok(handle(&mut state, Request::Mute { on: false }));
+    assert_eq!(revision(&mut state), before);
 }

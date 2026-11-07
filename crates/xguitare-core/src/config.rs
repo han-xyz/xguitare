@@ -12,6 +12,7 @@ use crate::engine::SWITCHER_MAX_FRAMES;
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
 const SOCKET_DIR_MODE: u32 = 0o700;
+const TUNER_REFERENCE_HZ: std::ops::RangeInclusive<f32> = 400.0..=480.0;
 pub const AUTO_PORT: &str = "auto";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,10 @@ pub struct Config {
     /// True when `$XDG_RUNTIME_DIR` is unset and `socket` is the `/tmp/xguitare-<uid>` fallback.
     pub socket_is_fallback: bool,
     pub ports: Ports,
+    /// The frequency of A4 the Tuner names notes against.
+    pub tuner_reference_hz: f32,
+    /// Whether a client's tuner mode turns on Mute while it is open.
+    pub tuner_mute: bool,
 }
 
 /// JACK ports the Daemon connects to `in`, `out_l` and `out_r`. Each value is one of:
@@ -67,6 +72,9 @@ pub enum ConfigError {
     NotFound {
         path: PathBuf,
     },
+    TunerReference {
+        path: PathBuf,
+    },
 }
 
 #[derive(Deserialize)]
@@ -80,6 +88,8 @@ struct ConfigFile {
     ir_max_ms: Option<f32>,
     socket: Option<PathBuf>,
     ports: Option<PortsFile>,
+    tuner_reference_hz: Option<f32>,
+    tuner_mute: Option<bool>,
 }
 
 fn deserialize_bank_kind<'de, D: Deserializer<'de>>(
@@ -137,6 +147,14 @@ impl Config {
                 path: path.to_path_buf(),
             });
         }
+        if file
+            .tuner_reference_hz
+            .is_some_and(|hz| !TUNER_REFERENCE_HZ.contains(&hz))
+        {
+            return Err(ConfigError::TunerReference {
+                path: path.to_path_buf(),
+            });
+        }
         Ok(defaults.overridden_by(file))
     }
 
@@ -158,6 +176,8 @@ impl Config {
                 output_left: AUTO_PORT.to_string(),
                 output_right: AUTO_PORT.to_string(),
             },
+            tuner_reference_hz: 440.0,
+            tuner_mute: true,
         })
     }
 
@@ -179,6 +199,8 @@ impl Config {
             socket_is_fallback: self.socket_is_fallback && file.socket.is_none(),
             socket: file.socket.unwrap_or(self.socket),
             ports,
+            tuner_reference_hz: file.tuner_reference_hz.unwrap_or(self.tuner_reference_hz),
+            tuner_mute: file.tuner_mute.unwrap_or(self.tuner_mute),
         }
     }
 }
@@ -266,6 +288,11 @@ impl fmt::Display for ConfigError {
                 path.display()
             ),
             ConfigError::NotFound { path } => write!(f, "{}: not found", path.display()),
+            ConfigError::TunerReference { path } => write!(
+                f,
+                "{}: tuner_reference_hz must be between 400 and 480",
+                path.display()
+            ),
         }
     }
 }

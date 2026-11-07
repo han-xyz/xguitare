@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use xguitare_core::control::{EngineState, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
+use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config};
 
@@ -29,12 +30,14 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
     let active = Some((file.clone(), preset.clone()));
     let mut config = empty_config(&dir);
     config.bank_dir = dir;
-    let (queues, audio) = engine_queues(QUEUE_CAPACITY);
+    let (queues, audio, tap) = engine_queues(QUEUE_CAPACITY);
+    let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let state = EngineState {
         bank,
         active,
         shared: Arc::new(EngineShared::default()),
         queues,
+        tuner,
         config,
         connections: Vec::new(),
         sample_rate: 48_000.0,

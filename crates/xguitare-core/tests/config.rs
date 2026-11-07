@@ -128,3 +128,29 @@ fn buffer_size_out_of_range() {
     let path = config_file("buffer-max", "buffer_size = 8192\n");
     assert_eq!(Config::load(Some(&path)).unwrap().buffer_size, 8192);
 }
+
+#[test]
+fn tuner_keys_parse() {
+    let path = config_file("tuner", "tuner_reference_hz = 442.0\ntuner_mute = false\n");
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.tuner_reference_hz, 442.0);
+    assert!(!config.tuner_mute);
+    for (test, edge) in [("tuner-low-edge", 400.0), ("tuner-high-edge", 480.0)] {
+        let path = config_file(test, &format!("tuner_reference_hz = {edge:.1}\n"));
+        assert_eq!(Config::load(Some(&path)).unwrap().tuner_reference_hz, edge);
+    }
+}
+
+#[test]
+fn tuner_reference_out_of_range() {
+    for (test, hz) in [("tuner-low", "399.0"), ("tuner-high", "481.0")] {
+        let path = config_file(test, &format!("tuner_reference_hz = {hz}\n"));
+        assert_eq!(
+            Config::load(Some(&path)).unwrap_err().to_string(),
+            format!(
+                "{}: tuner_reference_hz must be between 400 and 480",
+                path.display()
+            )
+        );
+    }
+}

@@ -19,6 +19,7 @@ use xguitare_core::control::{
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
+use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, BankKind, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
@@ -53,7 +54,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let preset = first_preset(&bank);
     let stop = register_stop_signals()?;
     let shared = Arc::new(EngineShared::default());
-    let (queues, audio_queues) = engine_queues(QUEUE_CAPACITY);
+    let (queues, audio_queues, tap) = engine_queues(QUEUE_CAPACITY);
     let mut active = None;
     let session = jack_adapter::start(
         config.buffer_size,
@@ -72,14 +73,17 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     )
     .map_err(DaemonError::Jack)?;
     let connections = session.connect(&config.ports);
+    let sample_rate = shared.sample_rate.load(Ordering::Relaxed) as f32;
+    let tuner = Tuner::new(tap, sample_rate, config.tuner_reference_hz);
     let state = Arc::new(Mutex::new(EngineState {
         bank,
         active,
         shared: Arc::clone(&shared),
         queues,
+        tuner,
         config,
         connections,
-        sample_rate: shared.sample_rate.load(Ordering::Relaxed) as f32,
+        sample_rate,
         max_frames: session.max_frames(),
         revision: 1,
     }));

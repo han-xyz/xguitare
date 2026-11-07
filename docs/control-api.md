@@ -16,7 +16,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 
 Parameter addresses are `<module id>.<param name>`, e.g. `preamp.gain`. A Module's id is its `id` in the Preset file, or its type when the file gives none.
@@ -32,7 +32,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":741,"callback_max_us":1228,"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"input_peak_db":-103.8,"output_peak_db":-120.0,"prepared_frames":128,"preset":"Clean","program":0,"revision":2,"sample_rate":48000,"xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":741,"callback_max_us":1228,"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"input_peak_db":-103.8,"muted":false,"output_peak_db":-120.0,"prepared_frames":128,"preset":"Clean","program":0,"revision":2,"sample_rate":48000,"xruns":0}
 ```
 
 | Key | Value |
@@ -42,7 +42,8 @@ Response:
 | `sample_rate` | JACK sample rate in Hz. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove` and `rack_move`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove` and `rack_move`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
+| `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status`, in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
 | `xruns` | Xruns since the Daemon started. |
@@ -306,3 +307,56 @@ Response:
 | `to` | Its position now. |
 
 Errors: `no module '<id>'`, `no preset loaded`, `engine busy`, and the layout errors of `rack_add`; on any of them nothing changes.
+
+## tuner
+
+The Tuner's last reading of the dry input. The Daemon analyses the input ten times a second; this request returns the latest result and never analyses itself.
+
+Request:
+
+```json
+{"cmd":"tuner"}
+```
+
+Response:
+
+```json
+{"ok":true,"cents":0,"confident":true,"hz":110.0,"note":"A2"}
+```
+
+With no pitch detected (silence, noise, or a pitch outside 35 to 1400 Hz):
+
+```json
+{"ok":true,"cents":null,"confident":false,"hz":null,"note":null}
+```
+
+| Key | Value |
+| --- | --- |
+| `hz` | Detected frequency in Hz, one decimal; `null` when nothing is detected. |
+| `note` | The nearest note and its octave, sharps only, A4 at the config key `tuner_reference_hz` (default 440), e.g. `E1`, `A#4`; `null` when nothing is detected. |
+| `cents` | Distance from `note` in cents, an integer from -49 to 50; `null` when nothing is detected. |
+| `confident` | Whether the reading is clear enough to show; a client shows only confident readings. |
+
+Errors: none besides the transport errors.
+
+## mute
+
+Turns Mute on or off: while on, both outputs fade to silence over about 10 ms and stay silent, while the Tuner still reads the input. Off fades them back in. Mute stays on until a client turns it off, also when the client that turned it on disconnects. The Revision does not change.
+
+Request:
+
+```json
+{"cmd":"mute","on":true}
+```
+
+Response:
+
+```json
+{"ok":true,"muted":true}
+```
+
+| Key | Value |
+| --- | --- |
+| `muted` | The Mute state now. |
+
+Errors: `on` missing or not a boolean gets the transport's `invalid request: ` error, e.g. ``invalid request: missing field `on` ``; Mute is unchanged.

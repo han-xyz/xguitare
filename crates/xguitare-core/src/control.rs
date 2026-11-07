@@ -14,6 +14,7 @@ pub use serde_json::Value;
 use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
 use crate::firstrun::{BASS_IR, DEFAULT_IR};
 use crate::preset::{CABINET_TYPE, shortest_f64};
+use crate::tuner::Tuner;
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
 };
@@ -57,6 +58,10 @@ pub enum Request {
         id: String,
         to: usize,
     },
+    Tuner,
+    Mute {
+        on: bool,
+    },
 }
 
 /// One Control API reply; on the wire `{"ok":true, ...payload fields}` or `{"ok":false,"error":"..."}`.
@@ -71,6 +76,7 @@ pub struct EngineState {
     pub active: Option<(PathBuf, Preset)>,
     pub shared: Arc<EngineShared>,
     pub queues: EngineQueues,
+    pub tuner: Tuner,
     pub config: Config,
     pub connections: Vec<(String, String)>,
     pub sample_rate: f32,
@@ -95,6 +101,8 @@ pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarn
         }
         Request::RackRemove { id } => rack_remove(state, &id, &mut warnings),
         Request::RackMove { id, to } => rack_move(state, &id, to, &mut warnings),
+        Request::Tuner => Ok(tuner(state)),
+        Request::Mute { on } => Ok(mute(state, on)),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
@@ -192,6 +200,7 @@ fn status(state: &EngineState) -> Value {
         "buffer_size": shared.buffer_size.load(Ordering::Relaxed),
         "prepared_frames": state.max_frames,
         "revision": state.revision,
+        "muted": shared.muted.load(Ordering::Relaxed),
         "input_peak_db": peak_db(take_peak(&shared.input_peak_bits)),
         "output_peak_db": peak_db(take_peak(&shared.output_peak_bits)),
         "xruns": shared.xruns.load(Ordering::Relaxed),
@@ -199,6 +208,23 @@ fn status(state: &EngineState) -> Value {
         "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "connections": connections,
     })
+}
+
+fn tuner(state: &EngineState) -> Value {
+    match state.tuner.reading() {
+        Some(reading) => json!({
+            "hz": (f64::from(reading.hz) * 10.0).round() / 10.0,
+            "note": reading.note,
+            "cents": reading.cents,
+            "confident": reading.confident,
+        }),
+        None => json!({"hz": null, "note": null, "cents": null, "confident": false}),
+    }
+}
+
+fn mute(state: &EngineState, on: bool) -> Value {
+    state.shared.muted.store(on, Ordering::Relaxed);
+    json!({ "muted": on })
 }
 
 fn peak_db(peak: f32) -> f64 {
