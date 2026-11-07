@@ -137,7 +137,7 @@ The first run creates five Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primu
 
 Every subcommand except `run` sends one request to the running Daemon and exits 0 on success; on an error it prints one `error: ...` line to stderr and exits 1. `xguitare --help` lists them.
 
-`status` shows the active Preset, the Revision, input and output peaks since the last `status`, audio settings and port connections:
+`status` shows the active Preset, the Revision, whether Mute is on, input and output peaks since the last `status`, audio settings and port connections:
 
 ```console
 $ xguitare status
@@ -147,6 +147,7 @@ sample_rate: 48000
 buffer_size: 128
 prepared_frames: 128
 revision: 1
+muted: false
 input_peak_db: -102.2
 output_peak_db: -120.0
 xruns: 0
@@ -225,6 +226,31 @@ $ xguitare rack remove delay
 removed delay
 ```
 
+`tuner` prints the Tuner's reading of the dry input: the nearest note, the pitch and how many cents it is off (A4 at `tuner_reference_hz`), or `no signal`:
+
+```console
+$ xguitare tuner
+E1  41.2 Hz -3 ct
+```
+
+`tuner --watch` keeps printing readings until Ctrl-C or SIGTERM: on a terminal it rewrites one line, otherwise it prints one line per reading. With `tuner_mute = true`, the default, it turns Mute on while it runs and off when it stops:
+
+```console
+$ timeout -s INT 2 xguitare tuner --watch
+no signal
+no signal
+...
+```
+
+`mute on|off` silences both outputs, or brings them back; the Tuner keeps reading while muted:
+
+```console
+$ xguitare mute on
+muted
+$ xguitare mute off
+unmuted
+```
+
 ## GUI
 
 `xguitare-gui` is a window onto the running Daemon: it uses the same Control API as the CLI. Install it next to `xguitare`, so that it can start the Daemon:
@@ -274,6 +300,8 @@ bank_kind = "guitar"                           # starter Bank for a missing bank
 buffer_size = 128                              # frames per JACK period requested at start, 1 to 8192
 crossfade_ms = 20                              # Preset switch crossfade
 ir_max_ms = 100                                # cabinet IRs are cut to this length
+tuner_reference_hz = 440.0                     # A4 for the Tuner, 400–480
+tuner_mute = true                              # the GUI's Tuner view and `tuner --watch` mute the output
 socket = "/run/user/1000/xguitare/xguitare.sock" # default: $XDG_RUNTIME_DIR/xguitare/xguitare.sock
 
 [ports]
@@ -324,6 +352,8 @@ pw-metadata -n settings 0 clock.force-quantum 0
 **`error: daemon already running at /run/user/1000/xguitare/xguitare.sock`.** `xguitare run` found another Daemon answering on the socket. Stop that one (Ctrl-C in its terminal, or `pkill -x xguitare`), or use it with the CLI. A socket file left by a crashed Daemon is removed automatically.
 
 **`error: daemon not running (socket ...)`.** A CLI command found no Daemon. Start one with `xguitare run`.
+
+**Silent output after a tuner client died.** Mute stays on when the client that turned it on is killed before it can turn it off; `xguitare status` shows `muted: true`. Run `xguitare mute off`.
 
 **Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` path, which is relative to the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
 
