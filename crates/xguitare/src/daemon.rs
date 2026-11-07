@@ -338,6 +338,7 @@ fn watch_until_stopped(
         thread::sleep(POLL_INTERVAL);
         {
             let mut state = state_guard(state);
+            state.tuner.tick();
             apply_bank_changes(&mut state, bank_watch);
             apply_program_changes(&mut state);
         }

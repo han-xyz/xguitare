@@ -5,14 +5,17 @@ mod logging;
 pub mod socket_server;
 
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use signal_hook::consts::{SIGINT, SIGTERM};
 use xguitare_client::UnixSocketTransport;
 use xguitare_core::Config;
 
-pub use cli::run_cli;
+pub use cli::{CliEnv, run_cli};
 
 #[derive(Parser)]
 #[command(
@@ -53,6 +56,19 @@ enum Cmd {
     /// Edit the live Rack's layout
     #[command(subcommand)]
     Rack(RackCmd),
+    /// Print the Tuner reading; --watch keeps printing until Ctrl-C and, with tuner_mute, mutes meanwhile
+    Tuner {
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Turn Mute on or off
+    Mute { state: MuteState },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum MuteState {
+    On,
+    Off,
 }
 
 #[derive(Subcommand)]
@@ -90,7 +106,8 @@ where
                 .map(|()| 0)
                 .map_err(|err| err.to_string())
         }
-        _ => run_client(&argv, cli.config.as_deref()),
+        Cmd::Tuner { watch: true } => run_client(&argv, cli.config.as_deref(), true),
+        _ => run_client(&argv, cli.config.as_deref(), false),
     };
     match result {
         Ok(code) => code,
@@ -101,8 +118,25 @@ where
     }
 }
 
-fn run_client(argv: &[OsString], config_path: Option<&Path>) -> Result<i32, String> {
+/// `stops_on_signal`: SIGINT and SIGTERM set `CliEnv::stop` instead of ending the process; only `tuner --watch` asks for it, so Ctrl-C still ends every other command.
+fn run_client(
+    argv: &[OsString],
+    config_path: Option<&Path>,
+    stops_on_signal: bool,
+) -> Result<i32, String> {
     let config = Config::load(config_path).map_err(|err| err.to_string())?;
+    let stop = Arc::new(AtomicBool::new(false));
+    if stops_on_signal {
+        for signal in [SIGINT, SIGTERM] {
+            signal_hook::flag::register(signal, Arc::clone(&stop))
+                .map_err(|err| format!("cannot register signal handler: {err}"))?;
+        }
+    }
+    let env = CliEnv {
+        tuner_mute: config.tuner_mute,
+        is_tty: io::stdout().is_terminal(),
+        stop,
+    };
     let mut transport = UnixSocketTransport::from_config(&config).map_err(|err| err.to_string())?;
     let argv: Vec<String> = argv
         .iter()
@@ -113,6 +147,7 @@ fn run_client(argv: &[OsString], config_path: Option<&Path>) -> Result<i32, Stri
         &mut transport,
         &mut io::stdout(),
         &mut io::stderr(),
+        &env,
     ))
 }
 

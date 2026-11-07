@@ -1,18 +1,31 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use xguitare::{run_cli, run_main};
+use xguitare::{CliEnv, run_cli, run_main};
 use xguitare_client::{ClientError, Transport};
 use xguitare_core::control::{Request, Response};
 
 struct Canned {
     replies: VecDeque<Result<Response, ClientError>>,
     requests: Vec<Request>,
+    stop_after_tuner_requests: Option<(usize, Arc<AtomicBool>)>,
 }
 
 impl Transport for Canned {
     fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
         self.requests.push(req.clone());
+        if let Some((count, stop)) = &self.stop_after_tuner_requests {
+            let tuner_requests = self
+                .requests
+                .iter()
+                .filter(|req| **req == Request::Tuner)
+                .count();
+            if tuner_requests == *count {
+                stop.store(true, Ordering::Relaxed);
+            }
+        }
         self.replies
             .pop_front()
             .expect("one canned reply per request")
@@ -27,16 +40,32 @@ struct Outcome {
 }
 
 fn cli(argv: &[&str], reply: Result<Response, ClientError>) -> Outcome {
+    let env = CliEnv {
+        tuner_mute: false,
+        is_tty: false,
+        stop: Arc::new(AtomicBool::new(false)),
+    };
+    cli_with(argv, vec![reply], env, None)
+}
+
+fn cli_with(
+    argv: &[&str],
+    replies: Vec<Result<Response, ClientError>>,
+    env: CliEnv,
+    stop_after_tuner_requests: Option<usize>,
+) -> Outcome {
     let argv: Vec<String> = std::iter::once("xguitare")
         .chain(argv.iter().copied())
         .map(String::from)
         .collect();
     let mut transport = Canned {
-        replies: VecDeque::from([reply]),
+        replies: VecDeque::from(replies),
         requests: Vec::new(),
+        stop_after_tuner_requests: stop_after_tuner_requests
+            .map(|count| (count, Arc::clone(&env.stop))),
     };
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
-    let code = run_cli(&argv, &mut transport, &mut stdout, &mut stderr);
+    let code = run_cli(&argv, &mut transport, &mut stdout, &mut stderr, &env);
     Outcome {
         code,
         stdout: String::from_utf8(stdout).unwrap(),
@@ -70,13 +99,13 @@ fn status_format() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","program":0,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}]}"#,
+            r#"{"ok":true,"preset":"Clean","program":0,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"muted":false,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}]}"#,
         ),
     );
     assert_eq!(out.requests, [Request::Status]);
     assert_eq!(
         out.stdout,
-        "preset: Clean\nprogram: 0\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\n"
+        "preset: Clean\nprogram: 0\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\n"
     );
     let out = cli(
         &["status"],
@@ -373,4 +402,113 @@ fn rack_remove_prints() {
     );
     assert_eq!(out.stdout, "removed delay\n");
     assert_eq!(out.code, 0);
+}
+
+fn watch_env(tuner_mute: bool) -> CliEnv {
+    CliEnv {
+        tuner_mute,
+        is_tty: false,
+        stop: Arc::new(AtomicBool::new(false)),
+    }
+}
+
+const E1_READING: &str = r#"{"ok":true,"hz":41.2,"note":"E1","cents":-3,"confident":true}"#;
+
+#[test]
+fn tuner_prints_reading() {
+    let out = cli(&["tuner"], reply(E1_READING));
+    assert_eq!(out.requests, [Request::Tuner]);
+    assert_eq!(out.stdout, "E1  41.2 Hz -3 ct\n");
+    assert_eq!(out.code, 0);
+    let out = cli(
+        &["tuner"],
+        reply(r#"{"ok":true,"hz":466.2,"note":"A#4","cents":0,"confident":true}"#),
+    );
+    assert_eq!(out.stdout, "A#4 466.2 Hz +0 ct\n");
+}
+
+#[test]
+fn tuner_prints_no_signal() {
+    let out = cli(
+        &["tuner"],
+        reply(r#"{"ok":true,"hz":null,"note":null,"cents":null,"confident":false}"#),
+    );
+    assert_eq!(out.stdout, "no signal\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn tuner_watch_two_readings_mutes_around() {
+    let out = cli_with(
+        &["tuner", "--watch"],
+        vec![
+            reply(r#"{"ok":true,"muted":true}"#),
+            reply(E1_READING),
+            reply(r#"{"ok":true,"hz":null,"note":null,"cents":null,"confident":false}"#),
+            reply(r#"{"ok":true,"muted":false}"#),
+        ],
+        watch_env(true),
+        Some(2),
+    );
+    assert_eq!(
+        out.requests,
+        [
+            Request::Mute { on: true },
+            Request::Tuner,
+            Request::Tuner,
+            Request::Mute { on: false },
+        ]
+    );
+    assert_eq!(out.stdout, "E1  41.2 Hz -3 ct\nno signal\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn tuner_watch_without_tuner_mute_sends_no_mute() {
+    let out = cli_with(
+        &["tuner", "--watch"],
+        vec![reply(E1_READING), reply(E1_READING)],
+        watch_env(false),
+        Some(2),
+    );
+    assert_eq!(out.requests, [Request::Tuner, Request::Tuner]);
+    assert_eq!(out.stdout, "E1  41.2 Hz -3 ct\nE1  41.2 Hz -3 ct\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn mute_on_off_prints() {
+    let out = cli(&["mute", "on"], reply(r#"{"ok":true,"muted":true}"#));
+    assert_eq!(out.requests, [Request::Mute { on: true }]);
+    assert_eq!(out.stdout, "muted\n");
+    assert_eq!(out.code, 0);
+    let out = cli(&["mute", "off"], reply(r#"{"ok":true,"muted":false}"#));
+    assert_eq!(out.requests, [Request::Mute { on: false }]);
+    assert_eq!(out.stdout, "unmuted\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn mute_bad_value_is_usage_error() {
+    let out = cli(&["mute", "maybe"], reply(r#"{"ok":true}"#));
+    assert_eq!(out.code, 1);
+    assert!(out.requests.is_empty());
+    assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
+    assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
+}
+
+#[test]
+fn status_shows_muted() {
+    let out = cli(
+        &["status"],
+        reply(
+            r#"{"ok":true,"preset":"Clean","program":0,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":3,"muted":true,"input_peak_db":-120.0,"output_peak_db":-120.0,"xruns":0,"callback_max_us":0,"callback_last_us":0,"connections":[]}"#,
+        ),
+    );
+    assert!(
+        out.stdout
+            .contains("revision: 3\nmuted: true\ninput_peak_db"),
+        "{}",
+        out.stdout
+    );
 }

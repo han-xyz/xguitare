@@ -1,9 +1,26 @@
 use std::io::Write;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
 
 use xguitare_client::Transport;
 use xguitare_core::control::{Request, Response, Value};
 
-use crate::{Cmd, RackCmd, parse};
+use crate::{Cmd, MuteState, RackCmd, parse};
+
+const WATCH_INTERVAL: Duration = Duration::from_millis(100);
+const WATCH_LINE_COLUMNS: usize = 24;
+
+/// What a client command needs from its surroundings besides the transport.
+pub struct CliEnv {
+    /// The config's `tuner_mute`: whether `tuner --watch` turns Mute on while it runs.
+    pub tuner_mute: bool,
+    /// Whether stdout is a terminal: `tuner --watch` then rewrites one line instead of printing one per reading.
+    pub is_tty: bool,
+    /// Set to end `tuner --watch`.
+    pub stop: Arc<AtomicBool>,
+}
 
 /// Runs one client subcommand against the Daemon; returns the exit code (0 on success and `--help`, 1 after one `error: ...` line on `err`).
 pub fn run_cli(
@@ -11,22 +28,79 @@ pub fn run_cli(
     transport: &mut dyn Transport,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    env: &CliEnv,
 ) -> i32 {
     let cli = match parse(argv, out, err) {
         Ok(cli) => cli,
         Err(code) => return code,
     };
-    let result = request_for(cli.cmd).and_then(|req| {
-        match transport.request(&req).map_err(|e| e.to_string())? {
-            Response::Ok(payload) => Ok(render(&req, &payload)),
-            Response::Err { error } => Err(error),
-        }
-    });
+    let result = match cli.cmd {
+        Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
+        cmd => request_for(cmd).and_then(|req| Ok(render(&req, &request(transport, &req)?))),
+    };
     let written = match result {
         Ok(text) => write!(out, "{text}").map(|()| 0),
         Err(message) => writeln!(err, "error: {}", without_control_chars(&message)).map(|()| 1),
     };
     written.unwrap_or(1)
+}
+
+fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String> {
+    match transport.request(req).map_err(|e| e.to_string())? {
+        Response::Ok(payload) => Ok(payload),
+        Response::Err { error } => Err(error),
+    }
+}
+
+fn watch_tuner(
+    transport: &mut dyn Transport,
+    out: &mut dyn Write,
+    env: &CliEnv,
+) -> Result<(), String> {
+    if env.tuner_mute {
+        request(transport, &Request::Mute { on: true })?;
+    }
+    let watched = print_tuner_readings(transport, out, env);
+    let unmuted = if env.tuner_mute {
+        request(transport, &Request::Mute { on: false }).map(drop)
+    } else {
+        Ok(())
+    };
+    watched.and(unmuted)
+}
+
+fn print_tuner_readings(
+    transport: &mut dyn Transport,
+    out: &mut dyn Write,
+    env: &CliEnv,
+) -> Result<(), String> {
+    while !env.stop.load(Ordering::Relaxed) {
+        let line = tuner_line(&request(transport, &Request::Tuner)?);
+        if env.is_tty {
+            write!(out, "\r{line:<WATCH_LINE_COLUMNS$}")
+        } else {
+            writeln!(out, "{line}")
+        }
+        .and_then(|()| out.flush())
+        .map_err(|e| e.to_string())?;
+        thread::sleep(WATCH_INTERVAL);
+    }
+    if env.is_tty {
+        writeln!(out).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn tuner_line(payload: &Value) -> String {
+    if payload["confident"] != true {
+        return "no signal".to_string();
+    }
+    format!(
+        "{:<3} {:.1} Hz {:+} ct",
+        text(&payload["note"]),
+        payload["hz"].as_f64().unwrap_or_default(),
+        payload["cents"].as_i64().unwrap_or_default()
+    )
 }
 
 fn request_for(cmd: Cmd) -> Result<Request, String> {
@@ -58,6 +132,10 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         },
         Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id },
         Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove { id, to },
+        Cmd::Tuner { .. } => Request::Tuner,
+        Cmd::Mute { state } => Request::Mute {
+            on: matches!(state, MuteState::On),
+        },
     })
 }
 
@@ -103,7 +181,14 @@ fn render(req: &Request, payload: &Value) -> String {
             text(&payload["id"]),
             text(&payload["to"])
         ),
-        Request::Tuner | Request::Mute { .. } => unreachable!("no CLI command sends {req:?} yet"),
+        Request::Tuner => format!("{}\n", tuner_line(payload)),
+        Request::Mute { .. } => {
+            if payload["muted"] == true {
+                "muted\n".to_string()
+            } else {
+                "unmuted\n".to_string()
+            }
+        }
     }
 }
 
@@ -115,6 +200,7 @@ fn render_status(payload: &Value) -> String {
         "buffer_size",
         "prepared_frames",
         "revision",
+        "muted",
         "input_peak_db",
         "output_peak_db",
         "xruns",
