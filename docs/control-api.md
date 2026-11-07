@@ -1,6 +1,6 @@
 # Control API
 
-The protocol a client uses to inspect and change the running Daemon: which Preset is active, the Bank, and Parameter values. The `xguitare` CLI is one client of it; a GUI or script can be another. Request and response types are in `crates/xguitare-core/src/control.rs`; the socket server is `crates/xguitare/src/socket_server.rs`.
+The protocol a client uses to inspect and change the running Daemon: which Preset is active, the Bank, Parameter values and the Rack's layout. The `xguitare` CLI is one client of it; a GUI or script can be another. Request and response types are in `crates/xguitare-core/src/control.rs`; the socket server is `crates/xguitare/src/socket_server.rs`.
 
 ## Transport
 
@@ -16,7 +16,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 
 Parameter addresses are `<module id>.<param name>`, e.g. `preamp.gain`. A Module's id is its `id` in the Preset file, or its type when the file gives none.
@@ -42,7 +42,7 @@ Response:
 | `sample_rate` | JACK sample rate in Hz. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set` and `save`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove` and `rack_move`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. |
 | `input_peak_db` | Largest input sample since the previous `status`, in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
 | `xruns` | Xruns since the Daemon started. |
@@ -201,3 +201,105 @@ Errors:
 | `no preset loaded` | No Preset is active. |
 | `active preset file was removed; load a preset first` | The active Preset's file is no longer in the Bank. |
 | `cannot save <path>: <reason>` | Writing or renaming the file failed. |
+
+## modules
+
+Lists the Module types a Preset can use, in registry order.
+
+Request:
+
+```json
+{"cmd":"modules"}
+```
+
+Response (shortened to two types):
+
+```json
+{"ok":true,"modules":[{"channels":"mono","params":[{"default":0.0,"integer":false,"max":20.0,"min":-60.0,"name":"level","unit":"dB"}],"type":"gain"},{"channels":"mono_to_stereo","params":[{"default":0.0,"integer":false,"max":20.0,"min":-20.0,"name":"level","unit":"dB"}],"type":"cabinet"}]}
+```
+
+| Key | Value |
+| --- | --- |
+| `modules[].type` | The Module type, as written in a Preset's `type`. |
+| `modules[].channels` | `"mono"` (before the cabinet), `"stereo"` (after it) or `"mono_to_stereo"` (the cabinet). |
+| `modules[].params` | The Parameters in order, each with `name`, `min`, `max`, `default`, `unit` (as in `get`) and `integer`. |
+
+Errors: none besides the transport errors.
+
+## rack_add
+
+Inserts a Module with default Parameters into the active Preset, rebuilds the Rack from it and swaps it in with a crossfade. `after` is the id of the Module to insert after; `null` or omitted inserts at the front. The new Module's id is its type, or `<type>-2`, `<type>-3`… when that id is taken. A cabinet gets `ir = "default-cab.wav"`, or `"bass-cab.wav"` when only that file is in the Bank directory. The change is not written to the Preset file until `save`.
+
+Request:
+
+```json
+{"cmd":"rack_add","type":"delay","after":"reverb"}
+```
+
+Response:
+
+```json
+{"ok":true,"id":"delay"}
+```
+
+| Key | Value |
+| --- | --- |
+| `id` | The new Module's id. |
+
+Errors (on any of them nothing changes):
+
+| `error` | When |
+| --- | --- |
+| `unknown module type '<type>'` | No Module type has that name, e.g. `unknown module type 'wah'`. |
+| `no module '<after>'` | The active Preset has no Module with id `after`. |
+| `stereo module '<id>' before the cabinet` | A stereo Module would come before the cabinet, or the Rack has no cabinet. |
+| `mono module '<id>' after the cabinet` | A mono Module would come after the cabinet. |
+| `more than one cabinet` | The Rack already has a cabinet. |
+| `cabinet needs an ir; add one in the preset file` | A cabinet is added and neither `default-cab.wav` nor `bass-cab.wav` is in the Bank directory. |
+| `no preset loaded` | No Preset is active. |
+| `engine busy` | The audio thread's command queue is full; retry. |
+
+## rack_remove
+
+Removes a Module from the active Preset and swaps in the rebuilt Rack, as `rack_add` does.
+
+Request:
+
+```json
+{"cmd":"rack_remove","id":"delay"}
+```
+
+Response:
+
+```json
+{"ok":true,"id":"delay"}
+```
+
+| Key | Value |
+| --- | --- |
+| `id` | The removed Module's id. |
+
+Errors: `no module '<id>'`, `no preset loaded`, `engine busy`, and the layout errors of `rack_add` (removing the cabinet while stereo Modules follow it gives `stereo module '<id>' before the cabinet`); on any of them nothing changes.
+
+## rack_move
+
+Moves a Module of the active Preset to the zero-based position `to` and swaps in the rebuilt Rack, as `rack_add` does. A `to` past the end moves it to the end.
+
+Request:
+
+```json
+{"cmd":"rack_move","id":"delay","to":6}
+```
+
+Response:
+
+```json
+{"ok":true,"id":"delay","to":5}
+```
+
+| Key | Value |
+| --- | --- |
+| `id` | The moved Module's id. |
+| `to` | Its position now. |
+
+Errors: `no module '<id>'`, `no preset loaded`, `engine busy`, and the layout errors of `rack_add`; on any of them nothing changes.

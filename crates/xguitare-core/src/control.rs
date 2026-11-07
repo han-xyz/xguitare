@@ -7,12 +7,12 @@ use serde::de::{Deserializer, Error as _};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, json};
-use xguitare_dsp::{ParamSpec, Rack, Unit};
+use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
 use crate::engine::{Command, EngineQueues, EngineShared, SWITCHER_MAX_FRAMES, take_peak};
-use crate::preset::shortest_f64;
+use crate::preset::{CABINET_TYPE, shortest_f64};
 use crate::{
     Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
 };
@@ -23,16 +23,37 @@ const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";
 const NANOS_PER_MICRO: u64 = 1_000;
 const SILENCE_DB: f32 = -120.0;
+const CABINET_IRS: [&str; 2] = ["default-cab.wav", "bass-cab.wav"];
+const CABINET_NEEDS_IR: &str = "cabinet needs an ir; add one in the preset file";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "cmd", rename_all = "lowercase")]
+#[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     Status,
     List,
-    Load { preset: String },
-    Set { param: String, value: f64 },
-    Get { param: Option<String> },
+    Load {
+        preset: String,
+    },
+    Set {
+        param: String,
+        value: f64,
+    },
+    Get {
+        param: Option<String>,
+    },
     Save,
+    Modules,
+    RackAdd {
+        r#type: String,
+        after: Option<String>,
+    },
+    RackRemove {
+        id: String,
+    },
+    RackMove {
+        id: String,
+        to: usize,
+    },
 }
 
 /// One Control API reply; on the wire `{"ok":true, ...payload fields}` or `{"ok":false,"error":"..."}`.
@@ -55,7 +76,7 @@ pub struct EngineState {
     pub revision: u64,
 }
 
-/// Handles one request; the build warnings of a `load` come back beside the Response for the caller to log.
+/// Handles one request; the build warnings of a `load` or a Rack edit come back beside the Response for the caller to log.
 pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarning>) {
     let mut warnings = Vec::new();
     let result = match req {
@@ -65,6 +86,12 @@ pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarn
         Request::Set { param, value } => set(state, &param, value),
         Request::Get { param } => get(state, param.as_deref()),
         Request::Save => save(state),
+        Request::Modules => Ok(modules()),
+        Request::RackAdd { r#type, after } => {
+            rack_add(state, &r#type, after.as_deref(), &mut warnings)
+        }
+        Request::RackRemove { id } => rack_remove(state, &id, &mut warnings),
+        Request::RackMove { id, to } => rack_move(state, &id, to, &mut warnings),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
@@ -284,6 +311,138 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
     Ok(payload)
 }
 
+fn modules() -> Value {
+    let modules: Vec<Value> = ModuleRegistry::default()
+        .specs()
+        .map(|spec| {
+            let params: Vec<Value> = spec
+                .params
+                .iter()
+                .map(|p| {
+                    json!({
+                        "name": p.name,
+                        "min": shortest_f64(p.min),
+                        "max": shortest_f64(p.max),
+                        "default": shortest_f64(p.default),
+                        "unit": unit_text(p.unit),
+                        "integer": p.integer,
+                    })
+                })
+                .collect();
+            json!({"type": spec.type_name, "channels": channels_text(spec.channels), "params": params})
+        })
+        .collect();
+    json!({ "modules": modules })
+}
+
+fn rack_add(
+    state: &mut EngineState,
+    type_name: &str,
+    after: Option<&str>,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<Value, String> {
+    let bank_dir = state.config.bank_dir.clone();
+    edit_rack(state, warnings, |modules| {
+        let spec = ModuleRegistry::default()
+            .spec(type_name)
+            .ok_or_else(|| format!("unknown module type '{type_name}'"))?;
+        let index = match after {
+            None => 0,
+            Some(after) => module_index(modules, after)? + 1,
+        };
+        let ir = if type_name == CABINET_TYPE {
+            let ir = CABINET_IRS
+                .into_iter()
+                .find(|ir| bank_dir.join(ir).is_file())
+                .ok_or(CABINET_NEEDS_IR)?;
+            Some(ir.to_string())
+        } else {
+            None
+        };
+        let id = free_id(modules, type_name);
+        modules.insert(
+            index,
+            PresetModule {
+                id: id.clone(),
+                type_name: type_name.to_string(),
+                ir,
+                params: spec
+                    .params
+                    .iter()
+                    .map(|p| (p.name.to_string(), p.default))
+                    .collect(),
+            },
+        );
+        Ok(json!({ "id": id }))
+    })
+}
+
+fn rack_remove(
+    state: &mut EngineState,
+    id: &str,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<Value, String> {
+    edit_rack(state, warnings, |modules| {
+        modules.remove(module_index(modules, id)?);
+        Ok(json!({ "id": id }))
+    })
+}
+
+fn rack_move(
+    state: &mut EngineState,
+    id: &str,
+    to: usize,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<Value, String> {
+    edit_rack(state, warnings, |modules| {
+        let module = modules.remove(module_index(modules, id)?);
+        let to = to.min(modules.len());
+        modules.insert(to, module);
+        Ok(json!({ "id": id, "to": to }))
+    })
+}
+
+fn edit_rack(
+    state: &mut EngineState,
+    warnings: &mut Vec<BuildWarning>,
+    edit: impl FnOnce(&mut Vec<PresetModule>) -> Result<Value, String>,
+) -> Result<Value, String> {
+    let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
+    let (file, mut preset) = (file.clone(), preset.clone());
+    let payload = edit(&mut preset.modules)?;
+    let (rack, build_warnings) = preset
+        .build(
+            state.sample_rate,
+            state.max_frames,
+            &state.config.bank_dir,
+            state.config.ir_max_ms,
+        )
+        .map_err(|err| err.to_string())?;
+    *warnings = build_warnings;
+    swap_rack(state, rack)?;
+    state.revision += 1;
+    state.active = Some((file, preset));
+    Ok(payload)
+}
+
+fn module_index(modules: &[PresetModule], id: &str) -> Result<usize, String> {
+    modules
+        .iter()
+        .position(|m| m.id == id)
+        .ok_or_else(|| ResolveError::UnknownModule(id.to_string()).to_string())
+}
+
+fn free_id(modules: &[PresetModule], type_name: &str) -> String {
+    let is_taken = |id: &str| modules.iter().any(|m| m.id == id);
+    if !is_taken(type_name) {
+        return type_name.to_string();
+    }
+    (2..)
+        .map(|n| format!("{type_name}-{n}"))
+        .find(|id| !is_taken(id))
+        .expect("a finite Rack leaves some suffix free")
+}
+
 fn get(state: &EngineState, key: Option<&str>) -> Result<Value, String> {
     let (_, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
     let selected: Vec<(usize, usize)> = match key {
@@ -343,6 +502,14 @@ fn unit_text(unit: Unit) -> &'static str {
         Unit::Ms => "ms",
         Unit::Hz => "Hz",
         Unit::Percent => "%",
+    }
+}
+
+fn channels_text(channels: Channels) -> &'static str {
+    match channels {
+        Channels::Mono => "mono",
+        Channels::Stereo => "stereo",
+        Channels::MonoToStereo => "mono_to_stereo",
     }
 }
 

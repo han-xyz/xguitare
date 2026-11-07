@@ -275,3 +275,88 @@ fn run_main_missing_args_names_them() {
         "{stderr}"
     );
 }
+
+#[test]
+fn modules_prints_types() {
+    let out = cli(
+        &["modules"],
+        reply(
+            r#"{"ok":true,"modules":[{"type":"gain","channels":"mono","params":[{"name":"level","min":-60.0,"max":20.0,"default":0.0,"unit":"dB","integer":false}]},{"type":"cabinet","channels":"mono_to_stereo","params":[]},{"type":"delay","channels":"stereo","params":[{"name":"time"},{"name":"feedback"},{"name":"mix"}]}]}"#,
+        ),
+    );
+    assert_eq!(out.requests, [Request::Modules]);
+    assert_eq!(
+        out.stdout,
+        "gain        mono            level\ncabinet     mono_to_stereo  \ndelay       stereo          time,feedback,mix\n"
+    );
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn rack_add_prints() {
+    let out = cli(
+        &["rack", "add", "delay", "--after", "cabinet"],
+        reply(r#"{"ok":true,"id":"delay-2"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackAdd {
+            r#type: "delay".to_string(),
+            after: Some("cabinet".to_string()),
+        }]
+    );
+    assert_eq!(out.stdout, "added delay-2\n");
+    let out = cli(
+        &["rack", "add", "gate"],
+        reply(r#"{"ok":true,"id":"gate"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackAdd {
+            r#type: "gate".to_string(),
+            after: None,
+        }]
+    );
+    let out = cli(
+        &["rack", "add", "delay"],
+        reply(r#"{"ok":false,"error":"stereo module 'delay' before the cabinet"}"#),
+    );
+    assert_eq!(
+        out.stderr,
+        "error: stereo module 'delay' before the cabinet\n"
+    );
+    assert_eq!(out.code, 1);
+}
+
+#[test]
+fn rack_move_prints() {
+    let out = cli(
+        &["rack", "move", "delay", "6"],
+        reply(r#"{"ok":true,"id":"delay","to":4}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackMove {
+            id: "delay".to_string(),
+            to: 6,
+        }]
+    );
+    assert_eq!(out.stdout, "moved delay to 4\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn rack_remove_prints() {
+    let out = cli(
+        &["rack", "remove", "delay"],
+        reply(r#"{"ok":true,"id":"delay"}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::RackRemove {
+            id: "delay".to_string(),
+        }]
+    );
+    assert_eq!(out.stdout, "removed delay\n");
+    assert_eq!(out.code, 0);
+}

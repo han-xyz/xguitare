@@ -75,6 +75,11 @@ impl ModuleRegistry {
         self.entry(type_name).map(|entry| entry.spec)
     }
 
+    /// Every registered ModuleSpec, in registry order.
+    pub fn specs(&self) -> impl Iterator<Item = &'static ModuleSpec> + '_ {
+        self.entries.iter().map(|entry| entry.spec)
+    }
+
     pub fn construct(&self, type_name: &str) -> Option<Box<dyn Module>> {
         self.entry(type_name)?
             .construct

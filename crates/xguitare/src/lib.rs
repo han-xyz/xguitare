@@ -48,6 +48,26 @@ enum Cmd {
     Get { param: Option<String> },
     /// Write the live Parameter values back to the active Preset file
     Save,
+    /// List the Module types, their channels and Parameters
+    Modules,
+    /// Edit the live Rack's layout
+    #[command(subcommand)]
+    Rack(RackCmd),
+}
+
+#[derive(Subcommand)]
+enum RackCmd {
+    /// Add a Module with default Parameters, after <id> or at the front
+    Add {
+        #[arg(value_name = "TYPE")]
+        type_name: String,
+        #[arg(long)]
+        after: Option<String>,
+    },
+    /// Remove a Module
+    Remove { id: String },
+    /// Move a Module to a zero-based position
+    Move { id: String, to: usize },
 }
 
 /// Parses `argv` and runs the command; returns the process exit code (0 on success, `--help` and `--version`; 1 on any error, after one line on stderr).

@@ -3,7 +3,7 @@ use std::io::Write;
 use xguitare_client::Transport;
 use xguitare_core::control::{Request, Response, Value};
 
-use crate::{Cmd, parse};
+use crate::{Cmd, RackCmd, parse};
 
 /// Runs one client subcommand against the Daemon; returns the exit code (0 on success and `--help`, 1 after one `error: ...` line on `err`).
 pub fn run_cli(
@@ -46,6 +46,13 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         }
         Cmd::Get { param } => Request::Get { param },
         Cmd::Save => Request::Save,
+        Cmd::Modules => Request::Modules,
+        Cmd::Rack(RackCmd::Add { type_name, after }) => Request::RackAdd {
+            r#type: type_name,
+            after,
+        },
+        Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id },
+        Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove { id, to },
     })
 }
 
@@ -83,6 +90,14 @@ fn render(req: &Request, payload: &Value) -> String {
             })
             .collect(),
         Request::Save => format!("saved {}\n", text(&payload["path"])),
+        Request::Modules => render_modules(payload),
+        Request::RackAdd { .. } => format!("added {}\n", text(&payload["id"])),
+        Request::RackRemove { .. } => format!("removed {}\n", text(&payload["id"])),
+        Request::RackMove { .. } => format!(
+            "moved {} to {}\n",
+            text(&payload["id"]),
+            text(&payload["to"])
+        ),
     }
 }
 
@@ -133,6 +148,22 @@ fn render_list(payload: &Value) -> String {
             } else {
                 format!("{program:>2}  {name}\n")
             }
+        })
+        .collect()
+}
+
+fn render_modules(payload: &Value) -> String {
+    items(&payload["modules"])
+        .map(|module| {
+            let params: Vec<String> = items(&module["params"])
+                .map(|param| text(&param["name"]))
+                .collect();
+            format!(
+                "{:<12}{:<16}{}\n",
+                text(&module["type"]),
+                text(&module["channels"]),
+                params.join(",")
+            )
         })
         .collect()
 }

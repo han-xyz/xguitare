@@ -206,6 +206,23 @@ $ xguitare save
 saved /home/you/.config/xguitare/bank/03-lead.toml
 ```
 
+`modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` the Module goes to the front; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file:
+
+```console
+$ xguitare modules
+gain        mono            level
+gate        mono            threshold,attack,release,hysteresis
+...
+$ xguitare rack add delay --after reverb
+added delay
+$ xguitare rack move delay 1
+error: stereo module 'delay' before the cabinet
+$ xguitare rack move delay 6
+moved delay to 5
+$ xguitare rack remove delay
+removed delay
+```
+
 ## GUI
 
 `xguitare-gui` is a window onto the running Daemon: it uses the same Control API as the CLI. Install it next to `xguitare`, so that it can start the Daemon:

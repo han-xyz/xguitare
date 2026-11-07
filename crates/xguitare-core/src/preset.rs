@@ -9,7 +9,7 @@ use xguitare_dsp::{AudioBuffers, Module, ModuleSpec, Rack, RackError};
 use crate::ir::load_ir;
 use crate::registry::ModuleRegistry;
 
-const CABINET_TYPE: &str = "cabinet";
+pub(crate) const CABINET_TYPE: &str = "cabinet";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preset {
