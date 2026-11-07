@@ -9,7 +9,7 @@ version.workspace = true
 xguitare-dsp = { path = "../xguitare-dsp" }
 directories = "6.0.0"
 serde = { version = "1.0.229", features = ["derive"] }
-toml = "1.1.8"
+toml = "1.2.1"
 hound = "3.5.1"
 libc = "0.2.191"
 rtrb = "0.4.1"
