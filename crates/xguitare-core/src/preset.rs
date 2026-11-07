@@ -303,7 +303,7 @@ impl fmt::Display for PresetError {
             PresetError::MissingIr(id) => write!(f, "cabinet '{id}' has no ir"),
             PresetError::IrOutsideBank(id) => write!(
                 f,
-                "cabinet '{id}' ir must be a relative path inside the bank directory"
+                "cabinet '{id}' ir must be a relative name inside the IR directory or the Bank directory"
             ),
             PresetError::NonFiniteParam { module, param } => {
                 write!(

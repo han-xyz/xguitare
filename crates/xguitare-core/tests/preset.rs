@@ -230,7 +230,7 @@ fn out_of_range_param_is_clamped() {
 }
 
 #[test]
-fn ir_path_outside_bank_is_error() {
+fn ir_path_error_text() {
     let cabinet = |ir: &str| {
         Preset::parse(&format!(
             "name = \"X\"\n[[module]]\ntype = \"cabinet\"\nid = \"cab\"\nir = \"{ir}\"\n"
@@ -247,7 +247,7 @@ fn ir_path_outside_bank_is_error() {
         let error = cabinet(ir).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "cabinet 'cab' ir must be a relative path inside the bank directory",
+            "cabinet 'cab' ir must be a relative name inside the IR directory or the Bank directory",
             "{ir}"
         );
     }
