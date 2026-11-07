@@ -11,7 +11,8 @@ const LEVEL: usize = 2;
 const STAGES: usize = 2;
 const INPUT_HIGH_PASS_HZ: f32 = 30.0;
 const DC_BLOCK_HZ: f32 = 10.0;
-const TONE_HZ: f32 = 1000.0;
+const TONE_LOW_PASS_HZ: f32 = 400.0;
+const TONE_HIGH_PASS_HZ: f32 = 1500.0;
 const OVERSAMPLING: f32 = 4.0;
 
 static SPEC: ModuleSpec = ModuleSpec {
@@ -54,8 +55,10 @@ pub struct Fuzz {
     input_high_pass_state: f32,
     dc_block_coeff: f32,
     dc_blocks: [DcBlock; STAGES],
-    tone_coeff: f32,
+    low_pass_coeff: f32,
     low_pass_state: f32,
+    high_pass_coeff: f32,
+    high_pass_state: f32,
     oversampler: Oversampler4x,
 }
 
@@ -71,8 +74,10 @@ impl Fuzz {
             input_high_pass_state: 0.0,
             dc_block_coeff: 0.0,
             dc_blocks: [DcBlock::default(); STAGES],
-            tone_coeff: 0.0,
+            low_pass_coeff: 0.0,
             low_pass_state: 0.0,
+            high_pass_coeff: 0.0,
+            high_pass_state: 0.0,
             oversampler: Oversampler4x::new(),
         }
     }
@@ -96,7 +101,8 @@ impl Module for Fuzz {
         self.level.prepare(sample_rate);
         self.input_high_pass_coeff = cutoff_coeff(INPUT_HIGH_PASS_HZ, oversampled_rate);
         self.dc_block_coeff = cutoff_coeff(DC_BLOCK_HZ, oversampled_rate);
-        self.tone_coeff = cutoff_coeff(TONE_HZ, sample_rate);
+        self.low_pass_coeff = cutoff_coeff(TONE_LOW_PASS_HZ, sample_rate);
+        self.high_pass_coeff = cutoff_coeff(TONE_HIGH_PASS_HZ, sample_rate);
         self.oversampler.prepare(max_frames);
     }
 
@@ -107,6 +113,7 @@ impl Module for Fuzz {
         self.input_high_pass_state = 0.0;
         self.dc_blocks = [DcBlock::default(); STAGES];
         self.low_pass_state = 0.0;
+        self.high_pass_state = 0.0;
         self.oversampler.reset();
     }
 
@@ -139,10 +146,12 @@ impl Module for Fuzz {
         self.oversampler.downsample(mono);
 
         for sample in mono.iter_mut() {
-            self.low_pass_state = *sample + self.tone_coeff * (self.low_pass_state - *sample);
-            let high_pass = *sample - self.low_pass_state;
+            self.low_pass_state = *sample + self.low_pass_coeff * (self.low_pass_state - *sample);
+            self.high_pass_state =
+                *sample + self.high_pass_coeff * (self.high_pass_state - *sample);
+            let high_pass = *sample - self.high_pass_state;
             let tone = self.tone.next_value();
-            // Big Muff tone stack: a crossfade from a low-pass to a high-pass at one corner.
+            // Big Muff tone stack: the split low-pass and high-pass corners scoop the mids at tone 50.
             let shaped = (1.0 - tone) * self.low_pass_state + tone * high_pass;
             *sample = shaped * self.level.next_value();
         }

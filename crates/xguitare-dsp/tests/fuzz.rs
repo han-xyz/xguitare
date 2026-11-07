@@ -82,3 +82,19 @@ fn finite_under_full_scale() {
     let output = run(&mut rack, &full_scale_sine_then_noise());
     assert!(output.iter().all(|s| s.is_finite()));
 }
+
+#[test]
+fn tone_center_scoops_mids() {
+    let input = noise(0.05, 2 * SAMPLE_RATE as usize);
+    let output = fuzz_output(0.0, 50.0, &input);
+    let response =
+        |hz: f32| {
+            db(bin_mag(&output[SETTLE..], hz, SAMPLE_RATE)
+                / bin_mag(&input[SETTLE..], hz, SAMPLE_RATE))
+        };
+    let (low, mid, high) = (response(200.0), response(1000.0), response(4000.0));
+    assert!(
+        mid <= low - 4.0 && mid <= high - 4.0,
+        "200 Hz {low} dB, 1 kHz {mid} dB, 4 kHz {high} dB"
+    );
+}
