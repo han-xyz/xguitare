@@ -143,7 +143,7 @@ impl EngineQueues {
     }
 }
 
-/// The audio thread's Rack state: the current Rack, the one fading in, the one waiting for that fade to end, and the Commands that change them. Allocates and frees nothing after `new`; every Rack it lets go of leaves through `AudioQueues::from_audio`.
+/// The audio thread's Rack state: the current Rack, the one fading in, the one waiting for that fade to end and a block it fits, and the Commands that change them. Allocates and frees nothing after `new`; every Rack it lets go of leaves through `AudioQueues::from_audio`.
 pub struct RackSwitcher {
     current: Box<Rack>,
     incoming: Option<Box<Rack>>,
@@ -201,7 +201,7 @@ impl RackSwitcher {
                     newest.module_mut(module).set_param(param, value);
                 }
                 Command::SwapRack(new) => {
-                    if self.incoming.is_none() {
+                    if self.incoming.is_none() && self.pending.is_none() {
                         self.start_fade(new);
                     } else if let Some(replaced) = self.pending.replace(new) {
                         self.retire(replaced);
@@ -228,6 +228,11 @@ impl RackSwitcher {
     fn run_racks(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
         let frames = input.len();
         let fits = |rack: &Rack| frames <= rack.max_frames();
+        if self.incoming.is_none()
+            && let Some(next) = self.pending.take_if(|next| fits(next))
+        {
+            self.start_fade(next);
+        }
         if !fits(&self.current) || self.incoming.as_deref().is_some_and(|new| !fits(new)) {
             self.cut_to_fitting(frames);
         }
@@ -247,12 +252,12 @@ impl RackSwitcher {
             .crossfader
             .process(&mut self.current, incoming, input, out_l, out_r);
         if let Some(new) = self.incoming.take_if(|_| faded) {
-            self.finish_fade(new);
+            self.finish_fade(new, frames);
         }
         true
     }
 
-    /// A Rack that cannot run this block makes the output silent and stops the fade, so cut without a fade: to the pending Rack if it fits, else to the fading-in one when the current Rack is the one that does not fit.
+    /// A Rack that cannot run this block makes the output silent and stops the fade, so cut without a fade: to the pending Rack if it fits, else to the fading-in one when the current Rack is the one that does not fit, keeping the pending Rack until a block fits it.
     fn cut_to_fitting(&mut self, frames: usize) {
         if let Some(newest) = self.pending.take_if(|new| frames <= new.max_frames()) {
             if let Some(fading_in) = self.incoming.take() {
@@ -265,14 +270,14 @@ impl RackSwitcher {
         if frames > self.current.max_frames()
             && let Some(new) = self.incoming.take_if(|new| frames <= new.max_frames())
         {
-            self.finish_fade(new);
+            self.finish_fade(new, frames);
         }
     }
 
-    fn finish_fade(&mut self, new: Box<Rack>) {
+    fn finish_fade(&mut self, new: Box<Rack>, frames: usize) {
         let old = self.make_current(new);
         self.retire(old);
-        if let Some(next) = self.pending.take() {
+        if let Some(next) = self.pending.take_if(|next| frames <= next.max_frames()) {
             self.start_fade(next);
         }
     }

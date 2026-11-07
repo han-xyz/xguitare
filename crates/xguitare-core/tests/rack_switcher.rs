@@ -182,3 +182,33 @@ fn grown_block_mid_fade_cuts_to_newest() {
     assert!((left[0] - 0.05).abs() < 1e-6, "{}", left[0]);
     assert_eq!(shared.running_frames.load(Ordering::Relaxed), LARGER);
 }
+
+#[test]
+fn grown_block_cuts_to_fitting_incoming_and_keeps_pending() {
+    const LARGER: usize = 2 * BLOCK;
+    let (mut control, audio, _) = engine_queues(CAPACITY);
+    let mut switcher = RackSwitcher::new(
+        gain_rack(&[0.0]),
+        SWITCHER_MAX_FRAMES,
+        fades(),
+        audio,
+        Arc::default(),
+    );
+    swap(&mut control, sized_gain_rack(&[-6.0], LARGER));
+    block(&mut switcher);
+    swap(&mut control, gain_rack(&[-20.0]));
+    let input = [0.5; LARGER];
+    let (mut left, mut right) = ([0.0; LARGER], [0.0; LARGER]);
+    switcher.apply_commands();
+    assert!(switcher.process(&input, &mut left, &mut right));
+    assert!(
+        (left[0] - 0.5 * 10f32.powf(-6.0 / 20.0)).abs() < 1e-4,
+        "{}",
+        left[0]
+    );
+    let mut out = [0.0; BLOCK];
+    for _ in 0..2 * FADE.div_ceil(BLOCK) + 2 {
+        out = block(&mut switcher);
+    }
+    assert!((out[BLOCK - 1] - 0.05).abs() < 1e-6, "{}", out[BLOCK - 1]);
+}
