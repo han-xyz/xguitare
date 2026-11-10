@@ -10,6 +10,7 @@ use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_core::control::{EngineState, PeakMeters, SILENCE_DB, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::metronome::Metronome;
 use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankKind, Config};
@@ -72,6 +73,7 @@ fn registry_modules(test: &str) -> serde_json::Value {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     match handle(&mut state, Request::Modules).0 {
         Response::Ok(payload) => payload,

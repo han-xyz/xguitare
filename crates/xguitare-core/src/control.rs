@@ -20,6 +20,8 @@ use crate::engine::{
     take_peak,
 };
 use crate::firstrun::{BASS_IR, DEFAULT_IR, ensure_bank};
+use crate::metronome::Metronome;
+use crate::metronome_control::{metronome, metronome_status, metronome_tap, practice_settings};
 use crate::mixer_control::{
     BusChange, bus_add, bus_remove, bus_set, clip_reset, master_set, send_set,
 };
@@ -220,6 +222,14 @@ pub enum Request {
         on: Option<bool>,
         count_in: Option<u32>,
     },
+    /// `volume` in dB, −40..=0.
+    Metronome {
+        on: Option<bool>,
+        bpm: Option<f64>,
+        meter: Option<(u32, u32)>,
+        volume: Option<f64>,
+    },
+    MetronomeTap,
     BusAdd {
         name: Option<String>,
     },
@@ -364,6 +374,7 @@ pub struct EngineState {
     /// The Preset `save` last wrote to each file, until the Bank watcher sees that file change or a `load`.
     pub saved: HashMap<PathBuf, Preset>,
     pub projects: Projects,
+    pub metronome: Metronome,
 }
 
 /// One Control API connection, from `open_connection` to `close_connection`; `status` reports and clears only its own peaks.
@@ -616,6 +627,13 @@ fn handle_from(
         Request::Loop { start, end, on } => set_loop(state, LoopRegion { start, end, on }),
         Request::Tempo { bpm, meter } => tempo(state, bpm, meter),
         Request::Click { on, count_in } => click(state, on, count_in),
+        Request::Metronome {
+            on,
+            bpm,
+            meter,
+            volume,
+        } => metronome(state, on, bpm, meter, volume),
+        Request::MetronomeTap => metronome_tap(state),
         Request::BusAdd { name } => bus_add(state, name.as_deref()),
         Request::BusRemove { bus } => bus_remove(state, &bus),
         Request::BusSet {
@@ -733,7 +751,8 @@ pub fn follow_sample_rate(state: &mut EngineState) -> Option<Result<Reprepare, S
 pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
     let sample_rate = sample_rate as f32;
     let fades = FadeLengths::at(sample_rate, state.config.crossfade_ms);
-    if state.queues.commands.slots() < 2 + rebuild_arrangement_slots(state)
+    let metronome_slots = usize::from(state.metronome.on);
+    if state.queues.commands.slots() < 2 + metronome_slots + rebuild_arrangement_slots(state)
         || state
             .queues
             .commands
@@ -745,6 +764,14 @@ pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<R
     let mut outcome = rebuild(state, sample_rate, state.max_frames)?;
     state.sample_rate = sample_rate;
     state.tuner.set_sample_rate(sample_rate);
+    if state.metronome.on {
+        let settings = practice_settings(state, true);
+        state
+            .queues
+            .commands
+            .push(Command::Metronome(settings))
+            .map_err(|_| ENGINE_BUSY.to_string())?;
+    }
     add_warnings(&mut outcome, rebuild_arrangement(state)?);
     Ok(outcome)
 }
@@ -826,6 +853,7 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         "callback_max_us": shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "connections": connections,
+        "metronome": metronome_status(state),
     });
     if let Some(fields) = payload.as_object_mut() {
         fields.extend(status_fields(state, &peaks.tracks, &peaks.mix));
@@ -1464,7 +1492,7 @@ fn set_ports(
     Ok(json!({ "connected": connected(state, ports) }))
 }
 
-fn save_state(config: &Config, saved: &SavedState) -> Result<(), String> {
+pub(crate) fn save_state(config: &Config, saved: &SavedState) -> Result<(), String> {
     write_state(&config.state_file, saved)
         .map_err(|err| format!("cannot save {}: {err}", config.state_file.display()))
 }

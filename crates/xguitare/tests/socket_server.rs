@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
 use xguitare_core::control::{EngineState, PeakMeters, Value};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
+use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
@@ -85,6 +86,7 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket

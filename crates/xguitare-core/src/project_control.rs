@@ -14,6 +14,7 @@ use crate::control::{
     BusRef, EngineState, IndexOrName, MixPeaks, Position, TrackRef, TransportAction, peak_db, slug,
 };
 use crate::engine::{Command, MeterPoint, transport_from_code};
+use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
@@ -825,7 +826,7 @@ pub(crate) fn click(
     project.count_in = count_in.unwrap_or(project.count_in);
     check_project(&project).map_err(|err| err.to_string())?;
     let (on, count_in) = (project.click, project.count_in);
-    send(state, &click_commands(&project))?;
+    send(state, &click_commands(state, &project))?;
     commit(state, project);
     Ok(json!({"on": on, "count_in": count_in}))
 }
@@ -983,7 +984,7 @@ fn open(
         },
     )?;
     // The swap is queued, so the commands after it reach the new Arrangement; a full queue leaves the click off until the next `click`.
-    let _ = send(state, &click_commands(&project));
+    let _ = send(state, &click_commands(state, &project));
     let events = &mut state.projects.events;
     events.push(ProjectEvent::Opened {
         dir: dir.clone(),
@@ -1074,7 +1075,7 @@ fn swap_project_with_ids(
 
 /// The commands [`rebuild_arrangement`] may push.
 pub(crate) fn rebuild_arrangement_slots(state: &EngineState) -> usize {
-    if state.projects.open.is_some() { 3 } else { 0 }
+    if state.projects.open.is_some() { 4 } else { 0 }
 }
 
 /// After a quantum or sample-rate change, rebuilds the open Project's Arrangement at the Engine's rate and `max_frames` and swaps it in; while the Project's rate differs from the Engine's, closes the Arrangement instead, so nothing plays or records at the wrong rate.
@@ -1104,7 +1105,7 @@ pub(crate) fn rebuild_arrangement(state: &mut EngineState) -> Result<Vec<BuildWa
             moved_from: NOTHING_MOVED,
         },
     )?;
-    let clicks = click_commands(&open.project);
+    let clicks = click_commands(state, &open.project);
     state.projects.events.push(ProjectEvent::Readers(readers));
     send(state, &clicks)?;
     Ok(warnings)
@@ -1123,10 +1124,11 @@ fn rate_mismatch(project_rate: u32, engine_rate: f32) -> Option<String> {
     })
 }
 
-fn click_commands(project: &Project) -> [ArrangementCommand; 2] {
+fn click_commands(state: &EngineState, project: &Project) -> [ArrangementCommand; 3] {
     [
         ArrangementCommand::Click(project.click),
         ArrangementCommand::CountIn(project.count_in),
+        ArrangementCommand::ClickVolume(click_volume_db(state)),
     ]
 }
 

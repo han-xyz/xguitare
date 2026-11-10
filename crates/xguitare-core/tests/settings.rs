@@ -11,6 +11,7 @@ use xguitare_core::control::{
 };
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
+use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
@@ -120,6 +121,7 @@ fn state(test: &str, config_toml: &str) -> (EngineState, AudioQueues, TempDir) {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     (state, audio, TempDir(dir))
 }

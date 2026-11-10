@@ -8,6 +8,7 @@ use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use serde_json::{Value, json};
 use xguitare_core::control::{ConnectionId, EngineState, PeakMeters, handle_line, open_connection};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
+use xguitare_core::metronome::Metronome;
 use xguitare_core::project::{Item, PROJECT_FILE, Project, Take, Track};
 use xguitare_core::project_control::{ProjectEvent, Projects, take_project_events};
 use xguitare_core::render::RenderTask;
@@ -64,6 +65,7 @@ fn session(test: &str) -> Session {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     let connection = open_connection(&mut state);
     Session {

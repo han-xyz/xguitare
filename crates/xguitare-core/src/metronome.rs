@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 use crate::project::TEMPO_BPM;
 
 pub const VOLUME_DB: RangeInclusive<f64> = -40.0..=0.0;
+pub(crate) const BAD_BPM: &str = "bpm must be between 20 and 300";
+pub(crate) const BAD_VOLUME: &str = "volume must be between -40 and 0 dB";
 pub const DEFAULT_VOLUME_DB: f64 = -12.0;
 pub const DEFAULT_BPM: f64 = 120.0;
 pub const DEFAULT_METER: (u32, u32) = (4, 4);
@@ -28,6 +30,14 @@ pub struct MetronomeSettings {
     pub meter: (u32, u32),
     pub volume_db: f32,
     pub sample_rate: f32,
+}
+
+/// The control thread's side of the Metronome; its tempo, meter and volume live in `state.toml` ([`crate::SavedMetronome`]).
+#[derive(Debug, Default)]
+pub struct Metronome {
+    /// Whether it plays with no Project open; with one open the Project's click stands in for it.
+    pub(crate) on: bool,
+    pub(crate) taps: TapTempo,
 }
 
 /// The tempo of a series of taps: the average interval of the last four, from the second tap on; a gap over two seconds starts a new series.

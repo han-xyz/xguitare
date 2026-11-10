@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::control::temp_path;
+use crate::metronome::{BAD_BPM, BAD_VOLUME, VOLUME_DB};
+use crate::project::{ProjectError, TEMPO_BPM, is_meter};
 use crate::{BankKind, Ports};
 
 const STATE_FILE_MODE: u32 = 0o600;
@@ -25,6 +27,45 @@ pub struct SavedState {
     /// The folder that holds one sub-folder per Project.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projects_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "SavedMetronome::is_empty")]
+    pub metronome: SavedMetronome,
+}
+
+/// The `[metronome]` table: the tempo, meter and volume the Metronome plays with no Project open; it always starts off.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedMetronome {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meter: Option<(u32, u32)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume_db: Option<f64>,
+}
+
+impl SavedMetronome {
+    fn is_empty(&self) -> bool {
+        *self == SavedMetronome::default()
+    }
+
+    /// Drops each value out of range; the reasons, or `None` when every value is valid.
+    fn drop_invalid(&mut self) -> Option<String> {
+        let mut reasons = Vec::new();
+        if self.bpm.take_if(|bpm| !TEMPO_BPM.contains(bpm)).is_some() {
+            reasons.push(BAD_BPM.to_string());
+        }
+        if self.meter.take_if(|meter| !is_meter(*meter)).is_some() {
+            reasons.push(ProjectError::Meter.to_string());
+        }
+        if self
+            .volume_db
+            .take_if(|db| !VOLUME_DB.contains(db))
+            .is_some()
+        {
+            reasons.push(BAD_VOLUME.to_string());
+        }
+        (!reasons.is_empty()).then(|| reasons.join(", "))
+    }
 }
 
 /// The `[banks]` table: the Bank directory each kind switched to or from, recorded by the first `bank_kind` switch.
@@ -69,8 +110,14 @@ pub(crate) fn read_state(path: &Path) -> (SavedState, Option<String>) {
             );
         }
     };
-    match toml::from_str(&text) {
-        Ok(state) => (state, None),
+    match toml::from_str::<SavedState>(&text) {
+        Ok(mut state) => {
+            let warning = state
+                .metronome
+                .drop_invalid()
+                .map(|reasons| format!("{}: metronome: {reasons}; ignored", path.display()));
+            (state, warning)
+        }
         Err(err) => {
             let (line, col) = crate::toml_position(&text, &err);
             let warning = format!("{}: line {line}:{col}: {}", path.display(), err.message());

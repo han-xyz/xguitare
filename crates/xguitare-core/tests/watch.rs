@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
+use xguitare_core::metronome::Metronome;
 use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
@@ -48,6 +49,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     (state, audio)
 }

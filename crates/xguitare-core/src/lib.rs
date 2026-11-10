@@ -9,6 +9,7 @@ pub mod firstrun;
 mod ir;
 mod irdir;
 pub mod metronome;
+mod metronome_control;
 mod mixer_control;
 pub mod ports;
 mod preset;
@@ -32,7 +33,7 @@ pub use ir::{IrError, load_ir};
 pub use irdir::list_irs;
 pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
-pub use state::{Banks, SavedState};
+pub use state::{Banks, SavedMetronome, SavedState};
 
 fn line_col(text: &str, offset: usize) -> (usize, usize) {
     let before = &text[..offset.min(text.len())];

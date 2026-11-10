@@ -17,6 +17,7 @@ use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
     engine_queues, raise_peak,
 };
+use xguitare_core::metronome::Metronome;
 use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::apply;
@@ -82,6 +83,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     (state, audio, dir)
 }
@@ -158,6 +160,7 @@ fn status_reports_fields() {
             "callback_max_us": 250,
             "callback_last_us": 90,
             "connections": [{"from": "system:capture_1", "to": "xguitare:in"}],
+            "metronome": {"on": false, "bpm": 120.0, "meter": [4, 4], "volume_db": -12.0, "beat": 0},
             "project": null,
             "project_warning": null,
             "render": null,

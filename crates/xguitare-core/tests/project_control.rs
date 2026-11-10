@@ -12,6 +12,7 @@ use xguitare_core::control::{
     follow_sample_rate, handle, handle_with_ports, reprepare,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, raise_peak};
+use xguitare_core::metronome::{Metronome, MetronomeSettings};
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{PROJECT_FILE, Project};
 use xguitare_core::project_control::{
@@ -104,6 +105,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     (state, audio, TempDir(dir))
 }
@@ -852,6 +854,7 @@ fn loop_tempo_and_click_are_checked_then_sent() {
             "Tempo { bpm: 90.0, meter: (3, 4) }",
             "Click(true)",
             "CountIn(1)",
+            "ClickVolume(-12.0)",
         ]
     );
     let status = status(&mut state);
@@ -1322,7 +1325,7 @@ fn click_and_count_in_are_saved_with_the_project() {
     );
     assert_eq!(
         arrangement_commands(&mut audio),
-        ["Click(true)", "CountIn(2)"]
+        ["Click(true)", "CountIn(2)", "ClickVolume(-12.0)"]
     );
 }
 
@@ -1402,4 +1405,205 @@ fn items_list_each_tracks_items_and_status_counts_loaded_audio() {
     close(&mut state);
     assert_ne!(status(&mut state)["revision"], recorded["revision"]);
     assert_eq!(error(handle(&mut state, Request::Items)), "no project open");
+}
+
+fn metronome(
+    on: Option<bool>,
+    bpm: Option<f64>,
+    meter: Option<(u32, u32)>,
+    volume: Option<f64>,
+) -> Request {
+    Request::Metronome {
+        on,
+        bpm,
+        meter,
+        volume,
+    }
+}
+
+fn metronome_settings(audio: &mut AudioQueues) -> Vec<MetronomeSettings> {
+    drain_commands(audio)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Metronome(settings) => Some(settings),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn metronome_starts_off_at_the_defaults() {
+    let (mut state, _audio, _dir) = state("metronome-defaults");
+    assert_eq!(
+        status(&mut state)["metronome"],
+        json!({"on": false, "bpm": 120.0, "meter": [4, 4], "volume_db": -12.0, "beat": 0})
+    );
+}
+
+#[test]
+fn metronome_request_plays_and_returns_the_new_state() {
+    let (mut state, mut audio, _dir) = state("metronome-request");
+    let revision = state.revision;
+    let payload = ok(handle(
+        &mut state,
+        metronome(Some(true), Some(97.5), Some((3, 4)), Some(-6.0)),
+    ));
+    assert_eq!(
+        payload,
+        json!({"on": true, "bpm": 97.5, "meter": [3, 4], "volume_db": -6.0, "beat": 0})
+    );
+    assert!(state.revision > revision);
+    assert_eq!(
+        metronome_settings(&mut audio),
+        [MetronomeSettings {
+            on: true,
+            bpm: 97.5,
+            meter: (3, 4),
+            volume_db: -6.0,
+            sample_rate: 48_000.0,
+        }]
+    );
+    state.shared.metronome_beat.store(2, Ordering::Relaxed);
+    let payload = ok(handle(&mut state, metronome(Some(false), None, None, None)));
+    assert_eq!(payload["on"], false);
+    assert_eq!(payload["bpm"], 97.5);
+    assert!(!metronome_settings(&mut audio)[0].on);
+    assert_eq!(status(&mut state)["metronome"]["beat"], 2);
+}
+
+#[test]
+fn metronome_errors_are_verbatim_and_change_nothing() {
+    let (mut state, mut audio, _dir) = state("metronome-errors");
+    let revision = state.revision;
+    for (request, expected) in [
+        (
+            metronome(None, Some(19.9), None, None),
+            "bpm must be between 20 and 300",
+        ),
+        (
+            metronome(None, Some(f64::NAN), None, None),
+            "bpm must be between 20 and 300",
+        ),
+        (
+            metronome(None, None, Some((17, 4)), None),
+            "meter must be 1 to 16 beats of a 2, 4, 8 or 16 note",
+        ),
+        (
+            metronome(None, None, Some((4, 3)), None),
+            "meter must be 1 to 16 beats of a 2, 4, 8 or 16 note",
+        ),
+        (
+            metronome(Some(true), None, None, Some(0.5)),
+            "volume must be between -40 and 0 dB",
+        ),
+        (
+            metronome(None, None, None, Some(-40.5)),
+            "volume must be between -40 and 0 dB",
+        ),
+    ] {
+        assert_eq!(error(handle(&mut state, request)), expected);
+    }
+    assert_eq!(state.revision, revision);
+    assert_eq!(metronome_settings(&mut audio), []);
+    assert_eq!(status(&mut state)["metronome"]["on"], false);
+}
+
+#[test]
+fn metronome_settings_are_saved_in_state_toml_but_not_on() {
+    let (mut state, _audio, _dir) = state("metronome-saved");
+    ok(handle(
+        &mut state,
+        metronome(Some(true), Some(90.0), Some((6, 8)), Some(-20.0)),
+    ));
+    let reloaded =
+        Config::load(Some(&state.config.state_file.with_file_name("config.toml"))).unwrap();
+    assert_eq!(reloaded.state_warning, None);
+    assert_eq!(reloaded.state.metronome.bpm, Some(90.0));
+    assert_eq!(reloaded.state.metronome.meter, Some((6, 8)));
+    assert_eq!(reloaded.state.metronome.volume_db, Some(-20.0));
+    let text = fs::read_to_string(&state.config.state_file).unwrap();
+    assert!(!text.lines().any(|line| line.starts_with("on")), "{text}");
+}
+
+#[test]
+fn metronome_tap_gives_no_bpm_then_the_tapped_tempo() {
+    let (mut state, mut audio, _dir) = state("metronome-tap");
+    let revision = state.revision;
+    assert_eq!(
+        ok(handle(&mut state, Request::MetronomeTap)),
+        json!({"bpm": null})
+    );
+    assert_eq!(state.revision, revision);
+    let second = ok(handle(&mut state, Request::MetronomeTap));
+    assert_eq!(
+        second,
+        json!({"bpm": 300.0}),
+        "two taps at once clamp to 300"
+    );
+    assert!(state.revision > revision);
+    assert_eq!(status(&mut state)["metronome"]["bpm"], 300.0);
+    assert_eq!(metronome_settings(&mut audio)[0].bpm, 300.0);
+}
+
+#[test]
+fn with_a_project_open_the_metronome_is_the_project_click() {
+    let (mut state, mut audio, _dir) = state("metronome-project");
+    ok(handle(
+        &mut state,
+        metronome(None, Some(90.0), Some((3, 4)), Some(-20.0)),
+    ));
+    new_project(&mut state, "Song");
+    drain_commands(&mut audio);
+    let payload = ok(handle(&mut state, metronome(Some(true), None, None, None)));
+    assert_eq!(
+        payload,
+        json!({"on": true, "bpm": 120.0, "meter": [4, 4], "volume_db": -20.0, "beat": 0})
+    );
+    let status_now = status(&mut state);
+    assert_eq!(status_now["click"]["on"], true);
+    assert_eq!(
+        arrangement_commands(&mut audio),
+        ["Click(true)", "CountIn(0)", "ClickVolume(-20.0)"]
+    );
+    ok(handle(
+        &mut state,
+        Request::Click {
+            on: Some(false),
+            count_in: None,
+        },
+    ));
+    assert_eq!(
+        status(&mut state)["metronome"]["on"],
+        false,
+        "and the click toggles it"
+    );
+    ok(handle(
+        &mut state,
+        metronome(None, Some(100.0), Some((6, 8)), Some(-30.0)),
+    ));
+    let commands = arrangement_commands(&mut audio);
+    assert!(
+        commands.contains(&"Tempo { bpm: 100.0, meter: (6, 8) }".to_string()),
+        "{commands:?}"
+    );
+    assert!(
+        commands.contains(&"ClickVolume(-30.0)".to_string()),
+        "{commands:?}"
+    );
+    assert_eq!(
+        status(&mut state)["tempo"],
+        json!({"bpm": 100.0, "meter": [6, 8]})
+    );
+    ok(handle(&mut state, Request::MetronomeTap));
+    ok(handle(&mut state, Request::MetronomeTap));
+    assert_eq!(
+        status(&mut state)["tempo"]["bpm"],
+        300.0,
+        "tap sets the Project tempo"
+    );
+    close(&mut state);
+    assert_eq!(
+        status(&mut state)["metronome"],
+        json!({"on": false, "bpm": 90.0, "meter": [3, 4], "volume_db": -30.0, "beat": 0})
+    );
 }

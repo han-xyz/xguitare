@@ -541,6 +541,11 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
     Ok(project)
 }
 
+/// Whether `(beats, note)` is 1 to 16 beats of a 2, 4, 8 or 16 note.
+pub(crate) fn is_meter((beats, note): (u32, u32)) -> bool {
+    METER_BEATS.contains(&beats) && METER_NOTES.contains(&note)
+}
+
 pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
     if project.tracks.len() > MAX_TRACKS {
         return Err(ProjectError::TooManyTracks);
@@ -548,8 +553,7 @@ pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
     if !TEMPO_BPM.contains(&project.tempo_bpm) {
         return Err(ProjectError::Tempo);
     }
-    let (beats, note) = project.meter;
-    if !METER_BEATS.contains(&beats) || !METER_NOTES.contains(&note) {
+    if !is_meter(project.meter) {
         return Err(ProjectError::Meter);
     }
     if project.sample_rate == 0 {

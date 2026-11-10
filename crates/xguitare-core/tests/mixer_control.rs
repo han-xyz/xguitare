@@ -13,6 +13,7 @@ use xguitare_core::control::{
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, MeterPoint, RackSwitcher, engine_queues,
 };
+use xguitare_core::metronome::Metronome;
 use xguitare_core::project::{PROJECT_FILE, Project};
 use xguitare_core::project_control::{Projects, autosave_if_due};
 use xguitare_core::tuner::Tuner;
@@ -79,6 +80,7 @@ fn session(test: &str) -> Session {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     };
     let connection = open_connection(&mut state);
     Session {

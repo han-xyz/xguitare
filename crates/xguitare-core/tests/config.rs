@@ -270,3 +270,28 @@ fn bad_state_toml_is_ignored_with_warning() {
         "{warning}"
     );
 }
+
+#[test]
+fn an_invalid_metronome_value_in_state_toml_is_ignored_with_a_warning() {
+    let path = config_file("state-metronome", "");
+    let state = path.parent().unwrap().join("state.toml");
+    fs::write(
+        &state,
+        "[metronome]\nbpm = 500.0\nmeter = [3, 4]\nvolume_db = -6.0\n",
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(
+        config.state_warning.as_deref(),
+        Some(
+            format!(
+                "{}: metronome: bpm must be between 20 and 300; ignored",
+                state.display()
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(config.state.metronome.bpm, None);
+    assert_eq!(config.state.metronome.meter, Some((3, 4)));
+    assert_eq!(config.state.metronome.volume_db, Some(-6.0));
+}

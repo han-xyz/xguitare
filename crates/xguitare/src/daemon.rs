@@ -21,6 +21,7 @@ use xguitare_core::control::{
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
+use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, capture_track_inputs};
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
@@ -110,6 +111,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
         projects: Projects::default(),
+        metronome: Metronome::default(),
     }));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);
     let session = Arc::new(session);
