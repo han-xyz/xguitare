@@ -1631,7 +1631,7 @@ fn save_as_name_cannot_escape_bank() {
 }
 
 #[test]
-fn save_as_never_replaces_a_file() {
+fn save_as_numbers_past_unindexed_files() {
     let (mut state, _audio, dir) = state("save-as-no-replace");
     let bank = state.config.bank_dir.clone();
     let victim = dir.0.join("victim.txt");
