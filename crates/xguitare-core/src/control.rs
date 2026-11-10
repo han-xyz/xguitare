@@ -25,9 +25,9 @@ use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
 use crate::project::{LoopRegion, MAX_TRACKS};
 use crate::project_control::{
     Projects, TrackChange, change_track_module, click, create_projects_dir, items, project_close,
-    project_list, project_new, project_open, project_save, set_loop, set_track_modules,
-    status_fields, target_track, tempo, track_add, track_preset, track_remove, track_select,
-    track_set, transport,
+    project_list, project_new, project_open, project_save, rebuild_arrangement,
+    rebuild_arrangement_slots, set_loop, set_track_modules, status_fields, target_track, tempo,
+    track_add, track_preset, track_remove, track_select, track_set, transport,
 };
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
 use crate::tuner::Tuner;
@@ -474,8 +474,12 @@ pub enum Reprepare {
 /// `engine busy` when the command queue has no free slot for the `SwapRack`. A Preset that fails to build is not an error but `Reprepare::Passthrough`.
 pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare, String> {
     let max_frames = buffer_size as usize;
-    let outcome = rebuild(state, state.sample_rate, max_frames)?;
+    if state.queues.commands.slots() < 1 + rebuild_arrangement_slots(state) {
+        return Err(ENGINE_BUSY.to_string());
+    }
+    let mut outcome = rebuild(state, state.sample_rate, max_frames)?;
     state.max_frames = max_frames;
+    add_warnings(&mut outcome, rebuild_arrangement(state)?);
     Ok(outcome)
 }
 
@@ -496,7 +500,7 @@ pub fn follow_sample_rate(state: &mut EngineState) -> Option<Result<Reprepare, S
 pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
     let sample_rate = sample_rate as f32;
     let fades = FadeLengths::at(sample_rate, state.config.crossfade_ms);
-    if state.queues.commands.slots() < 2
+    if state.queues.commands.slots() < 2 + rebuild_arrangement_slots(state)
         || state
             .queues
             .commands
@@ -505,10 +509,17 @@ pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<R
     {
         return Err(ENGINE_BUSY.to_string());
     }
-    let outcome = rebuild(state, sample_rate, state.max_frames)?;
+    let mut outcome = rebuild(state, sample_rate, state.max_frames)?;
     state.sample_rate = sample_rate;
     state.tuner.set_sample_rate(sample_rate);
+    add_warnings(&mut outcome, rebuild_arrangement(state)?);
     Ok(outcome)
+}
+
+fn add_warnings(outcome: &mut Reprepare, more: Vec<BuildWarning>) {
+    if let Reprepare::Built(warnings) = outcome {
+        warnings.extend(more);
+    }
 }
 
 fn rebuild(

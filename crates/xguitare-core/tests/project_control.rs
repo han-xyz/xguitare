@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, PeakMeters, Position, Request, Response, TrackRef, TransportAction, handle,
-    handle_with_ports,
+    EngineState, PeakMeters, Position, Request, Response, TrackRef, TransportAction,
+    follow_sample_rate, handle, handle_with_ports, reprepare,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, raise_peak};
 use xguitare_core::ports::{AudioPorts, AvailablePort};
@@ -1058,6 +1058,56 @@ fn takes_still_waiting_for_the_engine_are_saved_on_close() {
     drain_commands(&mut audio);
     close(&mut state);
     assert_eq!(saved(&state, "song").tracks[0].items.len(), 1);
+}
+
+fn swapped_arrangement_frames(audio: &mut AudioQueues) -> Vec<usize> {
+    drain_commands(audio)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::SwapArrangement(arrangement) => Some(arrangement.max_frames()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_quantum_change_rebuilds_the_open_projects_arrangement() {
+    let (mut state, mut audio, _dir) = state("quantum");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    drain_commands(&mut audio);
+    take_project_events(&mut state);
+    reprepare(&mut state, 256).unwrap();
+    assert_eq!(swapped_arrangement_frames(&mut audio), [256]);
+    assert_eq!(reader_ids(&mut state).len(), 1);
+}
+
+#[test]
+fn a_rate_change_stops_the_project_until_the_rates_match_again() {
+    let (mut state, mut audio, _dir) = state("rate-change");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    drain_commands(&mut audio);
+    let mismatch = "project rate 48000 Hz differs from the engine rate 44100 Hz";
+    state.shared.sample_rate.store(44_100, Ordering::Relaxed);
+    follow_sample_rate(&mut state).unwrap().unwrap();
+    assert!(
+        drain_commands(&mut audio)
+            .iter()
+            .any(|command| matches!(command, Command::CloseArrangement))
+    );
+    assert_eq!(status(&mut state)["project_warning"], mismatch);
+    for action in [TransportAction::Play, TransportAction::Record] {
+        assert_eq!(error(handle(&mut state, transport(action, None))), mismatch);
+    }
+    add_track(&mut state, "Bass");
+    assert_eq!(swapped_arrangement_frames(&mut audio), Vec::<usize>::new());
+
+    state.shared.sample_rate.store(48_000, Ordering::Relaxed);
+    follow_sample_rate(&mut state).unwrap().unwrap();
+    assert_eq!(swapped_arrangement_frames(&mut audio), [128]);
+    assert_eq!(status(&mut state)["project_warning"], Value::Null);
+    ok(handle(&mut state, transport(TransportAction::Play, None)));
 }
 
 #[test]

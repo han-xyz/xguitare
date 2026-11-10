@@ -52,16 +52,16 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"solo":false,"volume_db":-3.0},{"armed":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"solo":false,"volume_db":0.0}],"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"solo":false,"volume_db":-3.0},{"armed":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"solo":false,"volume_db":0.0}],"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
 | --- | --- |
 | `preset` | Name of the active Preset; `null` when none is loaded (empty Bank, or the first Preset failed to load at start). |
 | `program` | Bank position of the active Preset's file; `null` when no Preset is loaded or its file has been removed from the Bank. The `preset` name stays while the removed Preset keeps playing. |
-| `sample_rate` | JACK sample rate in Hz; follows a rate change while the Daemon runs, and the Rack and the Tuner are rebuilt at the new rate. |
+| `sample_rate` | JACK sample rate in Hz; follows a rate change while the Daemon runs, and the Rack and the Tuner are rebuilt at the new rate. An open Project stops playing while the rate differs from its own (see `project_warning`) and plays again once they match. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
-| `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
+| `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack, and an open Project's Tracks, within a second when `buffer_size` differs. |
 | `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
 | `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `bypass`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
@@ -74,6 +74,7 @@ Response:
 | `disk_overflows` | Times since the Daemon started that a Track's recording ring was full and frames were dropped because the disk fell behind. |
 | `count_in_remaining` | Beats left in the count-in before recording starts, rounded up; `0` when no count-in is under way or no Project is open. |
 | `loaded_audio_bytes` | Bytes of Take audio the open Project holds in memory (4 per frame); `0` when no Project is open. |
+| `project_warning` | Why the open Project does not play, e.g. `project rate 48000 Hz differs from the engine rate 44100 Hz` after a sample-rate change: the transport stops, Takes still open are finished, and `play` and `record` are refused until the rates match; `null` otherwise. |
 | `project` | Name of the open Project; `null` when none is open. The keys below are `null` (`tracks` empty) while no Project is open. |
 | `transport` | `stopped`, `playing` or `recording` (also during the count-in), as the audio thread runs it. |
 | `position` | The playhead: `frames` from the Project start and `bars_beats` as `<bar>.<beat>`, both counted from 1 at the Project's tempo and meter. |
@@ -891,6 +892,7 @@ Errors:
 | --- | --- |
 | `no project open` | No Project is open. |
 | `no track is armed` | `record` with no armed Track. |
+| `project rate <rate> Hz differs from the engine rate <rate> Hz` | `play` or `record` while the Engine runs at another sample rate than the Project. |
 | `locate needs a position` | `locate` without `position`. |
 | `position must be <bar>.<beat> or <seconds>s` | The text is neither, the bar or beat is 0, the beat is past the meter, or the seconds are negative or not finite. |
 | `position is more than an hour past the end of the project` | The position is past that limit, e.g. `1e300s` or frame 18446744073709551615. |

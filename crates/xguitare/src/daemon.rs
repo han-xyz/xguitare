@@ -24,7 +24,7 @@ use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
     ClosedProject, LastTakes, ProjectEvent, Projects, add_finished_takes, autosave_if_due,
-    close_for_stop, finish_closed, finish_stopped, take_project_events,
+    close_for_stop, finish_closed, finish_stopped, project_rate_warning, take_project_events,
 };
 use xguitare_core::take_capture::Latency;
 use xguitare_core::tuner::Tuner;
@@ -547,6 +547,9 @@ fn follow_sample_rate_change(state: &mut EngineState) {
         Ok(outcome) => {
             let new = state.sample_rate as u32;
             info!("sample rate changed: {old} -> {new}");
+            if let Some(mismatch) = project_rate_warning(state) {
+                warn!("{mismatch}; the project does not play or record until they match");
+            }
             match outcome {
                 Reprepare::Built(warnings) => {
                     for warning in &warnings {

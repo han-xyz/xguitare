@@ -363,12 +363,8 @@ pub(crate) fn project_open(
         Project::load(&dir)
     };
     let project = loaded.map_err(|err| err.to_string())?;
-    let engine_rate = state.sample_rate as u32;
-    if project.sample_rate != engine_rate {
-        return Err(format!(
-            "project rate {} Hz differs from the engine rate {engine_rate} Hz",
-            project.sample_rate
-        ));
+    if let Some(mismatch) = rate_mismatch(project.sample_rate, state.sample_rate) {
+        return Err(mismatch);
     }
     let takes = load_takes(&dir, &project)?;
     let payload = json!({
@@ -601,6 +597,11 @@ pub(crate) fn transport(
 ) -> Result<Value, String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
     let (command, frames) = match action {
+        TransportAction::Play | TransportAction::Record
+            if let Some(mismatch) = project_rate_warning(state) =>
+        {
+            return Err(mismatch);
+        }
         TransportAction::Play => (ArrangementCommand::Play, None),
         TransportAction::Stop => (ArrangementCommand::Stop, None),
         TransportAction::Record => {
@@ -723,6 +724,10 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
             .sum()
     });
     fields.insert("loaded_audio_bytes".to_string(), json!(loaded_audio_bytes));
+    fields.insert(
+        "project_warning".to_string(),
+        json!(project_rate_warning(state)),
+    );
     let Some(open) = state.projects.open.as_ref() else {
         for key in [
             "project",
@@ -853,20 +858,70 @@ fn swap_project_with_ids(
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
-    let (readers, build_warnings) = start_arrangement(
+    if rate_mismatch(open.project.sample_rate, state.sample_rate).is_none() {
+        let (readers, build_warnings) = start_arrangement(
+            &state.config,
+            &mut state.queues,
+            state.sample_rate,
+            state.max_frames,
+            &project,
+            &open.takes,
+            &track_ids,
+        )?;
+        warnings.extend(build_warnings);
+        state.projects.events.push(ProjectEvent::Readers(readers));
+    }
+    open_project_mut(state).track_ids = track_ids;
+    commit(state, project);
+    Ok(())
+}
+
+/// The commands [`rebuild_arrangement`] may push.
+pub(crate) fn rebuild_arrangement_slots(state: &EngineState) -> usize {
+    if state.projects.open.is_some() { 3 } else { 0 }
+}
+
+/// After a quantum or sample-rate change, rebuilds the open Project's Arrangement at the Engine's rate and `max_frames` and swaps it in; while the Project's rate differs from the Engine's, closes the Arrangement instead, so nothing plays or records at the wrong rate.
+pub(crate) fn rebuild_arrangement(state: &mut EngineState) -> Result<Vec<BuildWarning>, String> {
+    let Some(open) = state.projects.open.as_ref() else {
+        return Ok(Vec::new());
+    };
+    if rate_mismatch(open.project.sample_rate, state.sample_rate).is_some() {
+        state.queues.drain_from_audio();
+        state
+            .queues
+            .commands
+            .push(Command::CloseArrangement)
+            .map_err(|_| ENGINE_BUSY.to_string())?;
+        open_project_mut(state).recording = false;
+        return Ok(Vec::new());
+    }
+    let (readers, warnings) = start_arrangement(
         &state.config,
         &mut state.queues,
         state.sample_rate,
         state.max_frames,
-        &project,
+        &open.project,
         &open.takes,
-        &track_ids,
+        &open.track_ids,
     )?;
-    warnings.extend(build_warnings);
+    let clicks = click_commands(&open.project);
     state.projects.events.push(ProjectEvent::Readers(readers));
-    open_project_mut(state).track_ids = track_ids;
-    commit(state, project);
-    Ok(())
+    send(state, &clicks)?;
+    Ok(warnings)
+}
+
+/// Why the open Project does not play: its sample rate differs from the Engine's.
+pub fn project_rate_warning(state: &EngineState) -> Option<String> {
+    let open = state.projects.open.as_ref()?;
+    rate_mismatch(open.project.sample_rate, state.sample_rate)
+}
+
+fn rate_mismatch(project_rate: u32, engine_rate: f32) -> Option<String> {
+    let engine_rate = engine_rate as u32;
+    (project_rate != engine_rate).then(|| {
+        format!("project rate {project_rate} Hz differs from the engine rate {engine_rate} Hz")
+    })
 }
 
 fn click_commands(project: &Project) -> [ArrangementCommand; 2] {
