@@ -517,12 +517,9 @@ fn stereo_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold, width: 
 }
 
 fn volume_field(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
-    if column.volume_db == f64::NEG_INFINITY {
-        ui.label(muted_text("-inf dB"));
-        return None;
-    }
     let id = Id::unique(("mixer_volume", column.target));
-    let (typed, field) = released_value(ui, id, column.volume_db, |db| {
+    let shown_db = column.volume_db.max(FADER_FLOOR_DB);
+    let (typed, field) = released_value(ui, id, shown_db, |db| {
         DragValue::new(db)
             .range(FADER_FLOOR_DB..=FADER_TOP_DB)
             .speed(0.2)
