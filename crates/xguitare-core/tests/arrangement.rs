@@ -964,3 +964,32 @@ fn empty_master() -> StereoRack {
     master.prepare(RATE as f32, BLOCK);
     master
 }
+
+#[test]
+fn stop_and_click_off_forget_the_last_click_beat() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::Click(true));
+    arrangement.apply(ArrangementCommand::Play);
+    let beat = 24_000;
+    run(&mut arrangement, &[], beat + BLOCK);
+    assert_eq!(arrangement.click_beat(), 2);
+    arrangement.apply(ArrangementCommand::Stop);
+    arrangement.apply(ArrangementCommand::Locate(beat as u64 / 2));
+    arrangement.apply(ArrangementCommand::Play);
+    run(&mut arrangement, &[], BLOCK);
+    assert_eq!(
+        arrangement.click_beat(),
+        0,
+        "after Stop, until the next beat"
+    );
+    run(&mut arrangement, &[], beat);
+    assert_eq!(arrangement.click_beat(), 2);
+    arrangement.apply(ArrangementCommand::Click(false));
+    arrangement.apply(ArrangementCommand::Click(true));
+    run(&mut arrangement, &[], BLOCK);
+    assert_eq!(
+        arrangement.click_beat(),
+        0,
+        "after Click off, until the next beat"
+    );
+}

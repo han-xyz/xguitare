@@ -439,6 +439,7 @@ impl Arrangement {
                 self.end_takes(false);
                 self.transport = Transport::Stopped;
                 self.count_in = CountIn::default();
+                self.click_beat = 0;
             }
             ArrangementCommand::Record => self.record(),
             ArrangementCommand::Locate(frame) => {
@@ -455,7 +456,12 @@ impl Arrangement {
             {
                 self.change_tempo(bpm, meter.0);
             }
-            ArrangementCommand::Click(on) => self.click_on = on,
+            ArrangementCommand::Click(on) => {
+                self.click_on = on;
+                if !on {
+                    self.click_beat = 0;
+                }
+            }
             ArrangementCommand::ClickVolume(db) => self.blip.set_volume(db),
             ArrangementCommand::CountIn(bars) if bars <= MAX_COUNT_IN_BARS => {
                 self.count_in_bars = bars;
