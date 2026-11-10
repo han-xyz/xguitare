@@ -244,14 +244,19 @@ pub fn key_step(spec: &ParamRow, value: f64, key: KnobKey) -> f64 {
     next.clamp(spec.min, spec.max)
 }
 
-/// A number typed into a knob's field: a Unicode minus reads as `-`, a trailing unit such as `dB` or `%` is ignored.
+/// A number typed into a knob's field: a Unicode minus reads as `-`, a trailing `k` or `kHz` (any case) multiplies by 1000, another trailing unit such as `dB` or `%` is ignored.
 pub fn parse_typed_value(text: &str) -> Option<f64> {
     let text = text.replace('\u{2212}', "-");
-    let number = text
-        .trim()
-        .trim_end_matches(|c: char| c.is_alphabetic() || c == '%')
-        .trim_end();
-    number.parse::<f64>().ok().filter(|value| value.is_finite())
+    let text = text.trim();
+    let number = text.trim_end_matches(|c: char| c.is_alphabetic() || c == '%');
+    let unit = text[number.len()..].to_lowercase();
+    let scale = if unit == "k" || unit == "khz" {
+        1000.0
+    } else {
+        1.0
+    };
+    let value = number.trim_end().parse::<f64>().ok()?;
+    Some(value * scale).filter(|value| value.is_finite())
 }
 
 /// How far to scroll the Rack while a unit is dragged by its ears with the pointer at `pointer_y` in a scroll area from `top` to `bottom`: negative up, positive down, growing to [`AUTOSCROLL_MAX_PX`] as the pointer reaches an edge within [`AUTOSCROLL_EDGE_PX`]; 0 elsewhere.

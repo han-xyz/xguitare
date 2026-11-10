@@ -310,7 +310,7 @@ Knobs: drag up to raise a value and down to lower it; 220 pixels cross the whole
 
 Values are shown with the unit, a whole value without decimals, others with one: `−24 dB`, `5 ms`, `0.8 Hz`, `20 kHz`, a compressor ratio as `6 : 1`.
 
-Typed values: every knob has a value field. Click it, or Ctrl+click or right-click the knob, and the field holds the bare number in the Parameter's unit (`20000` for `20 kHz`); type a value (`-8`, `12.5`, `12 dB`) and press `Enter` to send it. `Esc` or a click elsewhere puts the shown value back; text that is no number does too, with a footer message. A value out of range is clamped by the Daemon, as with `xguitare set`.
+Typed values: every knob has a value field. Click it, or Ctrl+click or right-click the knob, and the field holds the bare number in the Parameter's unit (`20000` for `20 kHz`); type a value (`-8`, `12.5`, `12 dB`; `2 kHz` or `2k` is 2000) and press `Enter` to send it. `Esc` or a click elsewhere puts the shown value back; text that is no number does too, with a footer message. A value out of range is clamped by the Daemon, as with `xguitare set`.
 
 Knobs from the keyboard: `Tab` moves to the next knob, which shows a ring, then to its value field. `↑` and `↓` move a focused knob's value by 1 % of the range (1 for a whole-number Parameter), `Page Up` and `Page Down` by 10 %, `Home` and `End` to the minimum and maximum. The `1` to `9` keys and Ctrl+S work while a knob has focus, but not while a value field has the text cursor; `Esc` releases the focus.
 

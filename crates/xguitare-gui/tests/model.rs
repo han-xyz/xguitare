@@ -1333,6 +1333,9 @@ fn typed_values_parse_with_a_unicode_minus_or_a_unit() {
     assert_eq!(parse_typed_value(" 12.5 "), Some(12.5));
     assert_eq!(parse_typed_value("12 dB"), Some(12.0));
     assert_eq!(parse_typed_value("350ms"), Some(350.0));
+    assert_eq!(parse_typed_value("2 kHz"), Some(2000.0));
+    assert_eq!(parse_typed_value("2k"), Some(2000.0));
+    assert_eq!(parse_typed_value("2.5 KHZ"), Some(2500.0));
     assert_eq!(parse_typed_value(""), None);
     assert_eq!(parse_typed_value("dB"), None);
     assert_eq!(parse_typed_value("loud"), None);
