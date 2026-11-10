@@ -36,6 +36,7 @@ const CABINET_NEEDS_IR: &str = "cabinet needs an ir; add one in the preset file"
 const AFTER_OR_AT: &str = "give either after or at";
 const NO_CABINET: &str = "no cabinet module";
 const EMPTY_PRESET_NAME: &str = "preset name must not be empty";
+const SAVE_AS_TRIES: u64 = 8;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -495,33 +496,41 @@ fn save_as(state: &mut EngineState, name: &str) -> Result<Value, String> {
     if slug.is_empty() {
         return Err(EMPTY_PRESET_NAME.to_string());
     }
+    let dir = state.bank.dir.clone();
+    let cannot_read = |err: io::Error| format!("cannot save {}: {err}", dir.display());
+    let bank = Bank::load_dir(&dir).map_err(cannot_read)?;
     let wanted = name.to_lowercase();
-    if state.bank.entries.iter().any(
+    if bank.entries.iter().any(
         |entry| matches!(entry, BankEntry::Valid { preset, .. } if preset.name.to_lowercase() == wanted),
     ) {
         return Err(format!("a preset named '{name}' already exists"));
     }
-    let dir = state.bank.dir.clone();
-    let file = dir.join(format!("{:02}-{slug}.toml", next_prefix(&state.bank)));
     let text = Preset {
         name: name.to_string(),
         modules: live.modules.clone(),
     }
     .to_toml();
-    write_new(&file, &text).map_err(|err| {
-        let reason = match err.kind() {
-            ErrorKind::AlreadyExists => "file exists".to_string(),
-            _ => err.to_string(),
-        };
-        format!("cannot save {}: {reason}", file.display())
-    })?;
-    state.bank =
-        Bank::load_dir(&dir).map_err(|err| format!("cannot save {}: {err}", dir.display()))?;
+    let file = write_next_free(&dir, next_prefix(&bank), &slug, &text)?;
+    state.bank = Bank::load_dir(&dir).map_err(cannot_read)?;
     let saved = Preset::parse(&text).expect("a saved Preset parses back");
     state.active = Some((file.clone(), saved));
     state.revision += 1;
     state.modified = false;
     Ok(json!({"path": file.display().to_string(), "program": active_program(state)}))
+}
+
+/// Writes `text` to the first of `SAVE_AS_TRIES` names `<NN>-<slug>.toml` from `first` on that no file takes, since one may appear after the Bank was read.
+fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<PathBuf, String> {
+    let mut file = PathBuf::new();
+    for prefix in first..first + SAVE_AS_TRIES {
+        file = dir.join(format!("{prefix:02}-{slug}.toml"));
+        match write_new(&file, text) {
+            Ok(()) => return Ok(file),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(format!("cannot save {}: {err}", file.display())),
+        }
+    }
+    Err(format!("cannot save {}: file exists", file.display()))
 }
 
 /// The name lowercased, ASCII letters and digits kept, every other run of characters one `-`, no `-` at either end.

@@ -1637,13 +1637,10 @@ fn save_as_never_replaces_a_file() {
     let victim = dir.0.join("victim.txt");
     fs::write(&victim, "keep").unwrap();
     fs::write(bank.join("04-x.toml"), "unindexed").unwrap();
-    std::os::unix::fs::symlink(&victim, bank.join("04-y.toml")).unwrap();
-    for name in ["x", "y"] {
-        let file = bank.join(format!("04-{name}.toml"));
-        assert_eq!(
-            error(handle(&mut state, save_as(name))),
-            format!("cannot save {}: file exists", file.display())
-        );
+    std::os::unix::fs::symlink(&victim, bank.join("05-y.toml")).unwrap();
+    for (name, file) in [("x", "06-x.toml"), ("y", "07-y.toml")] {
+        let payload = ok(handle(&mut state, save_as(name)));
+        assert_eq!(payload["path"], bank.join(file).display().to_string());
     }
     assert_eq!(
         fs::read_to_string(bank.join("04-x.toml")).unwrap(),
@@ -1651,7 +1648,6 @@ fn save_as_never_replaces_a_file() {
     );
     assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
     assert!(tmp_files(&bank).is_empty());
-    assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Clean");
 }
 
 #[test]

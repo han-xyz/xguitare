@@ -230,7 +230,7 @@ Errors:
 | `active preset file was removed; load a preset first` | Without `as`: the active Preset's file is no longer in the Bank. |
 | `preset name must not be empty` | With `as`: the name is empty or has no ASCII letter or digit. |
 | `a preset named '<name>' already exists` | With `as`: a Preset in the Bank has this name, compared case-insensitively. |
-| `cannot save <path>: file exists` | With `as`: a file appeared at the new file's name since the Bank was last read. |
+| `cannot save <path>: file exists` | With `as`: files appeared at the new file's name and the seven numbers after it while saving. |
 | `cannot save <path>: <reason>` | Writing or renaming the file, or with `as` reading the Bank directory again, failed. |
 
 ## modules
