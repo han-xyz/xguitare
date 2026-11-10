@@ -25,8 +25,8 @@ pub const TIMELINE_HEIGHT: f32 = 360.0;
 const TRACK_ROW_HEIGHT: f32 = 72.0;
 const RULER_HEIGHT: f32 = 26.0;
 const TRANSPORT_HEIGHT: f32 = 44.0;
-const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(84.0, 32.0);
-const POSITION_SIZE: f32 = 22.0;
+const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(64.0, 32.0);
+const POSITION_SIZE: f32 = 20.0;
 const PANEL_BUTTON: egui::Vec2 = egui::Vec2::new(56.0, 32.0);
 /// The Tracks and timeline's height while the mixer panel is open below them: the ruler and three Track rows.
 pub const TIMELINE_HEIGHT_WITH_MIXER: f32 = RULER_HEIGHT + 3.0 * TRACK_ROW_HEIGHT;
@@ -48,6 +48,7 @@ pub(crate) const PAN: (f64, f64) = (-1.0, 1.0);
 const NO_INPUT: &str = "no input";
 const NO_TRACKS: &str = "No Tracks yet: Add Track";
 const COUNT_IN_BARS: [u32; 3] = [0, 1, 2];
+const COUNT_IN_WIDTH: f32 = 84.0;
 const AUTOSAVE_PROMPT: &str = "A newer autosave exists";
 
 /// An edge of the loop region being dragged: the region when the drag began and as it is now.
@@ -65,7 +66,7 @@ pub struct ProjectView {
     pub loop_drag: Option<LoopDrag>,
 }
 
-/// Play, Stop, Record (a second click stops recording) with the count-in beats left, Loop, Click with its count-in, tempo, meter, the position, then `Mixer` (lit while `mixer_open`) and `Render`, left to right. A meter that is no `<beats>/<note>` goes to `feedback`.
+/// Play, Stop, Record (a second click stops recording) with the count-in beats left, `Mixer` (lit while `mixer_open`) and `Render`, Loop, Click with its count-in in bars, tempo, meter, then the position, left to right on one row. A meter that is no `<beats>/<note>` goes to `feedback`.
 pub fn transport_bar(
     ui: &mut Ui,
     snapshot: &Snapshot,
@@ -81,7 +82,7 @@ pub fn transport_bar(
     };
     let colours = palette();
     ui.set_min_height(TRANSPORT_HEIGHT);
-    ui.horizontal_wrapped(|ui| {
+    ui.horizontal_centered(|ui| {
         let buttons = [
             (
                 "▶ Play",
@@ -163,14 +164,14 @@ pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'
 fn count_in_text(bars: u32) -> String {
     match bars {
         0 => "no count-in".to_string(),
-        1 => "count-in 1 bar".to_string(),
-        bars => format!("count-in {bars} bars"),
+        bars => format!("count-in {bars}"),
     }
 }
 
 fn count_in_picker(ui: &mut Ui, count_in: u32) -> Option<Command> {
     let mut chosen = None;
     let combo = ComboBox::from_id_salt("count_in")
+        .width(COUNT_IN_WIDTH)
         .selected_text(count_in_text(count_in))
         .show_ui(ui, |ui| {
             for bars in COUNT_IN_BARS {
@@ -191,14 +192,13 @@ fn count_in_picker(ui: &mut Ui, count_in: u32) -> Option<Command> {
     })
 }
 
-/// The tempo is sent when typed or when a drag ends; the meter, typed as `3/4`, on Enter.
+/// The tempo, a field reading `120.0 bpm`, is sent when typed or when a drag ends; the meter, typed as `3/4`, on Enter.
 fn tempo_fields(
     ui: &mut Ui,
     tempo: Tempo,
     (feedback, now): (&mut Feedback, Instant),
 ) -> Vec<Command> {
     let mut commands = Vec::new();
-    let label = ui.label("Tempo");
     let (bpm, field) = released_value(ui, Id::unique("tempo"), tempo.bpm, |bpm| {
         DragValue::new(bpm)
             .range(20.0..=300.0)
@@ -206,7 +206,7 @@ fn tempo_fields(
             .fixed_decimals(1)
             .suffix(" bpm")
     });
-    field.labelled_by(label.id);
+    field.widget_info(|| WidgetInfo::labeled(Role::SpinButton, true, "Tempo"));
     if let Some(bpm) = bpm {
         commands.push(Command::Tempo {
             bpm: Some(bpm),
@@ -263,8 +263,10 @@ fn edited_text(ui: &mut Ui, id: Id, shown: &str, width: f32, label: Id) -> Optio
 fn position_readout(ui: &mut Ui, transport: &TransportView, rate: f64, tempo: Tempo) {
     let bars = bars_beats_text(transport.frames, rate, tempo);
     let time = time_text(transport.frames, rate);
-    ui.label(RichText::new(bars).monospace().size(POSITION_SIZE).strong());
-    ui.label(muted_text(time).monospace().size(POSITION_SIZE * 0.7));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(bars).monospace().size(POSITION_SIZE).strong());
+        ui.label(muted_text(time).monospace().size(POSITION_SIZE * 0.7));
+    });
 }
 
 /// The ruler with the loop region, then one row per Track: its controls on the left, its lane of Items on the right.

@@ -1226,6 +1226,19 @@ fn mixer_snapshots() {
 }
 
 #[test]
+fn transport_bar_fits_one_row_at_1280() {
+    let (harness, _, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
+    let play = harness.get_by_role_and_label(Role::Button, "▶ Play").rect();
+    for label in ["Mixer", "Render", "3.2.60", "0:04.800"] {
+        let rect = harness.get_by_label(label).rect();
+        assert!(
+            play.y_range().contains(rect.center().y) && rect.right() <= DEFAULT_WINDOW.x,
+            "{label} at {rect:?} is not on Play's row in the window"
+        );
+    }
+}
+
+#[test]
 fn mixer_columns_send_their_commands() {
     let (mut harness, sent, _dir) = harness_with(TALL_WINDOW, mixer_snapshot());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
