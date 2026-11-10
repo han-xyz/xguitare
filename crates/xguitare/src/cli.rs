@@ -39,7 +39,7 @@ pub fn run_cli(
     };
     let result = match cli.cmd {
         Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
-        cmd => request_for(cmd).and_then(|req| Ok(render(&req, &request(transport, &req)?))),
+        cmd => request_for(cmd).and_then(|req| render(&req, &request(transport, &req)?)),
     };
     let written = match result {
         Ok(text) => write!(out, "{text}").map(|()| 0),
@@ -246,8 +246,8 @@ fn parse_meter(meter: &str) -> Result<(u32, u32), String> {
         .ok_or_else(|| "meter must be <beats>/<note>".to_string())
 }
 
-fn render(req: &Request, payload: &Value) -> String {
-    match req {
+fn render(req: &Request, payload: &Value) -> Result<String, String> {
+    let rendered = match req {
         Request::Status => render_status(payload),
         Request::List => render_list(payload),
         Request::Load { .. } => format!(
@@ -309,7 +309,7 @@ fn render(req: &Request, payload: &Value) -> String {
         Request::ProjectOpen { .. } => render_open(payload),
         Request::ProjectClose => format!("closed {}\n", text(&payload["name"])),
         Request::ProjectList => render_projects(payload),
-        Request::Items => render_items(payload),
+        Request::Items => render_items(payload)?,
         Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
         Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),
         Request::TrackSet { .. } => render_track(payload),
@@ -331,7 +331,8 @@ fn render(req: &Request, payload: &Value) -> String {
         | Request::Settings
         | Request::SetSettings { .. }
         | Request::Loop { .. } => format!("{payload}\n"),
-    }
+    };
+    Ok(rendered)
 }
 
 fn render_open(payload: &Value) -> String {
@@ -362,8 +363,10 @@ fn render_projects(payload: &Value) -> String {
         .collect()
 }
 
-fn render_items(payload: &Value) -> String {
-    let sample_rate = payload["sample_rate"].as_f64().unwrap_or(1.0);
+fn render_items(payload: &Value) -> Result<String, String> {
+    let sample_rate = payload["sample_rate"]
+        .as_f64()
+        .ok_or("the items answer has no sample_rate")?;
     let mut lines = String::new();
     for track in items(&payload["tracks"]) {
         for item in items(&track["items"]) {
@@ -378,7 +381,7 @@ fn render_items(payload: &Value) -> String {
             );
         }
     }
-    lines
+    Ok(lines)
 }
 
 fn track_label(payload: &Value) -> String {

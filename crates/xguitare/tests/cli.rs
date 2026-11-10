@@ -1001,6 +1001,19 @@ fn record_check_is_gone() {
 }
 
 #[test]
+fn project_items_without_sample_rate_is_an_error_line() {
+    let out = cli(
+        &["project", "items"],
+        reply(
+            r#"{"ok":true,"tracks":[{"id":0,"name":"Guitar","items":[{"position":0,"bars_beats":"1.1","offset":0,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]}]}]}"#,
+        ),
+    );
+    assert_eq!(out.stderr, "error: the items answer has no sample_rate\n");
+    assert_eq!(out.stdout, "");
+    assert_eq!(out.code, 1);
+}
+
+#[test]
 fn project_items_prints_one_line_per_item() {
     let out = cli(
         &["project", "items"],
