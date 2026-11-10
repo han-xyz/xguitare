@@ -230,6 +230,19 @@ fn state_toml_overrides_config() {
 }
 
 #[test]
+fn state_toml_names_projects_dir() {
+    let path = config_file("state-projects-dir", "");
+    fs::write(
+        path.parent().unwrap().join("state.toml"),
+        "projects_dir = \"/srv/xg/projects\"\n",
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.state_warning, None);
+    assert_eq!(config.projects_dir, PathBuf::from("/srv/xg/projects"));
+}
+
+#[test]
 fn state_toml_keeps_config_bank_dir() {
     let path = config_file("state-bank-dir", "bank_dir = \"/srv/xg/bank\"\n");
     fs::write(

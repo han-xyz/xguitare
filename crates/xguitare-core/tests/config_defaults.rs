@@ -17,4 +17,8 @@ fn defaults_when_missing() {
     assert!(config.socket.ends_with("xguitare.sock"));
     assert_eq!(config.tuner_reference_hz, 440.0);
     assert!(config.tuner_mute);
+    assert_eq!(
+        config.projects_dir,
+        std::path::Path::new(&std::env::var("HOME").unwrap()).join("Music/xguitare")
+    );
 }

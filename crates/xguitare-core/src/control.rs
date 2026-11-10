@@ -630,7 +630,7 @@ fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<Pat
 }
 
 /// The name lowercased, ASCII letters and digits kept, every other run of characters one `-`, no `-` at either end.
-fn slug(name: &str) -> String {
+pub(crate) fn slug(name: &str) -> String {
     let mut slug = String::new();
     for c in name.to_lowercase().chars() {
         if c.is_ascii_alphanumeric() {

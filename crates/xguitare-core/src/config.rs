@@ -4,7 +4,7 @@ use std::io::ErrorKind;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use directories::ProjectDirs;
+use directories::{BaseDirs, ProjectDirs};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::engine::SWITCHER_MAX_FRAMES;
@@ -14,6 +14,7 @@ const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
 const STATE_FILE: &str = "state.toml";
 const BANK_DIR: &str = "bank";
+const PROJECTS_DIR: &str = "Music/xguitare";
 pub const SOCKET_DIR_MODE: u32 = 0o700;
 const TUNER_REFERENCE_HZ: std::ops::RangeInclusive<f32> = 400.0..=480.0;
 const CROSSFADE_MS_MAX: f32 = 1000.0;
@@ -51,6 +52,8 @@ pub struct Config {
     pub bank_dir_in_config: bool,
     /// Whether the config file names `ir_dir`; without it and without a saved one, `ir_dir` is the Bank directory.
     pub ir_dir_in_config: bool,
+    /// The folder that holds one sub-folder per Project: `projects_dir` from `state.toml`, else `~/Music/xguitare`.
+    pub projects_dir: PathBuf,
 }
 
 /// JACK ports the Daemon connects to `in`, `out_l` and `out_r`. Each value is one of:
@@ -226,6 +229,7 @@ impl Config {
             None => (fallback_runtime_dir()?, true),
         };
         let bank_dir = config_dir.join(BANK_DIR);
+        let home = BaseDirs::new().ok_or(ConfigError::NoHomeDir)?;
         Ok(Config {
             ir_dir: bank_dir.clone(),
             bank_dir,
@@ -247,6 +251,7 @@ impl Config {
             state_warning: None,
             bank_dir_in_config: false,
             ir_dir_in_config: false,
+            projects_dir: home.home_dir().join(PROJECTS_DIR),
         })
     }
 
@@ -285,6 +290,7 @@ impl Config {
             tuner_reference_hz: file.tuner_reference_hz.unwrap_or(self.tuner_reference_hz),
             tuner_mute: file.tuner_mute.unwrap_or(self.tuner_mute),
             state_file: self.state_file,
+            projects_dir: state.projects_dir.clone().unwrap_or(self.projects_dir),
             state,
             state_warning: None,
             bank_dir_in_config,

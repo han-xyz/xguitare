@@ -22,6 +22,9 @@ pub struct SavedState {
     pub banks: Banks,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ports: Option<Ports>,
+    /// The folder that holds one sub-folder per Project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub projects_dir: Option<PathBuf>,
 }
 
 /// The `[banks]` table: the Bank directory each kind switched to or from, recorded by the first `bank_kind` switch.

@@ -9,6 +9,7 @@ mod ir;
 mod irdir;
 pub mod ports;
 mod preset;
+pub mod project;
 mod registry;
 mod state;
 pub mod tuner;

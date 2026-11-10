@@ -68,7 +68,7 @@ struct PresetFile {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ModuleEntry {
+pub(crate) struct ModuleEntry {
     #[serde(rename = "type")]
     type_name: String,
     id: Option<String>,
@@ -93,27 +93,10 @@ impl Preset {
                 msg: error.message().to_string(),
             }
         })?;
-        let registry = ModuleRegistry::default();
-        let mut ids = HashSet::new();
-        let mut modules = Vec::with_capacity(file.module.len());
-        for entry in file.module {
-            let spec = registry
-                .spec(&entry.type_name)
-                .ok_or_else(|| PresetError::UnknownModule(entry.type_name.clone()))?;
-            let module = resolve_entry(entry, spec)?;
-            if !ids.insert(module.id.clone()) {
-                return Err(PresetError::DuplicateId(module.id));
-            }
-            modules.push(module);
-        }
-        let preset = Preset {
+        Ok(Preset {
             name: file.name,
-            modules,
-        };
-        preset
-            .validate_layout()
-            .map_err(|error| PresetError::Layout(error.to_string()))?;
-        Ok(preset)
+            modules: parse_modules(file.module)?,
+        })
     }
 
     /// Checks the Module order against the Rack's layout rules without building any Module.
@@ -150,21 +133,7 @@ impl Preset {
     pub fn to_toml(&self) -> String {
         let file = PresetFile {
             name: self.name.clone(),
-            module: self
-                .modules
-                .iter()
-                .map(|module| ModuleEntry {
-                    type_name: module.type_name.clone(),
-                    id: Some(module.id.clone()),
-                    ir: module.ir.clone(),
-                    bypass: module.bypass,
-                    params: module
-                        .params
-                        .iter()
-                        .map(|(name, value)| (name.clone(), shortest_f64(*value)))
-                        .collect(),
-                })
-                .collect(),
+            module: module_entries(&self.modules),
         };
         toml::to_string_pretty(&file).expect("a PresetFile always serialises to TOML")
     }
@@ -228,6 +197,48 @@ impl Preset {
         }
         Ok((rack, warnings))
     }
+}
+
+/// The Modules a `[[module]]` list names, checked as [`Preset::parse`] checks them.
+pub(crate) fn parse_modules(entries: Vec<ModuleEntry>) -> Result<Vec<PresetModule>, PresetError> {
+    let registry = ModuleRegistry::default();
+    let mut ids = HashSet::new();
+    let mut modules = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let spec = registry
+            .spec(&entry.type_name)
+            .ok_or_else(|| PresetError::UnknownModule(entry.type_name.clone()))?;
+        let module = resolve_entry(entry, spec)?;
+        if !ids.insert(module.id.clone()) {
+            return Err(PresetError::DuplicateId(module.id));
+        }
+        modules.push(module);
+    }
+    let probe = Preset {
+        name: String::new(),
+        modules,
+    };
+    probe
+        .validate_layout()
+        .map_err(|error| PresetError::Layout(error.to_string()))?;
+    Ok(probe.modules)
+}
+
+pub(crate) fn module_entries(modules: &[PresetModule]) -> Vec<ModuleEntry> {
+    modules
+        .iter()
+        .map(|module| ModuleEntry {
+            type_name: module.type_name.clone(),
+            id: Some(module.id.clone()),
+            ir: module.ir.clone(),
+            bypass: module.bypass,
+            params: module
+                .params
+                .iter()
+                .map(|(name, value)| (name.clone(), shortest_f64(*value)))
+                .collect(),
+        })
+        .collect()
 }
 
 fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, PresetError> {
