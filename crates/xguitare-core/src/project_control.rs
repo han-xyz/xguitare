@@ -68,6 +68,8 @@ struct OpenProject {
     /// One id per Track, in Track order, that stays the Track's while others are added or removed; finished Takes name their Track by it.
     track_ids: Vec<u64>,
     next_track_id: u64,
+    /// Never reused, so a client holding a removed Bus's id cannot reach a new Bus by it.
+    next_bus_id: u64,
     /// Whether the Project changed since it was opened, saved or autosaved.
     changed: bool,
     last_autosave: Instant,
@@ -989,6 +991,12 @@ fn open(
     });
     events.push(ProjectEvent::Readers(readers));
     events.push(ProjectEvent::Inputs(track_inputs(&project)));
+    let next_bus_id = project
+        .buses
+        .iter()
+        .map(|bus| bus.id + 1)
+        .max()
+        .unwrap_or(0);
     state.projects.open = Some(OpenProject {
         dir,
         project,
@@ -997,6 +1005,7 @@ fn open(
         recording: false,
         recorded: false,
         next_track_id: track_ids.len() as u64,
+        next_bus_id,
         track_ids,
         changed: false,
         last_autosave: Instant::now(),
@@ -1313,6 +1322,13 @@ fn open_project(state: &EngineState) -> &OpenProject {
         .open
         .as_ref()
         .expect("callers check that a Project is open")
+}
+
+/// An id for a new Bus of the open Project; each call gives another.
+pub(crate) fn new_bus_id(state: &mut EngineState) -> u64 {
+    let open = open_project_mut(state);
+    open.next_bus_id += 1;
+    open.next_bus_id - 1
 }
 
 fn open_project_mut(state: &mut EngineState) -> &mut OpenProject {

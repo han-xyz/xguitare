@@ -229,6 +229,16 @@ fn bus_remove_removes_its_sends_and_keeps_the_other_ids() {
 }
 
 #[test]
+fn a_removed_bus_id_is_not_reused() {
+    let mut s = mixer("bus-id");
+    let added = ok(&mut s, r#"{"cmd":"bus_add","name":"Delay"}"#);
+    let removed_id = added["bus"]["id"].clone();
+    ok(&mut s, r#"{"cmd":"bus_remove","bus":"Delay"}"#);
+    let again = ok(&mut s, r#"{"cmd":"bus_add","name":"Echo"}"#);
+    assert_ne!(again["bus"]["id"], removed_id);
+}
+
+#[test]
 fn bus_set_checks_every_value_then_sends_commands() {
     let mut s = mixer("bus-set");
     assert_eq!(

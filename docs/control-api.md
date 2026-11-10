@@ -95,7 +95,7 @@ Response:
 | `click` | Whether the click is `on`, and `count_in` bars before recording. |
 | `selected` | Index of the selected Track. |
 | `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
-| `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
+| `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed, and is not given to a later Bus while the Project is open; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
 | `master` | `volume_db` (`null` when off), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
 
 Errors: none besides the transport errors.
