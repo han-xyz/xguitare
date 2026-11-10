@@ -246,6 +246,31 @@ fn loop_wraps_inside_a_block_on_the_exact_frame() {
     assert_eq!(arrangement.playhead(), 10 + (BLOCK as u64 - 110) % 100);
 }
 
+#[test]
+fn an_empty_or_reversed_loop_keeps_the_running_loop() {
+    let mut t = track("t");
+    t.items.push(item(0, "takes/t-1.wav", 1000));
+    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32).collect();
+    let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(ramp))]);
+    let mut p = project(vec![t]);
+    p.loop_region = LoopRegion {
+        start: 10,
+        end: 110,
+        on: true,
+    };
+    let mut arrangement = arrangement(&p, &takes);
+    for (start, end) in [(200, 200), (300, 100)] {
+        arrangement.apply(ArrangementCommand::Loop(LoopRegion {
+            start,
+            end,
+            on: true,
+        }));
+    }
+    arrangement.apply(ArrangementCommand::Play);
+    run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
+    assert_eq!(arrangement.playhead(), 10 + (BLOCK as u64 - 110) % 100);
+}
+
 fn zero_crossings(samples: &[f32]) -> usize {
     samples
         .windows(2)

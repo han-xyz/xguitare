@@ -304,7 +304,9 @@ impl Arrangement {
                 self.end_takes(false);
                 self.playhead = frame;
             }
-            ArrangementCommand::Loop(region) => self.loop_region = region,
+            ArrangementCommand::Loop(region) if !region.on || region.start < region.end => {
+                self.loop_region = region;
+            }
             ArrangementCommand::Tempo { bpm, meter }
                 if TEMPO_BPM.contains(&bpm)
                     && METER_BEATS.contains(&meter.0)
@@ -318,6 +320,7 @@ impl Arrangement {
             }
             ArrangementCommand::Volume { .. }
             | ArrangementCommand::Pan { .. }
+            | ArrangementCommand::Loop(_)
             | ArrangementCommand::Tempo { .. }
             | ArrangementCommand::CountIn(_) => {}
         }
