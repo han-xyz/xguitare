@@ -2,11 +2,10 @@ use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_core::control::{Request, Response, SILENCE_DB, TransportAction};
 use xguitare_core::project::LoopRegion;
+use xguitare_core::project_control::STILL_CLOSING;
 
 use crate::model::{Command, KeyEvent, Rgb, shortcuts_active};
 
-/// The Daemon's answer while a closed Project still gets its last Takes.
-pub const PROJECT_CLOSING: &str = "a project is still closing; try again";
 /// Track colours in Track order, repeating after the last.
 pub const TRACK_COLOURS: [Rgb; 6] = [
     (60, 120, 220),
@@ -503,7 +502,7 @@ pub fn autosave_offer(
 }
 
 pub fn still_closing(response: &Result<Response, ClientError>) -> bool {
-    matches!(response, Ok(Response::Err { error }) if error == PROJECT_CLOSING)
+    matches!(response, Ok(Response::Err { error }) if error == STILL_CLOSING)
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -28,7 +28,8 @@ const NOTHING_ARMED: &str = "no track is armed";
 const NEEDS_POSITION: &str = "locate needs a position";
 const BAD_POSITION: &str = "position must be <bar>.<beat> or <seconds>s";
 const POSITION_TOO_FAR: &str = "position is more than an hour past the end of the project";
-const STILL_CLOSING: &str = "a project is still closing; try again";
+/// The answer to `project_new` and `project_open` while a closed Project still gets its last Takes.
+pub const STILL_CLOSING: &str = "a project is still closing; try again";
 const DIGITS_TRACK_NAME: &str = "track name must not be only digits";
 /// How far past the Project's last Item or loop end `locate` may move the playhead.
 const LOCATE_SECONDS_PAST_END: f64 = 3600.0;

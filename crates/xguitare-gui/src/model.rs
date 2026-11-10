@@ -951,7 +951,7 @@ pub fn counts_toward_spawn(err: &ClientError) -> bool {
 pub enum Outgoing {
     Request(Request),
     Restore(Restore),
-    /// `project_close`, then `project_open` with `restore`, sent again while the Daemon answers [`PROJECT_CLOSING`].
+    /// `project_close`, then `project_open` with `restore`, sent again while the Daemon answers [`STILL_CLOSING`](xguitare_core::project_control::STILL_CLOSING).
     RestoreAutosave(String),
 }
 

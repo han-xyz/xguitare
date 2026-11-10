@@ -13,12 +13,13 @@ use crate::model::{
     ir_names, module_types, param_rows, refresh_decision, refused_remove, requests_until_quit,
     response_text, spawn_policy,
 };
-use crate::project_model::{PROJECT_CLOSING, autosave_offer, project_name, still_closing};
+use crate::project_model::{autosave_offer, project_name, still_closing};
 use serde_json::Value;
 use tracing::{info, warn};
 use xguitare_client::{ClientError, Connection};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
+use xguitare_core::project_control::STILL_CLOSING;
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -286,7 +287,7 @@ impl Client {
             thread::sleep(TICK);
         }
         warn!("project_open: still closing after {REOPEN_TRIES} tries");
-        self.snapshot.last_message = Some((format!("error: {PROJECT_CLOSING}"), Instant::now()));
+        self.snapshot.last_message = Some((format!("error: {STILL_CLOSING}"), Instant::now()));
     }
 
     fn poll(&mut self, now: Instant) {
