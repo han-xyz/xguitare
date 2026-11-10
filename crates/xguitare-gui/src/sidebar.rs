@@ -17,13 +17,12 @@ use crate::model::{
 };
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
-
-const CABINET: &str = "cabinet";
-/// The Daemon's `rack_add` error for a cabinet on a Bus or Master Rack.
-const CABINET_REFUSED: &str = "a cabinet is not allowed on a Bus or Master";
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
 
 const NO_PRESET: &str = "no preset";
+const CABINET: &str = "cabinet";
+/// The Daemon's `rack_add` error for a cabinet on a Bus or Master Rack.
+const CABINET_REFUSED: &str = "a cabinet is not allowed on a Bus or Master";
 const PRESET_NAME_SIZE: f32 = 30.0;
 const SECTION_TITLE_SIZE: f32 = 16.0;
 const SIDEBAR_SPACING: Vec2 = vec2(8.0, 4.0);
