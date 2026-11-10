@@ -6,9 +6,11 @@ use std::thread;
 use std::time::Duration;
 
 use xguitare_client::Transport;
-use xguitare_core::control::{Request, Response, Value};
+use xguitare_core::control::{
+    Position, Request, Response, SILENCE_DB, TrackRef, TransportAction, Value,
+};
 
-use crate::{BypassState, Cmd, IrCmd, MuteState, RackCmd, parse};
+use crate::{BypassState, Cmd, IrCmd, MuteState, ProjectCmd, RackCmd, Switch, TrackCmd, parse};
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
@@ -107,14 +109,12 @@ fn tuner_line(payload: &Value) -> String {
 fn request_for(cmd: Cmd) -> Result<Request, String> {
     Ok(match cmd {
         Cmd::Run => return Err("'run' starts the daemon; it is not a client command".to_string()),
-        Cmd::RecordCheck { .. } => {
-            return Err(
-                "'record-check' runs its own JACK client; it is not a client command".to_string(),
-            );
-        }
         Cmd::Status => Request::Status,
         Cmd::List => Request::List,
-        Cmd::Load { preset } => Request::Load { preset },
+        Cmd::Load { preset } => Request::Load {
+            preset,
+            track: None,
+        },
         Cmd::Set { param, value } => {
             let value: f64 = value
                 .parse()
@@ -122,9 +122,13 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             if !value.is_finite() {
                 return Err("value must be a finite number".to_string());
             }
-            Request::Set { param, value }
+            Request::Set {
+                param,
+                value,
+                track: None,
+            }
         }
-        Cmd::Get { param } => Request::Get { param },
+        Cmd::Get { param } => Request::Get { param, track: None },
         Cmd::Save { name } => Request::Save { name },
         Cmd::Modules => Request::Modules,
         Cmd::Rack(RackCmd::Add {
@@ -135,11 +139,20 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             r#type: type_name,
             after,
             at,
+            track: None,
         },
-        Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id },
-        Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove { id, to },
+        Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id, track: None },
+        Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove {
+            id,
+            to,
+            track: None,
+        },
         Cmd::Ir(IrCmd::List) => Request::IrList,
-        Cmd::Ir(IrCmd::Set { file, id }) => Request::RackIr { ir: file, id },
+        Cmd::Ir(IrCmd::Set { file, id }) => Request::RackIr {
+            ir: file,
+            id,
+            track: None,
+        },
         Cmd::Tuner { .. } => Request::Tuner,
         Cmd::Mute { state } => Request::Mute {
             on: matches!(state, MuteState::On),
@@ -147,8 +160,89 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         Cmd::Bypass { id, state } => Request::Bypass {
             id,
             on: matches!(state, BypassState::On),
+            track: None,
+        },
+        Cmd::Project(cmd) => project_request(cmd),
+        Cmd::Track(cmd) => track_request(cmd),
+        Cmd::Play => transport(TransportAction::Play, None),
+        Cmd::Stop => transport(TransportAction::Stop, None),
+        Cmd::Record => transport(TransportAction::Record, None),
+        Cmd::Locate { position } => {
+            transport(TransportAction::Locate, Some(Position::Text(position)))
+        }
+        Cmd::Tempo { bpm, meter } => Request::Tempo {
+            bpm: Some(bpm),
+            meter: meter.as_deref().map(parse_meter).transpose()?,
+        },
+        Cmd::Click { state, count_in } => Request::Click {
+            on: Some(is_on(state)),
+            count_in,
         },
     })
+}
+
+fn project_request(cmd: ProjectCmd) -> Request {
+    match cmd {
+        ProjectCmd::New { name } => Request::ProjectNew { name },
+        ProjectCmd::Open { name, restore } => Request::ProjectOpen { name, restore },
+        ProjectCmd::Save => Request::ProjectSave,
+        ProjectCmd::Close => Request::ProjectClose,
+        ProjectCmd::List => Request::ProjectList,
+    }
+}
+
+fn track_request(cmd: TrackCmd) -> Request {
+    match cmd {
+        TrackCmd::Add { name } => Request::TrackAdd { name },
+        TrackCmd::Remove { track } => Request::TrackRemove {
+            track: track_ref(track),
+        },
+        TrackCmd::Edit {
+            track,
+            input,
+            volume,
+            pan,
+            mute,
+            solo,
+            arm,
+            name,
+        } => Request::TrackSet {
+            track: track_ref(track),
+            input,
+            volume,
+            pan,
+            mute: mute.map(is_on),
+            solo: solo.map(is_on),
+            arm: arm.map(is_on),
+            name,
+        },
+        TrackCmd::Select { track } => Request::TrackSelect {
+            track: track_ref(track),
+        },
+    }
+}
+
+fn transport(action: TransportAction, position: Option<Position>) -> Request {
+    Request::Transport { action, position }
+}
+
+fn is_on(state: Switch) -> bool {
+    matches!(state, Switch::On)
+}
+
+/// Digits name a Track by index, anything else by name.
+fn track_ref(track: String) -> TrackRef {
+    match track.parse() {
+        Ok(index) => TrackRef::Index(index),
+        Err(_) => TrackRef::Name(track),
+    }
+}
+
+fn parse_meter(meter: &str) -> Result<(u32, u32), String> {
+    meter
+        .split_once('/')
+        .and_then(|(beats, note)| Some((beats.parse().ok()?, note.parse().ok()?)))
+        .ok_or_else(|| "meter must be <beats>/<note>".to_string())
 }
 
 fn render(req: &Request, payload: &Value) -> String {
@@ -172,8 +266,10 @@ fn render(req: &Request, payload: &Value) -> String {
                 text(&payload["value"])
             )
         }
-        Request::Get { param } => render_get(payload, param.as_deref()),
-        Request::Save { .. } => format!("saved {}\n", text(&payload["path"])),
+        Request::Get { param, .. } => render_get(payload, param.as_deref()),
+        Request::Save { .. } | Request::ProjectSave => {
+            format!("saved {}\n", text(&payload["path"]))
+        }
         Request::Modules => render_modules(payload),
         Request::RackAdd { .. } => format!("added {}\n", text(&payload["id"])),
         Request::RackRemove { .. } => format!("removed {}\n", text(&payload["id"])),
@@ -204,11 +300,91 @@ fn render(req: &Request, payload: &Value) -> String {
         Request::RackIr { .. } => {
             format!("ir {} {}\n", text(&payload["id"]), text(&payload["ir"]))
         }
+        Request::ProjectNew { .. } => format!(
+            "created {} at {}\n",
+            text(&payload["name"]),
+            text(&payload["path"])
+        ),
+        Request::ProjectOpen { .. } => render_open(payload),
+        Request::ProjectClose => format!("closed {}\n", text(&payload["name"])),
+        Request::ProjectList => render_projects(payload),
+        Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
+        Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),
+        Request::TrackSet { .. } => render_track(payload),
+        Request::TrackSelect { .. } => format!("selected track {}\n", track_label(payload)),
+        Request::Transport { action, .. } => match action {
+            TransportAction::Play => "playing\n".to_string(),
+            TransportAction::Stop => "stopped\n".to_string(),
+            TransportAction::Record => "recording\n".to_string(),
+            TransportAction::Locate => format!("located at frame {}\n", text(&payload["frames"])),
+        },
+        Request::Tempo { .. } => format!(
+            "tempo {} bpm {}\n",
+            text(&payload["bpm"]),
+            meter_text(&payload["meter"])
+        ),
+        Request::Click { .. } => format!("{}\n", click_text(payload)),
         Request::Ports
         | Request::SetPorts { .. }
         | Request::Settings
-        | Request::SetSettings { .. } => format!("{payload}\n"),
+        | Request::SetSettings { .. }
+        | Request::Loop { .. } => format!("{payload}\n"),
     }
+}
+
+fn render_open(payload: &Value) -> String {
+    let name = text(&payload["name"]);
+    if payload["restored"] == true {
+        return format!("opened {name} from its autosave\n");
+    }
+    let mut lines = format!("opened {name}\n");
+    if payload["autosave_newer"] == true {
+        lines.push_str("its autosave is newer; open it with --restore to load the autosave\n");
+    }
+    lines
+}
+
+fn render_projects(payload: &Value) -> String {
+    items(&payload["projects"])
+        .map(|project| {
+            if project["valid"] == false {
+                format!(
+                    "{}! ({})\n",
+                    text(&project["folder"]),
+                    text(&project["error"])
+                )
+            } else {
+                format!("{}\n", text(&project["name"]))
+            }
+        })
+        .collect()
+}
+
+fn track_label(payload: &Value) -> String {
+    format!("{} {}", text(&payload["index"]), text(&payload["name"]))
+}
+
+fn render_track(payload: &Value) -> String {
+    let yes_no = |key: &str| if payload[key] == true { "yes" } else { "no" };
+    format!(
+        "track {}: input {}, volume {} dB, pan {}, mute {}, solo {}, arm {}\n",
+        track_label(payload),
+        text(&payload["input"]),
+        text(&payload["volume_db"]),
+        text(&payload["pan"]),
+        yes_no("mute"),
+        yes_no("solo"),
+        yes_no("arm"),
+    )
+}
+
+fn meter_text(meter: &Value) -> String {
+    format!("{}/{}", text(&meter[0]), text(&meter[1]))
+}
+
+fn click_text(click: &Value) -> String {
+    let on = if click["on"] == true { "on" } else { "off" };
+    format!("click {on}, count-in {} bars", text(&click["count_in"]))
 }
 
 /// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR; then `<id>.bypass = yes|no`; a `key` naming one Parameter gets neither line.
@@ -278,7 +454,71 @@ fn render_status(payload: &Value) -> String {
             text(&connection["to"])
         );
     }
+    let _ = writeln!(
+        lines,
+        "disk_overflows: {}",
+        text(&payload["disk_overflows"])
+    );
+    let _ = writeln!(lines, "project: {}", text(&payload["project"]));
+    if !payload["project"].is_string() {
+        return lines;
+    }
+    render_project_status(&mut lines, payload);
     lines
+}
+
+fn render_project_status(lines: &mut String, payload: &Value) {
+    let position = &payload["position"];
+    let tempo = &payload["tempo"];
+    let looped = &payload["loop"];
+    let _ = writeln!(lines, "transport: {}", text(&payload["transport"]));
+    let _ = writeln!(
+        lines,
+        "position: {} (frame {})",
+        text(&position["bars_beats"]),
+        text(&position["frames"])
+    );
+    let _ = writeln!(
+        lines,
+        "tempo: {} bpm {}",
+        text(&tempo["bpm"]),
+        meter_text(&tempo["meter"])
+    );
+    let _ = writeln!(
+        lines,
+        "loop: {} {}..{}",
+        if looped["on"] == true { "on" } else { "off" },
+        text(&looped["start"]),
+        text(&looped["end"])
+    );
+    let _ = writeln!(lines, "{}", click_text(&payload["click"]));
+    lines.push_str("tracks:\n");
+    for (index, track) in items(&payload["tracks"]).enumerate() {
+        let selected = if payload["selected"] == index {
+            "*"
+        } else {
+            " "
+        };
+        let flags: Vec<&str> = [("armed", "armed"), ("mute", "muted"), ("solo", "solo")]
+            .into_iter()
+            .filter(|(key, _)| track[*key] == true)
+            .map(|(_, flag)| flag)
+            .collect();
+        let flags = if flags.is_empty() {
+            "-".to_string()
+        } else {
+            flags.join(", ")
+        };
+        let peak = track["input_peak_db"].as_f64().unwrap_or(SILENCE_DB);
+        let _ = writeln!(
+            lines,
+            "  {index}{selected} {}: {flags}; input {}; {} dB, pan {}; peak {peak:.1} dB",
+            text(&track["name"]),
+            text(&track["input"]),
+            text(&track["volume_db"]),
+            text(&track["pan"]),
+        );
+    }
 }
 
 fn status_text(key: &str, value: &Value) -> String {

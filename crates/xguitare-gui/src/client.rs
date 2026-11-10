@@ -392,7 +392,10 @@ impl Client {
                 warn!("list: skipped {skipped} entries without an integer program");
             }
         }
-        self.snapshot.params = self.payload(&Request::Get { param: None });
+        self.snapshot.params = self.payload(&Request::Get {
+            param: None,
+            track: None,
+        });
         if self.connection.is_none() {
             return;
         }

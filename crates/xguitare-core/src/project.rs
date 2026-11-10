@@ -342,7 +342,7 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
     Ok(project)
 }
 
-fn check_project(project: &Project) -> Result<(), ProjectError> {
+pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
     if project.tracks.len() > MAX_TRACKS {
         return Err(ProjectError::TooManyTracks);
     }
@@ -369,7 +369,7 @@ fn check_project(project: &Project) -> Result<(), ProjectError> {
     project.tracks.iter().try_for_each(check_track)
 }
 
-fn check_track(track: &Track) -> Result<(), ProjectError> {
+pub(crate) fn check_track(track: &Track) -> Result<(), ProjectError> {
     if !VOLUME_DB.contains(&track.volume_db) {
         return Err(ProjectError::Volume(track.name.clone()));
     }

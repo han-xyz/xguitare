@@ -11,6 +11,7 @@ mod irdir;
 pub mod ports;
 mod preset;
 pub mod project;
+pub mod project_control;
 mod registry;
 mod state;
 pub mod take_capture;

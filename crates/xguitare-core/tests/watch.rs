@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use xguitare_core::project_control::Projects;
 
 use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
@@ -46,6 +47,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         modified: false,
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
+        projects: Projects::default(),
     };
     (state, audio)
 }
@@ -95,6 +97,7 @@ fn unchanged_content_is_nothing() {
     let set = Request::Set {
         param: "gain.level".to_string(),
         value: -6.0,
+        track: None,
     };
     assert!(matches!(handle(&mut state, set).0, Response::Ok(_)));
     assert!(matches!(
@@ -270,6 +273,7 @@ fn own_save_keeps_later_live_change() {
             r#type: "gate".to_string(),
             after: None,
             at: Some(0),
+            track: None,
         };
         assert!(matches!(handle(&mut state, add).0, Response::Ok(_)));
         assert!(matches!(
@@ -280,6 +284,7 @@ fn own_save_keeps_later_live_change() {
         let rack_move = Request::RackMove {
             id: "gate".to_string(),
             to: 1,
+            track: None,
         };
         assert!(matches!(handle(&mut state, rack_move).0, Response::Ok(_)));
         assert_eq!(
@@ -323,10 +328,12 @@ fn record_of_inactive_file_does_not_hide_outside_edit() {
     let file = active_file(&state);
     let load = |preset: &str| Request::Load {
         preset: preset.to_string(),
+        track: None,
     };
     let set = Request::Set {
         param: "gain.level".to_string(),
         value: -6.0,
+        track: None,
     };
     assert!(matches!(handle(&mut state, set).0, Response::Ok(_)));
     assert!(matches!(

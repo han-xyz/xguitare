@@ -4,6 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use xguitare_core::project_control::Projects;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
@@ -118,6 +119,7 @@ fn state(test: &str, config_toml: &str) -> (EngineState, AudioQueues, TempDir) {
         modified: false,
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
+        projects: Projects::default(),
     };
     (state, audio, TempDir(dir))
 }
@@ -148,6 +150,7 @@ fn set_settings(bank_kind: Option<BankKind>, ir_dir: Option<&Path>) -> Request {
     Request::SetSettings {
         bank_kind,
         ir_dir: ir_dir.map(Path::to_path_buf),
+        projects_dir: None,
     }
 }
 
@@ -268,9 +271,10 @@ fn set_ports_reconnects_and_persists() {
 fn settings_reports_bank_and_ir_dir() {
     let (mut state, _audio, dir) = state("settings", "");
     let bank_dir = dir.0.join("bank").display().to_string();
+    let projects_dir = state.config.projects_dir.display().to_string();
     assert_eq!(
         ok(handle(&mut state, Request::Settings)),
-        json!({"bank_kind": "guitar", "bank_dir": bank_dir, "ir_dir": bank_dir})
+        json!({"bank_kind": "guitar", "bank_dir": bank_dir, "ir_dir": bank_dir, "projects_dir": projects_dir})
     );
 }
 
@@ -281,13 +285,14 @@ fn set_settings_bank_kind_seeds_and_loads_program_0() {
         &mut state,
         Request::Load {
             preset: "2".to_string(),
+            track: None,
         },
     ));
     let bass_dir = dir.0.join("bank-bass");
     let bass = bass_dir.display().to_string();
     assert_eq!(
         ok(handle(&mut state, set_settings(Some(BankKind::Bass), None))),
-        json!({"bank_kind": "bass", "bank_dir": bass, "ir_dir": bass})
+        json!({"bank_kind": "bass", "bank_dir": bass, "ir_dir": bass, "projects_dir": state.config.projects_dir.display().to_string()})
     );
     assert!(bass_dir.join("01-blues.toml").is_file());
     assert!(bass_dir.join("bass-cab.wav").is_file());
@@ -389,7 +394,14 @@ fn set_settings_ir_dir_must_be_a_directory() {
 }
 
 fn fill_queue(state: &mut EngineState) {
-    let first = ok(handle(state, Request::Get { param: None }))["params"][0].clone();
+    let first = ok(handle(
+        state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ))["params"][0]
+        .clone();
     let param = format!(
         "{}.{}",
         first["module"].as_str().unwrap(),
@@ -400,6 +412,7 @@ fn fill_queue(state: &mut EngineState) {
         Request::Set {
             param: param.clone(),
             value: 0.0,
+            track: None,
         },
     )
     .0

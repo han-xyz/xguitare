@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+use xguitare_core::project_control::Projects;
 
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
 use xguitare_core::control::{EngineState, PeakMeters, Value};
@@ -83,6 +84,7 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
         modified: false,
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
+        projects: Projects::default(),
     };
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket

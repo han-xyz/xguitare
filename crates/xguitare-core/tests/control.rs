@@ -6,6 +6,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use xguitare_core::project_control::Projects;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
@@ -80,6 +81,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         modified: false,
         peaks: PeakMeters::default(),
         saved: HashMap::new(),
+        projects: Projects::default(),
     };
     (state, audio, dir)
 }
@@ -119,6 +121,7 @@ fn bypass(id: &str, on: bool) -> Request {
     Request::Bypass {
         id: id.to_string(),
         on,
+        track: None,
     }
 }
 
@@ -126,6 +129,7 @@ fn set(param: &str, value: f64) -> Request {
     Request::Set {
         param: param.to_string(),
         value,
+        track: None,
     }
 }
 
@@ -150,6 +154,15 @@ fn status_reports_fields() {
             "callback_max_us": 250,
             "callback_last_us": 90,
             "connections": [{"from": "system:capture_1", "to": "xguitare:in"}],
+            "project": null,
+            "transport": null,
+            "position": null,
+            "tempo": null,
+            "loop": null,
+            "click": null,
+            "selected": null,
+            "tracks": [],
+            "disk_overflows": 0,
         })
     );
 }
@@ -187,6 +200,7 @@ fn load_returns_build_warnings() {
         &mut state,
         Request::Load {
             preset: "Cab".to_string(),
+            track: None,
         },
     );
     assert!(matches!(response, Response::Ok(_)));
@@ -204,6 +218,7 @@ fn load_by_name_and_number() {
         &mut state,
         Request::Load {
             preset: "Loud".to_string(),
+            track: None,
         },
     ));
     assert_eq!(payload, json!({"program": 1, "name": "Loud"}));
@@ -215,6 +230,7 @@ fn load_by_name_and_number() {
         &mut state,
         Request::Load {
             preset: "0".to_string(),
+            track: None,
         },
     ));
     assert_eq!(payload, json!({"program": 0, "name": "Clean"}));
@@ -232,6 +248,7 @@ fn load_invalid_entry_is_error() {
         &mut state,
         Request::Load {
             preset: "2".to_string(),
+            track: None,
         },
     ));
     assert!(message.starts_with("line 1:"), "{message}");
@@ -339,12 +356,19 @@ fn set_without_preset() {
 fn get_all_and_one() {
     let (mut state, _audio, _dir) = state("get");
     let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "default": 0.0, "integer": false, "bypass": false});
-    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let all = ok(handle(
+        &mut state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ));
     assert_eq!(all, json!({"params": [expected]}));
     let module = ok(handle(
         &mut state,
         Request::Get {
             param: Some("gain".to_string()),
+            track: None,
         },
     ));
     assert_eq!(module, all);
@@ -352,6 +376,7 @@ fn get_all_and_one() {
         &mut state,
         Request::Get {
             param: Some("gain.level".to_string()),
+            track: None,
         },
     ));
     assert_eq!(one, all);
@@ -359,7 +384,8 @@ fn get_all_and_one() {
         error(handle(
             &mut state,
             Request::Get {
-                param: Some("delay".to_string())
+                param: Some("delay".to_string()),
+                track: None
             }
         )),
         "no module 'delay'"
@@ -379,9 +405,16 @@ fn get_carries_integer() {
         &mut state,
         Request::Load {
             preset: "Hot".to_string(),
+            track: None,
         },
     ));
-    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let all = ok(handle(
+        &mut state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ));
     let integer: Vec<(&str, bool)> = all["params"]
         .as_array()
         .unwrap()
@@ -418,7 +451,8 @@ fn queue_full_is_engine_busy() {
         error(handle(
             &mut state,
             Request::Load {
-                preset: "1".to_string()
+                preset: "1".to_string(),
+                track: None
             }
         )),
         "engine busy"
@@ -701,6 +735,7 @@ fn rate_change_doubles_fade_frames() {
         &mut state,
         Request::Load {
             preset: "Loud".to_string(),
+            track: None,
         },
     ));
     let crossfade_48k = frames_to_settle(&run_blocks(&mut switcher, 8192));
@@ -712,6 +747,7 @@ fn rate_change_doubles_fade_frames() {
         &mut state,
         Request::Load {
             preset: "Clean".to_string(),
+            track: None,
         },
     ));
     let crossfade_96k = frames_to_settle(&run_blocks(&mut switcher, 8192));
@@ -840,6 +876,7 @@ fn revision_increments_on_load_set_save() {
         &mut state,
         Request::Load {
             preset: "1".to_string(),
+            track: None,
         },
     ));
     assert_eq!(revision(&mut state), 2);
@@ -905,6 +942,7 @@ fn rack_add(type_name: &str, after: Option<&str>) -> Request {
         r#type: type_name.to_string(),
         after: after.map(str::to_string),
         at: None,
+        track: None,
     }
 }
 
@@ -913,6 +951,7 @@ fn rack_add_at(type_name: &str, at: usize) -> Request {
         r#type: type_name.to_string(),
         after: None,
         at: Some(at),
+        track: None,
     }
 }
 
@@ -920,11 +959,15 @@ fn rack_move(id: &str, to: usize) -> Request {
     Request::RackMove {
         id: id.to_string(),
         to,
+        track: None,
     }
 }
 
 fn rack_remove(id: &str) -> Request {
-    Request::RackRemove { id: id.to_string() }
+    Request::RackRemove {
+        id: id.to_string(),
+        track: None,
+    }
 }
 
 #[test]
@@ -998,6 +1041,7 @@ fn rack_add_at_inserts_at_index() {
         r#type: "gate".to_string(),
         after: Some("gain".to_string()),
         at: Some(0),
+        track: None,
     };
     assert_eq!(error(handle(&mut state, both)), "give either after or at");
     assert_eq!(ids(&state), ["gate", "gain", "cabinet", "delay"]);
@@ -1266,6 +1310,7 @@ fn rack_ir(ir: &str, id: Option<&str>) -> Request {
     Request::RackIr {
         ir: ir.to_string(),
         id: id.map(str::to_string),
+        track: None,
     }
 }
 
@@ -1321,6 +1366,7 @@ fn non_finite_ir_refused_by_rack_ir_warned_on_load() {
         &mut state,
         Request::Load {
             preset: "Nan".to_string(),
+            track: None,
         },
     );
     assert!(matches!(response, Response::Ok(_)));
@@ -1415,7 +1461,13 @@ fn rack_ir_errors_verbatim() {
     let (mut state, mut audio, _dir) = ir_state("rack-ir-errors");
     ok(handle(&mut state, rack_add_at("gate", 0)));
     while audio.commands.pop().is_ok() {}
-    let before = ok(handle(&mut state, Request::Get { param: None }));
+    let before = ok(handle(
+        &mut state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ));
     let bad = state.config.ir_dir.join("bad.wav");
     fs::write(&bad, "").unwrap();
     let loader_error = xguitare_core::load_ir(&bad, "bad.wav", 48_000, 100.0)
@@ -1438,7 +1490,16 @@ fn rack_ir_errors_verbatim() {
     ] {
         assert_eq!(error(handle(&mut state, req)), expected);
     }
-    assert_eq!(ok(handle(&mut state, Request::Get { param: None })), before);
+    assert_eq!(
+        ok(handle(
+            &mut state,
+            Request::Get {
+                param: None,
+                track: None
+            }
+        )),
+        before
+    );
     assert!(audio.commands.pop().is_err(), "SwapRack pushed");
     assert_eq!(revision(&mut state), 2);
 }
@@ -1458,7 +1519,13 @@ fn save_after_rack_ir_round_trips() {
 #[test]
 fn get_cabinet_carries_ir() {
     let (mut state, _audio, _dir) = amp_state("get-cabinet-ir");
-    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let all = ok(handle(
+        &mut state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ));
     let params = all["params"].as_array().unwrap();
     assert!(params.iter().any(|p| p["module"] == "cabinet"));
     for param in params {
@@ -1542,6 +1609,7 @@ fn modified_tracks_changes() {
         &mut state,
         Request::Load {
             preset: "Loud".to_string(),
+            track: None,
         },
     ));
     assert!(!is_modified(&mut state));
@@ -1765,7 +1833,13 @@ fn bypass_switches_the_module_and_shows_in_get() {
             on: true
         })
     ));
-    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let all = ok(handle(
+        &mut state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ));
     assert_eq!(all["params"][0]["bypass"], true);
     let status = ok(handle(&mut state, Request::Status));
     assert_eq!(status["modified"], true);
@@ -1774,7 +1848,13 @@ fn bypass_switches_the_module_and_shows_in_get() {
         ok(handle(&mut state, bypass("gain", false))),
         json!({"bypass": false})
     );
-    let all = ok(handle(&mut state, Request::Get { param: None }));
+    let all = ok(handle(
+        &mut state,
+        Request::Get {
+            param: None,
+            track: None,
+        },
+    ));
     assert_eq!(all["params"][0]["bypass"], false);
 }
 

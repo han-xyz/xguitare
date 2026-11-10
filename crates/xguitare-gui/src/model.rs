@@ -420,6 +420,7 @@ impl Restore {
             r#type: self.type_name.clone(),
             after,
             at,
+            track: None,
         }
     }
 
@@ -428,14 +429,17 @@ impl Restore {
         let sets = self.values.iter().map(|(param, value)| Request::Set {
             param: format!("{id}.{param}"),
             value: *value,
+            track: None,
         });
         let bypass = self.bypass.then(|| Request::Bypass {
             id: id.to_string(),
             on: true,
+            track: None,
         });
         let ir = self.ir.clone().map(|ir| Request::RackIr {
             ir,
             id: Some(id.to_string()),
+            track: None,
         });
         sets.chain(bypass).chain(ir).collect()
     }
@@ -885,8 +889,15 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
     for command in queued {
         let req = match command {
-            Command::Load(preset) => Request::Load { preset },
-            Command::Set { param, value } => Request::Set { param, value },
+            Command::Load(preset) => Request::Load {
+                preset,
+                track: None,
+            },
+            Command::Set { param, value } => Request::Set {
+                param,
+                value,
+                track: None,
+            },
             Command::Save => Request::Save { name: None },
             Command::SaveAs(name) => Request::Save { name: Some(name) },
             Command::RackAdd {
@@ -897,12 +908,25 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Outgoing>, bool) {
                 r#type: type_name,
                 after,
                 at,
+                track: None,
             },
-            Command::RackRemove { id } => Request::RackRemove { id },
-            Command::RackMove { id, to } => Request::RackMove { id, to },
+            Command::RackRemove { id } => Request::RackRemove { id, track: None },
+            Command::RackMove { id, to } => Request::RackMove {
+                id,
+                to,
+                track: None,
+            },
             Command::Mute(on) => Request::Mute { on },
-            Command::Bypass { id, on } => Request::Bypass { id, on },
-            Command::RackIr { id, ir } => Request::RackIr { ir, id: Some(id) },
+            Command::Bypass { id, on } => Request::Bypass {
+                id,
+                on,
+                track: None,
+            },
+            Command::RackIr { id, ir } => Request::RackIr {
+                ir,
+                id: Some(id),
+                track: None,
+            },
             Command::SetPorts {
                 input,
                 output_left,
@@ -912,9 +936,11 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Outgoing>, bool) {
                 output_left,
                 output_right,
             },
-            Command::SetSettings { bank_kind, ir_dir } => {
-                Request::SetSettings { bank_kind, ir_dir }
-            }
+            Command::SetSettings { bank_kind, ir_dir } => Request::SetSettings {
+                bank_kind,
+                ir_dir,
+                projects_dir: None,
+            },
             Command::Restore(restore) => {
                 requests.push(Outgoing::Restore(restore));
                 continue;
@@ -1426,7 +1452,7 @@ impl Feedback {
 pub fn refused_remove(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {
     match (req, response) {
         (_, Ok(Response::Ok(_))) => None,
-        (Request::RackRemove { id }, _) => Some(id.clone()),
+        (Request::RackRemove { id, track: None }, _) => Some(id.clone()),
         _ => None,
     }
 }

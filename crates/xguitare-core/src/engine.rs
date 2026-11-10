@@ -1,12 +1,13 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::{mem, slice};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use xguitare_dsp::Rack;
 use xguitare_dsp::crossfade::Crossfader;
 
-use crate::arrangement::{Arrangement, ArrangementCommand};
+use crate::arrangement::{Arrangement, ArrangementCommand, Transport};
+use crate::project::MAX_TRACKS;
 
 #[derive(Debug, Default)]
 pub struct EngineShared {
@@ -26,6 +27,28 @@ pub struct EngineShared {
     pub muted: AtomicBool,
     /// Pushes into a Take ring that dropped frames because the disk thread fell behind.
     pub disk_overflows: AtomicU64,
+    /// The running Arrangement's transport as [`transport_code`] encodes it; Stopped while none runs.
+    pub transport: AtomicU8,
+    /// The running Arrangement's playhead in frames.
+    pub playhead: AtomicU64,
+    /// f32 bits of the largest |sample| on each Track input since the last `take_peak`, written while an Arrangement runs.
+    pub track_input_peak_bits: [AtomicU32; MAX_TRACKS],
+}
+
+pub fn transport_code(transport: Transport) -> u8 {
+    match transport {
+        Transport::Stopped => 0,
+        Transport::Playing => 1,
+        Transport::Recording => 2,
+    }
+}
+
+pub fn transport_from_code(code: u8) -> Transport {
+    match code {
+        1 => Transport::Playing,
+        2 => Transport::Recording,
+        _ => Transport::Stopped,
+    }
 }
 
 pub enum Command {
@@ -261,6 +284,10 @@ impl RackSwitcher {
                     for old in held.into_iter().flatten() {
                         self.retire_arrangement(old);
                     }
+                    self.shared
+                        .transport
+                        .store(transport_code(Transport::Stopped), Ordering::Relaxed);
+                    self.shared.playhead.store(0, Ordering::Relaxed);
                 }
                 Command::Arrangement(command) => {
                     for arrangement in [
@@ -298,6 +325,9 @@ impl RackSwitcher {
     ) -> bool {
         tap_block(&mut self.queues.tap, input);
         let fits = if self.arrangement.is_some() {
+            for (peak, input) in self.shared.track_input_peak_bits.iter().zip(track_inputs) {
+                raise_peak(peak, block_peak(input));
+            }
             self.run_arrangements(track_inputs, out_l, out_r)
         } else {
             self.run_racks(input, out_l, out_r)
@@ -373,6 +403,14 @@ impl RackSwitcher {
         }
         if faded && let Some(new) = self.incoming_arrangement.take() {
             self.finish_arrangement_fade(new);
+        }
+        if let Some(running) = self.arrangement.as_deref() {
+            self.shared
+                .transport
+                .store(transport_code(running.transport()), Ordering::Relaxed);
+            self.shared
+                .playhead
+                .store(running.playhead(), Ordering::Relaxed);
         }
         true
     }

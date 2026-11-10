@@ -207,11 +207,12 @@ impl DiskThread {
         self.finished.try_iter().collect()
     }
 
-    /// Writes what the rings still hold, then ends the thread; a Take still open is left finalized at its length so far.
-    pub fn stop(self) {
+    /// Writes what the rings still hold, then ends the thread and returns the Takes finished since the last [`DiskThread::finished`]; a Take still open is left finalized at its length so far.
+    pub fn stop(self) -> Vec<FinishedTake> {
         self.stop.store(true, Ordering::Relaxed);
         if self.handle.join().is_err() {
             warn!("disk thread panicked");
         }
+        self.finished.try_iter().collect()
     }
 }

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use xguitare::{CliEnv, run_cli, run_main};
 use xguitare_client::{ClientError, Transport};
-use xguitare_core::control::{Request, Response};
+use xguitare_core::control::{Position, Request, Response, TrackRef, TransportAction};
 
 struct Canned {
     replies: VecDeque<Result<Response, ClientError>>,
@@ -103,13 +103,13 @@ fn status_format() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","program":0,"modified":true,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"muted":false,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}]}"#,
+            r#"{"ok":true,"preset":"Clean","program":0,"modified":true,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"muted":false,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}],"disk_overflows":0,"project":null}"#,
         ),
     );
     assert_eq!(out.requests, [Request::Status]);
     assert_eq!(
         out.stdout,
-        "preset: Clean\nprogram: 0\nmodified: yes\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\n"
+        "preset: Clean\nprogram: 0\nmodified: yes\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\ndisk_overflows: 0\nproject: -\n"
     );
     let out = cli(
         &["status"],
@@ -123,7 +123,12 @@ fn status_format() {
         "{}",
         out.stdout
     );
-    assert!(out.stdout.ends_with("connections:\n"), "{}", out.stdout);
+    assert!(
+        out.stdout
+            .ends_with("connections:\ndisk_overflows: -\nproject: -\n"),
+        "{}",
+        out.stdout
+    );
 }
 
 #[test]
@@ -137,7 +142,8 @@ fn get_format() {
     assert_eq!(
         out.requests,
         [Request::Get {
-            param: Some("gain".to_string())
+            param: Some("gain".to_string()),
+            track: None
         }]
     );
     assert_eq!(
@@ -145,7 +151,13 @@ fn get_format() {
         "gain.level = -3.5 dB\ndelay.mix = 25 %\npreamp.bright = 1\n"
     );
     let out = cli(&["get"], reply(r#"{"ok":true,"params":[]}"#));
-    assert_eq!(out.requests, [Request::Get { param: None }]);
+    assert_eq!(
+        out.requests,
+        [Request::Get {
+            param: None,
+            track: None
+        }]
+    );
 }
 
 #[test]
@@ -158,7 +170,8 @@ fn set_prints_clamped() {
         out.requests,
         [Request::Set {
             param: "gain.level".to_string(),
-            value: 50.0
+            value: 50.0,
+            track: None
         }]
     );
     assert_eq!(out.stdout, "gain.level = 20 (clamped)\n");
@@ -170,7 +183,8 @@ fn set_prints_clamped() {
         out.requests,
         [Request::Set {
             param: "gain.level".to_string(),
-            value: -6.0
+            value: -6.0,
+            track: None
         }]
     );
     assert_eq!(out.stdout, "gain.level = -6\n");
@@ -194,7 +208,8 @@ fn load_prints() {
     assert_eq!(
         out.requests,
         [Request::Load {
-            preset: "Loud".to_string()
+            preset: "Loud".to_string(),
+            track: None
         }]
     );
     assert_eq!(out.stdout, "loaded 1 Loud\n");
@@ -358,6 +373,7 @@ fn rack_add_prints() {
             r#type: "delay".to_string(),
             after: Some("cabinet".to_string()),
             at: None,
+            track: None,
         }]
     );
     assert_eq!(out.stdout, "added delay-2\n");
@@ -371,6 +387,7 @@ fn rack_add_prints() {
             r#type: "gate".to_string(),
             after: None,
             at: None,
+            track: None,
         }]
     );
     let out = cli(
@@ -383,6 +400,7 @@ fn rack_add_prints() {
             r#type: "gate".to_string(),
             after: None,
             at: Some(0),
+            track: None,
         }]
     );
     let out = cli(
@@ -407,6 +425,7 @@ fn rack_move_prints() {
         [Request::RackMove {
             id: "delay".to_string(),
             to: 6,
+            track: None,
         }]
     );
     assert_eq!(out.stdout, "moved delay to 4\n");
@@ -423,6 +442,7 @@ fn rack_remove_prints() {
         out.requests,
         [Request::RackRemove {
             id: "delay".to_string(),
+            track: None,
         }]
     );
     assert_eq!(out.stdout, "removed delay\n");
@@ -588,6 +608,7 @@ fn ir_set_prints() {
         [Request::RackIr {
             ir: "cabs/x.wav".to_string(),
             id: None,
+            track: None,
         }]
     );
     assert_eq!(out.stdout, "ir cabinet cabs/x.wav\n");
@@ -601,6 +622,7 @@ fn ir_set_prints() {
         [Request::RackIr {
             ir: "cabs/x.wav".to_string(),
             id: Some("cab-2".to_string()),
+            track: None,
         }]
     );
     assert_eq!(out.stdout, "ir cab-2 cabs/x.wav\n");
@@ -696,7 +718,8 @@ fn bypass_on_off_prints() {
         out.requests,
         [Request::Bypass {
             id: "preamp".to_string(),
-            on: true
+            on: true,
+            track: None
         }]
     );
     assert_eq!(out.stdout, "preamp: bypassed\n");
@@ -709,7 +732,8 @@ fn bypass_on_off_prints() {
         out.requests,
         [Request::Bypass {
             id: "preamp".to_string(),
-            on: false
+            on: false,
+            track: None
         }]
     );
     assert_eq!(out.stdout, "preamp: on\n");
@@ -724,4 +748,254 @@ fn bypass_unknown_module_prints_error() {
     );
     assert_eq!(out.stderr, "error: no module 'wah'\n");
     assert_eq!(out.code, 1);
+}
+
+#[test]
+fn status_prints_the_open_project() {
+    let out = cli(
+        &["status"],
+        reply(
+            r#"{"ok":true,"preset":"Clean","connections":[],"disk_overflows":1,"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"tracks":[{"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04},{"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0}]}"#,
+        ),
+    );
+    assert!(
+        out.stdout.ends_with(
+            "connections:\ndisk_overflows: 1\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB\n  1* Bass: muted; input -; 0 dB, pan -0.5; peak -120.0 dB\n"
+        ),
+        "{}",
+        out.stdout
+    );
+}
+
+#[test]
+fn project_commands_send_their_requests_and_print_the_answer() {
+    let cases: [(&[&str], Request, &str, &str); 6] = [
+        (
+            &["project", "new", "My Song"],
+            Request::ProjectNew {
+                name: "My Song".to_string(),
+            },
+            r#"{"ok":true,"name":"My Song","path":"/p/my-song"}"#,
+            "created My Song at /p/my-song\n",
+        ),
+        (
+            &["project", "open", "song"],
+            Request::ProjectOpen {
+                name: "song".to_string(),
+                restore: false,
+            },
+            r#"{"ok":true,"name":"Song","path":"/p/song","autosave_newer":true,"restored":false}"#,
+            "opened Song\nits autosave is newer; open it with --restore to load the autosave\n",
+        ),
+        (
+            &["project", "open", "song", "--restore"],
+            Request::ProjectOpen {
+                name: "song".to_string(),
+                restore: true,
+            },
+            r#"{"ok":true,"name":"Song","path":"/p/song","autosave_newer":true,"restored":true}"#,
+            "opened Song from its autosave\n",
+        ),
+        (
+            &["project", "save"],
+            Request::ProjectSave,
+            r#"{"ok":true,"path":"/p/song/project.toml"}"#,
+            "saved /p/song/project.toml\n",
+        ),
+        (
+            &["project", "close"],
+            Request::ProjectClose,
+            r#"{"ok":true,"name":"Song","path":"/p/song"}"#,
+            "closed Song\n",
+        ),
+        (
+            &["project", "list"],
+            Request::ProjectList,
+            r#"{"ok":true,"projects":[{"name":"A Song","folder":"a-song","valid":true},{"name":"bad","folder":"bad","valid":false,"error":"line 1:8: invalid string"}]}"#,
+            "A Song\nbad! (line 1:8: invalid string)\n",
+        ),
+    ];
+    for (argv, request, answer, printed) in cases {
+        let out = cli(argv, reply(answer));
+        assert_eq!(out.requests, [request], "{argv:?}");
+        assert_eq!(out.stdout, printed, "{argv:?}");
+        assert_eq!(out.code, 0);
+    }
+}
+
+#[test]
+fn track_commands_take_an_index_or_a_name() {
+    let cases: [(&[&str], Request, &str, &str); 5] = [
+        (
+            &["track", "add", "Guitar"],
+            Request::TrackAdd {
+                name: Some("Guitar".to_string()),
+            },
+            r#"{"ok":true,"index":0,"name":"Guitar"}"#,
+            "added track 0 Guitar\n",
+        ),
+        (
+            &["track", "remove", "1"],
+            Request::TrackRemove {
+                track: TrackRef::Index(1),
+            },
+            r#"{"ok":true,"index":1,"name":"Bass"}"#,
+            "removed track 1 Bass\n",
+        ),
+        (
+            &["track", "select", "Bass"],
+            Request::TrackSelect {
+                track: TrackRef::Name("Bass".to_string()),
+            },
+            r#"{"ok":true,"index":1,"name":"Bass"}"#,
+            "selected track 1 Bass\n",
+        ),
+        (
+            &[
+                "track",
+                "edit",
+                "Guitar",
+                "--input",
+                "card:capture_1",
+                "--volume",
+                "-6",
+                "--pan",
+                "-0.5",
+                "--mute",
+                "off",
+                "--solo",
+                "on",
+                "--arm",
+                "on",
+                "--name",
+                "Lead",
+            ],
+            Request::TrackSet {
+                track: TrackRef::Name("Guitar".to_string()),
+                input: Some("card:capture_1".to_string()),
+                volume: Some(-6.0),
+                pan: Some(-0.5),
+                mute: Some(false),
+                solo: Some(true),
+                arm: Some(true),
+                name: Some("Lead".to_string()),
+            },
+            r#"{"ok":true,"index":0,"name":"Lead","input":"card:capture_1","volume_db":-6.0,"pan":-0.5,"mute":false,"solo":true,"arm":true}"#,
+            "track 0 Lead: input card:capture_1, volume -6 dB, pan -0.5, mute no, solo yes, arm yes\n",
+        ),
+        (
+            &["track", "edit", "0", "--input", ""],
+            Request::TrackSet {
+                track: TrackRef::Index(0),
+                input: Some(String::new()),
+                volume: None,
+                pan: None,
+                mute: None,
+                solo: None,
+                arm: None,
+                name: None,
+            },
+            r#"{"ok":true,"index":0,"name":"Lead","input":null,"volume_db":0.0,"pan":0.0,"mute":false,"solo":false,"arm":false}"#,
+            "track 0 Lead: input -, volume 0 dB, pan 0, mute no, solo no, arm no\n",
+        ),
+    ];
+    for (argv, request, answer, printed) in cases {
+        let out = cli(argv, reply(answer));
+        assert_eq!(out.requests, [request], "{argv:?}");
+        assert_eq!(out.stdout, printed, "{argv:?}");
+    }
+}
+
+#[test]
+fn transport_tempo_and_click_commands() {
+    let transport = |action, position: Option<&str>| Request::Transport {
+        action,
+        position: position.map(|text| Position::Text(text.to_string())),
+    };
+    let cases: [(&[&str], Request, &str, &str); 7] = [
+        (
+            &["play"],
+            transport(TransportAction::Play, None),
+            r#"{"ok":true,"action":"play"}"#,
+            "playing\n",
+        ),
+        (
+            &["stop"],
+            transport(TransportAction::Stop, None),
+            r#"{"ok":true,"action":"stop"}"#,
+            "stopped\n",
+        ),
+        (
+            &["record"],
+            transport(TransportAction::Record, None),
+            r#"{"ok":true,"action":"record"}"#,
+            "recording\n",
+        ),
+        (
+            &["locate", "3.2"],
+            transport(TransportAction::Locate, Some("3.2")),
+            r#"{"ok":true,"action":"locate","frames":216000}"#,
+            "located at frame 216000\n",
+        ),
+        (
+            &["tempo", "90.5", "3/4"],
+            Request::Tempo {
+                bpm: Some(90.5),
+                meter: Some((3, 4)),
+            },
+            r#"{"ok":true,"bpm":90.5,"meter":[3,4]}"#,
+            "tempo 90.5 bpm 3/4\n",
+        ),
+        (
+            &["click", "on", "--count-in", "2"],
+            Request::Click {
+                on: Some(true),
+                count_in: Some(2),
+            },
+            r#"{"ok":true,"on":true,"count_in":2}"#,
+            "click on, count-in 2 bars\n",
+        ),
+        (
+            &["click", "off"],
+            Request::Click {
+                on: Some(false),
+                count_in: None,
+            },
+            r#"{"ok":true,"on":false,"count_in":0}"#,
+            "click off, count-in 0 bars\n",
+        ),
+    ];
+    for (argv, request, answer, printed) in cases {
+        let out = cli(argv, reply(answer));
+        assert_eq!(out.requests, [request], "{argv:?}");
+        assert_eq!(out.stdout, printed, "{argv:?}");
+    }
+}
+
+#[test]
+fn project_errors_print_one_line() {
+    let out = cli(
+        &["track", "remove", "0"],
+        reply(r#"{"ok":false,"error":"cannot remove a track while recording"}"#),
+    );
+    assert_eq!(out.stderr, "error: cannot remove a track while recording\n");
+    assert_eq!(out.code, 1);
+    let out = cli_with(
+        &["tempo", "120", "3-4"],
+        Vec::new(),
+        &CliEnv {
+            tuner_mute: false,
+            is_tty: false,
+            stop: Arc::new(AtomicBool::new(false)),
+        },
+        None,
+    );
+    assert_eq!(out.stderr, "error: meter must be <beats>/<note>\n");
+    assert_eq!(out.code, 1);
+    assert_eq!(out.requests, Vec::<Request>::new());
+}
+
+#[test]
+fn record_check_is_gone() {
+    assert_eq!(run_main(["xguitare", "record-check", "/tmp/x"]), 1);
 }

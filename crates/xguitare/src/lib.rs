@@ -3,7 +3,6 @@ mod daemon;
 pub mod disk_writer;
 mod jack_adapter;
 mod logging;
-mod record_check;
 pub mod socket_server;
 
 use std::ffi::OsString;
@@ -77,16 +76,84 @@ enum Cmd {
     Mute { state: MuteState },
     /// Bypass a Module (on) or switch it back in (off)
     Bypass { id: String, state: BypassState },
-    /// Record a Project's armed Tracks for a few seconds and print the Takes; for live checks only
-    #[command(hide = true)]
-    RecordCheck {
-        project: PathBuf,
-        #[arg(long, default_value_t = 3.0)]
-        seconds: f64,
-        /// The playhead frame recording starts from
-        #[arg(long, default_value_t = 0)]
-        at: u64,
+    /// Create, open, save, close or list Projects
+    #[command(subcommand, arg_required_else_help = false)]
+    Project(ProjectCmd),
+    /// Add, remove, edit or select a Track of the open Project
+    #[command(subcommand, arg_required_else_help = false)]
+    Track(TrackCmd),
+    /// Start playback from the playhead
+    Play,
+    /// Stop playback or recording; the playhead stays
+    Stop,
+    /// Record the armed Tracks, after the count-in when stopped
+    Record,
+    /// Move the playhead: <bar>.<beat>, <bar> or <seconds>s
+    Locate { position: String },
+    /// Set the tempo in bpm and, optionally, the meter as <beats>/<note>
+    Tempo { bpm: f64, meter: Option<String> },
+    /// Turn the click on or off; --count-in sets the bars of click before recording (0, 1 or 2)
+    Click {
+        state: Switch,
+        #[arg(long)]
+        count_in: Option<u32>,
     },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Switch {
+    On,
+    Off,
+}
+
+#[derive(Subcommand)]
+enum ProjectCmd {
+    /// Create a Project in the projects folder and open it
+    New { name: String },
+    /// Open a Project; --restore loads its autosave
+    Open {
+        name: String,
+        #[arg(long)]
+        restore: bool,
+    },
+    /// Write the open Project to its project.toml
+    Save,
+    /// Save and close the open Project
+    Close,
+    /// List the Projects in the projects folder
+    List,
+}
+
+/// A Track is named by its zero-based index or its name.
+#[derive(Subcommand)]
+enum TrackCmd {
+    /// Add a Track with the active Preset's Modules
+    Add { name: Option<String> },
+    /// Remove a Track
+    Remove { track: String },
+    /// Change a Track's input, volume, pan, switches or name
+    Edit {
+        track: String,
+        /// A capture port; "" disconnects
+        #[arg(long)]
+        input: Option<String>,
+        /// dB, -60 to 6
+        #[arg(long, allow_negative_numbers = true)]
+        volume: Option<f32>,
+        /// -1 (left) to 1 (right)
+        #[arg(long, allow_negative_numbers = true)]
+        pan: Option<f32>,
+        #[arg(long)]
+        mute: Option<Switch>,
+        #[arg(long)]
+        solo: Option<Switch>,
+        #[arg(long)]
+        arm: Option<Switch>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Make a Track the one Rack commands edit
+    Select { track: String },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -147,14 +214,6 @@ where
             daemon::run(cli.config.as_deref())
                 .map(|()| 0)
                 .map_err(|err| err.to_string())
-        }
-        Cmd::RecordCheck {
-            project,
-            seconds,
-            at,
-        } => {
-            logging::init();
-            record_check::run(cli.config.as_deref(), &project, seconds, at).map(|()| 0)
         }
         Cmd::Tuner { watch: true } => run_client(&argv, cli.config.as_deref(), true),
         _ => run_client(&argv, cli.config.as_deref(), false),
