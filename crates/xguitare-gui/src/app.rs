@@ -174,7 +174,7 @@ impl App {
 }
 
 impl App {
-    /// The last [`Command::RackRemove`] among `commands` becomes the footer's Undo, from the `get` payload shown when it was sent; a `load` or a Bank kind change drops it, even of the same Preset.
+    /// The last [`Command::RackRemove`] among `commands` becomes the footer's Undo, from the `get` payload shown when it was sent; a `load` or a Bank kind change drops it, even of the same Preset, and the footer drops it when the active Preset changes ([`crate::model::shown_undo`]); an IR-folder-only settings change keeps it.
     fn remember_undo(&mut self, commands: &[Command], now: Instant) {
         for command in commands {
             match command {
@@ -189,7 +189,10 @@ impl App {
                         self.removed = removed;
                     }
                 }
-                Command::Load(_) | Command::SetSettings { .. } => self.removed = None,
+                Command::Load(_)
+                | Command::SetSettings {
+                    bank_kind: Some(_), ..
+                } => self.removed = None,
                 _ => {}
             }
         }

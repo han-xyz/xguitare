@@ -453,6 +453,42 @@ fn loading_a_preset_drops_the_undo() {
 }
 
 #[test]
+fn only_a_bank_kind_change_in_settings_drops_the_undo() {
+    let (mut harness, sent, _dir) = harness();
+    let from = unit_header_point(&harness, "chorus");
+    drag_and_release(&mut harness, from, pos2(100.0, 400.0));
+    for title in ["Preset", "Bass Bank", "Settings"] {
+        harness.get_by_label(title).click();
+        harness.run_steps(2);
+    }
+    edit_value(&mut harness, "IR folder", "/home/you/irs");
+    harness.get_by_label("Apply").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Undo");
+    harness.get_by_label("Guitar").click();
+    harness.run_steps(2);
+    harness.get_by_label("Apply").click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Undo").is_none());
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::RackRemove {
+                id: "chorus".to_string(),
+            },
+            Command::SetSettings {
+                bank_kind: None,
+                ir_dir: Some(PathBuf::from("/home/you/irs")),
+            },
+            Command::SetSettings {
+                bank_kind: Some(BankKind::Guitar),
+                ir_dir: None,
+            },
+        ]
+    );
+}
+
+#[test]
 fn unit_released_below_the_rack_moves_to_the_end() {
     let (mut harness, sent, _dir) = harness();
     let from = unit_header_point(&harness, "compressor");
