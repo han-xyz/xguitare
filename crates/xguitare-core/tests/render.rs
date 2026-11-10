@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -303,7 +304,7 @@ fn render_file(dir: &Path, bits: RenderBits, name: &str) -> PathBuf {
     let (song, takes) = loop_song();
     let render = Render::new(&config(dir), &song, &takes, RenderRange::Loop, bits).unwrap();
     let (job, file) = job(dir, name);
-    run_render(render, &job);
+    run_render(render, &job, |part, file| fs::hard_link(part, file));
     assert_eq!(job.state(), RenderState::Done, "{:?}", job.error());
     assert!(!dir.join(format!("{name}.wav.part")).exists());
     file
@@ -367,7 +368,7 @@ fn a_cancelled_render_leaves_no_file() {
     .unwrap();
     let (job, file) = job(&dir.0, "song");
     job.cancel();
-    run_render(render, &job);
+    run_render(render, &job, |part, file| fs::hard_link(part, file));
     assert_eq!(job.state(), RenderState::Cancelled);
     assert!(!file.exists());
     assert!(!dir.0.join("song.wav.part").exists());
@@ -386,8 +387,36 @@ fn a_failed_write_reports_the_error_and_leaves_no_part_file() {
     )
     .unwrap();
     let (job, file) = job(&dir.0.join("missing"), "song");
-    run_render(render, &job);
+    run_render(render, &job, |part, file| fs::hard_link(part, file));
     assert_eq!(job.state(), RenderState::Failed);
     assert!(job.error().unwrap().starts_with("cannot write "));
     assert!(!file.exists());
+}
+
+#[test]
+fn without_hard_links_the_part_file_is_renamed_to_a_new_name() {
+    let dir = temp_dir("no-hard-links");
+    let (song, takes) = loop_song();
+    let render = Render::new(
+        &config(&dir.0),
+        &song,
+        &takes,
+        RenderRange::Loop,
+        RenderBits::Pcm24,
+    )
+    .unwrap();
+    let (job, existing) = job(&dir.0, "song");
+    fs::write(&existing, "mine").unwrap();
+    let refuse = |_: &Path, _: &Path| -> io::Result<()> { Err(io::Error::from_raw_os_error(1)) };
+    fs::write(dir.0.join("song-2.wav"), "also mine").unwrap();
+    run_render(render, &job, refuse);
+    assert_eq!(job.state(), RenderState::Done, "{:?}", job.error());
+    assert_eq!(job.file(), dir.0.join("song-3.wav"));
+    assert_eq!(WavReader::open(job.file()).unwrap().duration(), 9_600);
+    assert_eq!(fs::read_to_string(&existing).unwrap(), "mine");
+    assert_eq!(
+        fs::read_to_string(dir.0.join("song-2.wav")).unwrap(),
+        "also mine"
+    );
+    assert!(!dir.0.join("song-3.wav.part").exists());
 }

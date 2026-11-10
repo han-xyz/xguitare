@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, ErrorKind};
+use std::io::{self, BufWriter, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::Config;
 use crate::arrangement::{Arrangement, ArrangementCommand};
 use crate::build::{ArrangementError, build_arrangement};
+use crate::control::has_no_hard_links;
 use crate::project::Project;
 
 /// The most frames one [`Render::step`] renders.
@@ -336,7 +337,9 @@ pub struct RenderTask {
 impl RenderTask {
     /// Runs [`run_render`] to the end.
     pub fn run(self) {
-        run_render(self.render, &self.job);
+        run_render(self.render, &self.job, |part, file| {
+            fs::hard_link(part, file)
+        });
     }
 }
 
@@ -371,12 +374,16 @@ fn is_free(file: &Path) -> bool {
 }
 
 /// Writes `render` to a new part file, links it to the job's file without replacing anything there and removes it, also on cancel or error, and records the outcome in `job`.
-pub fn run_render(mut render: Render, job: &RenderJob) {
+pub fn run_render(
+    mut render: Render,
+    job: &RenderJob,
+    link: impl Fn(&Path, &Path) -> io::Result<()>,
+) {
     let outcome =
         open_part(job, render.bits().spec(render.sample_rate())).and_then(|(part, writer)| {
             let written = write_wav(&mut render, writer, &part, job).and_then(|finished| {
                 if finished {
-                    link_final(&part, job)?;
+                    link_final(&part, job, link)?;
                 }
                 Ok(finished)
             });
@@ -421,13 +428,18 @@ fn open_part(job: &RenderJob, spec: WavSpec) -> Result<(PathBuf, WavFile), Strin
     }
 }
 
-/// Hard-links `part` to the job's file, which fails rather than replace a file there, moving on to the next `-N` file while one does.
-fn link_final(part: &Path, job: &RenderJob) -> Result<(), String> {
+/// `link`s `part` to the job's file, which fails rather than replace a file there, moving on to the next `-N` file while one does. When the filesystem has no hard links, the file is created new and `part` renamed onto that empty file.
+fn link_final(
+    part: &Path,
+    job: &RenderJob,
+    link: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> Result<(), String> {
     let mut file = job.file();
     loop {
-        match fs::hard_link(part, &file) {
+        match link(part, &file) {
             Ok(()) => return Ok(()),
             Err(err) if err.kind() == ErrorKind::AlreadyExists => file = job.next_file(),
+            Err(err) if has_no_hard_links(&err) => return rename_final(part, job),
             Err(err) => {
                 return Err(format!(
                     "cannot link {} to {}: {err}",
@@ -437,6 +449,26 @@ fn link_final(part: &Path, job: &RenderJob) -> Result<(), String> {
             }
         }
     }
+}
+
+/// Creates the job's file new, moving on to the next `-N` file while one exists, and renames `part` onto it.
+fn rename_final(part: &Path, job: &RenderJob) -> Result<(), String> {
+    let mut file = job.file();
+    loop {
+        match OpenOptions::new().write(true).create_new(true).open(&file) {
+            Ok(_) => break,
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => file = job.next_file(),
+            Err(err) => return Err(format!("cannot write {}: {err}", file.display())),
+        }
+    }
+    fs::rename(part, &file).map_err(|err| {
+        let _ = fs::remove_file(&file);
+        format!(
+            "cannot rename {} to {}: {err}",
+            part.display(),
+            file.display()
+        )
+    })
 }
 
 /// Returns `false` when the job was cancelled before the last frame.

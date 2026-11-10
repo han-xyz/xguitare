@@ -1142,7 +1142,7 @@ Starts a Render of the open Project in the background: its current state (unsave
 - `bits`: `24` (default), `16` (with triangular dither) or `"32f"` (32-bit float).
 - `name`: the file name without `.wav`; by default the Project folder's name. It must not be empty, start with `.`, or contain `/` or `..`.
 
-The file is `<project folder>/renders/<name>.wav`; `renders/` is created when missing. An existing file is never replaced: `<name>-2.wav`, `<name>-3.wav`, … is used instead, also when the file appears while the Render runs. The Render writes `<file>.part`, created new, and links it to the file when done; a cancelled or failed Render removes it.
+The file is `<project folder>/renders/<name>.wav`; `renders/` is created when missing. An existing file is never replaced: `<name>-2.wav`, `<name>-3.wav`, … is used instead, also when the file appears while the Render runs. The Render writes `<file>.part`, created new, and links it to the file when done; on a filesystem without hard links (exFAT, vfat) it creates the file new and renames the part file onto it. A cancelled or failed Render removes the part file.
 
 Request:
 

@@ -1162,7 +1162,7 @@ pub fn write_new(
     }
 }
 
-fn has_no_hard_links(err: &io::Error) -> bool {
+pub(crate) fn has_no_hard_links(err: &io::Error) -> bool {
     matches!(
         err.kind(),
         ErrorKind::Unsupported | ErrorKind::CrossesDevices
