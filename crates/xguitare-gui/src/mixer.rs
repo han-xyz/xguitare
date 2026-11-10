@@ -22,6 +22,8 @@ use crate::widgets::{self, KnobSize, colour, outlined_button, primary_button};
 
 const COLUMN_WIDTH: f32 = 118.0;
 const COLUMN_GAP: f32 = 4.0;
+/// A column's outer width: its content, inner margin and stroke.
+const MASTER_WIDTH: f32 = COLUMN_WIDTH + 10.0;
 const NAME_HEIGHT: f32 = 26.0;
 const SEND_ROW_HEIGHT: f32 = 40.0;
 const TO_MASTER_HEIGHT: f32 = 28.0;
@@ -99,18 +101,17 @@ impl RenderDraft {
     }
 }
 
-/// One column per Track, then per Bus with `Add Bus` after the last, then Master, scrolled sideways when they do not fit.
+/// One column per Track, then per Bus with `Add Bus` after the last, scrolled sideways when they do not fit, and Master at the right edge.
 pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Vec<Command> {
     let mut commands = Vec::new();
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
     };
     let columns = mixer_columns(status);
-    let buses = columns
-        .iter()
-        .filter(|column| matches!(column.target, MixerTarget::Bus(_)))
-        .count();
-    let bus_names: Vec<String> = columns
+    let Some((master, strips)) = columns.split_last() else {
+        return commands;
+    };
+    let bus_names: Vec<String> = strips
         .iter()
         .filter(|column| matches!(column.target, MixerTarget::Bus(_)))
         .map(|column| column.name.clone())
@@ -118,25 +119,34 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
     let selected = status["selected"]
         .as_u64()
         .and_then(|index| usize::try_from(index).ok());
-    ScrollArea::horizontal().id_salt("mixer").show(ui, |ui| {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = COLUMN_GAP;
-            for column in &columns {
-                if column.target == MixerTarget::Master
-                    && ui.add(primary_button("+ Add Bus")).clicked()
-                {
-                    commands.push(Command::BusAdd);
-                }
-                let hold = view.holds.get(&column.target).copied().unwrap_or_default();
-                let shape = Shape {
-                    bus_names: &bus_names,
-                    send_rows: buses,
-                    selected,
-                    open: view.rack == Some(column.target),
-                };
-                commands.extend(mixer_column(ui, column, hold, &shape));
-            }
-        });
+    let show_column = |ui: &mut Ui, column: &MixerColumn| {
+        let hold = view.holds.get(&column.target).copied().unwrap_or_default();
+        let shape = Shape {
+            bus_names: &bus_names,
+            send_rows: bus_names.len(),
+            selected,
+            open: view.rack == Some(column.target),
+        };
+        mixer_column(ui, column, hold, &shape)
+    };
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = COLUMN_GAP;
+        let scrolled_width = ui.available_width() - MASTER_WIDTH - COLUMN_GAP;
+        ScrollArea::horizontal()
+            .id_salt("mixer")
+            .max_width(scrolled_width)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    for column in strips {
+                        commands.extend(show_column(ui, column));
+                    }
+                    if ui.add(primary_button("+ Add Bus")).clicked() {
+                        commands.push(Command::BusAdd);
+                    }
+                });
+            });
+        commands.extend(show_column(ui, master));
     });
     commands
 }
