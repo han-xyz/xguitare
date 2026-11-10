@@ -2,15 +2,17 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Button, Checkbox, Color32, ComboBox, CursorIcon, Frame, InnerResponse, Label, Layout,
-    Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align, Button, Checkbox, Color32, ComboBox, CursorIcon, Frame, Id, InnerResponse, Key, Label,
+    Layout, Margin, Modifiers, Rect, Response, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    UiBuilder, Vec2, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 use xguitare_gui::model::{
-    ClipLatch, Command, Direction, EAR_WIDTH, ModuleType, NO_SIGNAL, ParamRow, PeakHold, Rgb,
-    Snapshot, Throttle, TunerReading, add_command, cabinet_ir, cents_fraction, drop_index, in_tune,
-    knob_fraction, knob_param_value, move_target, palette, param_rows, peak_db, peak_text,
-    rack_channels, tuner_header_text, tuner_reading, tuner_toggle, unit_suffix,
+    ClipLatch, Command, Direction, EAR_WIDTH, KnobKey, ModuleType, NO_SIGNAL, ParamRow, PeakHold,
+    Rgb, Snapshot, Throttle, TunerReading, add_command, autoscroll_delta, cabinet_ir,
+    cents_fraction, drop_index, in_tune, key_step, knob_fraction, knob_param_value, move_target,
+    palette, param_rows, parse_typed_value, peak_db, peak_text, rack_channels, tuner_header_text,
+    tuner_reading, tuner_toggle, unit_suffix,
 };
 use xguitare_gui::widgets::{self, KnobSize, colour};
 
@@ -41,6 +43,15 @@ const ADD_LABEL: &str = "Add a Module";
 const ADD_COMBO_WIDTH: f32 = 320.0;
 const NOTE_SIZE: f32 = 96.0;
 const NO_SIGNAL_SIZE: f32 = 40.0;
+const TYPED_FIELD_WIDTH: f32 = 64.0;
+const KNOB_KEYS: [(Key, KnobKey); 6] = [
+    (Key::ArrowUp, KnobKey::Up),
+    (Key::ArrowDown, KnobKey::Down),
+    (Key::PageUp, KnobKey::PageUp),
+    (Key::PageDown, KnobKey::PageDown),
+    (Key::Home, KnobKey::Home),
+    (Key::End, KnobKey::End),
+];
 
 pub struct Knobs<'a> {
     pub throttle: &'a mut Throttle,
@@ -242,7 +253,7 @@ fn tuner_view(
     .inner
 }
 
-/// A unit dropped by its ears moves to the unit under the pointer; while it is dragged, a line marks where it will land.
+/// A unit dropped by its ears moves to the unit under the pointer; while it is dragged, a line marks where it will land, and the Rack scrolls when the pointer nears the top or bottom of the view.
 fn module_units(
     ui: &mut Ui,
     snapshot: &Snapshot,
@@ -275,6 +286,16 @@ fn module_units(
     let pointer_y = ui
         .input(|input| input.pointer.latest_pos())
         .map(|pos| pos.y);
+    if let Some(y) = pointer_y
+        && placed.iter().any(|(_, ears)| ears.dragged())
+    {
+        let view = ui.clip_rect();
+        let delta = autoscroll_delta(y, view.top(), view.bottom());
+        if delta != 0.0 {
+            ui.scroll_with_delta(vec2(0.0, -delta));
+            ui.ctx().request_repaint();
+        }
+    }
     for (from, (_, ears)) in placed.iter().enumerate() {
         let to = drop_index(from, pointer_y, &tops);
         if ears.dragged() {
@@ -488,7 +509,7 @@ fn param_knobs(
         .collect()
 }
 
-/// A double-click reset is a final value, like a release.
+/// A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click opens the typed-value field in place of the value.
 fn param_knob(
     ui: &mut Ui,
     row: &ParamRow,
@@ -504,16 +525,36 @@ fn param_knob(
     let fraction = knob_fraction(shown as f32, row.min as f32, row.max as f32);
     ui.horizontal(|ui| {
         let knob = widgets::rack_knob(ui, size, fraction, accent);
-        let value = if knob.reset || knob.response.dragged() {
+        let field_id = knob.response.id.with("typed");
+        let ctrl = ui.input(|input| input.modifiers.ctrl);
+        if knob.response.secondary_clicked() || (knob.response.clicked() && ctrl) {
+            let field = TypedField {
+                text: value_number_text(shown, row),
+                focused: false,
+            };
+            ui.data_mut(|data| data.insert_temp(field_id, field));
+        }
+        let keys = if knob.response.has_focus() {
+            knob_keys(ui)
+        } else {
+            Vec::new()
+        };
+        let dragged = if knob.reset || knob.response.dragged() {
             knob_param_value(row, knob.fraction, knob.reset)
         } else {
             shown
         };
-        ui.vertical(|ui| {
-            ui.label(muted_text(&row.param));
-            ui.label(RichText::new(value_text(value, row)).strong());
-        });
-        if knob.reset || knob.response.drag_stopped() {
+        let value = keys
+            .iter()
+            .fold(dragged, |value, &key| key_step(row, value, key));
+        let typed = ui
+            .vertical(|ui| {
+                ui.label(muted_text(&row.param));
+                value_field(ui, field_id, value, row)
+            })
+            .inner;
+        let released = knob.reset || knob.response.drag_stopped() || !keys.is_empty();
+        if let Some(value) = typed.or(released.then_some(value)) {
             knobs.locals.insert(row.address.clone(), value);
             return Some(
                 knobs
@@ -530,11 +571,60 @@ fn param_knob(
     .inner
 }
 
+fn knob_keys(ui: &mut Ui) -> Vec<KnobKey> {
+    ui.input_mut(|input| {
+        KNOB_KEYS
+            .iter()
+            .flat_map(|&(key, knob_key)| {
+                std::iter::repeat_n(knob_key, input.count_and_consume_key(Modifiers::NONE, key))
+            })
+            .collect()
+    })
+}
+
+/// `focused` turns true once the field has asked for focus, a frame after it opens: the click that opened it would take the focus away again.
+#[derive(Clone)]
+struct TypedField {
+    text: String,
+    focused: bool,
+}
+
+/// The value label, or the open typed-value field; the field closes when it loses focus and returns its number only when Enter closed it.
+fn value_field(ui: &mut Ui, id: Id, value: f64, row: &ParamRow) -> Option<f64> {
+    let Some(mut field) = ui.data(|data| data.get_temp::<TypedField>(id)) else {
+        ui.label(RichText::new(value_text(value, row)).strong());
+        return None;
+    };
+    let edit = ui.add(
+        TextEdit::singleline(&mut field.text)
+            .id(id)
+            .desired_width(TYPED_FIELD_WIDTH),
+    );
+    if field.focused && !edit.has_focus() {
+        ui.data_mut(|data| data.remove::<TypedField>(id));
+        let entered = ui.input(|input| input.key_pressed(Key::Enter));
+        return entered.then(|| parse_typed_value(&field.text)).flatten();
+    }
+    if !field.focused && !ui.input(|input| input.pointer.any_click()) {
+        edit.request_focus();
+        field.focused = true;
+    }
+    ui.data_mut(|data| data.insert_temp(id, field));
+    None
+}
+
 fn value_text(value: f64, row: &ParamRow) -> String {
-    let suffix = unit_suffix(&row.unit);
+    format!(
+        "{}{}",
+        value_number_text(value, row),
+        unit_suffix(&row.unit)
+    )
+}
+
+fn value_number_text(value: f64, row: &ParamRow) -> String {
     if row.integer {
-        format!("{}{suffix}", value.round())
+        format!("{}", value.round())
     } else {
-        format!("{value:.1}{suffix}")
+        format!("{value:.1}")
     }
 }

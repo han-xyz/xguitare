@@ -28,6 +28,10 @@ pub const PEAK_HOLD_FOR: Duration = Duration::from_secs(2);
 pub const CENTS_SPAN: i64 = 50;
 pub const IN_TUNE_CENTS: i64 = 3;
 pub const NO_SIGNAL: &str = "no signal";
+pub const KNOB_KEY_STEP: f64 = 0.01;
+pub const KNOB_PAGE_STEP: f64 = 0.1;
+pub const AUTOSCROLL_EDGE_PX: f32 = 40.0;
+pub const AUTOSCROLL_MAX_PX: f32 = 12.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -193,6 +197,61 @@ pub fn knob_param_value(row: &ParamRow, fraction: f32, reset: bool) -> f64 {
     if row.integer { value.round() } else { value }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum KnobKey {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+}
+
+/// The value a focused knob's `key` moves `value` to: ↑/↓ [`KNOB_KEY_STEP`] of the range, PgUp/PgDn [`KNOB_PAGE_STEP`], an integer Parameter at least 1; Home/End the ends.
+pub fn key_step(spec: &ParamRow, value: f64, key: KnobKey) -> f64 {
+    let range = spec.max - spec.min;
+    let step = |fraction: f64| {
+        if spec.integer {
+            (range * fraction).round().max(1.0)
+        } else {
+            range * fraction
+        }
+    };
+    let next = match key {
+        KnobKey::Up => value + step(KNOB_KEY_STEP),
+        KnobKey::Down => value - step(KNOB_KEY_STEP),
+        KnobKey::PageUp => value + step(KNOB_PAGE_STEP),
+        KnobKey::PageDown => value - step(KNOB_PAGE_STEP),
+        KnobKey::Home => spec.min,
+        KnobKey::End => spec.max,
+    };
+    next.clamp(spec.min, spec.max)
+}
+
+/// A number typed into a knob's field: a Unicode minus reads as `-`, a trailing unit such as `dB` or `%` is ignored.
+pub fn parse_typed_value(text: &str) -> Option<f64> {
+    let text = text.replace('\u{2212}', "-");
+    let number = text
+        .trim()
+        .trim_end_matches(|c: char| c.is_alphabetic() || c == '%')
+        .trim_end();
+    number.parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
+/// How far to scroll the Rack while a unit is dragged by its ears with the pointer at `pointer_y` in a scroll area from `top` to `bottom`: negative up, positive down, growing to [`AUTOSCROLL_MAX_PX`] as the pointer reaches an edge within [`AUTOSCROLL_EDGE_PX`]; 0 elsewhere.
+pub fn autoscroll_delta(pointer_y: f32, top: f32, bottom: f32) -> f32 {
+    let speed = |depth: f32| AUTOSCROLL_MAX_PX * (depth / AUTOSCROLL_EDGE_PX).clamp(0.0, 1.0);
+    let from_top = pointer_y - top;
+    let from_bottom = bottom - pointer_y;
+    if from_top < AUTOSCROLL_EDGE_PX {
+        -speed(AUTOSCROLL_EDGE_PX - from_top)
+    } else if from_bottom < AUTOSCROLL_EDGE_PX {
+        speed(AUTOSCROLL_EDGE_PX - from_bottom)
+    } else {
+        0.0
+    }
+}
+
 /// Latches once a peak reaches [`CLIP_DB`] and stays lit until [`ClipLatch::reset`].
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ClipLatch {
@@ -262,13 +321,32 @@ pub fn open_units_to_string(open: &BTreeSet<String>) -> String {
     serde_json::json!(open).to_string()
 }
 
-/// Drops the open state of every Module a [`Command::RackRemove`] among `commands` removes; another Preset lacking an id keeps it.
-pub fn forget_removed_units(open: &mut BTreeSet<String>, commands: &[Command]) {
+/// Notes the id of every [`Command::RackRemove`] among `commands` as waiting for the Daemon.
+pub fn remember_removes(removing: &mut BTreeSet<String>, commands: &[Command]) {
     for command in commands {
         if let Command::RackRemove { id } = command {
-            open.remove(id);
+            removing.insert(id.clone());
         }
     }
+}
+
+/// Drops the open state of each id in `removing` that the `get` payload no longer has; a refused Remove keeps its unit open, and another Preset lacking an id that was never removed keeps it.
+pub fn forget_removed_units(
+    open: &mut BTreeSet<String>,
+    removing: &mut BTreeSet<String>,
+    get_payload: &Value,
+) {
+    let present: BTreeSet<String> = param_rows(get_payload)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    removing.retain(|id| {
+        let removed = !present.contains(id);
+        if removed {
+            open.remove(id);
+        }
+        !removed
+    });
 }
 
 /// A stored string that does not parse, from an older or edited file, reads as no unit open.

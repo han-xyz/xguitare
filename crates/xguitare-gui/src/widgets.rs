@@ -1,5 +1,6 @@
 use egui::{
-    Color32, Mesh, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Visuals, pos2, vec2,
+    Color32, EventFilter, Mesh, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Visuals,
+    pos2, vec2,
 };
 
 use crate::model::{
@@ -20,6 +21,8 @@ const RACK_KNOB_POINTER: f32 = 0.65;
 const RACK_KNOB_RIM_WIDTH: f32 = 0.0375;
 const RACK_KNOB_POINTER_WIDTH: f32 = 0.075;
 const RACK_KNOB_ARC_WIDTH: f32 = 0.05;
+const FOCUS_RING_GAP: f32 = 2.0;
+const FOCUS_RING_WIDTH: f32 = 1.5;
 const LAMP_RADIUS: f32 = 5.0;
 const LAMP_GLOW_RADIUS: f32 = 9.0;
 const LAMP_GLOW_ALPHA: f32 = 0.3;
@@ -44,7 +47,7 @@ impl KnobSize {
     }
 }
 
-/// `fraction` is the dragged position in 0..=1 before any integer stepping, which the caller applies; `reset` is a double-click asking for the Parameter default.
+/// `fraction` is the dragged position in 0..=1 before any integer stepping, which the caller applies; `reset` is a double-click asking for the Parameter default. While focused, ↑ and ↓ stay with the knob instead of moving focus; the caller reads them.
 pub struct RackKnob {
     pub response: Response,
     pub fraction: f32,
@@ -104,7 +107,22 @@ pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) ->
         ui.data_mut(|data| data.insert_temp(unrounded_id, next));
     }
     let reset = response.double_clicked();
+    let focused = response.has_focus();
+    if focused {
+        let arrows_stay = EventFilter {
+            vertical_arrows: true,
+            ..EventFilter::default()
+        };
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, arrows_stay));
+    }
     paint_rack_knob(ui.painter(), rect, next, accent, response.hovered());
+    if focused {
+        ui.painter().circle_stroke(
+            rect.center(),
+            rect.width() / 2.0 + FOCUS_RING_GAP,
+            Stroke::new(FOCUS_RING_WIDTH, colour(palette().text)),
+        );
+    }
     RackKnob {
         response,
         fraction: next,

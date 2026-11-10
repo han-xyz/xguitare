@@ -14,7 +14,7 @@ use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, SET_INTERVAL, Snapshot,
     Throttle, bank_rows, forget_removed_units, key_to_command, open_units_from_string,
-    open_units_to_string, param_rows, peak_db, quit_commands,
+    open_units_to_string, param_rows, peak_db, quit_commands, remember_removes,
 };
 use xguitare_gui::widgets;
 
@@ -50,6 +50,7 @@ pub struct App {
     clips: [ClipLatch; 2],
     holds: [PeakHold; 2],
     open_units: BTreeSet<String>,
+    removing: BTreeSet<String>,
     bank_query: String,
     save_as_name: Option<String>,
     bank_heading: &'static str,
@@ -106,6 +107,7 @@ impl App {
             clips: [ClipLatch::default(); 2],
             holds: [PeakHold::default(); 2],
             open_units,
+            removing: BTreeSet::new(),
             bank_query: String::new(),
             save_as_name: None,
             bank_heading,
@@ -169,6 +171,9 @@ impl eframe::App for App {
                 self.feedback.show(text.clone(), *at);
             }
             self.release_stale_holds(&snapshot);
+            if let Some(params) = &snapshot.params {
+                forget_removed_units(&mut self.open_units, &mut self.removing, params);
+            }
             self.snapshot = snapshot;
         }
     }
@@ -215,7 +220,7 @@ impl eframe::App for App {
             open_units: &mut self.open_units,
         };
         CentralPanel::default().show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
-        forget_removed_units(&mut self.open_units, &commands);
+        remember_removes(&mut self.removing, &commands);
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
             let _ = self.commands.send(command);

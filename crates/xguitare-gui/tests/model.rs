@@ -14,15 +14,16 @@ use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
-    KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL, ParamRow, PeakHold,
-    Rgb, Throttle, TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir,
-    cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout,
-    failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_to_command,
-    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
-    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
-    open_units_to_string, palette, param_rows, peak_db, peak_text, quit_commands, rack_channels,
-    refresh_decision, requests_until_quit, response_text, spawn_policy, tuner_header_text,
-    tuner_reading, tuner_toggle, unit_suffix,
+    KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL, ParamRow,
+    PeakHold, Rgb, Throttle, TunerReading, accent_for, add_after, add_command, autoscroll_delta,
+    bank_rows, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes,
+    engine_readout, failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_step,
+    key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
+    knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
+    open_units_from_string, open_units_to_string, palette, param_rows, parse_typed_value, peak_db,
+    peak_text, quit_commands, rack_channels, refresh_decision, remember_removes,
+    requests_until_quit, response_text, spawn_policy, tuner_header_text, tuner_reading,
+    tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -1166,18 +1167,118 @@ fn save_as_command_maps_to_request() {
     );
 }
 
+fn get_with_modules(ids: &[&str]) -> serde_json::Value {
+    let params: Vec<_> = ids
+        .iter()
+        .map(|id| json!({"module": id, "type": id, "param": "level", "value": 0.0}))
+        .collect();
+    json!({ "params": params })
+}
+
 #[test]
-fn open_units_forget_only_a_removed_module() {
+fn open_units_keep_a_refused_remove_open() {
     let mut open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
-    forget_removed_units(&mut open, &[Command::Load("lead".into())]);
-    assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
-    forget_removed_units(
-        &mut open,
+    let mut removing = BTreeSet::new();
+    remember_removes(
+        &mut removing,
         &[Command::RackRemove {
             id: "preamp".into(),
         }],
     );
+    assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+    forget_removed_units(
+        &mut open,
+        &mut removing,
+        &get_with_modules(&["preamp", "cabinet"]),
+    );
+    assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+}
+
+#[test]
+fn open_units_drop_a_confirmed_remove() {
+    let mut open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
+    let mut removing = BTreeSet::new();
+    remember_removes(
+        &mut removing,
+        &[
+            Command::Load("lead".into()),
+            Command::RackRemove {
+                id: "preamp".into(),
+            },
+        ],
+    );
+    forget_removed_units(&mut open, &mut removing, &get_with_modules(&["cabinet"]));
     assert_eq!(open, ["cabinet"].map(str::to_string).into());
+    assert!(removing.is_empty());
+}
+
+#[test]
+fn open_units_keep_a_module_another_preset_lacks() {
+    let mut open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
+    let mut removing = BTreeSet::new();
+    remember_removes(&mut removing, &[Command::Load("lead".into())]);
+    forget_removed_units(&mut open, &mut removing, &get_with_modules(&["gate"]));
+    assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+}
+
+#[test]
+fn key_step_moves_one_percent_ten_percent_or_to_an_end() {
+    let row = knob_row(-60.0, 20.0, 0.0, false);
+    assert!((key_step(&row, 0.0, KnobKey::Up) - 0.8).abs() < 1e-9);
+    assert!((key_step(&row, 0.0, KnobKey::Down) - -0.8).abs() < 1e-9);
+    assert!((key_step(&row, 0.0, KnobKey::PageUp) - 8.0).abs() < 1e-9);
+    assert!((key_step(&row, 0.0, KnobKey::PageDown) - -8.0).abs() < 1e-9);
+    assert_eq!(key_step(&row, 0.0, KnobKey::Home), -60.0);
+    assert_eq!(key_step(&row, 0.0, KnobKey::End), 20.0);
+    assert_eq!(key_step(&row, 19.5, KnobKey::PageUp), 20.0);
+    assert_eq!(key_step(&row, -59.5, KnobKey::Down), -60.0);
+}
+
+#[test]
+fn key_step_of_an_integer_parameter_moves_whole_numbers() {
+    let stages = knob_row(1.0, 4.0, 2.0, true);
+    assert_eq!(key_step(&stages, 2.0, KnobKey::Up), 3.0);
+    assert_eq!(key_step(&stages, 2.0, KnobKey::Down), 1.0);
+    assert_eq!(key_step(&stages, 2.0, KnobKey::PageUp), 3.0);
+    assert_eq!(key_step(&stages, 4.0, KnobKey::Up), 4.0);
+    let wide = knob_row(0.0, 100.0, 0.0, true);
+    assert_eq!(key_step(&wide, 50.0, KnobKey::PageDown), 40.0);
+}
+
+#[test]
+fn typed_values_parse_with_a_unicode_minus_or_a_unit() {
+    assert_eq!(parse_typed_value("-8"), Some(-8.0));
+    assert_eq!(parse_typed_value("\u{2212}8"), Some(-8.0));
+    assert_eq!(parse_typed_value(" 12.5 "), Some(12.5));
+    assert_eq!(parse_typed_value("12 dB"), Some(12.0));
+    assert_eq!(parse_typed_value("350ms"), Some(350.0));
+    assert_eq!(parse_typed_value(""), None);
+    assert_eq!(parse_typed_value("dB"), None);
+    assert_eq!(parse_typed_value("loud"), None);
+    assert_eq!(parse_typed_value("nan"), None);
+    assert_eq!(parse_typed_value("inf"), None);
+}
+
+#[test]
+fn autoscroll_only_near_an_edge_and_faster_closer_to_it() {
+    let (top, bottom) = (100.0, 600.0);
+    assert_eq!(autoscroll_delta(350.0, top, bottom), 0.0);
+    assert_eq!(autoscroll_delta(141.0, top, bottom), 0.0);
+    assert_eq!(autoscroll_delta(559.0, top, bottom), 0.0);
+    let near_top = autoscroll_delta(130.0, top, bottom);
+    let at_top = autoscroll_delta(101.0, top, bottom);
+    assert!(near_top < 0.0 && at_top < near_top);
+    let near_bottom = autoscroll_delta(570.0, top, bottom);
+    let at_bottom = autoscroll_delta(599.0, top, bottom);
+    assert!(near_bottom > 0.0 && at_bottom > near_bottom);
+    assert_eq!(
+        autoscroll_delta(20.0, top, bottom),
+        autoscroll_delta(100.0, top, bottom)
+    );
+    assert_eq!(
+        autoscroll_delta(700.0, top, bottom),
+        autoscroll_delta(600.0, top, bottom)
+    );
 }
 
 #[test]
