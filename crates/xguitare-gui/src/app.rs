@@ -20,8 +20,8 @@ use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
-    forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, palette,
-    param_rows, peak_db, quit_commands, remember_removes,
+    bank_rows_for_rack, forget_removed_units, key_to_command, open_units_from_string,
+    open_units_to_string, palette, param_rows, peak_db, quit_commands, remember_removes,
 };
 use crate::project::{
     ProjectView, TIMELINE_HEIGHT, TIMELINE_HEIGHT_WITH_MIXER, autosave_prompt, tracks_view,
@@ -355,7 +355,7 @@ impl eframe::App for App {
         let rows = snapshot
             .bank
             .as_ref()
-            .map(|list| bank_rows(list).0)
+            .map(|list| bank_rows_for_rack(bank_rows(list).0, self.mixer.shows_stereo_rack()))
             .unwrap_or_default();
         let project_status = snapshot
             .status

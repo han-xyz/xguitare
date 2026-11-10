@@ -18,15 +18,16 @@ use xguitare_gui::model::{
     KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL,
     ParamRow, PeakHold, PortChoices, PortSelection, Rgb, SECTIONS, Section, SettingsDraft,
     Throttle, TunerReading, accent_for, add_after, add_command, add_place, add_places,
-    autoscroll_delta, bank_kind, bank_rows, cabinet_ir, cents_fraction, cents_text,
-    counts_toward_spawn, ear_holes, engine_readout, failed_set, filter_bank, forget_removed_units,
-    format_value, in_tune, ir_names, key_step, key_to_command, knob_angle_deg, knob_fraction,
-    knob_param_value, knob_points, knob_value_from_drag, ladder_segments, latency_ms, module_types,
-    move_target, open_units_from_string, open_units_to_string, palette, param_label, param_rows,
-    parse_typed_value, peak_db, peak_text, port_choices, quit_commands, rack_channels,
-    refresh_decision, refused_remove, remember_removes, requests_until_quit, response_text,
-    set_ports_command, set_settings_command, settings_draft, shortcuts_active, spawn_policy,
-    tuner_header_text, tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
+    autoscroll_delta, bank_kind, bank_rows, bank_rows_for_rack, cabinet_ir, cents_fraction,
+    cents_text, counts_toward_spawn, ear_holes, engine_readout, failed_set, filter_bank,
+    forget_removed_units, format_value, in_tune, ir_names, key_step, key_to_command,
+    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
+    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
+    open_units_to_string, palette, param_label, param_rows, parse_typed_value, peak_db, peak_text,
+    port_choices, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
+    requests_until_quit, response_text, set_ports_command, set_settings_command, settings_draft,
+    shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
+    typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, Outgoing, RemovedUnit, Restore, ScreenRect, bypassed,
@@ -271,6 +272,27 @@ fn bank_rows_marks_active_and_invalid() {
     let no_active =
         json!({"active": null, "entries": [{"program": 0, "name": "Clean", "valid": true}]});
     assert!(!bank_rows(&no_active).0[0].active);
+}
+
+#[test]
+fn bank_rows_are_refused_while_a_bus_or_master_rack_is_shown() {
+    let rows = bank_rows(&starter_list()).0;
+    assert_eq!(bank_rows_for_rack(rows.clone(), false), rows);
+    let refused = bank_rows_for_rack(rows, true);
+    let errors: Vec<_> = refused.iter().map(|row| row.error.as_deref()).collect();
+    assert_eq!(
+        errors,
+        [
+            Some("a Preset loads only into a Track"),
+            Some("a Preset loads only into a Track"),
+            Some("a Preset loads only into a Track"),
+            Some("line 1:8: string values must be quoted"),
+        ]
+    );
+    assert_eq!(
+        key_to_command(KeyEvent::Digit(1, KeyModifiers::default()), &refused),
+        None
+    );
 }
 
 #[test]

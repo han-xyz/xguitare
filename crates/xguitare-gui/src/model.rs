@@ -20,6 +20,7 @@ pub const METER_FLOOR_DB: f64 = -60.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);
 pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
 pub const INVALID_PRESET: &str = "invalid preset";
+pub const LOAD_ONLY_INTO_TRACK: &str = "a Preset loads only into a Track";
 pub const KNOB_DRAG_PX: f32 = 220.0;
 pub const KNOB_FINE_DRAG_PX: f32 = 2200.0;
 pub const KNOB_ARC_START_DEG: f32 = 135.0;
@@ -955,6 +956,19 @@ pub fn bank_rows(list_payload: &Value) -> (Vec<BankRow>, usize) {
     (rows, skipped)
 }
 
+/// `rows` as the shown Rack takes them: on a Bus or Master Rack (`stereo_rack`) each row is refused, as the Daemon refuses `load` there.
+pub fn bank_rows_for_rack(rows: Vec<BankRow>, stereo_rack: bool) -> Vec<BankRow> {
+    if !stereo_rack {
+        return rows;
+    }
+    rows.into_iter()
+        .map(|row| BankRow {
+            error: row.error.or_else(|| Some(LOAD_ONLY_INTO_TRACK.to_string())),
+            ..row
+        })
+        .collect()
+}
+
 /// The rows whose name contains `query` in any case or whose program number is `query`; every row for a blank query.
 pub fn filter_bank(rows: &[BankRow], query: &str) -> Vec<BankRow> {
     let query = query.trim().to_lowercase();
@@ -1198,7 +1212,8 @@ pub fn requests_until_quit(
     (requests, false)
 }
 
-fn acts_on_rack(command: &Command) -> bool {
+/// Whether `command` is a request on the shown Rack.
+pub(crate) fn acts_on_rack(command: &Command) -> bool {
     matches!(
         command,
         Command::Load(_)

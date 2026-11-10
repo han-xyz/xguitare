@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_core::control::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
-use crate::model::Command;
+use crate::model::{Command, acts_on_rack};
 use crate::project_model::{project_name, track_rows};
 
 /// The fader position of 0 dB; the top is +6 dB.
@@ -348,19 +348,6 @@ impl RackFocus {
     }
 }
 
-fn is_rack_request(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Load(_)
-            | Command::Set { .. }
-            | Command::RackAdd { .. }
-            | Command::RackRemove { .. }
-            | Command::RackMove { .. }
-            | Command::Bypass { .. }
-            | Command::RackIr { .. }
-    )
-}
-
 /// `commands` with a [`Command::ShowRack`] of the window's Rack before each Rack request and wherever a command moves it, so that the client thread aims at the Rack the window shows; and the focus after them.
 pub fn aim_rack_commands(
     mut focus: RackFocus,
@@ -370,7 +357,7 @@ pub fn aim_rack_commands(
     let mut named = None;
     for command in commands {
         let target = focus.target();
-        if is_rack_request(&command)
+        if acts_on_rack(&command)
             && let Some(target) = target
             && named != Some(target)
         {
