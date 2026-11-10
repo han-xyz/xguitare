@@ -21,6 +21,19 @@ cargo install --path crates/xguitare
 
 This builds a release binary into `~/.cargo/bin/xguitare`; that directory must be on your `PATH`.
 
+### Install from a release
+
+Each tagged release on GitHub carries `xguitare-<version>-x86_64-linux.tar.gz` and a `.sha256` file. It holds the Daemon and CLI `xguitare` and the window `xguitare-gui`; the starter Banks are built in.
+
+```sh
+sha256sum -c xguitare-<version>-x86_64-linux.tar.gz.sha256
+tar -xzf xguitare-<version>-x86_64-linux.tar.gz
+cd xguitare-<version>
+./xguitare run
+```
+
+It needs PipeWire with `pipewire-jack` (libjack) at run time, and for `xguitare-gui` the libraries listed under Requirements.
+
 ## Run
 
 ```sh
