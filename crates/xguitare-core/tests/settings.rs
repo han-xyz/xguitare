@@ -296,6 +296,8 @@ fn set_settings_bank_kind_seeds_and_loads_program_0() {
     let config = reloaded(&dir);
     assert_eq!(config.bank_kind, BankKind::Bass);
     assert_eq!(config.bank_dir, bass_dir);
+    assert_eq!(config.state.banks.guitar, Some(dir.0.join("bank")));
+    assert_eq!(config.state.banks.bass, Some(bass_dir));
 
     ok(handle(
         &mut state,
@@ -303,6 +305,32 @@ fn set_settings_bank_kind_seeds_and_loads_program_0() {
     ));
     assert_eq!(state.bank.dir, dir.0.join("bank"));
     assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Clean");
+}
+
+#[test]
+fn set_settings_bass_user_keeps_bank_folder() {
+    let (mut state, _audio, dir) = state("bass-user", "bank_kind = \"bass\"\n");
+    let old_dir = dir.0.join("bank");
+    assert_eq!(state.bank.dir, old_dir);
+    assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Blues");
+
+    ok(handle(
+        &mut state,
+        set_settings(Some(BankKind::Guitar), None),
+    ));
+    let guitar_dir = dir.0.join("bank-guitar");
+    assert!(guitar_dir.join("01-clean.toml").is_file());
+    assert_eq!(state.bank.dir, guitar_dir);
+    assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Clean");
+    let saved = reloaded(&dir).state.banks;
+    assert_eq!(saved.bass, Some(old_dir.clone()));
+    assert_eq!(saved.guitar, Some(guitar_dir));
+
+    ok(handle(&mut state, set_settings(Some(BankKind::Bass), None)));
+    assert_eq!(state.bank.dir, old_dir);
+    assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Blues");
+    assert!(!dir.0.join("bank-bass").exists());
+    assert_eq!(reloaded(&dir).bank_dir, old_dir);
 }
 
 #[test]

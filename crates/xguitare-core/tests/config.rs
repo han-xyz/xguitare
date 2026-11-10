@@ -198,15 +198,12 @@ fn ir_dir_parses() {
 }
 
 #[test]
-fn bank_dir_default_follows_bank_kind() {
+fn bass_without_state_keeps_bank_dir() {
     let path = config_file("kind-dir", "bank_kind = \"bass\"\n");
     let config = Config::load(Some(&path)).unwrap();
     let dir = path.parent().unwrap();
-    assert_eq!(config.bank_dir, dir.join("bank-bass"));
-    assert_eq!(config.ir_dir, dir.join("bank-bass"));
-    let path = config_file("kind-dir-guitar", "");
-    let config = Config::load(Some(&path)).unwrap();
-    assert_eq!(config.bank_dir, path.parent().unwrap().join("bank"));
+    assert_eq!(config.bank_dir, dir.join("bank"));
+    assert_eq!(config.ir_dir, dir.join("bank"));
 }
 
 #[test]
@@ -218,13 +215,13 @@ fn state_toml_overrides_config() {
     let dir = path.parent().unwrap();
     fs::write(
         dir.join("state.toml"),
-        "bank_kind = \"bass\"\nir_dir = \"/srv/xg/state-irs\"\n[ports]\ninput = \"card:capture_1\"\noutput_left = \"card:playback_1\"\noutput_right = \"card:playback_2\"\n",
+        "bank_kind = \"bass\"\nir_dir = \"/srv/xg/state-irs\"\n[banks]\nguitar = \"/srv/xg/guitar\"\nbass = \"/srv/xg/bass\"\n[ports]\ninput = \"card:capture_1\"\noutput_left = \"card:playback_1\"\noutput_right = \"card:playback_2\"\n",
     )
     .unwrap();
     let config = Config::load(Some(&path)).unwrap();
     assert_eq!(config.state_warning, None);
     assert_eq!(config.bank_kind, BankKind::Bass);
-    assert_eq!(config.bank_dir, dir.join("bank-bass"));
+    assert_eq!(config.bank_dir, PathBuf::from("/srv/xg/bass"));
     assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/state-irs"));
     assert_eq!(config.ports.input, "card:capture_1");
     assert_eq!(config.ports.output_left, "card:playback_1");

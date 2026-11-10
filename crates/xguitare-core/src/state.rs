@@ -18,8 +18,40 @@ pub struct SavedState {
     pub bank_kind: Option<BankKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ir_dir: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Banks::is_empty")]
+    pub banks: Banks,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ports: Option<Ports>,
+}
+
+/// The `[banks]` table: the Bank directory each kind switched to or from, recorded by the first `bank_kind` switch.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Banks {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guitar: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bass: Option<PathBuf>,
+}
+
+impl Banks {
+    pub fn get(&self, kind: BankKind) -> Option<&PathBuf> {
+        match kind {
+            BankKind::Guitar => self.guitar.as_ref(),
+            BankKind::Bass => self.bass.as_ref(),
+        }
+    }
+
+    pub(crate) fn insert(&mut self, kind: BankKind, dir: PathBuf) {
+        match kind {
+            BankKind::Guitar => self.guitar = Some(dir),
+            BankKind::Bass => self.bass = Some(dir),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.guitar.is_none() && self.bass.is_none()
+    }
 }
 
 /// Reads `path`; a missing file is the empty state, and a file that cannot be read or parsed is the empty state plus a warning naming the path and the error.

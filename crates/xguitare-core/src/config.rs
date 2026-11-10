@@ -13,8 +13,7 @@ use crate::state::{SavedState, read_state};
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
 const STATE_FILE: &str = "state.toml";
-const GUITAR_BANK_DIR: &str = "bank";
-const BASS_BANK_DIR: &str = "bank-bass";
+const BANK_DIR: &str = "bank";
 pub const SOCKET_DIR_MODE: u32 = 0o700;
 const TUNER_REFERENCE_HZ: std::ops::RangeInclusive<f32> = 400.0..=480.0;
 const CROSSFADE_MS_MAX: f32 = 1000.0;
@@ -205,12 +204,11 @@ impl Config {
         })
     }
 
-    /// The Bank directory of `kind` when the config file names no `bank_dir`.
+    /// The Bank directory a switch to `kind` uses when the config file names no `bank_dir`: the one `[banks]` recorded, else `<config dir>/bank-<kind>`.
     pub(crate) fn kind_bank_dir(&self, kind: BankKind) -> PathBuf {
-        let config_dir = self.state_file.parent().unwrap_or(Path::new(""));
-        config_dir.join(match kind {
-            BankKind::Guitar => GUITAR_BANK_DIR,
-            BankKind::Bass => BASS_BANK_DIR,
+        self.state.banks.get(kind).cloned().unwrap_or_else(|| {
+            let config_dir = self.state_file.parent().unwrap_or(Path::new(""));
+            config_dir.join(format!("{BANK_DIR}-{kind}"))
         })
     }
 
@@ -219,7 +217,7 @@ impl Config {
             Some(dir) => (dir.to_path_buf(), false),
             None => (fallback_runtime_dir()?, true),
         };
-        let bank_dir = config_dir.join(GUITAR_BANK_DIR);
+        let bank_dir = config_dir.join(BANK_DIR);
         Ok(Config {
             ir_dir: bank_dir.clone(),
             bank_dir,
@@ -250,7 +248,8 @@ impl Config {
         let ir_dir_in_config = file.ir_dir.is_some();
         let bank_dir = file
             .bank_dir
-            .unwrap_or_else(|| self.kind_bank_dir(bank_kind));
+            .or_else(|| state.banks.get(bank_kind).cloned())
+            .unwrap_or_else(|| self.bank_dir.clone());
         let ports = match file.ports {
             Some(ports) => Ports {
                 input: ports.input.unwrap_or(self.ports.input),

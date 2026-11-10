@@ -24,7 +24,7 @@ pub use ir::{IrError, load_ir};
 pub use irdir::list_irs;
 pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
-pub use state::SavedState;
+pub use state::{Banks, SavedState};
 
 fn line_col(text: &str, offset: usize) -> (usize, usize) {
     let before = &text[..offset.min(text.len())];

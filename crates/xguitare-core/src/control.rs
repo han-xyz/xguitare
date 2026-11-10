@@ -951,7 +951,7 @@ fn settings(state: &EngineState) -> Value {
     })
 }
 
-/// Stores `bank_kind` and `ir_dir` in `state.toml` and applies them: a changed `bank_kind` switches to its Bank directory, seeded when missing, and loads Program 0 (the passthrough Rack when that fails); on an error nothing changes.
+/// Stores `bank_kind` and `ir_dir` in `state.toml` and applies them: a changed `bank_kind` records the Bank directory in use under the current kind in `[banks]`, switches to the new kind's directory (seeded when missing) and loads Program 0 (the passthrough Rack when that fails); on an error nothing changes.
 fn set_settings(
     state: &mut EngineState,
     bank_kind: Option<BankKind>,
@@ -962,12 +962,18 @@ fn set_settings(
         return Err(format!("ir_dir '{}' is not a directory", dir.display()));
     }
     let switch = bank_kind.filter(|kind| *kind != state.config.bank_kind);
-    let bank = match switch {
+    let switched = match switch {
         Some(_) if state.config.bank_dir_in_config => return Err(BANK_DIR_IN_CONFIG.to_string()),
-        Some(kind) => Some(switched_bank(state, kind)?),
+        Some(kind) => Some((kind, switched_bank(state, kind)?)),
         None => None,
     };
     let mut saved = state.config.state.clone();
+    if let Some((kind, bank)) = &switched {
+        saved
+            .banks
+            .insert(state.config.bank_kind, state.config.bank_dir.clone());
+        saved.banks.insert(*kind, bank.dir.clone());
+    }
     saved.bank_kind = bank_kind.or(saved.bank_kind);
     saved.ir_dir = ir_dir.or(saved.ir_dir);
     save_state(&state.config, &saved)?;
@@ -975,7 +981,7 @@ fn set_settings(
         state.config.ir_dir = dir.clone();
     }
     state.config.state = saved;
-    if let (Some(kind), Some(bank)) = (switch, bank) {
+    if let Some((kind, bank)) = switched {
         if !state.config.ir_dir_in_config && state.config.state.ir_dir.is_none() {
             state.config.ir_dir = bank.dir.clone();
         }

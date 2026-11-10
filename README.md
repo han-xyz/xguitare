@@ -127,11 +127,13 @@ Hot reload: the Daemon watches the Bank directory. Saving the active Preset's fi
 
 ### Bass
 
-Set `bank_kind = "bass"` in the config (or choose Bass in the GUI) to use the bass Bank in `~/.config/xguitare/bank-bass`; the guitar Bank stays in `~/.config/xguitare/bank`. Each is seeded when its directory does not exist yet. A `bank_dir` in the config wins over `bank_kind`, which then only picks the starter Presets for a missing `bank_dir`:
+Set `bank_kind = "bass"` in the config to seed the Bank directory (default `~/.config/xguitare/bank`) with bass Presets when it does not exist yet:
 
 ```toml
 bank_kind = "bass"
 ```
+
+Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `~/.config/xguitare/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
 
 The first run creates five Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module.
 
@@ -336,8 +338,8 @@ pw-link "Midi-Bridge:Midi Through: Port-0 (capture)" xguitare:midi_in
 Optional file: `~/.config/xguitare/config.toml` (`$XDG_CONFIG_HOME/xguitare/config.toml`), or any path given with `xguitare --config <path> <subcommand>`. A missing default file means all defaults; a `--config` path must exist (`<path>: not found` otherwise); an unknown key is an error. Every key with its default:
 
 ```toml
-bank_dir = "/home/you/.config/xguitare/bank"   # default: <config dir>/bank, or <config dir>/bank-bass for bank_kind "bass"
-bank_kind = "guitar"                           # "guitar" or "bass": the default bank_dir, and the starter Bank for a missing one
+bank_dir = "/home/you/.config/xguitare/bank"   # default: <config dir>/bank
+bank_kind = "guitar"                           # starter Bank for a missing bank_dir: "guitar" or "bass"
 ir_dir = "/home/you/.config/xguitare/bank"     # default: the Bank directory; where Preset `ir` names are looked up first
 buffer_size = 128                              # frames per JACK period requested at start, 1 to 8192
 crossfade_ms = 20                              # Preset switch crossfade, above 0 to 1000
@@ -371,7 +373,7 @@ output_right = "Scarlett*playback_FR"
 
 `<config dir>` is the directory holding the config file in use, also for `--config <path>`.
 
-The Daemon keeps the choices made in the GUI (or through the Control API's `set_ports` and `set_settings`) in `state.toml` beside the config file, mode 0600, and never rewrites `config.toml`, so its comments survive. `state.toml` is read after `config.toml` and overrides it: `[ports]` (`input`, `output_left`, `output_right`, exact port names), `bank_kind` and `ir_dir`. A `bank_dir` in `config.toml` is never overridden, and the GUI cannot switch the Bank kind while it is set. If `state.toml` cannot be parsed, the Daemon logs `<path>: line N:M: <error>; ignoring it` and starts with `config.toml` alone. To drop the GUI's choices, stop the Daemon and delete `state.toml`.
+The Daemon keeps the choices made in the GUI (or through the Control API's `set_ports` and `set_settings`) in `state.toml` beside the config file, mode 0600, and never rewrites `config.toml`, so its comments survive. `state.toml` is read after `config.toml` and overrides it: `[ports]` (`input`, `output_left`, `output_right`, exact port names), `bank_kind`, `ir_dir`, and `[banks]` (`guitar`, `bass`: each kind's Bank directory, recorded on the first switch; the one of `bank_kind` is the Bank directory). A `bank_dir` in `config.toml` is never overridden, and the GUI cannot switch the Bank kind while it is set. If `state.toml` cannot be parsed, the Daemon logs `<path>: line N:M: <error>; ignoring it` and starts with `config.toml` alone. To drop the GUI's choices, stop the Daemon and delete `state.toml`.
 
 If `$XDG_RUNTIME_DIR` is unset, the socket defaults to `/tmp/xguitare-<uid>/xguitare.sock` and the Daemon warns.
 
