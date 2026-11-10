@@ -1,15 +1,17 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, OnceLock};
 
+use eframe::egui_wgpu::{RenderState, Renderer, RendererOptions};
 use egui::{
     Event, Key, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, Pos2, Role, TouchPhase,
     Vec2, pos2,
 };
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state, default_wgpu_setup};
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
 use xguitare_core::control::TrackRef;
@@ -339,6 +341,19 @@ fn write_png(harness: &mut Harness<App>, name: &str) {
     assert!(path.exists(), "{} was not written", path.display());
 }
 
+// One wgpu device for every harness: creating one per test thread fails under parallel runs.
+static GPU: OnceLock<RenderState> = OnceLock::new();
+
+fn shared_gpu_renderer() -> WgpuTestRenderer {
+    let gpu =
+        GPU.get_or_init(|| create_render_state(default_wgpu_setup(), RendererOptions::PREDICTABLE));
+    let renderer = Renderer::new(&gpu.device, gpu.target_format, RendererOptions::PREDICTABLE);
+    WgpuTestRenderer::from_render_state(RenderState {
+        renderer: Arc::new(egui::mutex::RwLock::new(renderer)),
+        ..gpu.clone()
+    })
+}
+
 fn harness() -> (Harness<'static, App>, Receiver<Command>, TempDir) {
     harness_sized(WINDOW)
 }
@@ -356,7 +371,7 @@ fn harness_with(
     let mut harness = Harness::builder()
         .with_size(size)
         .with_context_setup(|ctx| ctx.add_font_provider(Arc::new(SystemFontProvider::new())))
-        .wgpu()
+        .renderer(shared_gpu_renderer())
         .build_eframe(move |cc| App::with_snapshot(cc, &config, snapshot, commands));
     harness.run_steps(2);
     (harness, sent, dir)
