@@ -40,7 +40,7 @@ const SECONDS_SUFFIX: char = 's';
 pub struct Projects {
     open: Option<OpenProject>,
     events: Vec<ProjectEvent>,
-    /// Closed Projects whose last Takes the Daemon has not yet added and saved.
+    /// Closed Projects that recorded and whose last Takes the Daemon has not yet added and saved.
     closing: usize,
 }
 
@@ -51,6 +51,8 @@ struct OpenProject {
     selected: usize,
     /// Whether the last transport request was `record`; `play` and `stop` end it.
     recording: bool,
+    /// Whether `record` was requested since it was opened, so Takes may still be on their way when it closes.
+    recorded: bool,
     /// One id per Track, in Track order, that stays the Track's while others are added or removed; finished Takes name their Track by it.
     track_ids: Vec<u64>,
     next_track_id: u64,
@@ -80,6 +82,8 @@ pub struct ClosedProject {
     /// Whether it changed since it was last saved or autosaved.
     pub changed: bool,
     track_ids: Vec<u64>,
+    /// Whether it counts in [`Projects`]' `closing` until [`finish_closed`] adds its last Takes.
+    takes_pending: bool,
 }
 
 /// What [`finish_closed`] and [`finish_stopped`] did, for the Daemon to log.
@@ -147,6 +151,7 @@ pub fn close_for_stop(state: &mut EngineState) -> Option<ClosedProject> {
         project: open.project,
         changed: open.changed,
         track_ids: open.track_ids,
+        takes_pending: false,
     })
 }
 
@@ -157,7 +162,9 @@ pub fn finish_closed(
     finished: &[FinishedTake],
     latency: impl FnMut(usize) -> Latency,
 ) -> LastTakes {
-    state.projects.closing = state.projects.closing.saturating_sub(1);
+    if closed.takes_pending {
+        state.projects.closing -= 1;
+    }
     let mut last = last_takes(&mut closed, finished, latency);
     if !last.added.is_empty() {
         save_closed(
@@ -393,8 +400,11 @@ pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
             project: open.project,
             changed: false,
             track_ids: open.track_ids,
+            takes_pending: open.recorded,
         }));
-    state.projects.closing += 1;
+    if open.recorded {
+        state.projects.closing += 1;
+    }
     state.revision += 1;
     Ok(payload)
 }
@@ -588,7 +598,10 @@ pub(crate) fn transport(
     send(state, &[command])?;
     let open = open_project_mut(state);
     match action {
-        TransportAction::Record => open.recording = true,
+        TransportAction::Record => {
+            open.recording = true;
+            open.recorded = true;
+        }
         TransportAction::Play | TransportAction::Stop => open.recording = false,
         TransportAction::Locate => {}
     }
@@ -786,6 +799,7 @@ fn open(
         takes,
         selected: 0,
         recording: false,
+        recorded: false,
         next_track_id: track_ids.len() as u64,
         track_ids,
         changed: false,

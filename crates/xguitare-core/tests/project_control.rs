@@ -1031,6 +1031,9 @@ fn a_project_still_closing_cannot_be_opened_until_its_last_takes_are_saved() {
     new_project(&mut state, "Song");
     add_track(&mut state, "Guitar");
     let id = reader_ids(&mut state)[0].1;
+    arm(&mut state, 0);
+    ok(handle(&mut state, transport(TransportAction::Record, None)));
+    ok(handle(&mut state, transport(TransportAction::Stop, None)));
     ok(handle(&mut state, Request::ProjectClose));
     let open = Request::ProjectOpen {
         name: "Song".to_string(),
@@ -1065,6 +1068,30 @@ fn a_project_still_closing_cannot_be_opened_until_its_last_takes_are_saved() {
     assert_eq!(saved(&state, "song").tracks[0].items[0].position, 500);
     ok(handle(&mut state, open));
     assert_eq!(status(&mut state)["project"], "Song");
+}
+
+#[test]
+fn a_project_closed_without_recording_can_be_opened_at_once() {
+    let (mut state, _audio, _dir) = state("closed-quiet");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    ok(handle(&mut state, Request::ProjectClose));
+    let Some(ProjectEvent::Closed(quiet)) = take_project_events(&mut state).pop() else {
+        panic!("close should end with a Closed event");
+    };
+    let open = |name: &str| Request::ProjectOpen {
+        name: name.to_string(),
+        restore: false,
+    };
+    ok(handle(&mut state, open("Song")));
+    arm(&mut state, 0);
+    ok(handle(&mut state, transport(TransportAction::Record, None)));
+    ok(handle(&mut state, Request::ProjectClose));
+    finish_closed(&mut state, quiet, &[], |_| Latency::default());
+    assert_eq!(
+        error(handle(&mut state, open("Song"))),
+        "a project is still closing; try again"
+    );
 }
 
 #[test]
