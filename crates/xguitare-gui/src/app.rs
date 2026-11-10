@@ -9,7 +9,7 @@ use std::time::Instant;
 use egui::{
     Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CornerRadius, Event, Frame, Key,
     Layout, Margin, Modifiers, Panel, Rect, RichText, ScrollArea, Sides, TextStyle, Theme, Ui,
-    Visuals, vec2,
+    vec2,
 };
 use serde_json::Value;
 use tracing::{error, info};
@@ -22,14 +22,12 @@ use xguitare_gui::model::{
     peak_fraction, quit_commands, rack_channels, status_line, tuner_reading, tuner_toggle,
     unit_suffix,
 };
-
-use crate::widgets::{self, KnobSpec};
+use xguitare_gui::widgets::{self, KnobSpec};
 
 const NO_PRESET: &str = "no preset";
 const NO_IR: &str = "none";
 const CABINET: &str = "cabinet";
 const BANK_WIDTH: f32 = 220.0;
-const PANEL_FILL: Color32 = Color32::from_rgb(28, 26, 24);
 const CARD_FILL: Color32 = Color32::from_rgb(40, 37, 34);
 const CARD_RADIUS: u8 = 8;
 const CARD_MARGIN: i8 = 8;
@@ -79,13 +77,7 @@ impl App {
         stop: Arc<AtomicBool>,
     ) -> App {
         ctx.set_theme(Theme::Dark);
-        ctx.set_visuals_of(
-            Theme::Dark,
-            Visuals {
-                panel_fill: PANEL_FILL,
-                ..Visuals::dark()
-            },
-        );
+        ctx.set_visuals_of(Theme::Dark, widgets::visuals());
         let tuner_mute = config.tuner_mute;
         let (commands, snapshots, client) =
             client::spawn(config, config_path, Arc::clone(&stop), move || {

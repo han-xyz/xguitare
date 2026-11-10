@@ -12,13 +12,14 @@ use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
-    BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType,
-    NEUTRAL_ACCENT, ParamRow, Throttle, TunerReading, accent_for, add_after, add_command,
-    bank_rows, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, failed_set, in_tune,
-    ir_names, key_to_command, knob_angle_deg, knob_fraction, knob_value_from_drag, meter_fraction,
-    module_types, move_target, param_rows, peak_fraction, quit_commands, rack_channels,
-    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, tuner_reading,
-    tuner_toggle, unit_suffix,
+    Band, BankRow, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
+    KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, Rgb, Throttle,
+    TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir, cents_fraction,
+    cents_text, counts_toward_spawn, ear_holes, failed_set, in_tune, ir_names, key_to_command,
+    knob_angle_deg, knob_fraction, knob_points, knob_value_from_drag, ladder_segments,
+    meter_fraction, module_types, move_target, palette, param_rows, peak_fraction, quit_commands,
+    rack_channels, refresh_decision, requests_until_quit, response_text, spawn_policy, status_line,
+    tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -654,19 +655,19 @@ fn module_types_from_payload() {
 #[test]
 fn knob_value_from_drag_steps_and_clamps() {
     assert_eq!(
-        knob_value_from_drag(0.0, 0.0, 100.0, -200.0, false, false),
+        knob_value_from_drag(0.0, 0.0, 100.0, -220.0, false, false),
         100.0
     );
     assert_eq!(
-        knob_value_from_drag(50.0, 0.0, 100.0, -1.0, false, false),
-        50.5
+        knob_value_from_drag(50.0, 0.0, 100.0, -22.0, false, false),
+        60.0
     );
     assert_eq!(
-        knob_value_from_drag(50.0, 0.0, 100.0, 1.0, false, false),
-        49.5
+        knob_value_from_drag(50.0, 0.0, 100.0, 22.0, false, false),
+        40.0
     );
     assert_eq!(
-        knob_value_from_drag(-20.0, -60.0, 20.0, -100.0, false, false),
+        knob_value_from_drag(-20.0, -60.0, 20.0, -110.0, false, false),
         20.0
     );
     assert_eq!(
@@ -678,15 +679,15 @@ fn knob_value_from_drag_steps_and_clamps() {
 #[test]
 fn knob_fine_is_ten_times_slower() {
     assert_eq!(
-        knob_value_from_drag(50.0, 0.0, 100.0, -10.0, true, false),
-        50.5
+        knob_value_from_drag(50.0, 0.0, 100.0, -22.0, true, false),
+        51.0
     );
     assert_eq!(
-        knob_value_from_drag(0.0, 0.0, 100.0, -2000.0, true, false),
+        knob_value_from_drag(0.0, 0.0, 100.0, -2200.0, true, false),
         100.0
     );
     assert_eq!(
-        knob_value_from_drag(0.0, 0.0, 100.0, -200.0, true, false),
+        knob_value_from_drag(0.0, 0.0, 100.0, -220.0, true, false),
         10.0
     );
 }
@@ -696,7 +697,7 @@ fn knob_integer_rounds() {
     assert_eq!(knob_value_from_drag(2.0, 1.0, 4.0, -40.0, false, true), 3.0);
     assert_eq!(knob_value_from_drag(2.0, 1.0, 4.0, -20.0, false, true), 2.0);
     assert_eq!(
-        knob_value_from_drag(0.0, 0.0, 1.0, -100.0, false, true),
+        knob_value_from_drag(0.0, 0.0, 1.0, -110.0, false, true),
         1.0
     );
     assert_eq!(knob_value_from_drag(1.0, 0.0, 1.0, 90.0, false, true), 1.0);
@@ -872,4 +873,108 @@ fn rack_ir_command_maps_to_request() {
             false
         )
     );
+}
+
+fn assert_near(actual: (f32, f32), expected: (f32, f32)) {
+    let close = (actual.0 - expected.0).abs() < 1e-4 && (actual.1 - expected.1).abs() < 1e-4;
+    assert!(close, "{actual:?} is not {expected:?}");
+}
+
+#[test]
+fn knob_points_follow_the_sweep() {
+    let diagonal = 10.0 * std::f32::consts::FRAC_1_SQRT_2;
+    let start = knob_points(0.0, 10.0);
+    assert_near(start.pointer, (-diagonal, diagonal));
+    assert!(start.arc.iter().all(|point| *point == start.arc[0]));
+    let middle = knob_points(0.5, 10.0);
+    assert_near(middle.pointer, (0.0, -10.0));
+    assert_near(middle.arc[0], (-diagonal, diagonal));
+    assert_near(*middle.arc.last().unwrap(), (0.0, -10.0));
+    let end = knob_points(1.0, 10.0);
+    assert_near(end.pointer, (diagonal, diagonal));
+    assert_near(*end.arc.last().unwrap(), (diagonal, diagonal));
+    assert!(
+        end.arc
+            .iter()
+            .any(|point| point.0.abs() < 1e-4 && point.1 < 0.0)
+    );
+}
+
+fn ladder_counts(db: f64, clipped: bool) -> (usize, usize, usize) {
+    let lit: Vec<Band> = ladder_segments(db, clipped)
+        .iter()
+        .filter(|segment| segment.lit)
+        .map(|segment| segment.band)
+        .collect();
+    let count = |band: Band| lit.iter().filter(|lit_band| **lit_band == band).count();
+    (count(Band::Green), count(Band::Yellow), count(Band::Red))
+}
+
+#[test]
+fn ladder_lights_bands_from_the_bottom() {
+    assert_eq!(ladder_segments(0.0, false).len(), LADDER_SEGMENTS);
+    assert_eq!(ladder_counts(-120.0, false), (0, 0, 0));
+    assert_eq!(ladder_counts(-60.0, false), (0, 0, 0));
+    assert_eq!(ladder_counts(-12.0, false), (19, 0, 0));
+    assert_eq!(ladder_counts(-3.0, false), (19, 3, 0));
+    assert_eq!(ladder_counts(0.0, false), (19, 3, 2));
+    assert_eq!(ladder_counts(6.0, false), (19, 3, 2));
+    let segments = ladder_segments(-12.0, false);
+    assert!(segments.windows(2).all(|pair| pair[0].lit || !pair[1].lit));
+}
+
+#[test]
+fn ladder_clip_lights_the_top_segment() {
+    assert_eq!(ladder_counts(-60.0, true), (0, 0, 1));
+    assert!(ladder_segments(-60.0, true)[LADDER_SEGMENTS - 1].lit);
+}
+
+#[test]
+fn ear_holes_sit_inside_the_ear() {
+    for height in [24.0, 34.0, 66.0, 190.0] {
+        let holes = ear_holes(height);
+        for (x, y) in holes {
+            assert!(
+                x - EAR_HOLE_RADIUS >= 0.0 && x + EAR_HOLE_RADIUS <= EAR_WIDTH,
+                "{height}"
+            );
+            assert!(
+                y - EAR_HOLE_RADIUS >= 0.0 && y + EAR_HOLE_RADIUS <= height,
+                "{height}"
+            );
+        }
+        assert!(holes[0].1 < holes[1].1, "{height}");
+    }
+    assert_eq!(ear_holes(66.0), [(15.0, 22.0), (15.0, 44.0)]);
+    assert_eq!(ear_holes(190.0), [(15.0, 22.0), (15.0, 168.0)]);
+}
+
+fn relative_luminance((r, g, b): Rgb) -> f64 {
+    let channel = |value: u8| {
+        let srgb = f64::from(value) / 255.0;
+        if srgb <= 0.04045 {
+            srgb / 12.92
+        } else {
+            ((srgb + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+fn contrast(a: Rgb, b: Rgb) -> f64 {
+    let (light, dark) = {
+        let (la, lb) = (relative_luminance(a), relative_luminance(b));
+        (la.max(lb), la.min(lb))
+    };
+    (light + 0.05) / (dark + 0.05)
+}
+
+#[test]
+fn palette_text_meets_wcag_aa_on_units() {
+    let colours = palette();
+    for background in [colours.ground, colours.unit, colours.unit_open] {
+        assert!(contrast(colours.text, background) >= 4.5);
+        assert!(contrast(colours.muted, background) >= 4.5);
+    }
+    assert_eq!(contrast((255, 255, 255), (0, 0, 0)), 21.0);
 }

@@ -12,10 +12,17 @@ pub const METER_RED_DB: f64 = -6.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);
 pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
 pub const INVALID_PRESET: &str = "invalid preset";
-pub const KNOB_DRAG_PX: f32 = 200.0;
-pub const KNOB_FINE_DRAG_PX: f32 = 2000.0;
+pub const KNOB_DRAG_PX: f32 = 220.0;
+pub const KNOB_FINE_DRAG_PX: f32 = 2200.0;
 pub const KNOB_ARC_START_DEG: f32 = 135.0;
 pub const KNOB_ARC_SWEEP_DEG: f32 = 270.0;
+pub const KNOB_ARC_POINTS: usize = 49;
+pub const LADDER_SEGMENTS: usize = 24;
+pub const LADDER_YELLOW_DB: f64 = -12.0;
+pub const LADDER_RED_DB: f64 = -3.0;
+pub const EAR_WIDTH: f32 = 30.0;
+pub const EAR_HOLE_RADIUS: f32 = 4.0;
+pub const EAR_HOLE_INSET: f32 = 22.0;
 pub const NEUTRAL_ACCENT: (u8, u8, u8) = (120, 120, 120);
 pub const CENTS_SPAN: i64 = 50;
 pub const IN_TUNE_CENTS: i64 = 3;
@@ -144,6 +151,127 @@ pub fn knob_fraction(value: f32, min: f32, max: f32) -> f32 {
 /// Clockwise degrees in egui's y-down screen space: 135° is lower left, 270° the top, 405° lower right.
 pub fn knob_angle_deg(fraction: f32) -> f32 {
     KNOB_ARC_START_DEG + KNOB_ARC_SWEEP_DEG * fraction
+}
+
+/// Offsets from the knob's centre in egui's y-down space: the pointer tip at `radius`, and the arc from the sweep's start to the value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KnobPoints {
+    pub pointer: (f32, f32),
+    pub arc: Vec<(f32, f32)>,
+}
+
+pub fn knob_points(fraction: f32, radius: f32) -> KnobPoints {
+    let value_deg = knob_angle_deg(fraction);
+    let last = (KNOB_ARC_POINTS - 1) as f32;
+    let arc = (0..KNOB_ARC_POINTS)
+        .map(|step| {
+            let deg = KNOB_ARC_START_DEG + (value_deg - KNOB_ARC_START_DEG) * step as f32 / last;
+            point_at_deg(radius, deg)
+        })
+        .collect();
+    KnobPoints {
+        pointer: point_at_deg(radius, value_deg),
+        arc,
+    }
+}
+
+fn point_at_deg(radius: f32, deg: f32) -> (f32, f32) {
+    let rad = deg.to_radians();
+    (radius * rad.cos(), radius * rad.sin())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Band {
+    Green,
+    Yellow,
+    Red,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Segment {
+    pub lit: bool,
+    pub band: Band,
+}
+
+/// Bottom segment first; each covers an equal dB step of [`METER_FLOOR_DB`]..0 and takes its band from its top edge. `clipped` lights the top segment whatever `db` is.
+pub fn ladder_segments(db: f64, clipped: bool) -> [Segment; LADDER_SEGMENTS] {
+    let step_db = -METER_FLOOR_DB / LADDER_SEGMENTS as f64;
+    let lit_count = ((db - METER_FLOOR_DB) / step_db)
+        .floor()
+        .clamp(0.0, LADDER_SEGMENTS as f64) as usize;
+    std::array::from_fn(|index| {
+        let top_db = METER_FLOOR_DB + (index + 1) as f64 * step_db;
+        let band = if top_db < LADDER_YELLOW_DB {
+            Band::Green
+        } else if top_db < LADDER_RED_DB {
+            Band::Yellow
+        } else {
+            Band::Red
+        };
+        let is_top = index == LADDER_SEGMENTS - 1;
+        Segment {
+            lit: index < lit_count || (clipped && is_top),
+            band,
+        }
+    })
+}
+
+/// Screw hole centres, top then bottom, as offsets from the top-left of an ear [`EAR_WIDTH`] wide and `height` tall.
+pub fn ear_holes(height: f32) -> [(f32, f32); 2] {
+    let inset = EAR_HOLE_INSET.min(height / 3.0);
+    let x = EAR_WIDTH / 2.0;
+    [(x, inset), (x, height - inset)]
+}
+
+pub type Rgb = (u8, u8, u8);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Palette {
+    pub ground: Rgb,
+    pub sidebar: Rgb,
+    pub unit: Rgb,
+    pub unit_open: Rgb,
+    pub meter_bridge: Rgb,
+    pub rail: Rgb,
+    pub edge_light: Rgb,
+    pub edge_dark: Rgb,
+    pub button_border: Rgb,
+    pub text: Rgb,
+    pub muted: Rgb,
+    pub knob_body: Rgb,
+    pub knob_rim: Rgb,
+    pub ear_edge: Rgb,
+    pub ear_centre: Rgb,
+    pub ear_hole: Rgb,
+    pub led_off: Rgb,
+    pub green: Rgb,
+    pub yellow: Rgb,
+    pub red: Rgb,
+}
+
+pub fn palette() -> Palette {
+    Palette {
+        ground: (0x1a, 0x1d, 0x20),
+        sidebar: (0x22, 0x26, 0x2a),
+        unit: (0x26, 0x2a, 0x2e),
+        unit_open: (0x30, 0x35, 0x3a),
+        meter_bridge: (0x2a, 0x2e, 0x33),
+        rail: (0x0f, 0x11, 0x13),
+        edge_light: (0x3d, 0x44, 0x4b),
+        edge_dark: (0x11, 0x13, 0x16),
+        button_border: (0x4a, 0x52, 0x5a),
+        text: (0xe4, 0xe7, 0xea),
+        muted: (0xa9, 0xb0, 0xb7),
+        knob_body: (0x15, 0x17, 0x1a),
+        knob_rim: (0x5a, 0x63, 0x6c),
+        ear_edge: (0x8c, 0x93, 0x9a),
+        ear_centre: (0xc2, 0xc8, 0xcd),
+        ear_hole: (0x0b, 0x0c, 0x0d),
+        led_off: (0x33, 0x38, 0x3d),
+        green: (0x46, 0xb4, 0x50),
+        yellow: (0xf0, 0xb4, 0x32),
+        red: (0xe5, 0x48, 0x3f),
+    }
 }
 
 pub fn accent_for(type_name: &str) -> (u8, u8, u8) {

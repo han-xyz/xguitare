@@ -1,5 +1,4 @@
 mod app;
-mod widgets;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
