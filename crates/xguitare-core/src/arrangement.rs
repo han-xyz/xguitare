@@ -396,7 +396,7 @@ impl Arrangement {
         self.click_on = previous.click_on;
         self.count_in_bars = previous.count_in_bars;
         self.count_in = previous.count_in;
-        self.blip = previous.blip;
+        self.blip.continue_from(&previous.blip);
         self.click_beat = previous.click_beat;
     }
 

@@ -863,6 +863,39 @@ fn switcher_publishes_the_count_in_beats_left() {
     assert_eq!(beats_left(), 0);
 }
 
+fn arrangement_at(project: &Project, rate: f32) -> Arrangement {
+    let mut master = StereoRack::new(Vec::new()).expect("no Modules");
+    master.prepare(rate, BLOCK);
+    Arrangement::new(
+        project,
+        Vec::new(),
+        Vec::new(),
+        master,
+        &HashMap::new(),
+        rate,
+        BLOCK,
+    )
+    .expect("no Takes")
+}
+
+#[test]
+fn a_rebuild_at_a_new_rate_clicks_at_that_rate_with_the_metronome_volume() {
+    let project = project(Vec::new());
+    let mut old = arrangement_at(&project, 48_000.0);
+    old.apply(ArrangementCommand::ClickVolume(-6.0));
+    let mut rebuilt = arrangement_at(&project, 96_000.0);
+    rebuilt.continue_from(&mut old);
+    let mut fresh = arrangement_at(&project, 96_000.0);
+    fresh.apply(ArrangementCommand::ClickVolume(-6.0));
+    for arrangement in [&mut rebuilt, &mut fresh] {
+        arrangement.apply(ArrangementCommand::Click(true));
+        arrangement.apply(ArrangementCommand::Play);
+    }
+    let (continued, _) = run(&mut rebuilt, &[], 2 * 48_000);
+    let (expected, _) = run(&mut fresh, &[], 2 * 48_000);
+    assert_eq!(continued, expected);
+}
+
 fn click_peak(samples: &[f32], beat: usize) -> f32 {
     samples[beat * 24_000..beat * 24_000 + 240]
         .iter()

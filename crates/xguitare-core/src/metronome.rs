@@ -108,6 +108,15 @@ impl Blip {
         }
     }
 
+    /// Takes over `previous`'s volume, and its sounding beat when both run at one sample rate; a beat cut by a rate change is dropped.
+    pub(crate) fn continue_from(&mut self, previous: &Blip) {
+        if self.beat_step.to_bits() == previous.beat_step.to_bits() {
+            *self = *previous;
+        } else {
+            self.gain = previous.gain;
+        }
+    }
+
     pub(crate) fn start(&mut self, accent: bool) {
         self.left = self.frames;
         self.phase = 0.0;
