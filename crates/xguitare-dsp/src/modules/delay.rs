@@ -146,10 +146,14 @@ impl Module for Delay {
             ];
             let feedback = self.feedback.next_value();
             let mix = self.mix.next_value();
+            #[allow(
+                clippy::manual_midpoint,
+                reason = "per-sample audio path; operands are bounded samples, f32::midpoint widens to f64"
+            )]
             let (written, wet) = if pingpong {
                 (
                     [
-                        f32::midpoint(*left, *right) + feedback * delayed[1],
+                        (*left + *right) * 0.5 + feedback * delayed[1],
                         feedback * delayed[0],
                     ],
                     [delayed[1], delayed[0]],
