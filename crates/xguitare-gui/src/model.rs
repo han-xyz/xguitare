@@ -1010,7 +1010,7 @@ pub enum Outgoing {
     RestoreAutosave(String),
 }
 
-/// `rack` is the Rack the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] or [`Command::ShowRack`] moves it for the commands after it, a shown Bus found in `status` by its id and a shown Track's Rack left to the Daemon's selected Track.
+/// `rack` is the Rack the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] or [`Command::ShowRack`] moves it for the commands after it, a shown Bus found in `status` by its id (the Rack requests for one that is gone are dropped) and a shown Track's Rack left to the Daemon's selected Track.
 #[allow(clippy::too_many_lines, reason = "one match arm per queued command")]
 pub fn requests_until_quit(
     queued: Vec<Command>,
@@ -1019,7 +1019,11 @@ pub fn requests_until_quit(
 ) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
     let mut rack = rack;
+    let mut shown_bus_gone = false;
     for command in queued {
+        if shown_bus_gone && acts_on_rack(&command) {
+            continue;
+        }
         let (track, bus, master) = rack_selectors(rack);
         let req = match command {
             Command::Load(preset) => Request::Load {
@@ -1106,6 +1110,7 @@ pub fn requests_until_quit(
             Command::TrackSet { track, edit } => track_set_request(track, edit),
             Command::TrackSelect(index) => {
                 rack = Some(MixerTarget::Track(index));
+                shown_bus_gone = false;
                 Request::TrackSelect {
                     track: TrackRef::Index(index),
                 }
@@ -1166,9 +1171,9 @@ pub fn requests_until_quit(
             },
             Command::RenderCancel => Request::RenderCancel,
             Command::ShowRack(shown) => {
-                rack = status
-                    .and_then(|status| shown.column(status))
-                    .filter(|target| !matches!(target, MixerTarget::Track(_)));
+                let column = status.and_then(|status| shown.column(status));
+                shown_bus_gone = matches!(shown, ShownRack::Bus(_)) && column.is_none();
+                rack = column.filter(|target| !matches!(target, MixerTarget::Track(_)));
                 continue;
             }
             Command::Restore(restore) => {
@@ -1189,6 +1194,19 @@ pub fn requests_until_quit(
         requests.push(Outgoing::Request(req));
     }
     (requests, false)
+}
+
+fn acts_on_rack(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Load(_)
+            | Command::Set { .. }
+            | Command::RackAdd { .. }
+            | Command::RackRemove { .. }
+            | Command::RackMove { .. }
+            | Command::Bypass { .. }
+            | Command::RackIr { .. }
+    )
 }
 
 fn track_set_request(track: usize, edit: TrackEdit) -> Request {

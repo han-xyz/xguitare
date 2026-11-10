@@ -528,6 +528,40 @@ fn rack_requests_find_the_shown_bus_by_id_and_master() {
 }
 
 #[test]
+fn rack_requests_for_a_shown_bus_that_is_gone_are_dropped() {
+    let queued = vec![
+        Command::ShowRack(ShownRack::Bus(7)),
+        Command::Set {
+            param: "reverb.mix".to_string(),
+            value: 40.0,
+        },
+        Command::Load("Clean".to_string()),
+        Command::Mute(true),
+        Command::TrackSelect(1),
+        Command::RackRemove {
+            id: "compressor".to_string(),
+        },
+    ];
+    let status = json!({"buses": [{"id": 0, "name": "Verb"}]});
+    let (outgoing, _) = requests_until_quit(queued, Some(MixerTarget::Track(0)), Some(&status));
+    assert_eq!(
+        outgoing,
+        [
+            Outgoing::Request(Request::Mute { on: true }),
+            Outgoing::Request(Request::TrackSelect {
+                track: TrackRef::Index(1),
+            }),
+            Outgoing::Request(Request::RackRemove {
+                id: "compressor".to_string(),
+                track: Some(TrackRef::Index(1)),
+                bus: None,
+                master: false,
+            }),
+        ]
+    );
+}
+
+#[test]
 fn project_commands_become_their_requests() {
     let queued = vec![
         Command::ProjectNew("Demo Song".to_string()),
