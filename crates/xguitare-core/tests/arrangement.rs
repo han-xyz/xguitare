@@ -863,6 +863,69 @@ fn switcher_publishes_the_count_in_beats_left() {
     assert_eq!(beats_left(), 0);
 }
 
+fn click_peak(samples: &[f32], beat: usize) -> f32 {
+    samples[beat * 24_000..beat * 24_000 + 240]
+        .iter()
+        .fold(0.0, |peak: f32, s| peak.max(s.abs()))
+}
+
+#[test]
+fn metronome_volume_reaches_the_click_and_beat_one_is_six_db_louder() {
+    let peaks_at = |volume_db: f32| {
+        let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+        arrangement.apply(ArrangementCommand::ClickVolume(volume_db));
+        arrangement.apply(ArrangementCommand::Click(true));
+        arrangement.apply(ArrangementCommand::Play);
+        let (left, _) = run(&mut arrangement, &[], 5 * 24_000);
+        (
+            click_peak(&left, 0),
+            click_peak(&left, 1),
+            click_peak(&left, 4),
+        )
+    };
+    let (accent, beat, next_accent) = peaks_at(0.0);
+    let (_, quiet_beat, _) = peaks_at(-12.0);
+    assert!((quiet_beat / beat - db(-12.0)).abs() < 1e-3);
+    assert!((accent / next_accent - 1.0).abs() < 1e-3);
+    let accent_db = 20.0 * (accent / beat).log10();
+    assert!((accent_db - 6.0).abs() < 1.0, "accent {accent_db} dB");
+}
+
+#[test]
+fn switcher_publishes_the_click_beat() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::clone(&shared));
+    let input = [0.0; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let first = arrangement(&project(Vec::new()), &HashMap::new());
+    for command in [
+        Command::SwapArrangement(Box::new(first)),
+        Command::Arrangement(ArrangementCommand::Click(true)),
+        Command::Arrangement(ArrangementCommand::Play),
+    ] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
+    let beat = || shared.metronome_beat.load(Ordering::Relaxed);
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    assert_eq!(beat(), 1);
+    for _ in 0..24_000 / BLOCK {
+        switcher.process_tracks(&input, &[], &mut left, &mut right);
+    }
+    assert_eq!(beat(), 2);
+    assert!(
+        control
+            .commands
+            .push(Command::Arrangement(ArrangementCommand::Click(false)))
+            .is_ok()
+    );
+    switcher.apply_commands();
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    assert_eq!(beat(), 0, "click off");
+}
+
 fn empty_master() -> StereoRack {
     let mut master = StereoRack::new(Vec::new()).expect("no Modules");
     master.prepare(RATE as f32, BLOCK);

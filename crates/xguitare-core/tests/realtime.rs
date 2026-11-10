@@ -10,6 +10,7 @@ use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, MeterPoint, RackSwitcher, SWITCHER_MAX_FRAMES,
     block_peak, engine_queues, raise_peak, tap_block,
 };
+use xguitare_core::metronome::MetronomeSettings;
 use xguitare_core::project::{Bus, Item, LoopRegion, Master, Project, Send, Take, Track};
 use xguitare_core::{ModuleRegistry, PresetModule};
 use xguitare_dsp::{Gain, Module, Rack, StereoRack};
@@ -312,7 +313,7 @@ fn sixteen_track_arrangement() -> Box<Arrangement> {
     )
 }
 
-fn every_arrangement_command() -> [ArrangementCommand; 16] {
+fn every_arrangement_command() -> [ArrangementCommand; 17] {
     [
         ArrangementCommand::Volume { track: 3, db: -9.0 },
         ArrangementCommand::Pan {
@@ -338,6 +339,7 @@ fn every_arrangement_command() -> [ArrangementCommand; 16] {
             meter: (4, 4),
         },
         ArrangementCommand::Click(true),
+        ArrangementCommand::ClickVolume(-6.0),
         ArrangementCommand::CountIn(1),
         ArrangementCommand::Loop(LoopRegion {
             start: 0,
@@ -717,4 +719,42 @@ fn sixteen_tracks_eight_buses_and_master_do_not_allocate() {
     });
     assert!(left.iter().any(|&sample| sample != 0.0));
     drop(switcher);
+}
+
+#[test]
+fn metronome_with_no_project_does_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::clone(&shared));
+    let on = |bpm, meter, volume_db| MetronomeSettings {
+        on: true,
+        bpm,
+        meter,
+        volume_db,
+        sample_rate: 48_000.0,
+    };
+    let changes = [
+        on(120.0, (4, 4), -12.0),
+        on(97.5, (3, 4), 0.0),
+        on(300.0, (6, 8), -40.0),
+        MetronomeSettings {
+            on: false,
+            ..on(300.0, (6, 8), -40.0)
+        },
+        on(60.0, (4, 4), -12.0),
+    ];
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for settings in changes {
+            assert!(control.commands.push(Command::Metronome(settings)).is_ok());
+            switcher.apply_commands();
+            for block in 0..100 {
+                shared.muted.store(block % 50 > 40, Ordering::Relaxed);
+                switcher.process(&input, &mut left, &mut right);
+            }
+        }
+    });
+    assert_ne!(shared.metronome_beat.load(Ordering::Relaxed), 0);
 }

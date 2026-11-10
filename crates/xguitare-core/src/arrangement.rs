@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::f32::consts::{FRAC_PI_4, SQRT_2, TAU};
+use std::f32::consts::{FRAC_PI_4, SQRT_2};
 use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
@@ -8,6 +8,7 @@ use xguitare_dsp::smooth::Smoother;
 use xguitare_dsp::{Rack, StereoRack};
 
 use crate::engine::{MeterPoint, MixMeters, set_module_bypass, set_module_param};
+use crate::metronome::{Blip, DEFAULT_VOLUME_DB};
 use crate::project::{
     Bus, LoopRegion, MAX_BUSES, MAX_TRACKS, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM,
     Track,
@@ -17,12 +18,6 @@ use crate::take_capture::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
 const MIN_VOLUME_DB: f32 = -60.0;
 const MAX_VOLUME_DB: f32 = 6.0;
 const MAX_COUNT_IN_BARS: u32 = 2;
-const CLICK_SECONDS: f32 = 0.005;
-const CLICK_HZ: f32 = 1000.0;
-const ACCENT_HZ: f32 = 1500.0;
-const CLICK_LEVEL: f32 = 0.5;
-/// The blip decays to this share of its start level over its length.
-const CLICK_END_LEVEL: f32 = 0.01;
 /// A Send ramping to off below this gain (-120 dB) stops, so an off Send costs nothing.
 const SEND_SILENT: f32 = 1e-6;
 
@@ -79,6 +74,8 @@ pub enum ArrangementCommand {
         meter: (u32, u32),
     },
     Click(bool),
+    /// The Metronome volume, −40..=0 dB, from the next beat of the click.
+    ClickVolume(f32),
     /// Bars of click before Recording starts.
     CountIn(u32),
     /// Whether the Track's own output goes to Master.
@@ -170,6 +167,8 @@ pub struct Arrangement {
     count_in_bars: u32,
     count_in: CountIn,
     blip: Blip,
+    /// The 1-based beat in the bar of the last click.
+    click_beat: u32,
     /// The first Track and Bus index whose clip flags another Track or Bus held before this Arrangement; `MAX_TRACKS` and `MAX_BUSES` when none moved.
     moved_from: (usize, usize),
 }
@@ -253,18 +252,6 @@ struct CountIn {
     left: u64,
 }
 
-#[derive(Clone, Copy)]
-struct Blip {
-    frames: usize,
-    left: usize,
-    phase: f32,
-    step: f32,
-    click_step: f32,
-    accent_step: f32,
-    level: f32,
-    decay: f32,
-}
-
 impl Arrangement {
     /// Builds the Arrangement of `project` at `sample_rate` for blocks of up to `max_frames`, from one Rack per Track, one stereo Rack per Bus and Master's stereo Rack (each prepared for at least `max_frames`) and the preloaded Take buffers keyed by Take file.
     ///
@@ -340,7 +327,8 @@ impl Arrangement {
             click_on: false,
             count_in_bars: 0,
             count_in: CountIn::default(),
-            blip: Blip::new(sample_rate),
+            blip: Blip::new(sample_rate, DEFAULT_VOLUME_DB as f32),
+            click_beat: 0,
             moved_from: (MAX_TRACKS, MAX_BUSES),
         };
         arrangement.update_audible();
@@ -391,6 +379,13 @@ impl Arrangement {
             .sum()
     }
 
+    /// The 1-based beat in the bar of the last click while the click sounds, during a count-in or with the click on and the transport running; 0 otherwise.
+    pub fn click_beat(&self) -> u32 {
+        let sounding =
+            self.is_counting_in() || (self.click_on && self.transport != Transport::Stopped);
+        if sounding { self.click_beat } else { 0 }
+    }
+
     /// Takes over the transport, playhead, count-in, click and open Takes of the Arrangement this one replaces, so a rebuild neither stops playback nor splits a Take; `previous` records nothing more.
     pub fn continue_from(&mut self, previous: &mut Arrangement) {
         for (track, old) in self.tracks.iter_mut().zip(previous.tracks.iter_mut()) {
@@ -402,6 +397,7 @@ impl Arrangement {
         self.count_in_bars = previous.count_in_bars;
         self.count_in = previous.count_in;
         self.blip = previous.blip;
+        self.click_beat = previous.click_beat;
     }
 
     /// Applies `command`; a Track, Module or Parameter index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored.
@@ -460,6 +456,7 @@ impl Arrangement {
                 self.change_tempo(bpm, meter.0);
             }
             ArrangementCommand::Click(on) => self.click_on = on,
+            ArrangementCommand::ClickVolume(db) => self.blip.set_volume(db),
             ArrangementCommand::CountIn(bars) if bars <= MAX_COUNT_IN_BARS => {
                 self.count_in_bars = bars;
             }
@@ -725,7 +722,9 @@ impl Arrangement {
             if let (Some(first), Some(beat)) = (grid, next_beat)
                 && beat_frame(beat, frames_per_beat) == first + idx as u64
             {
-                self.blip.start(beat % self.beats_per_bar == 0);
+                let in_bar = beat % self.beats_per_bar;
+                self.blip.start(in_bar == 0);
+                self.click_beat = in_bar as u32 + 1;
                 next_beat = Some(beat + 1);
             }
             *sample = self.blip.next_sample();
@@ -1037,43 +1036,5 @@ fn level_db(db: f32) -> Option<f32> {
         Some(db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB))
     } else {
         None
-    }
-}
-
-impl Blip {
-    fn new(sample_rate: f32) -> Blip {
-        let frames = (CLICK_SECONDS * sample_rate).round().max(1.0) as usize;
-        Blip {
-            frames,
-            left: 0,
-            phase: 0.0,
-            step: 0.0,
-            click_step: TAU * CLICK_HZ / sample_rate,
-            accent_step: TAU * ACCENT_HZ / sample_rate,
-            level: 0.0,
-            decay: CLICK_END_LEVEL.powf(1.0 / frames as f32),
-        }
-    }
-
-    fn start(&mut self, accent: bool) {
-        self.left = self.frames;
-        self.phase = 0.0;
-        self.step = if accent {
-            self.accent_step
-        } else {
-            self.click_step
-        };
-        self.level = CLICK_LEVEL;
-    }
-
-    fn next_sample(&mut self) -> f32 {
-        if self.left == 0 {
-            return 0.0;
-        }
-        let sample = self.level * self.phase.sin();
-        self.phase += self.step;
-        self.level *= self.decay;
-        self.left -= 1;
-        sample
     }
 }

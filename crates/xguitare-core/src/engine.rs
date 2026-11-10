@@ -7,6 +7,7 @@ use xguitare_dsp::Rack;
 use xguitare_dsp::crossfade::Crossfader;
 
 use crate::arrangement::{Arrangement, ArrangementCommand, Transport};
+use crate::metronome::{MetronomeSettings, PracticeMetronome};
 use crate::project::{MAX_BUSES, MAX_TRACKS};
 
 #[derive(Debug, Default)]
@@ -37,6 +38,8 @@ pub struct EngineShared {
     pub track_input_peak_bits: [AtomicU32; MAX_TRACKS],
     /// Post-fader peaks and clip flags of the running Arrangement's Tracks, Buses and Master.
     pub mix_meters: MixMeters,
+    /// The 1-based beat in the bar the Metronome (the Project's click while an Arrangement runs) last played; 0 while it is off.
+    pub metronome_beat: AtomicU32,
 }
 
 /// One meter of [`MixMeters`].
@@ -157,6 +160,8 @@ pub enum Command {
     SwapArrangement(Box<Arrangement>),
     /// Goes back to the Rack.
     CloseArrangement,
+    /// The Metronome played with no Arrangement running.
+    Metronome(MetronomeSettings),
     /// A Rack change (`Param`, `Bypass` and their Bus and Master forms) applies to the newest Arrangement the switcher holds, as its Module indices are; any other to every one it holds; ignored while none runs.
     Arrangement(ArrangementCommand),
 }
@@ -306,6 +311,7 @@ pub struct RackSwitcher {
     reserved_slots: usize,
     shared: Arc<EngineShared>,
     mute_gain: f32,
+    metronome: PracticeMetronome,
 }
 
 impl RackSwitcher {
@@ -339,6 +345,7 @@ impl RackSwitcher {
             reserved_slots,
             shared,
             mute_gain: 1.0,
+            metronome: PracticeMetronome::new(),
         }
     }
 
@@ -373,6 +380,7 @@ impl RackSwitcher {
                     }
                 }
                 Command::SetFadeLengths(fades) => self.fades = fades,
+                Command::Metronome(settings) => self.metronome.apply(settings),
                 Command::SwapArrangement(new) => {
                     if self.arrangement.is_none() {
                         self.arrangement = Some(new);
@@ -440,7 +448,7 @@ impl RackSwitcher {
         self.crossfader.start(self.fades.crossfade_frames);
     }
 
-    /// Taps the input, runs one block through the current Rack, or through both while a fade runs, then applies the Mute gain; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for. While an Arrangement runs, `input` is its first Track's input.
+    /// Taps the input, runs one block through the current Rack, or through both while a fade runs, adds the Metronome, then applies the Mute gain; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for. While an Arrangement runs, `input` is its first Track's input.
     pub fn process(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
         self.process_tracks(input, slice::from_ref(&input), out_l, out_r)
     }
@@ -460,7 +468,12 @@ impl RackSwitcher {
             }
             self.run_arrangements(track_inputs, out_l, out_r)
         } else {
-            self.run_racks(input, out_l, out_r)
+            let fits = self.run_racks(input, out_l, out_r);
+            self.metronome.process(out_l, out_r);
+            self.shared
+                .metronome_beat
+                .store(self.metronome.beat(), Ordering::Relaxed);
+            fits
         };
         self.apply_mute(out_l, out_r);
         fits
@@ -545,6 +558,9 @@ impl RackSwitcher {
             self.shared
                 .count_in_remaining
                 .store(running.count_in_remaining(), Ordering::Relaxed);
+            self.shared
+                .metronome_beat
+                .store(running.click_beat(), Ordering::Relaxed);
             running.raise_meters(&self.shared.mix_meters);
         }
         true
