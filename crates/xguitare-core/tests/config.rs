@@ -240,6 +240,7 @@ fn state_toml_keeps_config_bank_dir() {
     let config = Config::load(Some(&path)).unwrap();
     assert_eq!(config.bank_dir, PathBuf::from("/srv/xg/bank"));
     assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/bank"));
+    assert_eq!(config.bank_kind, BankKind::Guitar);
 }
 
 #[test]

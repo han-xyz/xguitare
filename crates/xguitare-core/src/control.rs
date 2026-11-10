@@ -967,6 +967,10 @@ fn set_settings(
     if switch.is_some() && state.config.bank_dir_in_config {
         return Err(BANK_DIR_IN_CONFIG.to_string());
     }
+    let ir_dir = ir_dir.filter(|dir| state.config.state.ir_dir.as_ref() != Some(dir));
+    if switch.is_none() && ir_dir.is_none() {
+        return Ok(settings(state));
+    }
     let mut config = state.config.clone();
     if let Some(dir) = ir_dir {
         config.state.ir_dir = Some(dir.clone());

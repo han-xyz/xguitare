@@ -101,7 +101,7 @@ pub enum ConfigError {
     },
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     bank_dir: Option<PathBuf>,
@@ -243,7 +243,8 @@ impl Config {
     }
 
     fn overridden_by(self, file: ConfigFile, state: SavedState) -> Config {
-        let bank_kind = state.bank_kind.or(file.bank_kind).unwrap_or(self.bank_kind);
+        let saved_kind = state.bank_kind.filter(|_| file.bank_dir.is_none());
+        let bank_kind = saved_kind.or(file.bank_kind).unwrap_or(self.bank_kind);
         let bank_dir_in_config = file.bank_dir.is_some();
         let ir_dir_in_config = file.ir_dir.is_some();
         let bank_dir = file

@@ -492,5 +492,8 @@ fn set_settings_refuses_relative_ir_dir_and_stores_no_same_kind() {
         &mut state,
         set_settings(Some(BankKind::Guitar), None),
     ));
+    ok(handle(&mut state, set_settings(None, None)));
     assert_eq!(reloaded(&dir).state.bank_kind, None);
+    assert!(!dir.0.join("state.toml").exists());
+    assert_eq!(revision(&mut state), 1);
 }
