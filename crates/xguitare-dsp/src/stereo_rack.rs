@@ -28,14 +28,20 @@ pub enum StereoSlot {
     Doubled(Box<dyn Module>, Box<dyn Module>),
 }
 
+/// Why [`StereoRack::new`] refused a slot list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StereoRackError {
+    /// A `MonoToStereo` Module (the cabinet) in any slot.
     CabinetNotAllowed,
+    /// A mono Module, by slot id, in a `Stereo` slot.
     MonoInStereoSlot(String),
+    /// A stereo Module, by slot id, in a `Linked` or `Doubled` slot.
     StereoInMonoSlot(String),
 }
 
 impl StereoRack {
+    /// Builds a Rack from `(id, slot)` pairs in processing order; call `prepare` before `process`.
+    ///
     /// # Errors
     ///
     /// A [`StereoRackError`] for a cabinet in any slot, a mono Module in a `Stereo` slot, or a stereo Module in a `Linked` or `Doubled` slot.
@@ -76,6 +82,7 @@ impl StereoRack {
         })
     }
 
+    /// Sizes the buffers for blocks of up to `max_frames` and prepares every Module instance.
     pub fn prepare(&mut self, sample_rate: f32, max_frames: usize) {
         self.max_frames = max_frames;
         for buffer in [
@@ -165,6 +172,16 @@ impl StereoRack {
             if param < module.spec().params.len() {
                 module.set_param(param, value);
             }
+        }
+    }
+
+    /// Resets every instance in the slot at `idx`, so its smoothers start at the current Parameter values; an `idx` out of range is ignored.
+    pub fn reset(&mut self, idx: usize) {
+        let Some((_, slot)) = self.slots.get_mut(idx) else {
+            return;
+        };
+        for module in slot.instances_mut() {
+            module.reset();
         }
     }
 

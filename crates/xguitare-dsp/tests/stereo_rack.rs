@@ -116,9 +116,12 @@ fn compressor() -> Compressor {
     prepared(Compressor::new(), &[(0, -30.0), (1, 8.0), (2, 1.0)])
 }
 
-fn gains(slot: StereoSlot) -> (f32, f32) {
-    let in_l = sine(0.5, 1_000.0, SAMPLE_RATE, frames(300.0));
-    let in_r = sine(0.01, 1_000.0, SAMPLE_RATE, frames(300.0));
+const LOUD: f32 = 0.5;
+const QUIET: f32 = 0.01;
+
+fn gains(slot: StereoSlot, left_level: f32, right_level: f32) -> (f32, f32) {
+    let in_l = sine(left_level, 1_000.0, SAMPLE_RATE, frames(300.0));
+    let in_r = sine(right_level, 1_000.0, SAMPLE_RATE, frames(300.0));
     let mut rack = stereo_rack(vec![("compressor", slot)]);
     let (out_l, out_r) = run(&mut rack, &in_l, &in_r);
     let window = frames(250.0)..frames(300.0);
@@ -128,21 +131,53 @@ fn gains(slot: StereoSlot) -> (f32, f32) {
     )
 }
 
+fn linked() -> StereoSlot {
+    StereoSlot::Linked(Box::new(compressor()))
+}
+
 #[test]
 fn linked_compressor_applies_one_gain_to_both_sides() {
-    let (linked_l, linked_r) = gains(StereoSlot::Linked(Box::new(compressor())));
+    let (linked_l, linked_r) = gains(linked(), LOUD, QUIET);
     assert!(linked_l < 0.5, "left gain {linked_l}");
     assert!(
         (linked_l - linked_r).abs() < 1e-3,
         "left {linked_l} right {linked_r}"
     );
 
-    let (doubled_l, doubled_r) = gains(StereoSlot::Doubled(
-        Box::new(compressor()),
-        Box::new(compressor()),
-    ));
+    let (doubled_l, doubled_r) = gains(
+        StereoSlot::Doubled(Box::new(compressor()), Box::new(compressor())),
+        LOUD,
+        QUIET,
+    );
     assert!((doubled_l - linked_l).abs() < 1e-3, "left {doubled_l}");
     assert!(doubled_r > 0.9, "unlinked right gain {doubled_r}");
+}
+
+#[test]
+fn linked_compressor_detects_the_louder_side() {
+    let (loud_left, _) = gains(linked(), LOUD, QUIET);
+    let (swapped_l, swapped_r) = gains(linked(), QUIET, LOUD);
+    assert!(swapped_r < 0.5, "right gain {swapped_r}");
+    assert!(
+        (swapped_l - swapped_r).abs() < 1e-3,
+        "left {swapped_l} right {swapped_r}"
+    );
+    assert!(
+        (swapped_l - loud_left).abs() < 1e-3,
+        "swapped {swapped_l} loud left {loud_left}"
+    );
+}
+
+#[test]
+fn reset_starts_slot_at_its_param_values() {
+    let mut rack = boosted_rack();
+    rack.reset(0);
+    let input = sine(0.25, 220.0, SAMPLE_RATE, frames(10.0));
+    let (out_l, out_r) = run(&mut rack, &input, &input);
+    for out in [&out_l, &out_r] {
+        let ratio = peak(&out[..BLOCK]) / peak(&input[..BLOCK]);
+        assert!((ratio - 2.0).abs() < 1e-3, "ratio {ratio}");
+    }
 }
 
 fn boosted_rack() -> StereoRack {

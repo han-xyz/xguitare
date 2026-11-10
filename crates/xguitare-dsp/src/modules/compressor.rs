@@ -86,7 +86,6 @@ impl Compressor {
         compressor
     }
 
-    /// Steps the smoothers and the envelope one frame on `detector` and returns the linear gain for that frame.
     fn next_gain(&mut self, detector: f32) -> f32 {
         let threshold = self.threshold.next_value();
         let ratio = self.ratio.next_value();
