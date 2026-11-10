@@ -547,7 +547,7 @@ impl fmt::Display for ProjectError {
             }
             ProjectError::TakeOutsideProject(file) => write!(
                 f,
-                "take file '{file}' must be a relative path inside the project folder"
+                "take file '{file}' must be takes/<name>.wav"
             ),
             ProjectError::NoTake { track, item, take } => {
                 write!(f, "track '{track}' item {item} has no take {take}")

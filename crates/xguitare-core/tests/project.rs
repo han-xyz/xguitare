@@ -270,7 +270,7 @@ fn track_from_preset_copies_modules() {
 }
 
 #[test]
-fn take_paths_outside_the_project_are_rejected() {
+fn take_paths_other_than_takes_name_wav_are_rejected() {
     let dir = temp_dir("take-paths");
     for file in [
         "../x.wav",
@@ -287,7 +287,7 @@ fn take_paths_outside_the_project_are_rejected() {
     ] {
         assert_eq!(
             load_error(&dir.0, &with_take_file(file)),
-            format!("take file '{file}' must be a relative path inside the project folder"),
+            format!("take file '{file}' must be takes/<name>.wav"),
         );
     }
 }
@@ -510,7 +510,7 @@ fn save_refuses_what_load_would_reject() {
     stray.tracks.push(track);
     assert_eq!(
         stray.save(&folder).unwrap_err().to_string(),
-        "take file 'project.toml' must be a relative path inside the project folder"
+        "take file 'project.toml' must be takes/<name>.wav"
     );
     assert_eq!(
         fs::read_to_string(folder.join(PROJECT_FILE)).unwrap(),
