@@ -137,6 +137,10 @@ pub fn add_finished_takes(
         Err(err) => failures.push(format!("cannot play the new takes: {err}")),
     }
     failures.extend(warnings.iter().map(ToString::to_string));
+    let open = open_project_mut(state);
+    if !open.recording {
+        failures.extend(autosave_on_stop(open).map(|err| format!("cannot autosave: {err}")));
+    }
     failures
 }
 
@@ -146,15 +150,26 @@ pub fn autosave_if_due(state: &mut EngineState, now: Instant) -> Option<Result<P
     if !autosave_due(open.last_autosave, now, open.changed) {
         return None;
     }
+    Some(write_autosave(open, now))
+}
+
+fn write_autosave(open: &mut OpenProject, now: Instant) -> Result<PathBuf, String> {
     open.last_autosave = now;
     open.changed = false;
     let file = open.dir.join(crate::project::AUTOSAVE_FILE);
-    Some(
-        open.project
-            .save_autosave(&open.dir)
-            .map(|()| file)
-            .map_err(|err| err.to_string()),
-    )
+    open.project
+        .save_autosave(&open.dir)
+        .map(|()| file)
+        .map_err(|err| err.to_string())
+}
+
+fn autosave_on_stop(open: &mut OpenProject) -> Option<String> {
+    if !open.changed {
+        return None;
+    }
+    write_autosave(open, Instant::now()).err().inspect(|_| {
+        open.changed = true;
+    })
 }
 
 /// Takes the open Project out as the Daemon stops; the Engine is not told.
@@ -624,6 +639,10 @@ pub(crate) fn transport(
         TransportAction::Locate => {}
     }
     let mut payload = json!({ "action": action });
+    if action == TransportAction::Stop {
+        // a failed write leaves the Project changed, so the timer retries and logs it
+        autosave_on_stop(open);
+    }
     if let Some(frames) = frames {
         payload["frames"] = json!(frames);
     }

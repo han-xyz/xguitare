@@ -410,6 +410,17 @@ fn autosave_waits_for_a_change_and_the_interval() {
 }
 
 #[test]
+fn a_transport_stop_autosaves_a_changed_project() {
+    let (mut state, _audio, _dir) = state("autosave-stop");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let folder = state.config.projects_dir.join("song");
+    assert!(Project::load_autosave(&folder).is_err());
+    ok(handle(&mut state, transport(TransportAction::Stop, None)));
+    assert_eq!(Project::load_autosave(&folder).unwrap().tracks.len(), 1);
+}
+
+#[test]
 fn project_save_and_close_write_project_toml() {
     let (mut state, mut audio, _dir) = state("save");
     new_project(&mut state, "Song");
