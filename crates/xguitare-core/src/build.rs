@@ -29,7 +29,7 @@ pub fn build_rack(
 ///
 /// # Errors
 ///
-/// `engine busy` when the command queue is full.
+/// `engine busy` when the command queue has no free slot for the `SwapRack`; `rack` is then dropped here.
 pub fn swap_rack(queues: &mut EngineQueues, rack: Rack) -> Result<(), String> {
     queues.drain_from_audio();
     queues

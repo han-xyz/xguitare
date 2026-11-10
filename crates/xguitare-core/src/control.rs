@@ -305,7 +305,7 @@ pub enum Reprepare {
 ///
 /// # Errors
 ///
-/// `engine busy` when the command queue is full.
+/// `engine busy` when the command queue has no free slot for the `SwapRack`. A Preset that fails to build is not an error but `Reprepare::Passthrough`.
 pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare, String> {
     let max_frames = buffer_size as usize;
     let outcome = rebuild(state, state.sample_rate, max_frames)?;
@@ -326,7 +326,7 @@ pub fn follow_sample_rate(state: &mut EngineState) -> Option<Result<Reprepare, S
 ///
 /// # Errors
 ///
-/// `engine busy` when the command queue has fewer than two free slots.
+/// `engine busy` when the command queue has fewer than two free slots (one for the fade lengths, one for the `SwapRack`), or when either push fails. A Preset that fails to build is not an error but `Reprepare::Passthrough`.
 pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
     let sample_rate = sample_rate as f32;
     let fades = FadeLengths::at(sample_rate, state.config.crossfade_ms);

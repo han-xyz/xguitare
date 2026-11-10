@@ -172,6 +172,7 @@ impl Preset {
     /// # Errors
     ///
     /// [`BuildError::Layout`] when the Module order breaks a Rack layout rule; a Cabinet IR that fails to load is a [`BuildWarning`] instead.
+    ///
     /// # Panics
     ///
     /// When a Module names an unregistered type; [`Preset::parse`] never yields one.

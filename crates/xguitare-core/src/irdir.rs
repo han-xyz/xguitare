@@ -7,7 +7,7 @@ const IR_EXTENSION: &str = "wav";
 ///
 /// # Errors
 ///
-/// `ir_dir <dir>: <io error>` when `dir` itself cannot be read.
+/// `ir_dir <dir>: <io error>` when `fs::read_dir` fails on `dir` itself, e.g. it is missing, not a directory or not permitted. Unreadable subdirectories are skipped, not errors.
 pub fn list_irs(dir: &Path) -> Result<Vec<String>, String> {
     let entries = fs::read_dir(dir).map_err(|err| format!("ir_dir {}: {err}", dir.display()))?;
     let mut names = Vec::new();
