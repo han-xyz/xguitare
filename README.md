@@ -390,7 +390,7 @@ master: -3 dB; out -120.0/-120.0 dB
 
 - `bus add [name]` adds a Bus with an empty Rack at 0 dB, centred; without a name it is `Bus <n>`, the first number free. A Project has at most 8 Buses; Bus names follow the Track name rules. `bus remove <bus>` removes it and every Send to it. `bus edit <bus>` takes `--name`, `--volume <dB>` (−60 to 6), `--pan <−1..1>` and `--mute|--solo on|off`. A Bus is named by its zero-based index or its name.
 - `send <track> <bus> <level>` sets a Track's Send to a Bus: a level in dB (−60 to 6) or `off`, the default. A Send is taken after the Track's volume and pan (post-fader); `--pre on` takes it after the Rack and pan, before the volume.
-- `master <dB>|off` sets the Master volume (−60 to 6, or off).
+- `master <dB>|off` sets the Master volume (−60 to 6, or off). `status` shows an off Master as `master: - dB; …`, and an off Send as `send <bus>: - dB, <pre|post>`.
 - `track edit <track> --to-master off` keeps a Track's own sound out of Master, so it is heard only through its Sends.
 - `rack add|remove|move`, `set`, `get`, `bypass` and `ir set` take `--bus <bus>` or `--master` to edit that Rack instead of the selected Track's; a Bus or Master Rack takes every Module type but the cabinet (`a cabinet is not allowed on a Bus or Master`), in any order, and `load` puts a Preset only into a Track.
 - Solo is solo in place: while anything is soloed, the soloed Tracks and Buses sound, with the Buses a soloed Track sends to and the Tracks that send to a soloed Bus. Mute always wins.
@@ -406,8 +406,6 @@ rendering /home/you/Music/xguitare/live/renders/live.wav
 10%
 40%
 70%
-90%
-100%
 rendered /home/you/Music/xguitare/live/renders/live.wav
 $ xguitare render --bits 16
 rendering /home/you/Music/xguitare/live/renders/live-2.wav
@@ -415,7 +413,7 @@ rendering /home/you/Music/xguitare/live/renders/live-2.wav
 rendered /home/you/Music/xguitare/live/renders/live-2.wav
 ```
 
-- `render` waits until the Render ends, printing a line at each tenth of the way, and ends with `rendered <file>`; a Render that fails or is cancelled ends with `error: render failed: <reason>` or `error: render cancelled` and exit 1. `render cancel`, from another shell, stops it; so do closing the Project and stopping the Daemon.
+- `render` waits until the Render ends, printing `NN%` for each further tenth it sees while polling (a short Render may skip some, and `100%`), and ends with `rendered <file>`; a Render that fails or is cancelled ends with `error: render failed: <reason>` or `error: render cancelled` and exit 1. `render cancel`, from another shell, stops it; so do closing the Project and stopping the Daemon.
 - The whole Project renders from the start to the end of its last Item, then on until Master has stayed below −90 dBFS for half a second (a reverb or delay tail), 10 seconds at most. `--loop` renders the loop region exactly instead.
 - `--bits 24` (default), `16` (with dither) or `32f` (32-bit float).
 - The file is `renders/<name>.wav` in the Project folder, `<name>` being `--name` or the Project folder's name. An existing file is never replaced: `-2`, `-3`, … is added. A name must not be empty, start with `.` or contain `/` or `..`. While it runs the Render writes `<file>.part`, removed when it is cancelled or fails.
