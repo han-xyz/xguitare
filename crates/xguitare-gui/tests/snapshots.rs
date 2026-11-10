@@ -27,7 +27,7 @@ impl Drop for TempDir {
     }
 }
 
-fn bass_config() -> Config {
+fn bass_config() -> (Config, TempDir) {
     static HARNESSES: AtomicUsize = AtomicUsize::new(0);
     let dir = TempDir(PathBuf::from(format!(
         "/tmp/xguitare-snap-{}-{}",
@@ -38,7 +38,7 @@ fn bass_config() -> Config {
     fs::create_dir_all(&dir.0).unwrap();
     let path = dir.0.join("config.toml");
     fs::write(&path, "bank_kind = \"bass\"\n").unwrap();
-    Config::load(Some(&path)).unwrap()
+    (Config::load(Some(&path)).unwrap(), dir)
 }
 
 fn param(module: &str, name: &str, value: f64, spec: (f64, f64, f64, &str, bool)) -> Value {
@@ -168,12 +168,12 @@ fn write_png(harness: &mut Harness<App>, name: &str) {
     assert!(path.exists(), "{} was not written", path.display());
 }
 
-fn harness() -> (Harness<'static, App>, Receiver<Command>) {
+fn harness() -> (Harness<'static, App>, Receiver<Command>, TempDir) {
     harness_sized(WINDOW)
 }
 
-fn harness_sized(size: Vec2) -> (Harness<'static, App>, Receiver<Command>) {
-    let config = bass_config();
+fn harness_sized(size: Vec2) -> (Harness<'static, App>, Receiver<Command>, TempDir) {
+    let (config, dir) = bass_config();
     let (commands, sent) = mpsc::channel();
     let mut harness = Harness::builder()
         .with_size(size)
@@ -181,7 +181,7 @@ fn harness_sized(size: Vec2) -> (Harness<'static, App>, Receiver<Command>) {
         .wgpu()
         .build_eframe(move |cc| App::with_snapshot(cc, &config, funk_snapshot(), commands));
     harness.run_steps(2);
-    (harness, sent)
+    (harness, sent, dir)
 }
 
 fn sent_now(sent: &Receiver<Command>) -> Vec<Command> {
@@ -219,28 +219,28 @@ const CLOSED: &str = "▶";
 fn gui_snapshots() {
     write_png(&mut harness().0, "default");
 
-    let (mut two_open, _) = harness();
+    let (mut two_open, _, _dir) = harness();
     open_unit(&mut two_open, 0);
     open_unit(&mut two_open, 0);
     assert_eq!(two_open.get_all_by_label("▼").count(), 2);
     write_png(&mut two_open, "two-units-open");
 
-    let (mut tuner, _) = harness();
+    let (mut tuner, _, _dir) = harness();
     tuner.get_by_role_and_label(Role::Button, "Tuner").click();
     write_png(&mut tuner, "tuner-open");
 
-    let (mut save_as, _) = harness();
+    let (mut save_as, _, _dir) = harness();
     save_as.get_by_label("Save as new").click();
     write_png(&mut save_as, "save-as-open");
 
-    let (mut sections, _) = harness();
+    let (mut sections, _, _dir) = harness();
     for title in ["Audio", "Settings"] {
         sections.get_by_label(title).click();
         sections.run_steps(2);
     }
     write_png(&mut sections, "left-panel-open");
 
-    let (mut editing, _) = harness();
+    let (mut editing, _, _dir) = harness();
     edit_value(&mut editing, "Threshold", "-30");
     write_png(&mut editing, "value-editing");
 
@@ -249,7 +249,7 @@ fn gui_snapshots() {
 
 #[test]
 fn units_have_fixed_heights() {
-    let (mut harness, _) = harness();
+    let (mut harness, _, _dir) = harness();
     assert_eq!(unit_height(&harness, "compressor unit"), 64.0);
     assert_eq!(unit_height(&harness, "chorus unit"), 64.0);
     open_unit(&mut harness, 0);
@@ -259,7 +259,7 @@ fn units_have_fixed_heights() {
 
 #[test]
 fn closed_units_wrap_their_knobs_in_the_minimum_window() {
-    let (harness, _) = harness_sized(MIN_WINDOW);
+    let (harness, _, _dir) = harness_sized(MIN_WINDOW);
     assert_eq!(unit_height(&harness, "compressor unit"), 128.0);
     assert_eq!(unit_height(&harness, "tonestack unit"), 64.0);
     for param in ["Threshold", "Ratio", "Attack", "Release", "Makeup"] {
@@ -274,8 +274,12 @@ fn closed_units_wrap_their_knobs_in_the_minimum_window() {
 
 #[test]
 fn closed_unit_knobs_stay_left_of_the_move_buttons() {
-    for width in [1024.0, 1100.0, 1280.0, 1440.0, 1920.0] {
-        let (harness, _) = harness_sized(Vec2::new(width, 900.0));
+    let wrap_point = (1100..=1140).step_by(4).map(|width| width as f32);
+    for width in [1024.0, 1280.0, 1440.0, 1920.0]
+        .into_iter()
+        .chain(wrap_point)
+    {
+        let (harness, _, _dir) = harness_sized(Vec2::new(width, 900.0));
         for unit in ["compressor", "preamp", "tonestack", "cabinet", "chorus"] {
             let unit_rect = harness.get_by_label(&format!("{unit} unit")).rect();
             let move_left = harness
@@ -302,7 +306,7 @@ fn closed_unit_knobs_stay_left_of_the_move_buttons() {
 
 #[test]
 fn right_click_on_a_knob_focuses_its_value_field() {
-    let (mut harness, _) = harness();
+    let (mut harness, _, _dir) = harness();
     let field = harness
         .get_by_role_and_label(Role::TextInput, "Threshold")
         .rect();
@@ -326,7 +330,7 @@ fn right_click_on_a_knob_focuses_its_value_field() {
 
 #[test]
 fn typed_value_is_sent_on_enter() {
-    let (mut harness, sent) = harness();
+    let (mut harness, sent, _dir) = harness();
     edit_value(&mut harness, "Threshold", "\u{2212}30 dB");
     assert_eq!(sent_now(&sent), []);
     harness.key_press(Key::Enter);
@@ -342,7 +346,7 @@ fn typed_value_is_sent_on_enter() {
 
 #[test]
 fn invalid_typed_value_reverts_with_a_footer_message() {
-    let (mut harness, sent) = harness();
+    let (mut harness, sent, _dir) = harness();
     edit_value(&mut harness, "Threshold", "loud");
     harness.key_press(Key::Enter);
     harness.run_steps(2);
@@ -354,7 +358,7 @@ fn invalid_typed_value_reverts_with_a_footer_message() {
 
 #[test]
 fn escape_reverts_a_typed_value() {
-    let (mut harness, sent) = harness();
+    let (mut harness, sent, _dir) = harness();
     edit_value(&mut harness, "Threshold", "-30");
     harness.key_press(Key::Escape);
     harness.run_steps(2);
@@ -365,7 +369,7 @@ fn escape_reverts_a_typed_value() {
 
 #[test]
 fn add_module_after_the_rack_rules_default() {
-    let (mut harness, sent) = harness();
+    let (mut harness, sent, _dir) = harness();
     harness.get_by_label("Add Module").click();
     harness.run_steps(2);
     harness.get_by_label("delay (stereo)").click();
@@ -391,7 +395,7 @@ fn add_module_after_the_rack_rules_default() {
 
 #[test]
 fn audio_and_settings_apply() {
-    let (mut harness, sent) = harness();
+    let (mut harness, sent, _dir) = harness();
     for title in ["Audio", "Settings"] {
         harness.get_by_label(title).click();
         harness.run_steps(2);
@@ -420,7 +424,7 @@ fn audio_and_settings_apply() {
 
 #[test]
 fn place_chosen_before_the_type_is_kept() {
-    let (mut harness, sent) = harness();
+    let (mut harness, sent, _dir) = harness();
     harness.get_by_label("Place").click();
     harness.run_steps(2);
     harness.get_by_label("at the front").click();
