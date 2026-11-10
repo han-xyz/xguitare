@@ -11,19 +11,22 @@ use xguitare_core::control::Response;
 use xguitare_core::control::{EngineState, PeakMeters, SILENCE_DB, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
-use xguitare_core::{Bank, Config};
+use xguitare_core::{Bank, BankKind, Config};
 use xguitare_gui::model::{
-    Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
-    KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL, ParamRow,
-    PeakHold, Rgb, Throttle, TunerReading, accent_for, add_after, add_command, autoscroll_delta,
-    bank_rows, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes,
-    engine_readout, failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_step,
-    key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
-    knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
-    open_units_from_string, open_units_to_string, palette, param_rows, parse_typed_value, peak_db,
-    peak_text, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
-    requests_until_quit, response_text, shortcuts_active, spawn_policy, tuner_header_text,
-    tuner_reading, tuner_toggle, unit_suffix,
+    AddPlace, Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback,
+    KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL,
+    ParamRow, PeakHold, PortChoices, PortSelection, Rgb, SECTIONS, Section, SettingsDraft,
+    Throttle, TunerReading, accent_for, add_after, add_command, add_place, add_places,
+    autoscroll_delta, bank_kind, bank_rows, cabinet_ir, cents_fraction, cents_text,
+    counts_toward_spawn, drop_index, ear_holes, engine_readout, failed_set, filter_bank,
+    forget_removed_units, format_value, in_tune, ir_names, key_step, key_to_command,
+    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
+    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
+    open_units_to_string, palette, param_label, param_rows, parse_typed_value, peak_db, peak_text,
+    port_choices, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
+    requests_until_quit, response_text, set_ports_command, set_settings_command, settings_draft,
+    shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
+    typed_value, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -577,15 +580,51 @@ fn add_after_empty_rack_is_front() {
         after: None,
         at: Some(0),
     };
-    assert_eq!(add_command(&[], &gate), front);
-    assert_eq!(add_command(&clean_rack()[2..], &gate), front);
+    let place = |rack: &[(String, String)]| add_place(rack, &gate.channels, None);
+    assert_eq!(add_command("gate", &place(&[])), front);
+    assert_eq!(add_command("gate", &place(&clean_rack()[2..])), front);
     assert_eq!(
-        add_command(&clean_rack(), &gate),
+        add_command("gate", &place(&clean_rack())),
         Command::RackAdd {
             type_name: "gate".to_string(),
             after: Some("amp".to_string()),
             at: None,
         }
+    );
+}
+
+#[test]
+fn add_place_offers_the_front_and_after_each_unit() {
+    let places = add_places(&clean_rack());
+    let labels: Vec<String> = places.iter().map(AddPlace::label).collect();
+    assert_eq!(
+        labels,
+        [
+            "at the front",
+            "after gate",
+            "after amp",
+            "after cabinet",
+            "after reverb"
+        ]
+    );
+}
+
+#[test]
+fn add_place_keeps_a_chosen_place_while_the_unit_is_there() {
+    let rack = clean_rack();
+    let chosen = AddPlace::After("gate".to_string());
+    assert_eq!(add_place(&rack, "stereo", Some(&chosen)), chosen);
+    assert_eq!(
+        add_place(&rack, "stereo", Some(&AddPlace::Front)),
+        AddPlace::Front
+    );
+    assert_eq!(
+        add_place(&rack, "stereo", Some(&AddPlace::After("gone".to_string()))),
+        AddPlace::After("reverb".to_string())
+    );
+    assert_eq!(
+        add_place(&rack, "mono", None),
+        AddPlace::After("amp".to_string())
     );
 }
 
@@ -1338,4 +1377,224 @@ fn peak_text_without_a_status_shows_no_value() {
     assert_eq!(peak_text(Some(-4.2), false), "peak -4.2 dB");
     assert_eq!(peak_text(Some(0.3), true), "peak +0.3 dB, clipped");
     assert_eq!(peak_text(None, false), "peak —");
+}
+
+fn spec(param: &str, unit: &str, integer: bool) -> ParamRow {
+    ParamRow {
+        param: param.to_string(),
+        unit: unit.to_string(),
+        ..knob_row(0.0, 1.0, 0.0, integer)
+    }
+}
+
+#[test]
+fn format_value_like_the_mockup() {
+    let cases = [
+        (spec("threshold", "dB", false), -24.0, "\u{2212}24 dB"),
+        (spec("attack", "ms", false), 5.0, "5 ms"),
+        (spec("ratio", "", false), 6.0, "6 : 1"),
+        (spec("ratio", "", false), 2.5, "2.5 : 1"),
+        (spec("high_cut", "Hz", true), 20000.0, "20 kHz"),
+        (spec("high_cut", "Hz", true), 2500.0, "2.5 kHz"),
+        (spec("low_cut", "Hz", true), 80.0, "80 Hz"),
+        (spec("rate", "Hz", false), 0.8, "0.8 Hz"),
+        (spec("gain", "%", false), 15.0, "15 %"),
+        (spec("bias", "", false), -0.25, "\u{2212}0.3"),
+        (spec("bias", "", false), -0.04, "0"),
+        (spec("stages", "", true), 2.0, "2"),
+    ];
+    for (row, value, expected) in cases {
+        assert_eq!(format_value(&row, value), expected, "{} {value}", row.param);
+    }
+}
+
+#[test]
+fn typed_text_is_the_bare_number_in_the_parameter_unit() {
+    assert_eq!(typed_text(&spec("high_cut", "Hz", true), 20000.0), "20000");
+    assert_eq!(typed_text(&spec("ratio", "", false), 6.0), "6");
+    assert_eq!(
+        typed_text(&spec("threshold", "dB", false), -24.0),
+        "\u{2212}24"
+    );
+    let text = typed_text(&spec("rate", "Hz", false), 0.8);
+    assert_eq!(parse_typed_value(&text), Some(0.8));
+}
+
+#[test]
+fn typed_value_refuses_text_that_is_no_number() {
+    assert_eq!(typed_value("\u{2212}30 dB"), Ok(-30.0));
+    assert_eq!(
+        typed_value("loud"),
+        Err("error: 'loud' is not a number".to_string())
+    );
+}
+
+#[test]
+fn param_label_in_sentence_case() {
+    assert_eq!(param_label("low_cut"), "Low cut");
+    assert_eq!(param_label("threshold"), "Threshold");
+    assert_eq!(param_label(""), "");
+}
+
+#[test]
+fn sections_in_panel_order() {
+    assert_eq!(
+        SECTIONS,
+        [
+            Section::Preset,
+            Section::Bank,
+            Section::Rack,
+            Section::Tuner,
+            Section::Audio,
+            Section::Settings,
+            Section::Engine,
+        ]
+    );
+    let titles: Vec<&str> = SECTIONS
+        .iter()
+        .map(|section| section.title(BankKind::Bass))
+        .collect();
+    assert_eq!(
+        titles,
+        [
+            "Preset",
+            "Bass Bank",
+            "Rack",
+            "Tuner and Mute",
+            "Audio",
+            "Settings",
+            "Engine"
+        ]
+    );
+    assert_eq!(Section::Bank.title(BankKind::Guitar), "Guitar Bank");
+    let closed: Vec<Section> = SECTIONS
+        .into_iter()
+        .filter(|section| !section.open_by_default())
+        .collect();
+    assert_eq!(closed, [Section::Audio, Section::Settings]);
+}
+
+#[test]
+fn bank_kind_follows_settings_else_config() {
+    let bass = json!({"bank_kind": "bass", "bank_dir": "/b", "ir_dir": "/b"});
+    assert_eq!(bank_kind(Some(&bass), BankKind::Guitar), BankKind::Bass);
+    assert_eq!(bank_kind(None, BankKind::Bass), BankKind::Bass);
+    assert_eq!(
+        bank_kind(Some(&json!({})), BankKind::Guitar),
+        BankKind::Guitar
+    );
+}
+
+const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
+const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
+const RIGHT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR";
+
+#[test]
+fn port_choices_from_a_ports_payload() {
+    let payload = json!({"ok": true, "capture": [CAPTURE, "other:capture_FL"],
+        "playback": [LEFT, RIGHT],
+        "connected": {"input": CAPTURE, "output_left": LEFT, "output_right": null}});
+    assert_eq!(
+        port_choices(&payload),
+        PortChoices {
+            capture: vec![CAPTURE.to_string(), "other:capture_FL".to_string()],
+            playback: vec![LEFT.to_string(), RIGHT.to_string()],
+            connected: PortSelection {
+                input: Some(CAPTURE.to_string()),
+                output_left: Some(LEFT.to_string()),
+                output_right: None,
+            },
+        }
+    );
+    assert_eq!(port_choices(&json!({})), PortChoices::default());
+}
+
+#[test]
+fn set_ports_needs_all_three_ports() {
+    let mut selection = PortSelection {
+        input: Some(CAPTURE.to_string()),
+        output_left: Some(LEFT.to_string()),
+        output_right: None,
+    };
+    assert_eq!(set_ports_command(&selection), None);
+    selection.output_right = Some(RIGHT.to_string());
+    assert_eq!(
+        set_ports_command(&selection),
+        Some(Command::SetPorts {
+            input: CAPTURE.to_string(),
+            output_left: LEFT.to_string(),
+            output_right: RIGHT.to_string(),
+        })
+    );
+}
+
+#[test]
+fn set_settings_sends_only_what_changed() {
+    let payload =
+        json!({"ok": true, "bank_kind": "guitar", "bank_dir": "/c/bank", "ir_dir": "/c/bank"});
+    let current = settings_draft(&payload).unwrap();
+    assert_eq!(
+        current,
+        SettingsDraft {
+            bank_kind: BankKind::Guitar,
+            ir_dir: "/c/bank".to_string(),
+        }
+    );
+    assert_eq!(settings_draft(&json!({})), None);
+    assert_eq!(set_settings_command(&current, &current), None);
+    let bass = SettingsDraft {
+        bank_kind: BankKind::Bass,
+        ..current.clone()
+    };
+    assert_eq!(
+        set_settings_command(&current, &bass),
+        Some(Command::SetSettings {
+            bank_kind: Some(BankKind::Bass),
+            ir_dir: None,
+        })
+    );
+    let irs = SettingsDraft {
+        ir_dir: " /c/irs ".to_string(),
+        ..current.clone()
+    };
+    assert_eq!(
+        set_settings_command(&current, &irs),
+        Some(Command::SetSettings {
+            bank_kind: None,
+            ir_dir: Some(PathBuf::from("/c/irs")),
+        })
+    );
+}
+
+#[test]
+fn ports_and_settings_commands_become_requests() {
+    let queued = vec![
+        Command::RefreshPorts,
+        Command::SetPorts {
+            input: CAPTURE.to_string(),
+            output_left: LEFT.to_string(),
+            output_right: RIGHT.to_string(),
+        },
+        Command::SetSettings {
+            bank_kind: Some(BankKind::Bass),
+            ir_dir: Some(PathBuf::from("/c/irs")),
+        },
+    ];
+    assert_eq!(
+        requests_until_quit(queued),
+        (
+            vec![
+                Request::SetPorts {
+                    input: CAPTURE.to_string(),
+                    output_left: LEFT.to_string(),
+                    output_right: RIGHT.to_string(),
+                },
+                Request::SetSettings {
+                    bank_kind: Some(BankKind::Bass),
+                    ir_dir: Some(PathBuf::from("/c/irs")),
+                },
+            ],
+            false
+        )
+    );
 }

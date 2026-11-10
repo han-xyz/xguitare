@@ -13,15 +13,16 @@ use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
 use crate::model::{
-    ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, SET_INTERVAL, Snapshot,
-    Throttle, bank_rows, forget_removed_units, key_to_command, open_units_from_string,
-    open_units_to_string, param_rows, peak_db, quit_commands, remember_removes, shortcuts_active,
+    ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
+    SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows, forget_removed_units,
+    key_to_command, open_units_from_string, open_units_to_string, param_rows, peak_db,
+    quit_commands, remember_removes, shortcuts_active,
 };
-use crate::rack::{Knobs, METERS, RackView, Tuner, rack_view};
-use crate::sidebar::{BankView, footer, sidebar};
+use crate::rack::{Knobs, METERS, RackView, rack_view};
+use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
 use crate::widgets;
 
-const BANK_WIDTH: f32 = 220.0;
+const SIDEBAR_WIDTH: f32 = 260.0;
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
@@ -53,7 +54,10 @@ pub struct App {
     removing: BTreeSet<String>,
     bank_query: String,
     save_as_name: Option<String>,
-    bank_heading: &'static str,
+    add_draft: AddDraft,
+    ports_draft: Option<PortSelection>,
+    settings_draft: Option<SettingsDraft>,
+    configured_bank_kind: BankKind,
 }
 
 impl App {
@@ -71,9 +75,13 @@ impl App {
         App::assemble(cc, &config, commands, snapshots, Some(client), stop)
     }
 
-    /// An App with no client thread: `snapshot` arrives as the only client update and commands go nowhere.
-    pub fn with_snapshot(cc: &eframe::CreationContext, config: &Config, snapshot: Snapshot) -> App {
-        let (commands, _) = mpsc::channel();
+    /// An App with no client thread: `snapshot` arrives as the only client update and its commands go to `commands`.
+    pub fn with_snapshot(
+        cc: &eframe::CreationContext,
+        config: &Config,
+        snapshot: Snapshot,
+        commands: Sender<Command>,
+    ) -> App {
         let (updates, snapshots) = mpsc::channel();
         updates
             .send(snapshot)
@@ -97,10 +105,6 @@ impl App {
             .unwrap_or_default();
         cc.egui_ctx.set_theme(Theme::Dark);
         cc.egui_ctx.set_visuals_of(Theme::Dark, widgets::visuals());
-        let bank_heading = match config.bank_kind {
-            BankKind::Guitar => "Guitar Bank",
-            BankKind::Bass => "Bass Bank",
-        };
         App {
             commands,
             snapshots,
@@ -113,6 +117,8 @@ impl App {
                 bank: None,
                 params: None,
                 tuner: None,
+                ports: None,
+                settings: None,
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
@@ -132,7 +138,10 @@ impl App {
             removing: BTreeSet::new(),
             bank_query: String::new(),
             save_as_name: None,
-            bank_heading,
+            add_draft: AddDraft::default(),
+            ports_draft: None,
+            settings_draft: None,
+            configured_bank_kind: config.bank_kind,
         }
     }
 }
@@ -221,29 +230,34 @@ impl eframe::App for App {
             .collect();
         commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| footer(ui, snapshot, &self.feedback, now));
-        let mut bank = BankView {
-            rows: &rows,
-            heading: self.bank_heading,
-            query: &mut self.bank_query,
-            save_as_name: &mut self.save_as_name,
-        };
-        Panel::left("bank")
-            .exact_size(BANK_WIDTH)
-            .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut bank)));
-        let mut knobs = Knobs {
-            throttle: &mut self.throttle,
-            locals: &mut self.locals,
-            revision: revision(snapshot),
-            now,
-        };
         let mut tuner = Tuner {
             open: &mut self.tuner_open,
             muted_by_us: &mut self.muted_by_us,
             mute_default: self.tuner_mute,
         };
+        let mut panel = SidebarView {
+            rows: &rows,
+            bank_kind: bank_kind(snapshot.settings.as_ref(), self.configured_bank_kind),
+            query: &mut self.bank_query,
+            save_as_name: &mut self.save_as_name,
+            add: &mut self.add_draft,
+            tuner: &mut tuner,
+            ports: &mut self.ports_draft,
+            settings: &mut self.settings_draft,
+        };
+        Panel::left("sidebar")
+            .exact_size(SIDEBAR_WIDTH)
+            .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut panel)));
+        let mut knobs = Knobs {
+            throttle: &mut self.throttle,
+            locals: &mut self.locals,
+            feedback: &mut self.feedback,
+            revision: revision(snapshot),
+            now,
+        };
         let mut view = RackView {
             knobs: &mut knobs,
-            tuner: &mut tuner,
+            tuner_open: self.tuner_open,
             clips: &mut self.clips,
             holds: &self.holds,
             open_units: &mut self.open_units,

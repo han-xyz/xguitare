@@ -1,17 +1,22 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver};
 
-use egui::{Role, Vec2};
+use egui::{Key, Modifiers, Role, Vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
-use xguitare_core::Config;
+use xguitare_core::{BankKind, Config};
 use xguitare_gui::app::App;
-use xguitare_gui::model::{Link, ModuleType, Snapshot};
+use xguitare_gui::model::{Command, Link, ModuleType, Snapshot};
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
+const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
+const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
+const RIGHT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR";
 
 struct TempDir(PathBuf);
 
@@ -22,9 +27,11 @@ impl Drop for TempDir {
 }
 
 fn bass_config() -> Config {
+    static HARNESSES: AtomicUsize = AtomicUsize::new(0);
     let dir = TempDir(PathBuf::from(format!(
-        "/tmp/xguitare-snap-{}",
-        std::process::id()
+        "/tmp/xguitare-snap-{}-{}",
+        std::process::id(),
+        HARNESSES.fetch_add(1, Ordering::Relaxed)
     )));
     let _ = fs::remove_dir_all(&dir.0);
     fs::create_dir_all(&dir.0).unwrap();
@@ -124,6 +131,16 @@ fn funk_snapshot() -> Snapshot {
         bank: Some(json!({"active": 2, "entries": entries})),
         params: Some(funk_params()),
         tuner: Some(json!({"confident": true, "note": "A1", "hz": 55.1, "cents": 4})),
+        ports: Some(json!({
+            "capture": [CAPTURE, "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_FL"],
+            "playback": [LEFT, RIGHT],
+            "connected": {"input": CAPTURE, "output_left": LEFT, "output_right": RIGHT},
+        })),
+        settings: Some(json!({
+            "bank_kind": "bass",
+            "bank_dir": "/home/you/.config/xguitare/bank-bass",
+            "ir_dir": "/home/you/.config/xguitare/bank-bass",
+        })),
         module_types,
         irs: vec!["bass-cab.wav".to_string(), "guitar-cab.wav".to_string()],
         last_message: None,
@@ -141,6 +158,7 @@ fn snapshot_dir() -> PathBuf {
 
 fn write_png(harness: &mut Harness<App>, name: &str) {
     harness.run_steps(2);
+    harness.check_accessibility();
     let image = harness.render().unwrap();
     let dir = snapshot_dir();
     fs::create_dir_all(&dir).unwrap();
@@ -149,38 +167,179 @@ fn write_png(harness: &mut Harness<App>, name: &str) {
     assert!(path.exists(), "{} was not written", path.display());
 }
 
-fn harness() -> Harness<'static, App> {
+fn harness() -> (Harness<'static, App>, Receiver<Command>) {
     let config = bass_config();
+    let (commands, sent) = mpsc::channel();
     let mut harness = Harness::builder()
         .with_size(WINDOW)
-        .with_accessibility_check(false)
         .with_context_setup(|ctx| ctx.add_font_provider(Arc::new(SystemFontProvider::new())))
         .wgpu()
-        .build_eframe(move |cc| App::with_snapshot(cc, &config, funk_snapshot()));
+        .build_eframe(move |cc| App::with_snapshot(cc, &config, funk_snapshot(), commands));
     harness.run_steps(2);
-    harness
+    (harness, sent)
 }
+
+fn sent_now(sent: &Receiver<Command>) -> Vec<Command> {
+    sent.try_iter().collect()
+}
+
+fn unit_height(harness: &Harness<App>, unit: &str) -> f32 {
+    harness.get_by_label(unit).rect().height()
+}
+
+fn open_unit(harness: &mut Harness<App>, nth: usize) {
+    harness
+        .get_all_by_label(CLOSED)
+        .nth(nth)
+        .unwrap()
+        .click_accesskit();
+    harness.run_steps(2);
+}
+
+fn edit_value(harness: &mut Harness<App>, param: &str, text: &str) {
+    harness
+        .get_by_role_and_label(Role::TextInput, param)
+        .focus();
+    harness.run_steps(2);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness
+        .get_by_role_and_label(Role::TextInput, param)
+        .type_text(text);
+    harness.run_steps(2);
+}
+
+const CLOSED: &str = "▶";
 
 #[test]
 fn gui_snapshots() {
-    write_png(&mut harness(), "default");
+    write_png(&mut harness().0, "default");
 
-    let mut two_open = harness();
-    for _ in 0..2 {
-        two_open
-            .get_all_by_label("▶")
-            .next()
-            .unwrap()
-            .click_accesskit();
-        two_open.run_steps(2);
-    }
+    let (mut two_open, _) = harness();
+    open_unit(&mut two_open, 0);
+    open_unit(&mut two_open, 0);
+    assert_eq!(two_open.get_all_by_label("▼").count(), 2);
     write_png(&mut two_open, "two-units-open");
 
-    let mut tuner = harness();
+    let (mut tuner, _) = harness();
     tuner.get_by_role_and_label(Role::Button, "Tuner").click();
     write_png(&mut tuner, "tuner-open");
 
-    let mut save_as = harness();
+    let (mut save_as, _) = harness();
     save_as.get_by_label("Save as new").click();
     write_png(&mut save_as, "save-as-open");
+
+    let (mut sections, _) = harness();
+    for title in ["Audio", "Settings"] {
+        sections.get_by_label(title).click();
+        sections.run_steps(2);
+    }
+    write_png(&mut sections, "left-panel-open");
+
+    let (mut editing, _) = harness();
+    edit_value(&mut editing, "Threshold", "-30");
+    write_png(&mut editing, "value-editing");
+}
+
+#[test]
+fn units_have_fixed_heights() {
+    let (mut harness, _) = harness();
+    assert_eq!(unit_height(&harness, "compressor unit"), 64.0);
+    assert_eq!(unit_height(&harness, "chorus unit"), 64.0);
+    open_unit(&mut harness, 0);
+    assert_eq!(unit_height(&harness, "compressor unit"), 190.0);
+    assert_eq!(unit_height(&harness, "preamp unit"), 64.0);
+}
+
+#[test]
+fn typed_value_is_sent_on_enter() {
+    let (mut harness, sent) = harness();
+    edit_value(&mut harness, "Threshold", "\u{2212}30 dB");
+    assert_eq!(sent_now(&sent), []);
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Set {
+            param: "compressor.threshold".to_string(),
+            value: -30.0,
+        }]
+    );
+}
+
+#[test]
+fn invalid_typed_value_reverts_with_a_footer_message() {
+    let (mut harness, sent) = harness();
+    edit_value(&mut harness, "Threshold", "loud");
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
+    harness.get_by_label("error: 'loud' is not a number");
+    let field = harness.get_by_role_and_label(Role::TextInput, "Threshold");
+    assert_eq!(field.value().as_deref(), Some("\u{2212}24 dB"));
+}
+
+#[test]
+fn escape_reverts_a_typed_value() {
+    let (mut harness, sent) = harness();
+    edit_value(&mut harness, "Threshold", "-30");
+    harness.key_press(Key::Escape);
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
+    let field = harness.get_by_role_and_label(Role::TextInput, "Threshold");
+    assert_eq!(field.value().as_deref(), Some("\u{2212}24 dB"));
+}
+
+#[test]
+fn add_module_after_the_rack_rules_default() {
+    let (mut harness, sent) = harness();
+    harness.get_by_label("Add Module").click();
+    harness.run_steps(2);
+    harness.get_by_label("delay (stereo)").click();
+    harness.run_steps(2);
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::ComboBox, "Place")
+            .value()
+            .as_deref(),
+        Some("after chorus")
+    );
+    harness.get_by_label("Add").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackAdd {
+            type_name: "delay".to_string(),
+            after: Some("chorus".to_string()),
+            at: None,
+        }]
+    );
+}
+
+#[test]
+fn audio_and_settings_apply() {
+    let (mut harness, sent) = harness();
+    for title in ["Audio", "Settings"] {
+        harness.get_by_label(title).click();
+        harness.run_steps(2);
+    }
+    harness.get_all_by_label("Apply").next().unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("Guitar").click();
+    harness.run_steps(2);
+    harness.get_all_by_label("Apply").nth(1).unwrap().click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::SetPorts {
+                input: CAPTURE.to_string(),
+                output_left: LEFT.to_string(),
+                output_right: RIGHT.to_string(),
+            },
+            Command::SetSettings {
+                bank_kind: Some(BankKind::Guitar),
+                ir_dir: None,
+            },
+        ]
+    );
 }

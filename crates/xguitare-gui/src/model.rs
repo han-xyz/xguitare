@@ -1,8 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use xguitare_client::ClientError;
+use xguitare_core::BankKind;
 use xguitare_core::control::{Request, Response, SILENCE_DB};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
@@ -40,7 +42,7 @@ pub enum Link {
     Starting { since: Instant },
 }
 
-/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get` and `tuner` replies as sent, `module_types` the `modules` reply of the current connection, `irs` the last `ir_list` reply's names.
+/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get`, `tuner`, `ports` and `settings` replies as sent, `module_types` the `modules` reply of the current connection, `irs` the last `ir_list` reply's names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub link: Link,
@@ -48,6 +50,8 @@ pub struct Snapshot {
     pub bank: Option<Value>,
     pub params: Option<Value>,
     pub tuner: Option<Value>,
+    pub ports: Option<Value>,
+    pub settings: Option<Value>,
     pub module_types: Vec<ModuleType>,
     pub irs: Vec<String>,
     pub last_message: Option<(String, Instant)>,
@@ -84,6 +88,17 @@ pub enum Command {
     },
     /// Sends nothing itself: the client thread fetches `ir_list` again on its next tick.
     RefreshIrs,
+    SetPorts {
+        input: String,
+        output_left: String,
+        output_right: String,
+    },
+    /// Sends nothing itself: the client thread fetches `ports` again on its next tick.
+    RefreshPorts,
+    SetSettings {
+        bank_kind: Option<BankKind>,
+        ir_dir: Option<PathBuf>,
+    },
     Quit,
 }
 
@@ -515,13 +530,51 @@ pub fn add_after(rack: &[(String, String)], new_channels: &str) -> Option<String
     after.map(|(id, _)| id.clone())
 }
 
-/// Adds `module_type` where [`add_after`] places it; its front is position 0, as `after: null` would append.
-pub fn add_command(rack: &[(String, String)], module_type: &ModuleType) -> Command {
-    let after = add_after(rack, &module_type.channels);
+/// Where the Add Module picker inserts a new Module.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AddPlace {
+    Front,
+    After(String),
+}
+
+impl AddPlace {
+    pub fn label(&self) -> String {
+        match self {
+            AddPlace::Front => "at the front".to_string(),
+            AddPlace::After(id) => format!("after {id}"),
+        }
+    }
+}
+
+/// The front, then after each Module in Rack order.
+pub fn add_places(rack: &[(String, String)]) -> Vec<AddPlace> {
+    std::iter::once(AddPlace::Front)
+        .chain(rack.iter().map(|(id, _)| AddPlace::After(id.clone())))
+        .collect()
+}
+
+/// The `chosen` place while the Rack still offers it, else where [`add_after`] puts a Module of `new_channels`.
+pub fn add_place(
+    rack: &[(String, String)],
+    new_channels: &str,
+    chosen: Option<&AddPlace>,
+) -> AddPlace {
+    if let Some(chosen) = chosen.filter(|chosen| add_places(rack).contains(chosen)) {
+        return chosen.clone();
+    }
+    add_after(rack, new_channels).map_or(AddPlace::Front, AddPlace::After)
+}
+
+/// The front is position 0, as `after: null` would append.
+pub fn add_command(type_name: &str, place: &AddPlace) -> Command {
+    let (after, at) = match place {
+        AddPlace::Front => (None, Some(0)),
+        AddPlace::After(id) => (Some(id.clone()), None),
+    };
     Command::RackAdd {
-        type_name: module_type.type_name.clone(),
-        at: after.is_none().then_some(0),
+        type_name: type_name.to_string(),
         after,
+        at,
     }
 }
 
@@ -639,7 +692,19 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::RackMove { id, to } => Request::RackMove { id, to },
             Command::Mute(on) => Request::Mute { on },
             Command::RackIr { id, ir } => Request::RackIr { ir, id: Some(id) },
-            Command::RefreshIrs => continue,
+            Command::SetPorts {
+                input,
+                output_left,
+                output_right,
+            } => Request::SetPorts {
+                input,
+                output_left,
+                output_right,
+            },
+            Command::SetSettings { bank_kind, ir_dir } => {
+                Request::SetSettings { bank_kind, ir_dir }
+            }
+            Command::RefreshIrs | Command::RefreshPorts => continue,
             Command::Quit => return (requests, true),
         };
         requests.push(req);
@@ -816,6 +881,174 @@ pub fn unit_suffix(unit: &str) -> &'static str {
         "%" => " %",
         _ => "",
     }
+}
+
+const KILO: f64 = 1000.0;
+const RATIO_PARAM: &str = "ratio";
+
+/// A Parameter name in sentence case: `low_cut` reads `Low cut`.
+pub fn param_label(param: &str) -> String {
+    let words = param.replace('_', " ");
+    let mut chars = words.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// The value as a knob shows it: one decimal at most, none on a whole value, a Unicode minus, `kHz` from 1000 Hz, a ratio as `6 : 1`.
+pub fn format_value(spec: &ParamRow, value: f64) -> String {
+    if spec.param == RATIO_PARAM {
+        return format!("{} : 1", number_text(value));
+    }
+    if spec.unit == "Hz" && value.abs() >= KILO {
+        return format!("{} kHz", number_text(value / KILO));
+    }
+    format!("{}{}", number_text(value), unit_suffix(&spec.unit))
+}
+
+/// The number a value field holds while it is edited, in the Parameter's own unit, so that [`parse_typed_value`] reads it back.
+pub fn typed_text(spec: &ParamRow, value: f64) -> String {
+    if spec.integer {
+        return number_text(value.round());
+    }
+    number_text(value)
+}
+
+/// The value typed into a value field, or the footer message for text that is no number.
+pub fn typed_value(text: &str) -> Result<f64, String> {
+    parse_typed_value(text).ok_or_else(|| format!("error: '{}' is not a number", text.trim()))
+}
+
+fn number_text(value: f64) -> String {
+    let tenths = (value * 10.0).round();
+    let text = if tenths == 0.0 {
+        "0".to_string()
+    } else if tenths % 10.0 == 0.0 {
+        format!("{}", tenths / 10.0)
+    } else {
+        format!("{:.1}", tenths / 10.0)
+    };
+    text.replace('-', "\u{2212}")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Preset,
+    Bank,
+    Rack,
+    Tuner,
+    Audio,
+    Settings,
+    Engine,
+}
+
+/// The left panel's sections, top to bottom.
+pub const SECTIONS: [Section; 7] = [
+    Section::Preset,
+    Section::Bank,
+    Section::Rack,
+    Section::Tuner,
+    Section::Audio,
+    Section::Settings,
+    Section::Engine,
+];
+
+impl Section {
+    pub fn title(self, bank_kind: BankKind) -> &'static str {
+        match (self, bank_kind) {
+            (Section::Preset, _) => "Preset",
+            (Section::Bank, BankKind::Guitar) => "Guitar Bank",
+            (Section::Bank, BankKind::Bass) => "Bass Bank",
+            (Section::Rack, _) => "Rack",
+            (Section::Tuner, _) => "Tuner and Mute",
+            (Section::Audio, _) => "Audio",
+            (Section::Settings, _) => "Settings",
+            (Section::Engine, _) => "Engine",
+        }
+    }
+
+    /// Audio and Settings are set once and stay closed until opened.
+    pub fn open_by_default(self) -> bool {
+        !matches!(self, Section::Audio | Section::Settings)
+    }
+}
+
+/// The Bank kind of a `settings` payload, `configured` before one arrives.
+pub fn bank_kind(settings_payload: Option<&Value>, configured: BankKind) -> BankKind {
+    settings_payload
+        .and_then(|settings| serde_json::from_value(settings["bank_kind"].clone()).ok())
+        .unwrap_or(configured)
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PortSelection {
+    pub input: Option<String>,
+    pub output_left: Option<String>,
+    pub output_right: Option<String>,
+}
+
+/// What the Audio pickers offer and show, from a `ports` payload.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PortChoices {
+    pub capture: Vec<String>,
+    pub playback: Vec<String>,
+    pub connected: PortSelection,
+}
+
+pub fn port_choices(ports_payload: &Value) -> PortChoices {
+    let names = |key: &str| -> Vec<String> {
+        ports_payload[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|name| name.as_str().map(str::to_string))
+            .collect()
+    };
+    let connected = |key: &str| ports_payload["connected"][key].as_str().map(str::to_string);
+    PortChoices {
+        capture: names("capture"),
+        playback: names("playback"),
+        connected: PortSelection {
+            input: connected("input"),
+            output_left: connected("output_left"),
+            output_right: connected("output_right"),
+        },
+    }
+}
+
+/// `None` until all three ports are chosen: `set_ports` takes no empty name.
+pub fn set_ports_command(selection: &PortSelection) -> Option<Command> {
+    Some(Command::SetPorts {
+        input: selection.input.clone()?,
+        output_left: selection.output_left.clone()?,
+        output_right: selection.output_right.clone()?,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsDraft {
+    pub bank_kind: BankKind,
+    pub ir_dir: String,
+}
+
+/// The Settings section's values from a `settings` payload; `None` when it lacks them.
+pub fn settings_draft(settings_payload: &Value) -> Option<SettingsDraft> {
+    Some(SettingsDraft {
+        bank_kind: serde_json::from_value(settings_payload["bank_kind"].clone()).ok()?,
+        ir_dir: settings_payload["ir_dir"].as_str()?.to_string(),
+    })
+}
+
+/// A `set_settings` with only the keys `draft` changes from `current`; `None` when it changes none.
+pub fn set_settings_command(current: &SettingsDraft, draft: &SettingsDraft) -> Option<Command> {
+    let bank_kind = (draft.bank_kind != current.bank_kind).then_some(draft.bank_kind);
+    let ir_dir = draft.ir_dir.trim();
+    let ir_dir = (ir_dir != current.ir_dir).then(|| PathBuf::from(ir_dir));
+    if bank_kind.is_none() && ir_dir.is_none() {
+        return None;
+    }
+    Some(Command::SetSettings { bank_kind, ir_dir })
 }
 
 #[derive(Debug, Default)]

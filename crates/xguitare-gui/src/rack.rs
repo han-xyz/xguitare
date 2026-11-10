@@ -2,18 +2,18 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Button, Checkbox, Color32, ComboBox, CursorIcon, Frame, Id, InnerResponse, Key, Label,
-    Layout, Margin, Modifiers, Rect, Response, RichText, ScrollArea, Sense, Stroke, TextEdit, Ui,
-    UiBuilder, Vec2, pos2, vec2,
+    Align, Button, Color32, ComboBox, CursorIcon, Frame, Id, InnerResponse, Key, Label, Layout,
+    Margin, Modifiers, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    UiBuilder, Vec2, WidgetInfo, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 
 use crate::model::{
-    ClipLatch, Command, Direction, EAR_WIDTH, KnobKey, ModuleType, NO_SIGNAL, ParamRow, PeakHold,
-    Rgb, Snapshot, Throttle, TunerReading, add_command, autoscroll_delta, cabinet_ir,
-    cents_fraction, drop_index, in_tune, key_step, knob_fraction, knob_param_value, move_target,
-    palette, param_rows, parse_typed_value, peak_db, peak_text, rack_channels, tuner_header_text,
-    tuner_reading, tuner_toggle, unit_suffix,
+    ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KnobKey, NO_SIGNAL, ParamRow, PeakHold,
+    Rgb, Snapshot, Throttle, TunerReading, autoscroll_delta, cabinet_ir, cents_fraction,
+    drop_index, format_value, in_tune, key_step, knob_fraction, knob_param_value, move_target,
+    palette, param_label, param_rows, peak_db, peak_text, tuner_header_text, tuner_reading,
+    typed_text, typed_value,
 };
 use crate::widgets::{self, KnobSize, colour};
 
@@ -23,8 +23,9 @@ const RAIL_WIDTH: i8 = 14;
 const UNIT_GAP: f32 = 4.0;
 pub const UNIT_MARGIN: i8 = 8;
 const UNIT_SIDE_MARGIN: i8 = EAR_WIDTH as i8 + 14;
-const UNIT_HEIGHT: f32 = 66.0;
+const UNIT_HEIGHT: f32 = 64.0;
 const OPEN_UNIT_HEIGHT: f32 = 190.0;
+const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const UNIT_NAME_WIDTH: f32 = 120.0;
 const UNIT_NAME_SIZE: f32 = 18.0;
@@ -33,18 +34,18 @@ const LAMP_SLOT: f32 = 18.0;
 const METER_LABEL_WIDTH: f32 = 52.0;
 pub const METERS: [(&str, &str); 2] = [("Input", "input_peak_db"), ("Output", "output_peak_db")];
 const CLEAR_CLIP_HINT: &str = "Click to clear the clip lamp";
-const BUTTON_SIZE: Vec2 = Vec2::new(64.0, 36.0);
 const MOVE_BUTTON_SIZE: Vec2 = Vec2::splat(36.0);
 const MOVE_BUTTONS_WIDTH: f32 = 90.0;
 const OPEN_CHEVRON: &str = "▼";
 const CLOSED_CHEVRON: &str = "▶";
 const DROP_LINE_WIDTH: f32 = 2.0;
 const TUNER_LABEL: &str = "Tuner";
-const ADD_LABEL: &str = "Add a Module";
-const ADD_COMBO_WIDTH: f32 = 320.0;
+const METER_BRIDGE_LABEL: &str = "Meter bridge";
 const NOTE_SIZE: f32 = 96.0;
 const NO_SIGNAL_SIZE: f32 = 40.0;
-const TYPED_FIELD_WIDTH: f32 = 64.0;
+const VALUE_FIELD_WIDTH: f32 = 64.0;
+const LARGE_KNOB_COLUMN_WIDTH: f32 = 84.0;
+const SMALL_KNOB_TOP: f32 = 4.0;
 const KNOB_KEYS: [(Key, KnobKey); 6] = [
     (Key::ArrowUp, KnobKey::Up),
     (Key::ArrowDown, KnobKey::Down),
@@ -54,32 +55,18 @@ const KNOB_KEYS: [(Key, KnobKey); 6] = [
     (Key::End, KnobKey::End),
 ];
 
+/// `feedback` takes the footer message for a typed value that is no number.
 pub struct Knobs<'a> {
     pub throttle: &'a mut Throttle,
     pub locals: &'a mut HashMap<String, f64>,
+    pub feedback: &'a mut Feedback,
     pub revision: u64,
     pub now: Instant,
 }
 
-pub struct Tuner<'a> {
-    pub open: &'a mut bool,
-    pub muted_by_us: &'a mut bool,
-    pub mute_default: bool,
-}
-
-impl Tuner<'_> {
-    fn toggle(&mut self) -> Option<Command> {
-        let (open, command, muted_by_us) =
-            tuner_toggle(*self.open, self.mute_default, *self.muted_by_us);
-        *self.open = open;
-        *self.muted_by_us = muted_by_us;
-        command
-    }
-}
-
 pub struct RackView<'a, 'b> {
     pub knobs: &'a mut Knobs<'b>,
-    pub tuner: &'a mut Tuner<'b>,
+    pub tuner_open: bool,
     pub clips: &'a mut [ClipLatch; 2],
     pub holds: &'a [PeakHold; 2],
     pub open_units: &'a mut BTreeSet<String>,
@@ -95,7 +82,7 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = UNIT_GAP;
                 meter_bridge(ui, snapshot, view.clips, view.holds);
-                commands.extend(tuner_unit(ui, snapshot, view.tuner));
+                tuner_unit(ui, snapshot, view.tuner_open);
                 commands.extend(module_units(
                     ui,
                     snapshot,
@@ -103,29 +90,33 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
                     view.knobs,
                     view.open_units,
                 ));
-                let rack = rack_channels(&modules, &snapshot.module_types);
-                commands.extend(add_row(ui, &snapshot.module_types, &rack));
             });
     });
     commands
 }
 
+/// A unit exactly `height` tall whatever its content, which is clipped to it; `label` names it in the accessibility tree.
 fn rack_unit<R>(
     ui: &mut Ui,
+    label: &str,
     fill: Rgb,
-    min_height: f32,
+    height: f32,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> InnerResponse<R> {
     let colours = palette();
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), height));
+    let mut unit_ui = ui.new_child(UiBuilder::new().id_salt(label).max_rect(rect));
+    unit_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
     let inner = Frame::new()
         .fill(colour(fill))
         .inner_margin(Margin::symmetric(UNIT_SIDE_MARGIN, UNIT_MARGIN))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.set_min_height(min_height - 2.0 * f32::from(UNIT_MARGIN));
+        .show(&mut unit_ui, |ui| {
+            ui.set_min_size(ui.available_size());
             content(ui)
-        });
-    let rect = inner.response.rect;
+        })
+        .inner;
+    let response = ui.allocate_rect(rect, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Group, true, label));
     let painter = ui.painter();
     painter.hline(
         rect.x_range(),
@@ -138,7 +129,21 @@ fn rack_unit<R>(
         Stroke::new(1.0, colour(colours.edge_dark)),
     );
     widgets::rack_ears(painter, rect);
-    inner
+    InnerResponse::new(inner, response)
+}
+
+/// The unit's top row, as tall as a closed unit's content, items centred in it.
+fn unit_header<R>(
+    ui: &mut Ui,
+    sense: Sense,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> InnerResponse<R> {
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), HEADER_HEIGHT));
+    let header = UiBuilder::new()
+        .max_rect(rect)
+        .layout(Layout::left_to_right(Align::Center))
+        .sense(sense);
+    ui.scope_builder(header, content)
 }
 
 fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
@@ -148,7 +153,10 @@ fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
 
 fn unit_name(ui: &mut Ui, name: &str) {
     let text = RichText::new(name).strong().size(UNIT_NAME_SIZE);
-    ui.add_sized(vec2(UNIT_NAME_WIDTH, 0.0), Label::new(text));
+    ui.add_sized(
+        vec2(UNIT_NAME_WIDTH, ui.available_height()),
+        Label::new(text),
+    );
 }
 
 pub fn muted_text(text: impl Into<String>) -> RichText {
@@ -165,93 +173,69 @@ fn meter_bridge(
     holds: &[PeakHold; 2],
 ) {
     let mut cleared = false;
-    rack_unit(ui, palette().meter_bridge, METER_BRIDGE_HEIGHT, |ui| {
-        for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
-            ui.horizontal(|ui| {
-                ui.add_sized(vec2(METER_LABEL_WIDTH, 0.0), Label::new(muted_text(*label)));
-                let db = snapshot
-                    .status
-                    .as_ref()
-                    .map_or(SILENCE_DB, |status| peak_db(status, key));
-                let ladder = widgets::led_ladder(ui, db, clip.is_clipped())
-                    .interact(Sense::click())
-                    .on_hover_text(CLEAR_CLIP_HINT);
-                cleared |= ladder.clicked();
-                let held_db = snapshot.status.as_ref().map(|_| hold.held_db());
-                ui.label(muted_text(peak_text(held_db, clip.is_clipped())));
-            });
-        }
-    });
+    rack_unit(
+        ui,
+        METER_BRIDGE_LABEL,
+        palette().meter_bridge,
+        METER_BRIDGE_HEIGHT,
+        |ui| {
+            for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(METER_LABEL_WIDTH, 0.0), Label::new(muted_text(*label)));
+                    let db = snapshot
+                        .status
+                        .as_ref()
+                        .map_or(SILENCE_DB, |status| peak_db(status, key));
+                    let ladder = widgets::led_ladder(ui, db, clip.is_clipped())
+                        .interact(Sense::click())
+                        .on_hover_text(CLEAR_CLIP_HINT);
+                    cleared |= ladder.clicked();
+                    let held_db = snapshot.status.as_ref().map(|_| hold.held_db());
+                    ui.label(muted_text(peak_text(held_db, clip.is_clipped())));
+                });
+            }
+        },
+    );
     if cleared {
         clips.iter_mut().for_each(ClipLatch::reset);
     }
 }
 
-fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Command> {
-    let open = *tuner.open;
+/// The Tuner's readout; the left panel's Tuner toggle opens it to the Tuner view.
+fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) {
     let (fill, height) = if open {
         (palette().unit_open, OPEN_UNIT_HEIGHT)
     } else {
         (palette().unit, UNIT_HEIGHT)
     };
     let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
-    rack_unit(ui, fill, height, |ui| {
-        let mut commands = Vec::new();
-        ui.horizontal(|ui| {
+    rack_unit(ui, "Tuner unit", fill, height, |ui| {
+        unit_header(ui, Sense::hover(), |ui| {
             unit_lamp(ui, colour(palette().green), open);
             unit_name(ui, TUNER_LABEL);
             ui.label(RichText::new(tuner_header_text(reading.as_ref())).strong());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let label = if open { "Close" } else { TUNER_LABEL };
-                if ui.add(Button::new(label).min_size(BUTTON_SIZE)).clicked() {
-                    commands.extend(tuner.toggle());
-                }
-            });
         });
         if open {
-            commands.extend(tuner_view(ui, snapshot, reading.as_ref(), tuner));
+            tuner_view(ui, reading.as_ref());
         }
-        commands
-    })
-    .inner
+    });
 }
 
-fn tuner_view(
-    ui: &mut Ui,
-    snapshot: &Snapshot,
-    reading: Option<&TunerReading>,
-    tuner: &mut Tuner,
-) -> Option<Command> {
-    let muted = snapshot
-        .status
-        .as_ref()
-        .and_then(|status| status["muted"].as_bool());
-    ui.vertical_centered(|ui| {
-        match reading {
-            Some(reading) => {
-                let colour = widgets::tune_colour(in_tune(reading.cents));
-                ui.label(RichText::new(&reading.note).size(NOTE_SIZE).color(colour));
+fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
+    ui.horizontal(|ui| match reading {
+        Some(reading) => {
+            let colour = widgets::tune_colour(in_tune(reading.cents));
+            ui.label(RichText::new(&reading.note).size(NOTE_SIZE).color(colour));
+            ui.vertical(|ui| {
                 widgets::cents_arc(ui, Some(cents_fraction(reading.cents)), colour);
                 ui.label(RichText::new(format!("{:.1} Hz", reading.hz)).color(colour));
-            }
-            None => {
-                ui.label(RichText::new(NO_SIGNAL).size(NO_SIGNAL_SIZE));
-                widgets::cents_arc(ui, None, Color32::GRAY);
-            }
+            });
         }
-        let mut checked = muted.unwrap_or_default();
-        let changed = ui
-            .add_enabled(muted.is_some(), Checkbox::new(&mut checked, "Mute"))
-            .changed();
-        if !changed {
-            return None;
+        None => {
+            ui.label(RichText::new(NO_SIGNAL).size(NO_SIGNAL_SIZE));
+            widgets::cents_arc(ui, None, Color32::GRAY);
         }
-        if !checked {
-            *tuner.muted_by_us = false;
-        }
-        Some(Command::Mute(checked))
-    })
-    .inner
+    });
 }
 
 /// A unit dropped by its ears moves to the unit under the pointer; while it is dragged, a line marks where it will land, and the Rack scrolls when the pointer nears the top or bottom of the view.
@@ -346,19 +330,17 @@ fn module_unit(
         (palette().unit, UNIT_HEIGHT)
     };
     let mut toggled = false;
-    let inner = rack_unit(ui, fill, height, |ui| {
+    let inner = rack_unit(ui, &format!("{module} unit"), fill, height, |ui| {
         let mut commands = Vec::new();
-        let header = UiBuilder::new()
-            .layout(Layout::left_to_right(Align::Center))
-            .sense(Sense::click());
-        let header = ui.scope_builder(header, |ui| {
+        let header = unit_header(ui, Sense::click(), |ui| {
             unit_lamp(ui, accent, true);
             unit_name(ui, &module_label(module, unit.rows));
             let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
             toggled |= ui.small_button(chevron).clicked();
             let knobs_width = (ui.available_width() - MOVE_BUTTONS_WIDTH).max(0.0);
-            let wrapped = Layout::left_to_right(Align::Center).with_main_wrap(true);
-            ui.allocate_ui_with_layout(vec2(knobs_width, 0.0), wrapped, |ui| {
+            let row = Layout::left_to_right(Align::Min);
+            ui.allocate_ui_with_layout(vec2(knobs_width, HEADER_HEIGHT), row, |ui| {
+                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                 if !open {
                     commands.extend(param_knobs(ui, unit.rows, KnobSize::Small, accent, knobs));
                 }
@@ -369,17 +351,19 @@ fn module_unit(
         });
         toggled |= header.response.clicked();
         if open {
-            ui.horizontal_wrapped(|ui| {
+            ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                 commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
-            });
-            if let Some(ir_choice) = &unit.ir_choice {
-                commands.extend(ir_row(ui, module, ir_choice));
-            }
-            if ui.button("Remove").clicked() {
-                commands.push(Command::RackRemove {
-                    id: module.to_string(),
+                ui.with_layout(Layout::top_down(Align::Max), |ui| {
+                    if let Some(ir_choice) = &unit.ir_choice {
+                        commands.extend(ir_row(ui, module, ir_choice));
+                    }
+                    if ui.button("Remove").clicked() {
+                        commands.push(Command::RackRemove {
+                            id: module.to_string(),
+                        });
+                    }
                 });
-            }
+            });
         }
         commands
     });
@@ -415,7 +399,7 @@ struct IrChoice<'a> {
 fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
     let mut commands = Vec::new();
     ui.horizontal(|ui| {
-        ui.label("IR");
+        let label = ui.label("IR");
         let current = ir_choice.current.as_deref();
         let combo = ComboBox::from_id_salt(("ir", module))
             .selected_text(current.unwrap_or(NO_IR))
@@ -432,7 +416,7 @@ fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
                     }
                 }
             });
-        if combo.response.clicked() {
+        if combo.response.labelled_by(label.id).clicked() {
             commands.push(Command::RefreshIrs);
         }
     });
@@ -444,39 +428,6 @@ fn module_label(module: &str, rows: &[ParamRow]) -> String {
         Some(row) if row.module_type != module => format!("{module} ({})", row.module_type),
         _ => module.to_string(),
     }
-}
-
-fn add_combo(
-    ui: &mut Ui,
-    module_types: &[ModuleType],
-    rack: &[(String, String)],
-) -> Option<Command> {
-    let mut added = None;
-    ComboBox::from_id_salt("add_module")
-        .selected_text(ADD_LABEL)
-        .width(ADD_COMBO_WIDTH)
-        .show_ui(ui, |ui| {
-            for module_type in module_types {
-                if ui.selectable_label(false, module_type.label()).clicked() {
-                    added = Some(add_command(rack, module_type));
-                }
-            }
-        });
-    added
-}
-
-fn add_row(ui: &mut Ui, module_types: &[ModuleType], rack: &[(String, String)]) -> Option<Command> {
-    let colours = palette();
-    Frame::new()
-        .fill(colour(colours.knob_body))
-        .stroke(Stroke::new(1.0, colour(colours.button_border)))
-        .inner_margin(Margin::same(UNIT_MARGIN))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.vertical_centered(|ui| add_combo(ui, module_types, rack))
-                .inner
-        })
-        .inner
 }
 
 /// Added right to left, so that they read ↑ ↓ at the right of the unit.
@@ -510,7 +461,7 @@ fn param_knobs(
         .collect()
 }
 
-/// A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click opens the typed-value field in place of the value.
+/// A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click focuses the knob's value field.
 fn param_knob(
     ui: &mut Ui,
     row: &ParamRow,
@@ -524,16 +475,13 @@ fn param_knob(
         _ => row.value,
     };
     let fraction = knob_fraction(shown as f32, row.min as f32, row.max as f32);
-    ui.horizontal(|ui| {
+    let field_id = Id::unique(("value", &row.address));
+    let label = muted_text(param_label(&row.param));
+    let knob_and_field = |ui: &mut Ui, knobs: &mut Knobs| {
         let knob = widgets::rack_knob(ui, size, fraction, accent);
-        let field_id = knob.response.id.with("typed");
         let ctrl = ui.input(|input| input.modifiers.ctrl);
         if knob.response.secondary_clicked() || (knob.response.clicked() && ctrl) {
-            let field = TypedField {
-                text: value_number_text(shown, row),
-                focused: false,
-            };
-            ui.data_mut(|data| data.insert_temp(field_id, field));
+            ui.memory_mut(|memory| memory.request_focus(field_id));
         }
         let keys = if knob.response.has_focus() {
             knob_keys(ui)
@@ -548,28 +496,52 @@ fn param_knob(
         let value = keys
             .iter()
             .fold(dragged, |value, &key| key_step(row, value, key));
-        let typed = ui
-            .vertical(|ui| {
-                ui.label(muted_text(&row.param));
-                value_field(ui, field_id, value, row)
-            })
-            .inner;
         let released = knob.reset || knob.response.drag_stopped() || !keys.is_empty();
-        if let Some(value) = typed.or(released.then_some(value)) {
-            knobs.locals.insert(row.address.clone(), value);
-            return Some(
-                knobs
-                    .throttle
-                    .on_release(&row.address, value, knobs.revision),
-            );
+        (value, released, knobs.now)
+    };
+    let (value, released, typed) = match size {
+        KnobSize::Small => {
+            ui.horizontal_top(|ui| {
+                let (value, released, now) = ui
+                    .vertical(|ui| {
+                        ui.add_space(SMALL_KNOB_TOP);
+                        knob_and_field(ui, knobs)
+                    })
+                    .inner;
+                let typed = ui
+                    .vertical(|ui| {
+                        let label = ui.label(label);
+                        value_field(ui, field_id, label.id, row, value, (knobs.feedback, now))
+                    })
+                    .inner;
+                (value, released, typed)
+            })
+            .inner
         }
-        if value == shown {
-            return None;
+        KnobSize::Large => {
+            let column = Layout::top_down(Align::Center);
+            ui.allocate_ui_with_layout(vec2(LARGE_KNOB_COLUMN_WIDTH, 0.0), column, |ui| {
+                let label = ui.label(label);
+                let (value, released, now) = knob_and_field(ui, knobs);
+                let typed = value_field(ui, field_id, label.id, row, value, (knobs.feedback, now));
+                (value, released, typed)
+            })
+            .inner
         }
+    };
+    if let Some(value) = typed.or(released.then_some(value)) {
         knobs.locals.insert(row.address.clone(), value);
-        knobs.throttle.on_drag(&row.address, value, knobs.now)
-    })
-    .inner
+        return Some(
+            knobs
+                .throttle
+                .on_release(&row.address, value, knobs.revision),
+        );
+    }
+    if value == shown {
+        return None;
+    }
+    knobs.locals.insert(row.address.clone(), value);
+    knobs.throttle.on_drag(&row.address, value, knobs.now)
 }
 
 fn knob_keys(ui: &mut Ui) -> Vec<KnobKey> {
@@ -583,49 +555,38 @@ fn knob_keys(ui: &mut Ui) -> Vec<KnobKey> {
     })
 }
 
-/// `focused` turns true once the field has asked for focus, a frame after it opens: the click that opened it would take the focus away again.
-#[derive(Clone)]
-struct TypedField {
-    text: String,
-    focused: bool,
-}
-
-/// The value label, or the open typed-value field; the field closes when it loses focus and returns its number only when Enter closed it.
-fn value_field(ui: &mut Ui, id: Id, value: f64, row: &ParamRow) -> Option<f64> {
-    let Some(mut field) = ui.data(|data| data.get_temp::<TypedField>(id)) else {
-        ui.label(RichText::new(value_text(value, row)).strong());
+/// Shows the formatted value; while focused it holds the bare number to edit. Enter returns the typed number; Esc or a click elsewhere drops the edit, and text that is no number also puts a footer message.
+fn value_field(
+    ui: &mut Ui,
+    id: Id,
+    label: Id,
+    row: &ParamRow,
+    value: f64,
+    (feedback, now): (&mut Feedback, Instant),
+) -> Option<f64> {
+    let editing = ui.data_mut(|data| data.remove_temp::<String>(id));
+    let mut text = editing.clone().unwrap_or_else(|| format_value(row, value));
+    let edit = ui
+        .add(
+            TextEdit::singleline(&mut text)
+                .id(id)
+                .desired_width(VALUE_FIELD_WIDTH),
+        )
+        .labelled_by(label);
+    if edit.has_focus() {
+        let text = if editing.is_some() {
+            text
+        } else {
+            typed_text(row, value)
+        };
+        ui.data_mut(|data| data.insert_temp(id, text));
         return None;
-    };
-    let edit = ui.add(
-        TextEdit::singleline(&mut field.text)
-            .id(id)
-            .desired_width(TYPED_FIELD_WIDTH),
-    );
-    if field.focused && !edit.has_focus() {
-        ui.data_mut(|data| data.remove::<TypedField>(id));
-        let entered = ui.input(|input| input.key_pressed(Key::Enter));
-        return entered.then(|| parse_typed_value(&field.text)).flatten();
     }
-    if !field.focused && !ui.input(|input| input.pointer.any_click()) {
-        edit.request_focus();
-        field.focused = true;
+    let entered = edit.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+    if !entered {
+        return None;
     }
-    ui.data_mut(|data| data.insert_temp(id, field));
-    None
-}
-
-fn value_text(value: f64, row: &ParamRow) -> String {
-    format!(
-        "{}{}",
-        value_number_text(value, row),
-        unit_suffix(&row.unit)
-    )
-}
-
-fn value_number_text(value: f64, row: &ParamRow) -> String {
-    if row.integer {
-        format!("{}", value.round())
-    } else {
-        format!("{value:.1}")
-    }
+    typed_value(&text)
+        .map_err(|message| feedback.show(message, now))
+        .ok()
 }

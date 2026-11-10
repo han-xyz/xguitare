@@ -49,6 +49,8 @@ struct Client {
     modules_fetched: bool,
     modules_warned: bool,
     irs_fetched: bool,
+    ports_fetched: bool,
+    settings_fetched: bool,
     tuner_answered: bool,
     snapshot: Snapshot,
 }
@@ -68,6 +70,8 @@ impl Client {
             modules_fetched: false,
             modules_warned: false,
             irs_fetched: false,
+            ports_fetched: false,
+            settings_fetched: false,
             tuner_answered: false,
             snapshot: Snapshot {
                 link: Link::Disconnected {
@@ -77,6 +81,8 @@ impl Client {
                 bank: None,
                 params: None,
                 tuner: None,
+                ports: None,
+                settings: None,
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
@@ -152,6 +158,9 @@ impl Client {
         if queued.contains(&Command::RefreshIrs) {
             self.irs_fetched = false;
         }
+        if queued.contains(&Command::RefreshPorts) {
+            self.ports_fetched = false;
+        }
         let (requests, quit) = requests_until_quit(queued);
         let sent = requests.len();
         for req in requests {
@@ -161,6 +170,14 @@ impl Client {
             }
             if let Request::RackIr { .. } = &req {
                 log_rack_ir(&response);
+            }
+            match &req {
+                Request::SetPorts { .. } => self.ports_fetched = false,
+                Request::SetSettings { .. } => {
+                    self.settings_fetched = false;
+                    self.irs_fetched = false;
+                }
+                _ => {}
             }
             if let Some(param) = failed_set(&req, &response) {
                 self.snapshot.failed_set = Some((param, Instant::now()));
@@ -253,6 +270,17 @@ impl Client {
                 return;
             }
         }
+        if !self.ports_fetched {
+            self.snapshot.ports = self.fetch_once(&Request::Ports);
+            self.ports_fetched = true;
+        }
+        if !self.settings_fetched {
+            self.snapshot.settings = self.fetch_once(&Request::Settings);
+            self.settings_fetched = true;
+        }
+        if self.connection.is_none() {
+            return;
+        }
         self.failures = 0;
         let revision = status["revision"].as_u64().unwrap_or(0);
         self.snapshot.status = Some(status);
@@ -294,6 +322,18 @@ impl Client {
                 }
             }
             Err(_) => {}
+        }
+    }
+
+    /// Fetched once whatever the answer, like `ir_list`; an error is logged, not shown.
+    fn fetch_once(&mut self, req: &Request) -> Option<Value> {
+        match self.request(req) {
+            Ok(Response::Ok(payload)) => Some(payload),
+            Ok(Response::Err { error }) => {
+                warn!("{req:?}: {error}");
+                None
+            }
+            Err(_) => None,
         }
     }
 
@@ -340,6 +380,8 @@ impl Client {
         self.revision = None;
         self.modules_fetched = false;
         self.irs_fetched = false;
+        self.ports_fetched = false;
+        self.settings_fetched = false;
         self.snapshot.status = None;
         self.snapshot.tuner = None;
         self.snapshot.link = Link::Disconnected {
