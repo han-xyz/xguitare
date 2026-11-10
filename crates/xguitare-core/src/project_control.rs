@@ -983,7 +983,7 @@ fn open(
             moved_from: NOTHING_MOVED,
         },
     )?;
-    // The swap is queued, so the commands after it reach the new Arrangement; a full queue leaves the click off until the next `click`.
+    // The swap is queued, so the commands after it reach the new Arrangement; a full queue leaves the click off and at the default volume until the next `click`.
     let _ = send(state, &click_commands(state, &project));
     state.metronome.on = false;
     let events = &mut state.projects.events;
