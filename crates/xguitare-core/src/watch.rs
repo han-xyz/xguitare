@@ -102,6 +102,7 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
     }
     state.active = Some((file, preset));
     state.revision += 1;
+    state.modified = false;
     actions.push(Action::Reload { program });
     actions
 }

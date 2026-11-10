@@ -43,6 +43,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 1,
+        modified: false,
         peaks: PeakMeters::default(),
     };
     (state, audio)
@@ -95,7 +96,7 @@ fn unchanged_content_is_nothing() {
     };
     assert!(matches!(handle(&mut state, set).0, Response::Ok(_)));
     assert!(matches!(
-        handle(&mut state, Request::Save).0,
+        handle(&mut state, Request::Save { name: None }).0,
         Response::Ok(_)
     ));
     assert!(matches!(audio.commands.pop(), Ok(Command::SetParam { .. })));
@@ -130,7 +131,7 @@ fn removed_active_file_keeps_rack_and_clears_program() {
     };
     assert!(status["program"].is_null(), "{status}");
     assert!(matches!(
-        handle(&mut state, Request::Save).0,
+        handle(&mut state, Request::Save { name: None }).0,
         Response::Err { .. }
     ));
     assert_eq!(fs::read_to_string(&loud).unwrap(), loud_text);

@@ -305,7 +305,7 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
         let req = match command {
             Command::Load(preset) => Request::Load { preset },
             Command::Set { param, value } => Request::Set { param, value },
-            Command::Save => Request::Save,
+            Command::Save => Request::Save { name: None },
             Command::RackAdd {
                 type_name,
                 after,
@@ -571,7 +571,7 @@ impl Feedback {
 /// The status bar message for a command's response: a saved path or an error; other successes are silent.
 pub fn response_text(req: &Request, response: Result<Response, ClientError>) -> Option<String> {
     match (req, response) {
-        (Request::Save, Ok(Response::Ok(payload))) => Some(format!(
+        (Request::Save { .. }, Ok(Response::Ok(payload))) => Some(format!(
             "saved {}",
             payload["path"].as_str().unwrap_or_default()
         )),

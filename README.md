@@ -210,6 +210,13 @@ $ xguitare save
 saved /home/you/.config/xguitare/bank/03-lead.toml
 ```
 
+`save --as <name>` writes them to a new Preset file in the Bank instead, named after `<name>`, and switches to it; a name another Preset already has is refused:
+
+```console
+$ xguitare save --as "My Lead Tone"
+saved /home/you/.config/xguitare/bank/04-my-lead-tone.toml
+```
+
 `modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, preamp, tonestack, cabinet, reverb):
 
 ```console

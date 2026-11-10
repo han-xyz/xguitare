@@ -269,9 +269,29 @@ fn save_prints_path() {
         &["save"],
         reply(r#"{"ok":true,"path":"/bank/01-clean.toml"}"#),
     );
-    assert_eq!(out.requests, [Request::Save]);
+    assert_eq!(out.requests, [Request::Save { name: None }]);
     assert_eq!(out.code, 0);
     assert_eq!(out.stdout, "saved /bank/01-clean.toml\n");
+}
+
+#[test]
+fn cli_save_as() {
+    let out = cli(
+        &["save", "--as", "My Tone"],
+        reply(r#"{"ok":true,"path":"/bank/04-my-tone.toml","program":3}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Save {
+            name: Some("My Tone".to_string())
+        }]
+    );
+    assert_eq!(
+        out.requests[0].to_line(),
+        r#"{"cmd":"save","as":"My Tone"}"#
+    );
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "saved /bank/04-my-tone.toml\n");
 }
 
 #[test]

@@ -35,6 +35,7 @@ const CABINET_IRS: [&str; 2] = [DEFAULT_IR, BASS_IR];
 const CABINET_NEEDS_IR: &str = "cabinet needs an ir; add one in the preset file";
 const AFTER_OR_AT: &str = "give either after or at";
 const NO_CABINET: &str = "no cabinet module";
+const EMPTY_PRESET_NAME: &str = "preset name must not be empty";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -51,7 +52,11 @@ pub enum Request {
     Get {
         param: Option<String>,
     },
-    Save,
+    Save {
+        /// Writes a new Preset file with this name instead of the active Preset's file.
+        #[serde(rename = "as")]
+        name: Option<String>,
+    },
     Modules,
     RackAdd {
         r#type: String,
@@ -95,6 +100,8 @@ pub struct EngineState {
     pub max_frames: usize,
     /// Incremented on every change to the live Rack or the Bank; starts at 1.
     pub revision: u64,
+    /// Whether the live Rack has changed since the active Preset was loaded, reloaded or saved.
+    pub modified: bool,
     pub peaks: PeakMeters,
 }
 
@@ -175,7 +182,8 @@ fn handle_from(
         Request::Load { preset } => load(state, &preset, &mut warnings),
         Request::Set { param, value } => set(state, &param, value),
         Request::Get { param } => get(state, param.as_deref()),
-        Request::Save => save(state),
+        Request::Save { name: None } => save(state),
+        Request::Save { name: Some(name) } => save_as(state, &name),
         Request::Modules => Ok(modules()),
         Request::RackAdd { r#type, after, at } => {
             rack_add(state, &r#type, after.as_deref(), at, &mut warnings)
@@ -293,6 +301,7 @@ fn rebuild(
     state.revision += 1;
     if let Reprepare::Passthrough { .. } = outcome {
         state.active = None;
+        state.modified = false;
     }
     Ok(outcome)
 }
@@ -325,6 +334,7 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         "prepared_frames": state.max_frames,
         "revision": state.revision,
         "muted": shared.muted.load(Ordering::Relaxed),
+        "modified": state.modified,
         "input_peak_db": peak_db(peaks.input),
         "output_peak_db": peak_db(peaks.output),
         "xruns": shared.xruns.load(Ordering::Relaxed),
@@ -389,6 +399,7 @@ fn load(
     };
     let payload = json!({"program": program, "name": preset.name});
     install_preset(state, file, preset, warnings)?;
+    state.modified = false;
     Ok(payload)
 }
 
@@ -451,6 +462,7 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
         .map_err(|_| ENGINE_BUSY.to_string())?;
     preset.modules[module].params[param].1 = applied;
     state.revision += 1;
+    state.modified = true;
     Ok(json!({
         "param": format!("{}.{}", address.module, address.param),
         "value": shortest_f64(applied),
@@ -471,7 +483,69 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
         *active = saved;
     }
     state.revision += 1;
+    state.modified = false;
     Ok(payload)
+}
+
+/// Writes the live Preset, renamed `name`, to a new `<NN>-<slug>.toml` in the Bank dir and makes it the active Preset; the name reaches the path only through the slug.
+fn save_as(state: &mut EngineState, name: &str) -> Result<Value, String> {
+    let (_, live) = state.active.as_ref().ok_or(NO_PRESET)?;
+    let slug = slug(name);
+    if slug.is_empty() {
+        return Err(EMPTY_PRESET_NAME.to_string());
+    }
+    let dir = state.bank.dir.clone();
+    let cannot_save = |err: io::Error| format!("cannot save {}: {err}", dir.display());
+    let bank = Bank::load_dir(&dir).map_err(cannot_save)?;
+    let wanted = name.to_lowercase();
+    if bank.entries.iter().any(
+        |entry| matches!(entry, BankEntry::Valid { preset, .. } if preset.name.to_lowercase() == wanted),
+    ) {
+        return Err(format!("a preset named '{name}' already exists"));
+    }
+    let file = dir.join(format!("{:02}-{slug}.toml", next_prefix(&bank)));
+    let text = Preset {
+        name: name.to_string(),
+        modules: live.modules.clone(),
+    }
+    .to_toml();
+    write_through(&file, &text).map_err(|err| format!("cannot save {}: {err}", file.display()))?;
+    state.bank = Bank::load_dir(&dir).map_err(cannot_save)?;
+    let saved = Preset::parse(&text).expect("a saved Preset parses back");
+    state.active = Some((file.clone(), saved));
+    state.revision += 1;
+    state.modified = false;
+    Ok(json!({"path": file.display().to_string(), "program": active_program(state)}))
+}
+
+/// The name lowercased, ASCII letters and digits kept, every other run of characters one `-`, no `-` at either end.
+fn slug(name: &str) -> String {
+    let mut slug = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.trim_end_matches('-').to_string()
+}
+
+/// One more than the highest two-digit prefix among the Bank's file names.
+fn next_prefix(bank: &Bank) -> u32 {
+    bank.entries
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.file().file_name()?.to_str()?;
+            let prefix = name.get(..2)?;
+            if !prefix.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            prefix.parse().ok()
+        })
+        .max()
+        .unwrap_or(0)
+        + 1
 }
 
 /// Replaces the file `path` names, through a symlink, by a temp file and rename beside it, keeping the old file's mode.
@@ -620,6 +694,7 @@ fn edit_rack(
     let (file, mut preset) = (file.clone(), preset.clone());
     let payload = edit(&mut preset)?;
     install_preset(state, file, preset, warnings)?;
+    state.modified = true;
     Ok(payload)
 }
 
@@ -652,6 +727,7 @@ fn rack_ir(
     }
     *warnings = build_warnings;
     swap_in(state, file, preset, rack)?;
+    state.modified = true;
     Ok(json!({"id": id, "ir": ir}))
 }
 

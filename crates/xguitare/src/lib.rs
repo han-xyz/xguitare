@@ -49,8 +49,11 @@ enum Cmd {
     },
     /// Show Parameters: all, one Module's, or one
     Get { param: Option<String> },
-    /// Write the live Parameter values back to the active Preset file
-    Save,
+    /// Write the live Parameter values back to the active Preset file, or with --as to a new Preset
+    Save {
+        #[arg(long = "as", value_name = "NAME")]
+        name: Option<String>,
+    },
     /// List the Module types, their channels and Parameters
     Modules,
     /// Edit the live Rack's layout

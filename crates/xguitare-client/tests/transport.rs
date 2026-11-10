@@ -9,7 +9,7 @@ fn one_shot_round_trip() {
     let dir = TempDir::new("one-shot");
     let server = serve(&dir.socket(), &[r#"{"ok":true,"path":"/bank/clean.toml"}"#]);
     let mut transport = UnixSocketTransport::from_config(&dir.config());
-    let response = transport.request(&Request::Save).unwrap();
+    let response = transport.request(&Request::Save { name: None }).unwrap();
     assert_eq!(
         response,
         Response::from_line(r#"{"ok":true,"path":"/bank/clean.toml"}"#).unwrap()

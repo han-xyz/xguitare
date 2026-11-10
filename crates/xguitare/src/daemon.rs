@@ -93,6 +93,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         sample_rate,
         max_frames: session.max_frames(),
         revision: 1,
+        modified: false,
         peaks: PeakMeters::default(),
     }));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);

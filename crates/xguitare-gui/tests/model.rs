@@ -54,6 +54,7 @@ fn registry_modules(test: &str) -> serde_json::Value {
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 0,
+        modified: false,
         peaks: PeakMeters::default(),
     };
     match handle(&mut state, Request::Modules).0 {
@@ -117,7 +118,7 @@ fn commands_before_quit_are_sent_in_order() {
         Command::Load("2".to_string()),
     ];
     let expected = vec![
-        Request::Save,
+        Request::Save { name: None },
         Request::Set {
             param: "preamp.gain".to_string(),
             value: 70.0,
@@ -415,7 +416,7 @@ fn feedback_expires_after_3s() {
 fn feedback_only_save_and_errors() {
     let saved = Ok(Response::Ok(json!({"path": "/bank/01-clean.toml"})));
     assert_eq!(
-        response_text(&Request::Save, saved).as_deref(),
+        response_text(&Request::Save { name: None }, saved).as_deref(),
         Some("saved /bank/01-clean.toml")
     );
     let busy = Ok(Response::Err {
@@ -430,7 +431,10 @@ fn feedback_only_save_and_errors() {
         Some("error: engine busy")
     );
     let gone = Err(ClientError::NotRunning(PathBuf::from("/tmp/xgv/x.sock")));
-    assert!(response_text(&Request::Save, gone).is_some_and(|text| text.starts_with("error: ")));
+    assert!(
+        response_text(&Request::Save { name: None }, gone)
+            .is_some_and(|text| text.starts_with("error: "))
+    );
     let applied = Ok(Response::Ok(
         json!({"param": "preamp.gain", "value": 42.0, "clamped": false}),
     ));
@@ -537,7 +541,7 @@ fn hold_cleared_on_set_error() {
         json!({"param": "preamp.gain", "value": 12.0, "clamped": false}),
     ));
     assert_eq!(failed_set(&set, &applied), None);
-    assert_eq!(failed_set(&Request::Save, &busy), None);
+    assert_eq!(failed_set(&Request::Save { name: None }, &busy), None);
 }
 
 #[test]

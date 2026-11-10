@@ -119,7 +119,7 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             Request::Set { param, value }
         }
         Cmd::Get { param } => Request::Get { param },
-        Cmd::Save => Request::Save,
+        Cmd::Save { name } => Request::Save { name },
         Cmd::Modules => Request::Modules,
         Cmd::Rack(RackCmd::Add {
             type_name,
@@ -163,7 +163,7 @@ fn render(req: &Request, payload: &Value) -> String {
             )
         }
         Request::Get { param } => render_get(payload, param.as_deref()),
-        Request::Save => format!("saved {}\n", text(&payload["path"])),
+        Request::Save { .. } => format!("saved {}\n", text(&payload["path"])),
         Request::Modules => render_modules(payload),
         Request::RackAdd { .. } => format!("added {}\n", text(&payload["id"])),
         Request::RackRemove { .. } => format!("removed {}\n", text(&payload["id"])),

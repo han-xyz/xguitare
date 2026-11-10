@@ -36,7 +36,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":741,"callback_max_us":1228,"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"input_peak_db":-103.8,"muted":false,"output_peak_db":-120.0,"prepared_frames":128,"preset":"Clean","program":0,"revision":2,"sample_rate":48000,"xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":741,"callback_max_us":1228,"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"input_peak_db":-103.8,"modified":false,"muted":false,"output_peak_db":-120.0,"prepared_frames":128,"preset":"Clean","program":0,"revision":2,"sample_rate":48000,"xruns":0}
 ```
 
 | Key | Value |
@@ -47,6 +47,7 @@ Response:
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
 | `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
+| `modified` | Whether the live Rack differs from the active Preset's file: `true` after a successful `set`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
@@ -202,13 +203,34 @@ Response:
 | --- | --- |
 | `path` | The file written. |
 
+With `as`, writes the active Preset, with its current Parameter values and the given name, to a new file in the Bank directory instead, and makes that the active Preset; the Bank is read again. The file is `<NN>-<slug>.toml`: `NN` is one more than the highest two-digit prefix of a file in the Bank directory, zero-padded to two digits; `slug` is the name lowercased with ASCII letters and digits kept and every other run of characters replaced by one `-`, without a `-` at either end. The name reaches the file name only through the slug, so the file is always directly in the Bank directory.
+
+Request:
+
+```json
+{"cmd":"save","as":"My Lead Tone!"}
+```
+
+Response:
+
+```json
+{"ok":true,"path":"/home/you/.config/xguitare/bank/04-my-lead-tone.toml","program":3}
+```
+
+| Key | Value |
+| --- | --- |
+| `path` | The new file. |
+| `program` | Bank position of the new file, now the active Preset. |
+
 Errors:
 
 | `error` | When |
 | --- | --- |
 | `no preset loaded` | No Preset is active. |
-| `active preset file was removed; load a preset first` | The active Preset's file is no longer in the Bank. |
-| `cannot save <path>: <reason>` | Writing or renaming the file failed. |
+| `active preset file was removed; load a preset first` | Without `as`: the active Preset's file is no longer in the Bank. |
+| `preset name must not be empty` | With `as`: the name is empty or has no ASCII letter or digit. |
+| `a preset named '<name>' already exists` | With `as`: a Preset in the Bank has this name, compared case-insensitively. |
+| `cannot save <path>: <reason>` | Reading the Bank directory, or writing or renaming the file, failed. |
 
 ## modules
 

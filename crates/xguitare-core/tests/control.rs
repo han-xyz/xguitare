@@ -16,6 +16,7 @@ use xguitare_core::engine::{
     engine_queues, raise_peak,
 };
 use xguitare_core::tuner::Tuner;
+use xguitare_core::watch::apply;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, ModuleRegistry, Preset, PresetModule};
 
 const QUEUE_CAPACITY: usize = 64;
@@ -74,6 +75,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 1,
+        modified: false,
         peaks: PeakMeters::default(),
     };
     (state, audio, dir)
@@ -131,6 +133,7 @@ fn status_reports_fields() {
             "prepared_frames": 128,
             "revision": 1,
             "muted": false,
+            "modified": false,
             "input_peak_db": -120.0,
             "output_peak_db": -120.0,
             "xruns": 3,
@@ -264,7 +267,7 @@ fn set_rounds_integer_param() {
         audio.commands.pop(),
         Ok(Command::SetParam { module: 1, param: 1, value }) if value == 150.0
     ));
-    ok(handle(&mut state, Request::Save));
+    ok(handle(&mut state, Request::Save { name: None }));
     let file = state.config.bank_dir.join("01-clean.toml");
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(saved.modules[1].params[1], ("low_cut".to_string(), 150.0));
@@ -453,7 +456,7 @@ fn malformed_json_is_error() {
 fn save_writes_live_values_atomically() {
     let (mut state, _audio, _dir) = state("save");
     ok(handle(&mut state, set("gain.level", -6.0)));
-    let payload = ok(handle(&mut state, Request::Save));
+    let payload = ok(handle(&mut state, Request::Save { name: None }));
     let file = state.config.bank_dir.join("01-clean.toml");
     assert_eq!(payload, json!({"path": file.display().to_string()}));
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
@@ -467,7 +470,7 @@ fn save_keeps_mode() {
     let (mut state, _audio, _dir) = state("save-keeps-mode");
     let file = state.config.bank_dir.join("01-clean.toml");
     fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
-    ok(handle(&mut state, Request::Save));
+    ok(handle(&mut state, Request::Save { name: None }));
     assert_eq!(fs::metadata(&file).unwrap().mode() & 0o777, 0o600);
 }
 
@@ -481,7 +484,7 @@ fn save_through_symlink() {
     fs::rename(&link, &target).unwrap();
     std::os::unix::fs::symlink(&target, &link).unwrap();
     ok(handle(&mut state, set("gain.level", -6.0)));
-    ok(handle(&mut state, Request::Save));
+    ok(handle(&mut state, Request::Save { name: None }));
     assert!(
         fs::symlink_metadata(&link)
             .unwrap()
@@ -507,7 +510,7 @@ fn save_does_not_follow_planted_tmp_link() {
         let name = format!("01-clean.toml.{}.{n}.tmp", std::process::id());
         std::os::unix::fs::symlink(&victim, state.config.bank_dir.join(name)).unwrap();
     }
-    let message = error(handle(&mut state, Request::Save));
+    let message = error(handle(&mut state, Request::Save { name: None }));
     assert!(message.starts_with("cannot save "), "{message}");
     assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
     assert_eq!(fs::metadata(&victim).unwrap().mode(), victim_mode);
@@ -517,7 +520,10 @@ fn save_does_not_follow_planted_tmp_link() {
 fn save_without_preset_is_error() {
     let (mut state, _audio, _dir) = state("save-without-preset");
     state.active = None;
-    assert_eq!(error(handle(&mut state, Request::Save)), "no preset loaded");
+    assert_eq!(
+        error(handle(&mut state, Request::Save { name: None })),
+        "no preset loaded"
+    );
 }
 
 #[test]
@@ -526,7 +532,7 @@ fn save_after_active_removed_is_error() {
     remove_active_file_and_reindex(&mut state);
     let loud = fs::read_to_string(state.config.bank_dir.join("02-loud.toml")).unwrap();
     assert_eq!(
-        error(handle(&mut state, Request::Save)),
+        error(handle(&mut state, Request::Save { name: None })),
         "active preset file was removed; load a preset first"
     );
     assert!(!state.config.bank_dir.join("01-clean.toml").exists());
@@ -555,7 +561,7 @@ fn failed_save_leaves_no_tmp() {
     fs::remove_file(&target).unwrap();
     fs::create_dir(&target).unwrap();
     fs::write(target.join("occupied"), "").unwrap();
-    let message = error(handle(&mut state, Request::Save));
+    let message = error(handle(&mut state, Request::Save { name: None }));
     assert!(message.starts_with("cannot save"), "{message}");
     assert!(tmp_files(&state.config.bank_dir).is_empty());
 }
@@ -824,7 +830,7 @@ fn revision_increments_on_load_set_save() {
     assert_eq!(revision(&mut state), 2);
     ok(handle(&mut state, set("gain.level", -6.0)));
     assert_eq!(revision(&mut state), 3);
-    ok(handle(&mut state, Request::Save));
+    ok(handle(&mut state, Request::Save { name: None }));
     assert_eq!(revision(&mut state), 4);
 }
 
@@ -1139,7 +1145,7 @@ fn save_after_rack_edit_round_trips() {
     ok(handle(&mut state, rack_add("delay", Some("cabinet"))));
     ok(handle(&mut state, rack_add("delay", Some("delay"))));
     ok(handle(&mut state, rack_add("gate", Some("gain"))));
-    ok(handle(&mut state, Request::Save));
+    ok(handle(&mut state, Request::Save { name: None }));
     let file = state.config.bank_dir.join("01-clean.toml");
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
     let (_, live) = state.active.as_ref().unwrap();
@@ -1425,7 +1431,7 @@ fn rack_ir_errors_verbatim() {
 fn save_after_rack_ir_round_trips() {
     let (mut state, _audio, _dir) = ir_state("rack-ir-save");
     ok(handle(&mut state, rack_ir("cabs/x.wav", None)));
-    ok(handle(&mut state, Request::Save));
+    ok(handle(&mut state, Request::Save { name: None }));
     let file = state.config.bank_dir.join("01-clean.toml");
     let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(saved.modules[1].ir.as_deref(), Some("cabs/x.wav"));
@@ -1477,4 +1483,142 @@ fn ir_list_skips_unreadable_subdir() {
         ok(handle(&mut state, Request::IrList))["irs"],
         json!(["a.wav"])
     );
+}
+
+fn save_as(name: &str) -> Request {
+    Request::Save {
+        name: Some(name.to_string()),
+    }
+}
+
+fn is_modified(state: &mut EngineState) -> bool {
+    ok(handle(state, Request::Status))["modified"] == true
+}
+
+fn bank_files(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".toml"))
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn modified_tracks_changes() {
+    let (mut state, _audio, _dir) = ir_state("modified");
+    assert!(!is_modified(&mut state));
+    for req in [
+        set("gain.level", -6.0),
+        rack_add_at("gate", 0),
+        rack_move("gate", 1),
+        rack_remove("gate"),
+        rack_ir("cabs/x.wav", None),
+    ] {
+        ok(handle(&mut state, Request::Save { name: None }));
+        assert!(!is_modified(&mut state));
+        ok(handle(&mut state, req.clone()));
+        assert!(is_modified(&mut state), "{req:?}");
+    }
+    ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "Loud".to_string(),
+        },
+    ));
+    assert!(!is_modified(&mut state));
+    ok(handle(&mut state, set("gain.level", -9.0)));
+    let file = active_file(&state).unwrap();
+    fs::write(
+        &file,
+        "name = \"Loud\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = 1\n",
+    )
+    .unwrap();
+    apply(&mut state, &[file]);
+    assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Loud");
+    assert!(!is_modified(&mut state));
+}
+
+#[test]
+fn save_as_creates_and_loads() {
+    let (mut state, _audio, _dir) = state("save-as");
+    ok(handle(&mut state, set("gain.level", -6.0)));
+    let before = revision(&mut state).as_u64().unwrap();
+    let connection = open_connection(&mut state);
+    let (line, _) = handle_line(
+        &mut state,
+        connection,
+        r#"{"cmd":"save","as":"My Lead Tone!"}"#,
+    );
+    let file = state.config.bank_dir.join("04-my-lead-tone.toml");
+    assert_eq!(
+        serde_json::from_str::<Value>(&line).unwrap(),
+        json!({"ok": true, "path": file.display().to_string(), "program": 3})
+    );
+    let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved.name, "My Lead Tone!");
+    assert_eq!(saved.modules[0].params[0], ("level".to_string(), -6.0));
+    let original =
+        Preset::parse(&fs::read_to_string(state.config.bank_dir.join("01-clean.toml")).unwrap())
+            .unwrap();
+    assert_eq!(original.modules[0].params[0], ("level".to_string(), -3.0));
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["preset"], "My Lead Tone!");
+    assert_eq!(status["program"], 3);
+    assert_eq!(status["modified"], false);
+    assert!(status["revision"].as_u64().unwrap() > before);
+    assert_eq!(
+        ok(handle(&mut state, Request::List))["entries"][3]["name"],
+        "My Lead Tone!"
+    );
+    assert!(tmp_files(&state.config.bank_dir).is_empty());
+}
+
+#[test]
+fn save_as_rejects_empty_and_duplicate() {
+    let (mut state, _audio, _dir) = state("save-as-rejects");
+    let before = bank_files(&state.config.bank_dir);
+    for name in ["", "   ", "!!!", "--"] {
+        assert_eq!(
+            error(handle(&mut state, save_as(name))),
+            "preset name must not be empty",
+            "{name:?}"
+        );
+    }
+    assert_eq!(
+        error(handle(&mut state, save_as("loud"))),
+        "a preset named 'loud' already exists"
+    );
+    assert_eq!(
+        error(handle(&mut state, save_as("CLEAN"))),
+        "a preset named 'CLEAN' already exists"
+    );
+    assert_eq!(bank_files(&state.config.bank_dir), before);
+    assert!(!is_modified(&mut state));
+}
+
+#[test]
+fn save_as_name_cannot_escape_bank() {
+    let (mut state, _audio, _dir) = state("save-as-escape");
+    let bank = state.config.bank_dir.clone();
+    assert_eq!(
+        error(handle(&mut state, save_as(".."))),
+        "preset name must not be empty"
+    );
+    for (name, file) in [("../x", "04-x.toml"), ("a/b", "05-a-b.toml")] {
+        let payload = ok(handle(&mut state, save_as(name)));
+        assert_eq!(payload["path"], bank.join(file).display().to_string());
+    }
+    assert_eq!(
+        bank_files(&bank),
+        [
+            "01-clean.toml",
+            "02-loud.toml",
+            "03-broken.toml",
+            "04-x.toml",
+            "05-a-b.toml"
+        ]
+    );
+    assert_eq!(fs::read_dir(&bank).unwrap().count(), 6);
 }

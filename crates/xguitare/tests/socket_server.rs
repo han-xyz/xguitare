@@ -58,6 +58,7 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
         sample_rate: 48_000.0,
         max_frames: 128,
         revision: 1,
+        modified: false,
         peaks: PeakMeters::default(),
     };
     let stop = Arc::new(AtomicBool::new(false));
