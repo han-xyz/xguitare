@@ -28,8 +28,8 @@ const TRANSPORT_HEIGHT: f32 = 44.0;
 const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(84.0, 32.0);
 const POSITION_SIZE: f32 = 22.0;
 const PANEL_BUTTON: egui::Vec2 = egui::Vec2::new(56.0, 32.0);
-/// The Tracks and timeline's height while the mixer panel is open below them.
-pub const TIMELINE_HEIGHT_WITH_MIXER: f32 = 200.0;
+/// The Tracks and timeline's height while the mixer panel is open below them: the ruler and three Track rows.
+pub const TIMELINE_HEIGHT_WITH_MIXER: f32 = RULER_HEIGHT + 3.0 * TRACK_ROW_HEIGHT;
 const NAME_WIDTH: f32 = 140.0;
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(28.0, 24.0);
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
