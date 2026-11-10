@@ -9,9 +9,9 @@ use hound::{SampleFormat, WavReader};
 use xguitare::disk_writer::{DiskThread, TakeWriter};
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
 use xguitare_core::engine::{Command, FadeLengths, RackSwitcher, engine_queues};
-use xguitare_core::project::{LoopRegion, Project, Track};
+use xguitare_core::project::{LoopRegion, Master, Project, Track};
 use xguitare_core::take_capture::{FinishedTake, TakeSpan, TrackReader, take_ring};
-use xguitare_dsp::Rack;
+use xguitare_dsp::{Rack, StereoRack};
 
 struct TempDir(PathBuf);
 
@@ -217,13 +217,19 @@ fn armed_arrangement() -> Box<Arrangement> {
             mute: false,
             solo: false,
             arm: true,
+            to_master: true,
+            sends: Vec::new(),
             modules: Vec::new(),
             items: Vec::new(),
         }],
+        buses: Vec::new(),
+        master: Master::default(),
     };
     let arrangement = Arrangement::new(
         &project,
         vec![empty_rack()],
+        Vec::new(),
+        empty_master(),
         &HashMap::new(),
         48_000.0,
         BLOCK,
@@ -295,4 +301,10 @@ fn a_take_recorded_while_a_pending_arrangement_is_replaced_stays_one_file() {
         }]
     );
     assert_eq!(wav_samples(&dir.0, "takes/t-1.wav"), input[..recorded]);
+}
+
+fn empty_master() -> StereoRack {
+    let mut master = StereoRack::new(Vec::new()).expect("no Modules");
+    master.prepare(48_000.0, BLOCK);
+    master
 }

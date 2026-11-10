@@ -66,6 +66,10 @@ struct OpenProject {
 pub type TrackReaders = Vec<TrackReader>;
 
 /// Work for the Daemon, in the order it arose.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a few events per Control API request; boxing the closed Project saves nothing that matters"
+)]
 pub enum ProjectEvent {
     /// Start a disk thread writing Takes under `dir` at `sample_rate`.
     Opened { dir: PathBuf, sample_rate: u32 },

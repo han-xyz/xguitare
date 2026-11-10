@@ -315,7 +315,7 @@ Projects live under `projects_dir`, by default `~/Music/xguitare`; the GUI's `Se
 
 ```text
 ~/Music/xguitare/demo-song/
-  project.toml            name, sample rate, tempo, meter, loop, click, count-in, Tracks with their Modules, Items and Takes
+  project.toml            name, sample rate, tempo, meter, loop, click, count-in, Master, Buses, Tracks with their Modules, Sends, Items and Takes
   project.autosave.toml   the latest autosave, when there is one
   takes/guitar-1.wav      one mono 32-bit float WAV per Take, at the Project's sample rate
 ```

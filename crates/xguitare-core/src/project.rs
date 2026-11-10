@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write};
@@ -8,13 +9,16 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::control::{slug, temp_path};
-use crate::preset::{ModuleEntry, module_entries, parse_modules};
+use crate::preset::{
+    CABINET_TYPE, ModuleEntry, module_entries, parse_modules, parse_stereo_modules,
+};
 use crate::{Preset, PresetError, PresetModule};
 
 pub const PROJECT_FILE: &str = "project.toml";
 pub const AUTOSAVE_FILE: &str = "project.autosave.toml";
 pub const TAKES_DIR: &str = "takes";
 pub const MAX_TRACKS: usize = 16;
+pub const MAX_BUSES: usize = 8;
 pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 
 const DEFAULT_SAMPLE_RATE: u32 = 48_000;
@@ -30,8 +34,6 @@ const PAN: RangeInclusive<f32> = -1.0..=1.0;
 /// The largest frame a TOML integer holds, so every saved frame loads again.
 const LAST_FRAME: u64 = i64::MAX as u64;
 const TAKE_EXTENSION: &str = ".wav";
-const EMPTY_TRACK_NAME: &str = "track name must not be empty";
-const DIGITS_TRACK_NAME: &str = "track name must not be only digits";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
@@ -47,6 +49,8 @@ pub struct Project {
     /// Bars of click before Recording starts from stopped.
     pub count_in: u32,
     pub tracks: Vec<Track>,
+    pub buses: Vec<Bus>,
+    pub master: Master,
 }
 
 /// Start and end in frames.
@@ -61,7 +65,7 @@ pub struct LoopRegion {
 #[derive(Debug, Clone, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "mute, solo and arm are independent Track switches"
+    reason = "mute, solo, arm and to_master are independent Track switches"
 )]
 pub struct Track {
     pub name: String,
@@ -72,8 +76,51 @@ pub struct Track {
     pub mute: bool,
     pub solo: bool,
     pub arm: bool,
+    /// Whether the Track's own output goes to Master; its Sends play either way.
+    pub to_master: bool,
+    /// At most one per Bus; a Bus with none here gets nothing from this Track.
+    pub sends: Vec<Send>,
     pub modules: Vec<PresetModule>,
     pub items: Vec<Item>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bus {
+    /// Stays the Bus's while others are added or removed; Sends name their Bus by it.
+    pub id: u64,
+    pub name: String,
+    pub volume_db: f32,
+    pub pan: f32,
+    pub mute: bool,
+    pub solo: bool,
+    pub modules: Vec<PresetModule>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Send {
+    /// The id of the Bus it feeds.
+    pub bus: u64,
+    /// `-inf` is off.
+    pub level_db: f32,
+    /// Taken after the Track's Rack and pan, before its volume.
+    pub pre: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Master {
+    /// `-inf` is silent.
+    pub volume_db: f32,
+    pub modules: Vec<PresetModule>,
+}
+
+impl Default for Master {
+    fn default() -> Self {
+        Master {
+            volume_db: 0.0,
+            modules: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +188,28 @@ pub enum ProjectError {
     Exists(String),
     /// A Track name that `track_add` would refuse, with its message.
     TrackName(String),
+    TooManyBuses,
+    Bus {
+        bus: String,
+        error: PresetError,
+    },
+    Master(PresetError),
+    CabinetOnBus,
+    /// A Bus name that breaks the Track name rules, with its message.
+    BusName(String),
+    DuplicateBusId(u64),
+    BusVolume(String),
+    BusPan(String),
+    MasterVolume,
+    UnknownBus {
+        track: String,
+        bus: u64,
+    },
+    DuplicateSend {
+        track: String,
+        bus: u64,
+    },
+    SendLevel(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -157,11 +226,51 @@ struct ProjectFile {
     count_in: u32,
     loop_region: LoopRegion,
     #[serde(default)]
+    master: MasterFile,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    buses: Vec<BusFile>,
+    #[serde(default)]
     tracks: Vec<TrackFile>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct MasterFile {
+    volume_db: f32,
+    #[serde(default)]
+    module: Vec<ModuleEntry>,
+}
+
+impl Default for MasterFile {
+    fn default() -> Self {
+        MasterFile {
+            volume_db: 0.0,
+            module: Vec::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BusFile {
+    id: u64,
+    name: String,
+    volume_db: f32,
+    pan: f32,
+    #[serde(default)]
+    mute: bool,
+    #[serde(default)]
+    solo: bool,
+    #[serde(default)]
+    module: Vec<ModuleEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "mute, solo, arm and to_master are independent Track switches"
+)]
 struct TrackFile {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,10 +283,14 @@ struct TrackFile {
     solo: bool,
     #[serde(default)]
     arm: bool,
+    #[serde(default = "on")]
+    to_master: bool,
     #[serde(default)]
     module: Vec<ModuleEntry>,
     #[serde(default)]
     items: Vec<Item>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sends: Vec<Send>,
 }
 
 impl Project {
@@ -211,6 +324,8 @@ impl Project {
             click: false,
             count_in: 0,
             tracks: Vec::new(),
+            buses: Vec::new(),
+            master: Master::default(),
         };
         let takes = dir.join(TAKES_DIR);
         let filled = fs::create_dir(&takes)
@@ -227,7 +342,7 @@ impl Project {
     ///
     /// # Errors
     ///
-    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, or an Item's active Take that does not exist.
+    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, an Item's active Take that does not exist, more than [`MAX_BUSES`] Buses, two Buses with one id or one name, a Bus's volume or pan out of the Track range, a Master volume other than `-inf` or −60..=6 dB, a cabinet on a Bus or Master, or a Send to an unknown Bus, a second Send to one Bus, or a Send level other than `-inf` or −60..=6 dB.
     pub fn load(dir: &Path) -> Result<Project, ProjectError> {
         read(&dir.join(PROJECT_FILE))
     }
@@ -305,6 +420,8 @@ impl Track {
             mute: false,
             solo: false,
             arm: false,
+            to_master: true,
+            sends: Vec::new(),
             modules: preset.modules.clone(),
             items: Vec::new(),
         }
@@ -332,19 +449,41 @@ pub(crate) fn checked_name(
     name: &str,
     except: Option<usize>,
 ) -> Result<String, String> {
+    let others = tracks
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| Some(*idx) != except);
+    checked_strip_name("track", others.map(|(_, track)| track.name.as_str()), name)
+}
+
+/// [`checked_name`] for a Bus among `buses`.
+pub(crate) fn checked_bus_name(
+    buses: &[Bus],
+    name: &str,
+    except: Option<usize>,
+) -> Result<String, String> {
+    let others = buses
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| Some(*idx) != except);
+    checked_strip_name("bus", others.map(|(_, bus)| bus.name.as_str()), name)
+}
+
+fn checked_strip_name<'a>(
+    kind: &str,
+    mut others: impl Iterator<Item = &'a str>,
+    name: &str,
+) -> Result<String, String> {
     let name: String = name.chars().filter(|c| !c.is_control()).collect();
     let name = name.trim();
     if name.is_empty() {
-        return Err(EMPTY_TRACK_NAME.to_string());
+        return Err(format!("{kind} name must not be empty"));
     }
     if name.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(DIGITS_TRACK_NAME.to_string());
+        return Err(format!("{kind} name must not be only digits"));
     }
-    let taken = tracks.iter().enumerate().any(|(idx, track)| {
-        Some(idx) != except && track.name.to_lowercase() == name.to_lowercase()
-    });
-    if taken {
-        return Err(format!("a track named '{name}' already exists"));
+    if others.any(|other| other.to_lowercase() == name.to_lowercase()) {
+        return Err(format!("a {kind} named '{name}' already exists"));
     }
     Ok(name.to_string())
 }
@@ -372,6 +511,19 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         tracks[idx].name = checked_name(&tracks[..idx], &tracks[idx].name, None)
             .map_err(ProjectError::TrackName)?;
     }
+    if file.buses.len() > MAX_BUSES {
+        return Err(ProjectError::TooManyBuses);
+    }
+    let mut buses: Vec<Bus> = file
+        .buses
+        .into_iter()
+        .map(bus_from_file)
+        .collect::<Result<_, _>>()?;
+    for idx in 0..buses.len() {
+        buses[idx].name = checked_bus_name(&buses[..idx], &buses[idx].name, None)
+            .map_err(ProjectError::BusName)?;
+    }
+    let master = master_from_file(file.master)?;
     let project = Project {
         name: file.name,
         sample_rate: file.sample_rate,
@@ -382,6 +534,8 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         click: file.click,
         count_in: file.count_in,
         tracks,
+        buses,
+        master,
     };
     check_project(&project)?;
     Ok(project)
@@ -414,7 +568,68 @@ pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
     if on && start >= end {
         return Err(ProjectError::Loop);
     }
-    project.tracks.iter().try_for_each(check_track)
+    project.tracks.iter().try_for_each(check_track)?;
+    check_mixer(project)
+}
+
+fn check_mixer(project: &Project) -> Result<(), ProjectError> {
+    if project.buses.len() > MAX_BUSES {
+        return Err(ProjectError::TooManyBuses);
+    }
+    let mut ids = HashSet::new();
+    for bus in &project.buses {
+        if !ids.insert(bus.id) {
+            return Err(ProjectError::DuplicateBusId(bus.id));
+        }
+        if !VOLUME_DB.contains(&bus.volume_db) {
+            return Err(ProjectError::BusVolume(bus.name.clone()));
+        }
+        if !PAN.contains(&bus.pan) {
+            return Err(ProjectError::BusPan(bus.name.clone()));
+        }
+    }
+    let racks = project.buses.iter().map(|bus| &bus.modules);
+    let mut modules = racks.chain([&project.master.modules]).flatten();
+    if modules.any(|module| module.type_name == CABINET_TYPE) {
+        return Err(ProjectError::CabinetOnBus);
+    }
+    if !is_level_db(project.master.volume_db) {
+        return Err(ProjectError::MasterVolume);
+    }
+    for track in &project.tracks {
+        let mut fed = HashSet::new();
+        for send in &track.sends {
+            if !ids.contains(&send.bus) {
+                return Err(ProjectError::UnknownBus {
+                    track: track.name.clone(),
+                    bus: send.bus,
+                });
+            }
+            if !fed.insert(send.bus) {
+                return Err(ProjectError::DuplicateSend {
+                    track: track.name.clone(),
+                    bus: send.bus,
+                });
+            }
+            if !is_level_db(send.level_db) {
+                return Err(ProjectError::SendLevel(track.name.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether `db` is a Send level or Master volume: off (`-inf`) or within the Track volume range.
+fn is_level_db(db: f32) -> bool {
+    db == f32::NEG_INFINITY || VOLUME_DB.contains(&db)
+}
+
+fn is_off(send: &Send) -> bool {
+    send.level_db == f32::NEG_INFINITY
+}
+
+fn on() -> bool {
+    true
 }
 
 pub(crate) fn check_track(track: &Track) -> Result<(), ProjectError> {
@@ -481,8 +696,39 @@ fn track_from_file(file: TrackFile) -> Result<Track, ProjectError> {
         mute: file.mute,
         solo: file.solo,
         arm: file.arm,
+        to_master: file.to_master,
+        sends: file.sends,
         modules,
         items: file.items,
+    })
+}
+
+fn bus_from_file(file: BusFile) -> Result<Bus, ProjectError> {
+    if file.module.iter().any(ModuleEntry::is_cabinet) {
+        return Err(ProjectError::CabinetOnBus);
+    }
+    let modules = parse_stereo_modules(file.module).map_err(|error| ProjectError::Bus {
+        bus: file.name.clone(),
+        error,
+    })?;
+    Ok(Bus {
+        id: file.id,
+        name: file.name,
+        volume_db: file.volume_db,
+        pan: file.pan,
+        mute: file.mute,
+        solo: file.solo,
+        modules,
+    })
+}
+
+fn master_from_file(file: MasterFile) -> Result<Master, ProjectError> {
+    if file.module.iter().any(ModuleEntry::is_cabinet) {
+        return Err(ProjectError::CabinetOnBus);
+    }
+    Ok(Master {
+        volume_db: file.volume_db,
+        modules: parse_stereo_modules(file.module).map_err(ProjectError::Master)?,
     })
 }
 
@@ -497,6 +743,23 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
         click: project.click,
         count_in: project.count_in,
         loop_region: project.loop_region,
+        master: MasterFile {
+            volume_db: project.master.volume_db,
+            module: module_entries(&project.master.modules),
+        },
+        buses: project
+            .buses
+            .iter()
+            .map(|bus| BusFile {
+                id: bus.id,
+                name: bus.name.clone(),
+                volume_db: bus.volume_db,
+                pan: bus.pan,
+                mute: bus.mute,
+                solo: bus.solo,
+                module: module_entries(&bus.modules),
+            })
+            .collect(),
         tracks: project
             .tracks
             .iter()
@@ -508,8 +771,15 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
                 mute: track.mute,
                 solo: track.solo,
                 arm: track.arm,
+                to_master: track.to_master,
                 module: module_entries(&track.modules),
                 items: track.items.clone(),
+                sends: track
+                    .sends
+                    .iter()
+                    .filter(|send| !is_off(send))
+                    .copied()
+                    .collect(),
             })
             .collect(),
     };
@@ -584,7 +854,31 @@ impl fmt::Display for ProjectError {
             }
             ProjectError::EmptyName => f.write_str("project name must not be empty"),
             ProjectError::Exists(name) => write!(f, "a project named '{name}' already exists"),
-            ProjectError::TrackName(error) => f.write_str(error),
+            ProjectError::TrackName(error) | ProjectError::BusName(error) => f.write_str(error),
+            ProjectError::TooManyBuses => write!(f, "at most {MAX_BUSES} buses"),
+            ProjectError::Bus { bus, error } => write!(f, "bus '{bus}': {error}"),
+            ProjectError::Master(error) => write!(f, "master: {error}"),
+            ProjectError::CabinetOnBus => {
+                f.write_str("a cabinet is not allowed on a Bus or Master")
+            }
+            ProjectError::DuplicateBusId(id) => write!(f, "two buses have id {id}"),
+            ProjectError::BusVolume(bus) => {
+                write!(f, "bus '{bus}' volume must be between -60 and 6 dB")
+            }
+            ProjectError::BusPan(bus) => write!(f, "bus '{bus}' pan must be between -1 and 1"),
+            ProjectError::MasterVolume => {
+                f.write_str("master volume must be -inf or between -60 and 6 dB")
+            }
+            ProjectError::UnknownBus { track, bus } => {
+                write!(f, "track '{track}' sends to unknown bus {bus}")
+            }
+            ProjectError::DuplicateSend { track, bus } => {
+                write!(f, "track '{track}' has two sends to bus {bus}")
+            }
+            ProjectError::SendLevel(track) => write!(
+                f,
+                "track '{track}' send level must be -inf or between -60 and 6 dB"
+            ),
         }
     }
 }

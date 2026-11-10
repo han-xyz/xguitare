@@ -6,9 +6,9 @@ use xguitare_core::arrangement::{Arrangement, ArrangementCommand, TakeNotLoaded,
 use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, engine_queues,
 };
-use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
+use xguitare_core::project::{Item, LoopRegion, Master, Project, Take, Track};
 use xguitare_core::take_capture::{ReadStop, TakeReader, TakeSpan};
-use xguitare_dsp::{Gain, Module, Rack};
+use xguitare_dsp::{Gain, Module, Rack, StereoRack};
 
 const RATE: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -23,6 +23,8 @@ fn track(name: &str) -> Track {
         mute: false,
         solo: false,
         arm: false,
+        to_master: true,
+        sends: Vec::new(),
         modules: Vec::new(),
         items: Vec::new(),
     }
@@ -39,6 +41,8 @@ fn project(tracks: Vec<Track>) -> Project {
         click: false,
         count_in: 0,
         tracks,
+        buses: Vec::new(),
+        master: Master::default(),
     }
 }
 
@@ -64,7 +68,16 @@ fn arrangement(project: &Project, takes: &HashMap<String, Arc<[f32]>>) -> Arrang
             rack
         })
         .collect();
-    Arrangement::new(project, racks, takes, RATE as f32, BLOCK).expect("takes loaded")
+    Arrangement::new(
+        project,
+        racks,
+        Vec::new(),
+        empty_master(),
+        takes,
+        RATE as f32,
+        BLOCK,
+    )
+    .expect("takes loaded")
 }
 
 fn run(arrangement: &mut Arrangement, inputs: &[&[f32]], frames: usize) -> (Vec<f32>, Vec<f32>) {
@@ -368,9 +381,17 @@ fn an_active_take_that_is_not_loaded_is_an_error() {
     let p = project(vec![t]);
     let mut rack = Rack::new(Vec::new()).expect("valid layout");
     rack.prepare(RATE as f32, BLOCK);
-    let error = Arrangement::new(&p, vec![rack], &HashMap::new(), RATE as f32, BLOCK)
-        .err()
-        .expect("missing Take");
+    let error = Arrangement::new(
+        &p,
+        vec![rack],
+        Vec::new(),
+        empty_master(),
+        &HashMap::new(),
+        RATE as f32,
+        BLOCK,
+    )
+    .err()
+    .expect("missing Take");
     assert_eq!(error, TakeNotLoaded("takes/t-1.wav".to_string()));
     assert_eq!(error.to_string(), "take 'takes/t-1.wav' is not loaded");
 }
@@ -447,9 +468,16 @@ fn a_set_on_a_module_added_during_a_crossfade_lands_on_the_new_rack() {
         rack.prepare(RATE as f32, BLOCK);
         rack
     };
-    let old_arrangement =
-        Arrangement::new(&p, vec![gain_rack()], &HashMap::new(), RATE as f32, BLOCK)
-            .expect("loaded");
+    let old_arrangement = Arrangement::new(
+        &p,
+        vec![gain_rack()],
+        Vec::new(),
+        empty_master(),
+        &HashMap::new(),
+        RATE as f32,
+        BLOCK,
+    )
+    .expect("loaded");
     assert!(
         control
             .commands
@@ -459,8 +487,16 @@ fn a_set_on_a_module_added_during_a_crossfade_lands_on_the_new_rack() {
     switcher.apply_commands();
     switcher.process_tracks(&input, &[&input], &mut left, &mut right);
 
-    let with_gain = Arrangement::new(&p, vec![gain_rack()], &HashMap::new(), RATE as f32, BLOCK)
-        .expect("loaded");
+    let with_gain = Arrangement::new(
+        &p,
+        vec![gain_rack()],
+        Vec::new(),
+        empty_master(),
+        &HashMap::new(),
+        RATE as f32,
+        BLOCK,
+    )
+    .expect("loaded");
     let rack_add = Command::SwapArrangement(Box::new(with_gain));
     let set = Command::Arrangement(ArrangementCommand::Param {
         track: 0,
@@ -825,4 +861,10 @@ fn switcher_publishes_the_count_in_beats_left() {
     assert!(control.commands.push(Command::CloseArrangement).is_ok());
     switcher.apply_commands();
     assert_eq!(beats_left(), 0);
+}
+
+fn empty_master() -> StereoRack {
+    let mut master = StereoRack::new(Vec::new()).expect("no Modules");
+    master.prepare(RATE as f32, BLOCK);
+    master
 }

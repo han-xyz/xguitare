@@ -5,12 +5,14 @@ use std::collections::HashMap;
 
 use assert_no_alloc::*;
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
+use xguitare_core::build::build_stereo_rack;
 use xguitare_core::engine::{
-    Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak,
-    engine_queues, raise_peak, tap_block,
+    Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, Strip,
+    block_peak, engine_queues, raise_peak, tap_block,
 };
-use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
-use xguitare_dsp::{Gain, Module, Rack};
+use xguitare_core::project::{Bus, Item, LoopRegion, Master, Project, Send, Take, Track};
+use xguitare_core::{ModuleRegistry, PresetModule};
+use xguitare_dsp::{Gain, Module, Rack, StereoRack};
 
 #[cfg(debug_assertions)]
 #[global_allocator]
@@ -261,6 +263,8 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
                 mute: false,
                 solo: idx == 1,
                 arm: idx % 4 == 0,
+                to_master: true,
+                sends: Vec::new(),
                 modules: Vec::new(),
                 items: vec![Item {
                     position: 50 * idx as u64,
@@ -285,6 +289,8 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
         click: false,
         count_in: 0,
         tracks,
+        buses: Vec::new(),
+        master: Master::default(),
     };
     (project, takes)
 }
@@ -292,7 +298,18 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
 fn sixteen_track_arrangement() -> Box<Arrangement> {
     let (project, takes) = playing_project(16);
     let racks = (0..16).map(|_| *gain_rack()).collect();
-    Box::new(Arrangement::new(&project, racks, &takes, 48_000.0, BLOCK).expect("takes loaded"))
+    Box::new(
+        Arrangement::new(
+            &project,
+            racks,
+            Vec::new(),
+            empty_master(),
+            &takes,
+            48_000.0,
+            BLOCK,
+        )
+        .expect("takes loaded"),
+    )
 }
 
 fn every_arrangement_command() -> [ArrangementCommand; 16] {
@@ -427,8 +444,18 @@ fn a_set_on_a_module_added_during_a_crossfade_does_not_allocate() {
             rack
         })
         .collect();
-    let added =
-        Box::new(Arrangement::new(&project, two_gains, &takes, 48_000.0, BLOCK).expect("loaded"));
+    let added = Box::new(
+        Arrangement::new(
+            &project,
+            two_gains,
+            Vec::new(),
+            empty_master(),
+            &takes,
+            48_000.0,
+            BLOCK,
+        )
+        .expect("loaded"),
+    );
     let arrangements = [sixteen_track_arrangement(), added];
     let input = [0.25; BLOCK];
     let inputs = [&input[..]; 16];
@@ -535,5 +562,159 @@ fn arrangement_crossfades_while_recording_do_not_allocate() {
         retired += 1;
     }
     assert_eq!(retired, 4);
+    drop(switcher);
+}
+
+fn empty_master() -> StereoRack {
+    let mut master = StereoRack::new(Vec::new()).expect("no Modules");
+    master.prepare(48_000.0, BLOCK);
+    master
+}
+
+const BUS_MODULES: [&str; 4] = ["compressor", "gate", "chorus", "reverb"];
+const MASTER_MODULES: [&str; 2] = ["compressor", "gain"];
+
+fn modules(types: &[&str]) -> Vec<PresetModule> {
+    let registry = ModuleRegistry::default();
+    types
+        .iter()
+        .map(|&type_name| PresetModule {
+            id: type_name.to_string(),
+            type_name: type_name.to_string(),
+            ir: None,
+            bypass: false,
+            params: registry
+                .spec(type_name)
+                .expect("registered")
+                .params
+                .iter()
+                .map(|param| (param.name.to_string(), param.default))
+                .collect(),
+        })
+        .collect()
+}
+
+fn full_mixer_arrangement() -> Box<Arrangement> {
+    let (mut project, takes) = playing_project(16);
+    project.buses = (0..8)
+        .map(|id| Bus {
+            id,
+            name: format!("Bus {id}"),
+            volume_db: -3.0,
+            pan: 0.25,
+            mute: false,
+            solo: id == 2,
+            modules: modules(&BUS_MODULES),
+        })
+        .collect();
+    project.master.modules = modules(&MASTER_MODULES);
+    for (idx, track) in project.tracks.iter_mut().enumerate() {
+        track.to_master = idx % 3 != 0;
+        track.sends = (0..8)
+            .filter(|bus| (idx as u64 + bus).is_multiple_of(2))
+            .map(|bus| Send {
+                bus,
+                level_db: -6.0,
+                pre: bus % 4 == 0,
+            })
+            .collect();
+    }
+    let racks = (0..16).map(|_| *gain_rack()).collect();
+    let bus_racks = project
+        .buses
+        .iter()
+        .map(|bus| build_stereo_rack(48_000.0, BLOCK, &bus.modules).expect("no cabinet"))
+        .collect();
+    let master = build_stereo_rack(48_000.0, BLOCK, &project.master.modules).expect("no cabinet");
+    Box::new(
+        Arrangement::new(&project, racks, bus_racks, master, &takes, 48_000.0, BLOCK)
+            .expect("takes loaded"),
+    )
+}
+
+fn every_mixer_command() -> [ArrangementCommand; 14] {
+    [
+        ArrangementCommand::ToMaster { track: 0, on: true },
+        ArrangementCommand::SendLevel {
+            track: 1,
+            bus: 1,
+            db: 0.0,
+        },
+        ArrangementCommand::SendLevel {
+            track: 0,
+            bus: 0,
+            db: f32::NEG_INFINITY,
+        },
+        ArrangementCommand::SendPre {
+            track: 2,
+            bus: 0,
+            on: true,
+        },
+        ArrangementCommand::BusVolume { bus: 3, db: -9.0 },
+        ArrangementCommand::BusPan { bus: 3, pan: -0.5 },
+        ArrangementCommand::BusMute { bus: 4, on: true },
+        ArrangementCommand::BusSolo { bus: 2, on: false },
+        ArrangementCommand::BusParam {
+            bus: 5,
+            module: 0,
+            param: 0,
+            value: -30.0,
+        },
+        ArrangementCommand::BusBypass {
+            bus: 5,
+            module: 3,
+            on: true,
+        },
+        ArrangementCommand::MasterVolume { db: -3.0 },
+        ArrangementCommand::MasterParam {
+            module: 1,
+            param: 0,
+            value: -6.0,
+        },
+        ArrangementCommand::MasterBypass {
+            module: 0,
+            on: true,
+        },
+        ArrangementCommand::BusVolume { bus: 99, db: 0.0 },
+    ]
+}
+
+#[test]
+fn sixteen_tracks_eight_buses_and_master_do_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::clone(&shared));
+    let arrangements = [full_mixer_arrangement(), full_mixer_arrangement()];
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for arrangement in arrangements {
+            assert!(
+                control
+                    .commands
+                    .push(Command::SwapArrangement(arrangement))
+                    .is_ok()
+            );
+            let play = Command::Arrangement(ArrangementCommand::Play);
+            assert!(control.commands.push(play).is_ok());
+            switcher.apply_commands();
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+        for command in every_mixer_command() {
+            assert!(control.commands.push(Command::Arrangement(command)).is_ok());
+            switcher.apply_commands();
+            for _ in 0..10 {
+                switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+            }
+        }
+        for _ in 0..100 {
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+        let _ = shared.mix_meters.take_peak(Strip::Master);
+        shared.mix_meters.clip_reset(None);
+    });
+    assert!(left.iter().any(|&sample| sample != 0.0));
     drop(switcher);
 }

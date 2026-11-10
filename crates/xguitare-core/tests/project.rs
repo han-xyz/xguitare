@@ -4,8 +4,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use xguitare_core::Preset;
 use xguitare_core::project::{
-    AUTOSAVE_FILE, Item, LoopRegion, PROJECT_FILE, Project, Take, Track, autosave_due,
-    autosave_newer,
+    AUTOSAVE_FILE, Item, LoopRegion, Master, PROJECT_FILE, Project, Send, Take, Track,
+    autosave_due, autosave_newer,
 };
 
 const TWO_TRACKS: &str = r#"name = "Song"
@@ -587,5 +587,295 @@ fn click_defaults_off_and_count_in_is_range_checked() {
         "tempo_bpm = 96.5",
         &["tempo_bpm = 96.5\ncount_in = 3"],
         "count-in must be 0, 1 or 2 bars",
+    );
+}
+
+const MIXER: &str = r#"name = "Mix"
+sample_rate = 48000
+tempo_bpm = 120.0
+meter = [4, 4]
+latency_offset_ms = 0.0
+
+[loop_region]
+start = 0
+end = 0
+on = false
+
+[master]
+volume_db = -3.0
+
+[[master.module]]
+type = "compressor"
+id = "glue"
+
+[[master.module]]
+type = "gain"
+id = "trim"
+params = { level = -1.5 }
+
+[[buses]]
+id = 3
+name = "Verb"
+volume_db = -6.0
+pan = 0.25
+mute = false
+solo = true
+
+[[buses.module]]
+type = "reverb"
+id = "room"
+
+[[buses.module]]
+type = "gate"
+id = "tail"
+
+[[buses]]
+id = 7
+name = "Echo"
+volume_db = 0.0
+pan = 0.0
+mute = true
+solo = false
+
+[[tracks]]
+name = "Guitar"
+volume_db = 0.0
+pan = 0.0
+to_master = false
+
+[[tracks.sends]]
+bus = 3
+level_db = -12.0
+pre = false
+
+[[tracks.sends]]
+bus = 7
+level_db = 6.0
+pre = true
+
+[[tracks]]
+name = "Bass"
+volume_db = 0.0
+pan = 0.0
+"#;
+
+#[test]
+fn round_trip_keeps_buses_sends_and_master() {
+    let dir = temp_dir("mixer-round-trip");
+    fs::write(dir.0.join(PROJECT_FILE), MIXER).unwrap();
+    let project = Project::load(&dir.0).unwrap();
+    assert_eq!(project.master.volume_db, -3.0);
+    let master: Vec<&str> = project
+        .master
+        .modules
+        .iter()
+        .map(|m| m.id.as_str())
+        .collect();
+    assert_eq!(master, ["glue", "trim"]);
+    assert_eq!(project.buses.len(), 2);
+    let verb = &project.buses[0];
+    assert_eq!((verb.id, verb.name.as_str()), (3, "Verb"));
+    assert_eq!(
+        (verb.volume_db, verb.pan, verb.mute, verb.solo),
+        (-6.0, 0.25, false, true)
+    );
+    let rack: Vec<&str> = verb.modules.iter().map(|m| m.type_name.as_str()).collect();
+    assert_eq!(rack, ["reverb", "gate"]);
+    assert!(project.buses[1].mute);
+    let guitar = &project.tracks[0];
+    assert!(!guitar.to_master);
+    assert_eq!(
+        guitar.sends,
+        [
+            Send {
+                bus: 3,
+                level_db: -12.0,
+                pre: false
+            },
+            Send {
+                bus: 7,
+                level_db: 6.0,
+                pre: true
+            },
+        ]
+    );
+    assert!(project.tracks[1].to_master && project.tracks[1].sends.is_empty());
+
+    let copy = temp_dir("mixer-round-trip-copy");
+    project.save(&copy.0).unwrap();
+    assert_eq!(Project::load(&copy.0).unwrap(), project);
+}
+
+#[test]
+fn a_file_without_a_mixer_loads_with_no_buses_and_master_at_zero_db() {
+    let dir = temp_dir("mixer-old-file");
+    fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
+    let project = Project::load(&dir.0).unwrap();
+    assert_eq!(project.buses, []);
+    assert_eq!(project.master, Master::default());
+    assert_eq!(project.master.volume_db, 0.0);
+    assert_eq!(project.master.modules, []);
+    assert!(
+        project
+            .tracks
+            .iter()
+            .all(|track| track.to_master && track.sends.is_empty())
+    );
+}
+
+#[test]
+fn only_sends_that_are_not_off_are_saved() {
+    let dir = temp_dir("mixer-off-sends");
+    fs::write(dir.0.join(PROJECT_FILE), MIXER).unwrap();
+    let mut project = Project::load(&dir.0).unwrap();
+    project.tracks[0].sends[1].level_db = f32::NEG_INFINITY;
+    project.master.volume_db = f32::NEG_INFINITY;
+    project.save(&dir.0).unwrap();
+    let text = fs::read_to_string(dir.0.join(PROJECT_FILE)).unwrap();
+    assert_eq!(text.matches("[[tracks.sends]]").count(), 1, "{text}");
+    let loaded = Project::load(&dir.0).unwrap();
+    assert_eq!(loaded.tracks[0].sends, project.tracks[0].sends[..1]);
+    assert_eq!(loaded.master.volume_db, f32::NEG_INFINITY);
+}
+
+fn assert_mixer_errors(test: &str, find: &str, replacements: &[&str], message: &str) {
+    let dir = temp_dir(test);
+    assert!(MIXER.contains(find), "{find}");
+    for replacement in replacements {
+        assert_eq!(
+            load_error(&dir.0, &MIXER.replacen(find, replacement, 1)),
+            message,
+            "{replacement}"
+        );
+    }
+}
+
+#[test]
+fn ninth_bus_is_error() {
+    let extra = (10..17)
+        .map(|id| format!("[[buses]]\nid = {id}\nname = \"B{id}\"\nvolume_db = 0.0\npan = 0.0\n"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_mixer_errors(
+        "mixer-nine-buses",
+        "[[tracks]]\nname = \"Guitar\"",
+        &[&format!("{extra}\n[[tracks]]\nname = \"Guitar\"")],
+        "at most 8 buses",
+    );
+}
+
+#[test]
+fn a_send_to_an_unknown_bus_is_error() {
+    assert_mixer_errors(
+        "mixer-unknown-bus",
+        "bus = 7",
+        &["bus = 8"],
+        "track 'Guitar' sends to unknown bus 8",
+    );
+}
+
+#[test]
+fn two_sends_to_one_bus_is_error() {
+    assert_mixer_errors(
+        "mixer-duplicate-send",
+        "bus = 7",
+        &["bus = 3"],
+        "track 'Guitar' has two sends to bus 3",
+    );
+}
+
+#[test]
+fn send_level_out_of_range_is_error() {
+    assert_mixer_errors(
+        "mixer-send-level",
+        "level_db = -12.0",
+        &[
+            "level_db = 6.5",
+            "level_db = -61.0",
+            "level_db = nan",
+            "level_db = inf",
+        ],
+        "track 'Guitar' send level must be -inf or between -60 and 6 dB",
+    );
+}
+
+#[test]
+fn bus_volume_and_pan_out_of_range_are_errors() {
+    assert_mixer_errors(
+        "mixer-bus-volume",
+        "volume_db = -6.0",
+        &["volume_db = 7.0", "volume_db = -inf", "volume_db = nan"],
+        "bus 'Verb' volume must be between -60 and 6 dB",
+    );
+    assert_mixer_errors(
+        "mixer-bus-pan",
+        "pan = 0.25",
+        &["pan = 1.5", "pan = nan"],
+        "bus 'Verb' pan must be between -1 and 1",
+    );
+}
+
+#[test]
+fn master_volume_out_of_range_is_error() {
+    assert_mixer_errors(
+        "mixer-master-volume",
+        "volume_db = -3.0",
+        &["volume_db = 6.5", "volume_db = -61.0", "volume_db = nan"],
+        "master volume must be -inf or between -60 and 6 dB",
+    );
+}
+
+#[test]
+fn a_cabinet_on_a_bus_or_master_is_error() {
+    let cabinet = "type = \"cabinet\"\nid = \"cab\"";
+    assert_mixer_errors(
+        "mixer-bus-cabinet",
+        "type = \"gate\"\nid = \"tail\"",
+        &[cabinet],
+        "a cabinet is not allowed on a Bus or Master",
+    );
+    assert_mixer_errors(
+        "mixer-master-cabinet",
+        "type = \"compressor\"\nid = \"glue\"",
+        &[cabinet],
+        "a cabinet is not allowed on a Bus or Master",
+    );
+}
+
+#[test]
+fn bus_and_master_module_errors_name_the_strip() {
+    assert_mixer_errors(
+        "mixer-bus-module",
+        "type = \"reverb\"",
+        &["type = \"wah\""],
+        "bus 'Verb': unknown module type 'wah'",
+    );
+    assert_mixer_errors(
+        "mixer-master-module",
+        "type = \"compressor\"",
+        &["type = \"wah\""],
+        "master: unknown module type 'wah'",
+    );
+}
+
+#[test]
+fn bus_names_and_ids_follow_the_rules() {
+    for (name, error) in [
+        ("verb", "a bus named 'verb' already exists"),
+        ("12", "bus name must not be only digits"),
+        (" ", "bus name must not be empty"),
+    ] {
+        assert_mixer_errors(
+            "mixer-bus-names",
+            "name = \"Echo\"",
+            &[&format!("name = \"{name}\"")],
+            error,
+        );
+    }
+    assert_mixer_errors(
+        "mixer-bus-ids",
+        "id = 7",
+        &["id = 3"],
+        "two buses have id 3",
     );
 }

@@ -4,12 +4,12 @@ use std::path::PathBuf;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
-use xguitare_core::project::{LoopRegion, Project, Take, Track};
+use xguitare_core::project::{LoopRegion, Master, Project, Take, Track};
 use xguitare_core::take_capture::{
     FinishedTake, Latency, ReadStop, TakePlacement, TakeSpan, add_finished_take, add_take,
     next_take_file, take_position, take_ring,
 };
-use xguitare_dsp::Rack;
+use xguitare_dsp::{Rack, StereoRack};
 
 struct TempDir(PathBuf);
 
@@ -38,6 +38,8 @@ fn track(name: &str) -> Track {
         mute: false,
         solo: false,
         arm: true,
+        to_master: true,
+        sends: Vec::new(),
         modules: Vec::new(),
         items: Vec::new(),
     }
@@ -264,6 +266,8 @@ fn finished_take_is_placed_latency_compensated_and_loaded() {
         click: false,
         count_in: 0,
         tracks: vec![track("t")],
+        buses: Vec::new(),
+        master: Master::default(),
     };
     let mut takes = HashMap::new();
     let finished = FinishedTake {
@@ -310,6 +314,8 @@ fn a_take_recorded_from_frame_0_starts_its_item_latency_frames_into_the_take() {
         click: false,
         count_in: 0,
         tracks: vec![track("t")],
+        buses: Vec::new(),
+        master: Master::default(),
     };
     let mut takes = HashMap::new();
     let finished = FinishedTake {
@@ -340,10 +346,25 @@ fn a_take_recorded_from_frame_0_starts_its_item_latency_frames_into_the_take() {
     project.tracks[0].arm = false;
     let mut rack = Rack::new(Vec::new()).unwrap();
     rack.prepare(48_000.0, 64);
-    let mut arrangement = Arrangement::new(&project, vec![rack], &takes, 48_000.0, 64).unwrap();
+    let mut arrangement = Arrangement::new(
+        &project,
+        vec![rack],
+        Vec::new(),
+        empty_master(),
+        &takes,
+        48_000.0,
+        64,
+    )
+    .unwrap();
     arrangement.apply(ArrangementCommand::Play);
     let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
     arrangement.process(&[], &mut left, &mut right);
     assert!((left[0] - samples[256]).abs() < 1e-6, "{}", left[0]);
     assert!((left[63] - samples[319]).abs() < 1e-6, "{}", left[63]);
+}
+
+fn empty_master() -> StereoRack {
+    let mut master = StereoRack::new(Vec::new()).expect("no Modules");
+    master.prepare(48_000.0, 64);
+    master
 }

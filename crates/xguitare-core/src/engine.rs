@@ -7,7 +7,7 @@ use xguitare_dsp::Rack;
 use xguitare_dsp::crossfade::Crossfader;
 
 use crate::arrangement::{Arrangement, ArrangementCommand, Transport};
-use crate::project::MAX_TRACKS;
+use crate::project::{MAX_BUSES, MAX_TRACKS};
 
 #[derive(Debug, Default)]
 pub struct EngineShared {
@@ -35,6 +35,83 @@ pub struct EngineShared {
     pub count_in_remaining: AtomicU32,
     /// f32 bits of the largest |sample| on each Track input since the last `take_peak`, written while an Arrangement runs.
     pub track_input_peak_bits: [AtomicU32; MAX_TRACKS],
+    /// Post-fader peaks and clip flags of the running Arrangement's Tracks, Buses and Master.
+    pub mix_meters: MixMeters,
+}
+
+/// One meter of [`MixMeters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strip {
+    Track(usize),
+    Bus(usize),
+    Master,
+}
+
+/// Post-fader stereo peaks and latching clip flags per Track, Bus and Master, written by the audio thread and read by the control thread.
+#[derive(Debug, Default)]
+pub struct MixMeters {
+    tracks: [StripMeter; MAX_TRACKS],
+    buses: [StripMeter; MAX_BUSES],
+    master: StripMeter,
+}
+
+#[derive(Debug, Default)]
+struct StripMeter {
+    /// f32 bits of the largest |sample| on each side since the last `take_peak`.
+    peak_bits: [AtomicU32; 2],
+    clip: AtomicBool,
+}
+
+/// A peak at or above this (0 dBFS) sets the clip flag.
+const CLIP_LEVEL: f32 = 1.0;
+
+impl MixMeters {
+    /// Raises the strip's peaks to `peak` and sets its clip flag when a side reaches 0 dBFS; a strip out of range is ignored.
+    pub fn raise(&self, strip: Strip, peak: [f32; 2]) {
+        let Some(meter) = self.meter(strip) else {
+            return;
+        };
+        for (bits, value) in meter.peak_bits.iter().zip(peak) {
+            raise_peak(bits, value);
+        }
+        if peak.iter().any(|&value| value >= CLIP_LEVEL) {
+            meter.clip.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// The strip's left and right peaks since the last call, reset to 0; zeros for a strip out of range.
+    pub fn take_peak(&self, strip: Strip) -> [f32; 2] {
+        self.meter(strip)
+            .map_or([0.0; 2], |meter| meter.peak_bits.each_ref().map(take_peak))
+    }
+
+    /// Whether the strip has reached 0 dBFS since its clip flag was last reset.
+    pub fn clip(&self, strip: Strip) -> bool {
+        self.meter(strip)
+            .is_some_and(|meter| meter.clip.load(Ordering::Relaxed))
+    }
+
+    /// Clears the clip flag of `strip`, or of every strip for `None`.
+    pub fn clip_reset(&self, strip: Option<Strip>) {
+        let clear = |meter: &StripMeter| meter.clip.store(false, Ordering::Relaxed);
+        match strip {
+            Some(strip) => self.meter(strip).into_iter().for_each(clear),
+            None => self
+                .tracks
+                .iter()
+                .chain(&self.buses)
+                .chain([&self.master])
+                .for_each(clear),
+        }
+    }
+
+    fn meter(&self, strip: Strip) -> Option<&StripMeter> {
+        match strip {
+            Strip::Track(idx) => self.tracks.get(idx),
+            Strip::Bus(idx) => self.buses.get(idx),
+            Strip::Master => Some(&self.master),
+        }
+    }
 }
 
 pub fn transport_code(transport: Transport) -> u8 {
@@ -70,7 +147,7 @@ pub enum Command {
     SwapArrangement(Box<Arrangement>),
     /// Goes back to the Rack.
     CloseArrangement,
-    /// A Rack change (`Param`, `Bypass`) applies to the newest Arrangement the switcher holds, as its Module indices are; any other to every one it holds; ignored while none runs.
+    /// A Rack change (`Param`, `Bypass` and their Bus and Master forms) applies to the newest Arrangement the switcher holds, as its Module indices are; any other to every one it holds; ignored while none runs.
     Arrangement(ArrangementCommand),
 }
 
@@ -314,8 +391,12 @@ impl RackSwitcher {
                     self.shared.count_in_remaining.store(0, Ordering::Relaxed);
                 }
                 Command::Arrangement(
-                    command
-                    @ (ArrangementCommand::Param { .. } | ArrangementCommand::Bypass { .. }),
+                    command @ (ArrangementCommand::Param { .. }
+                    | ArrangementCommand::Bypass { .. }
+                    | ArrangementCommand::BusParam { .. }
+                    | ArrangementCommand::BusBypass { .. }
+                    | ArrangementCommand::MasterParam { .. }
+                    | ArrangementCommand::MasterBypass { .. }),
                 ) => {
                     let newest = self
                         .pending_arrangement
@@ -451,6 +532,7 @@ impl RackSwitcher {
             self.shared
                 .count_in_remaining
                 .store(running.count_in_remaining(), Ordering::Relaxed);
+            running.raise_meters(&self.shared.mix_meters);
         }
         true
     }

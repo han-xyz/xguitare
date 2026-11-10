@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use xguitare_core::build::{build_arrangement, build_rack, swap_arrangement};
+use xguitare_core::build::{build_arrangement, build_rack, build_stereo_rack, swap_arrangement};
 use xguitare_core::engine::{Command, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
-use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
+use xguitare_core::project::{Item, LoopRegion, Master, Project, Take, Track};
 use xguitare_core::{Bank, BankEntry, BankKind, Config, Preset};
 
 struct TempDir(PathBuf);
@@ -75,6 +75,8 @@ fn project_with(tracks: Vec<Track>) -> Project {
         click: false,
         count_in: 0,
         tracks,
+        buses: Vec::new(),
+        master: Master::default(),
     }
 }
 
@@ -132,4 +134,37 @@ fn arrangement_with_an_unloaded_take_is_an_error() {
     .err()
     .unwrap();
     assert_eq!(error.to_string(), "take 'takes/a-1.wav' is not loaded");
+}
+
+fn stereo_modules(text: &str) -> Vec<xguitare_core::PresetModule> {
+    Preset::parse(&format!("name = \"S\"\n{text}"))
+        .unwrap()
+        .modules
+}
+
+#[test]
+fn stereo_rack_links_the_compressor_and_keeps_bypass() {
+    let modules = stereo_modules(
+        "[[module]]\ntype = \"compressor\"\nparams = { threshold = -40.0, ratio = 20.0 }\n\
+         [[module]]\ntype = \"gain\"\nbypass = true\nparams = { level = -20.0 }\n",
+    );
+    let mut rack = build_stereo_rack(48_000.0, 128, &modules).unwrap();
+    let (loud, quiet) = (vec![0.9; 128], vec![0.01; 128]);
+    let (mut left, mut right) = (vec![0.0; 128], vec![0.0; 128]);
+    for _ in 0..200 {
+        rack.process(&loud, &quiet, &mut left, &mut right);
+    }
+    let (gain_l, gain_r) = (left[127] / 0.9, right[127] / 0.01);
+    assert!(gain_l < 0.5, "left gain {gain_l}");
+    assert!((gain_l - gain_r).abs() < 1e-3, "{gain_l} != {gain_r}");
+}
+
+#[test]
+fn stereo_rack_refuses_a_cabinet() {
+    let modules = stereo_modules("[[module]]\ntype = \"cabinet\"\nir = \"v30.wav\"\n");
+    let error = build_stereo_rack(48_000.0, 128, &modules).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "a cabinet is not allowed on a Bus or Master"
+    );
 }

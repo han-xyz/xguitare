@@ -80,6 +80,12 @@ pub(crate) struct ModuleEntry {
     params: BTreeMap<String, f64>,
 }
 
+impl ModuleEntry {
+    pub(crate) fn is_cabinet(&self) -> bool {
+        self.type_name == CABINET_TYPE
+    }
+}
+
 impl Preset {
     /// # Errors
     ///
@@ -201,6 +207,20 @@ impl Preset {
 
 /// The Modules a `[[module]]` list names, checked as [`Preset::parse`] checks them.
 pub(crate) fn parse_modules(entries: Vec<ModuleEntry>) -> Result<Vec<PresetModule>, PresetError> {
+    let probe = Preset {
+        name: String::new(),
+        modules: parse_stereo_modules(entries)?,
+    };
+    probe
+        .validate_layout()
+        .map_err(|error| PresetError::Layout(error.to_string()))?;
+    Ok(probe.modules)
+}
+
+/// The Modules of a Bus or Master Rack: checked as [`parse_modules`] checks them but for the Rack layout rules, which a stereo Rack does not have.
+pub(crate) fn parse_stereo_modules(
+    entries: Vec<ModuleEntry>,
+) -> Result<Vec<PresetModule>, PresetError> {
     let registry = ModuleRegistry::default();
     let mut ids = HashSet::new();
     let mut modules = Vec::with_capacity(entries.len());
@@ -214,14 +234,7 @@ pub(crate) fn parse_modules(entries: Vec<ModuleEntry>) -> Result<Vec<PresetModul
         }
         modules.push(module);
     }
-    let probe = Preset {
-        name: String::new(),
-        modules,
-    };
-    probe
-        .validate_layout()
-        .map_err(|error| PresetError::Layout(error.to_string()))?;
-    Ok(probe.modules)
+    Ok(modules)
 }
 
 pub(crate) fn module_entries(modules: &[PresetModule]) -> Vec<ModuleEntry> {
