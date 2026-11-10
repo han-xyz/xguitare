@@ -5,9 +5,13 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_core::BankKind;
-use xguitare_core::control::{Position, Request, Response, SILENCE_DB, TrackRef, TransportAction};
+use xguitare_core::control::{
+    BusRef, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef, TransportAction,
+};
 use xguitare_core::project::LoopRegion;
+use xguitare_core::render::{RenderBits, RenderRange};
 
+use crate::mixer_model::{MixerTarget, rack_selectors};
 use crate::project_model::AutosaveOffer;
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
@@ -138,6 +142,36 @@ pub enum Command {
         on: Option<bool>,
         count_in: Option<u32>,
     },
+    BusAdd,
+    BusRemove(usize),
+    /// The `bus_set` keys to change; `None` keeps the value.
+    BusSet {
+        bus: usize,
+        volume: Option<f32>,
+        pan: Option<f32>,
+        mute: Option<bool>,
+        solo: Option<bool>,
+    },
+    SendSet {
+        track: usize,
+        bus: usize,
+        level: Option<SendLevel>,
+        pre: Option<bool>,
+    },
+    MasterSet(f32),
+    ClipReset(MixerTarget),
+    /// Sends nothing itself: the Rack requests after it, and the client thread's `get`, act on this Rack; a Track stands for the selected one.
+    ShowRack(MixerTarget),
+    Render {
+        range: RenderRange,
+        bits: RenderBits,
+        name: Option<String>,
+    },
+    RenderCancel,
+    /// Kept by the window: opens or closes the mixer panel.
+    ToggleMixer,
+    /// Kept by the window: opens the Render dialog.
+    OpenRenderDialog,
     Quit,
 }
 
@@ -151,6 +185,7 @@ pub struct TrackEdit {
     pub solo: Option<bool>,
     pub arm: Option<bool>,
     pub name: Option<String>,
+    pub to_master: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -433,8 +468,12 @@ pub struct Restore {
     pub values: Vec<(String, f64)>,
     pub bypass: bool,
     pub ir: Option<String>,
-    /// The Track the Module was removed from; `None` for the Preset's Rack.
+    /// The Track the Module was removed from; `None` for the Preset's Rack or a Bus or Master Rack.
     pub track: Option<TrackRef>,
+    /// The Bus the Module was removed from.
+    pub bus: Option<BusRef>,
+    /// Whether the Module was removed from the Master Rack.
+    pub master: bool,
 }
 
 /// The [`Restore`] of Module `id`, for the Rack `get_payload` shows; `None` when the payload has no such Module.
@@ -456,6 +495,8 @@ pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
         bypass: bypassed(get_payload, id),
         ir: cabinet_ir(get_payload, id),
         track: None,
+        bus: None,
+        master: false,
     })
 }
 
@@ -469,8 +510,8 @@ impl Restore {
             after,
             at,
             track: self.track.clone(),
-            bus: None,
-            master: false,
+            bus: self.bus.clone(),
+            master: self.master,
         }
     }
 
@@ -480,22 +521,22 @@ impl Restore {
             param: format!("{id}.{param}"),
             value: *value,
             track: self.track.clone(),
-            bus: None,
-            master: false,
+            bus: self.bus.clone(),
+            master: self.master,
         });
         let bypass = self.bypass.then(|| Request::Bypass {
             id: id.to_string(),
             on: true,
             track: self.track.clone(),
-            bus: None,
-            master: false,
+            bus: self.bus.clone(),
+            master: self.master,
         });
         let ir = self.ir.clone().map(|ir| Request::RackIr {
             ir,
             id: Some(id.to_string()),
             track: self.track.clone(),
-            bus: None,
-            master: false,
+            bus: self.bus.clone(),
+            master: self.master,
         });
         sets.chain(bypass).chain(ir).collect()
     }
@@ -870,6 +911,8 @@ pub enum KeyEvent {
     Digit(u8, KeyModifiers),
     CtrlS,
     CtrlR,
+    CtrlM,
+    CtrlAltR,
     Space,
     R,
     Home,
@@ -937,6 +980,8 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
         }
         KeyEvent::Digit(..)
         | KeyEvent::CtrlR
+        | KeyEvent::CtrlM
+        | KeyEvent::CtrlAltR
         | KeyEvent::Space
         | KeyEvent::R
         | KeyEvent::Home
@@ -963,26 +1008,29 @@ pub enum Outgoing {
     RestoreAutosave(String),
 }
 
-/// `selected` is the Track the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] moves it for the commands after it.
+/// `rack` is the Rack the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] or [`Command::ShowRack`] moves it for the commands after it.
 #[allow(clippy::too_many_lines, reason = "one match arm per queued command")]
-pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Vec<Outgoing>, bool) {
+pub fn requests_until_quit(
+    queued: Vec<Command>,
+    rack: Option<MixerTarget>,
+) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
-    let mut selected = selected;
+    let mut rack = rack;
     for command in queued {
-        let track = selected.map(TrackRef::Index);
+        let (track, bus, master) = rack_selectors(rack);
         let req = match command {
             Command::Load(preset) => Request::Load {
                 preset,
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::Set { param, value } => Request::Set {
                 param,
                 value,
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::Save => Request::Save { name: None },
             Command::SaveAs(name) => Request::Save { name: Some(name) },
@@ -995,36 +1043,36 @@ pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Ve
                 after,
                 at,
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::RackRemove { id } => Request::RackRemove {
                 id,
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::RackMove { id, to } => Request::RackMove {
                 id,
                 to,
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::Mute(on) => Request::Mute { on },
             Command::Bypass { id, on } => Request::Bypass {
                 id,
                 on,
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::RackIr { id, ir } => Request::RackIr {
                 ir,
                 id: Some(id),
                 track,
-                bus: None,
-                master: false,
+                bus,
+                master,
             },
             Command::SetPorts {
                 input,
@@ -1054,7 +1102,7 @@ pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Ve
             Command::TrackAdd => Request::TrackAdd { name: None },
             Command::TrackSet { track, edit } => track_set_request(track, edit),
             Command::TrackSelect(index) => {
-                selected = Some(index);
+                rack = Some(MixerTarget::Track(index));
                 Request::TrackSelect {
                     track: TrackRef::Index(index),
                 }
@@ -1074,6 +1122,50 @@ pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Ve
             },
             Command::Tempo { bpm, meter } => Request::Tempo { bpm, meter },
             Command::Click { on, count_in } => Request::Click { on, count_in },
+            Command::BusAdd => Request::BusAdd { name: None },
+            Command::BusRemove(index) => Request::BusRemove {
+                bus: BusRef::Index(index),
+            },
+            Command::BusSet {
+                bus,
+                volume,
+                pan,
+                mute,
+                solo,
+            } => Request::BusSet {
+                bus: BusRef::Index(bus),
+                name: None,
+                volume,
+                pan,
+                mute,
+                solo,
+            },
+            Command::SendSet {
+                track,
+                bus,
+                level,
+                pre,
+            } => Request::SendSet {
+                track: TrackRef::Index(track),
+                bus: BusRef::Index(bus),
+                level,
+                pre,
+            },
+            Command::MasterSet(volume) => Request::MasterSet { volume },
+            Command::ClipReset(target) => {
+                let (track, bus, master) = rack_selectors(Some(target));
+                Request::ClipReset { track, bus, master }
+            }
+            Command::Render { range, bits, name } => Request::Render {
+                range: Some(range),
+                bits: Some(bits),
+                name,
+            },
+            Command::RenderCancel => Request::RenderCancel,
+            Command::ShowRack(target) => {
+                rack = Some(target);
+                continue;
+            }
             Command::Restore(restore) => {
                 requests.push(Outgoing::Restore(restore));
                 continue;
@@ -1082,7 +1174,11 @@ pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Ve
                 requests.push(Outgoing::RestoreAutosave(name));
                 continue;
             }
-            Command::RefreshIrs | Command::RefreshPorts | Command::RefreshProjects => continue,
+            Command::RefreshIrs
+            | Command::RefreshPorts
+            | Command::RefreshProjects
+            | Command::ToggleMixer
+            | Command::OpenRenderDialog => continue,
             Command::Quit => return (requests, true),
         };
         requests.push(Outgoing::Request(req));
@@ -1100,7 +1196,7 @@ fn track_set_request(track: usize, edit: TrackEdit) -> Request {
         solo: edit.solo,
         arm: edit.arm,
         name: edit.name,
-        to_master: None,
+        to_master: edit.to_master,
     }
 }
 

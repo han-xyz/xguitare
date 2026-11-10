@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use xguitare_core::control::{Position, Request, Response, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
+use xguitare_gui::mixer_model::MixerTarget;
 use xguitare_gui::model::{
     Command, KeyEvent, KeyModifiers, Outgoing, RemovedUnit, TrackEdit, requests_until_quit,
     response_text, restore,
@@ -451,7 +452,7 @@ fn rack_requests_carry_the_selected_track() {
             on: true,
         },
     ];
-    let (outgoing, quit) = requests_until_quit(queued, Some(1));
+    let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(1)));
     assert!(!quit);
     assert_eq!(
         outgoing,

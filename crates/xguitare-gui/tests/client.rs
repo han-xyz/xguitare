@@ -284,6 +284,8 @@ fn drive_restore() -> Restore {
         bypass: true,
         ir: None,
         track: None,
+        bus: None,
+        master: false,
     }
 }
 

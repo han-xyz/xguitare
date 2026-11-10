@@ -729,6 +729,8 @@ fn unit_dropped_outside_the_rack_is_removed_and_undo_restores_it() {
             bypass: false,
             ir: None,
             track: None,
+            bus: None,
+            master: false,
         })]
     );
     assert!(harness.query_by_label("Undo").is_none());

@@ -8,6 +8,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::mixer_model::{MixerTarget, rack_selectors};
 use crate::model::{
     Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
     ir_names, module_types, param_rows, refresh_decision, refused_remove, requests_until_quit,
@@ -61,6 +62,8 @@ struct Client {
     settings_fetched: bool,
     projects_fetched: bool,
     tuner_answered: bool,
+    /// The Bus or Master Rack the mixer panel shows; `None` for the selected Track's.
+    shown_rack: Option<MixerTarget>,
     snapshot: Snapshot,
 }
 
@@ -83,6 +86,7 @@ impl Client {
             settings_fetched: false,
             projects_fetched: false,
             tuner_answered: false,
+            shown_rack: None,
             snapshot: Snapshot {
                 link: Link::Disconnected {
                     since: Instant::now(),
@@ -177,7 +181,9 @@ impl Client {
         if queued.contains(&Command::RefreshProjects) {
             self.projects_fetched = false;
         }
-        let (requests, quit) = requests_until_quit(queued, self.selected_track());
+        let rack = self.rack_target();
+        let rack_moved = self.follow_shown_rack(&queued);
+        let (requests, quit) = requests_until_quit(queued, rack);
         let sent = requests.len();
         for outgoing in requests {
             match outgoing {
@@ -190,6 +196,9 @@ impl Client {
         }
         if quit {
             info!("quit: sent {sent} final requests");
+        }
+        if rack_moved && !quit {
+            self.snapshot.params = self.payload(&self.rack_get());
         }
         !quit && !ui_gone
     }
@@ -237,14 +246,16 @@ impl Client {
 
     /// The follow-ups go to the id the Daemon gave the re-added Module, and only when it was added. A Module of a Track is placed by that Track's Rack, read again, since another Track may be selected now.
     fn restore(&mut self, restore: &Restore) {
-        let rack = match &restore.track {
-            Some(track) => self.payload(&Request::Get {
+        let named = restore.track.is_some() || restore.bus.is_some() || restore.master;
+        let rack = if named {
+            self.payload(&Request::Get {
                 param: None,
-                track: Some(track.clone()),
-                bus: None,
-                master: false,
-            }),
-            None => self.snapshot.params.clone(),
+                track: restore.track.clone(),
+                bus: restore.bus.clone(),
+                master: restore.master,
+            })
+        } else {
+            self.snapshot.params.clone()
         };
         let present: Vec<String> = rack
             .as_ref()
@@ -264,11 +275,57 @@ impl Client {
         }
     }
 
-    /// The Track that Rack requests act on: the selected one while a Project is open.
-    fn selected_track(&self) -> Option<usize> {
+    /// The Rack that Rack requests act on while a Project is open: the Bus or Master Rack the mixer panel shows, else the selected Track's.
+    fn rack_target(&self) -> Option<MixerTarget> {
         let status = self.snapshot.status.as_ref()?;
         project_name(Some(status))?;
-        usize::try_from(status["selected"].as_u64()?).ok()
+        let buses = status["buses"].as_array().map_or(0, Vec::len);
+        match self.shown_rack {
+            Some(MixerTarget::Bus(index)) if index < buses => Some(MixerTarget::Bus(index)),
+            Some(MixerTarget::Master) => Some(MixerTarget::Master),
+            _ => usize::try_from(status["selected"].as_u64()?)
+                .ok()
+                .map(MixerTarget::Track),
+        }
+    }
+
+    /// Keeps the Rack the last [`Command::ShowRack`] or [`Command::TrackSelect`] among `queued` names; `true` when a `ShowRack` came, so that its Rack is read now.
+    fn follow_shown_rack(&mut self, queued: &[Command]) -> bool {
+        let mut moved = false;
+        let mut shown = self.shown_rack;
+        for command in queued {
+            match command {
+                Command::ShowRack(MixerTarget::Track(_)) | Command::TrackSelect(_) => {
+                    moved |= matches!(command, Command::ShowRack(_));
+                    shown = None;
+                }
+                Command::ShowRack(target) => {
+                    moved = true;
+                    shown = Some(*target);
+                }
+                Command::ProjectNew(_)
+                | Command::ProjectOpen(_)
+                | Command::ProjectClose
+                | Command::RestoreAutosave(_) => shown = None,
+                _ => {}
+            }
+        }
+        self.shown_rack = shown;
+        moved
+    }
+
+    /// The `get` of the Rack shown: the Bus or Master Rack the mixer panel shows, else the Daemon's own choice (the selected Track's).
+    fn rack_get(&self) -> Request {
+        let shown = self
+            .rack_target()
+            .filter(|target| !matches!(target, MixerTarget::Track(_)));
+        let (track, bus, master) = rack_selectors(shown);
+        Request::Get {
+            param: None,
+            track,
+            bus,
+            master,
+        }
     }
 
     /// `project_open` waits for the closed Project's last Takes: it is sent again every tick while the Daemon answers that the Project is still closing.
@@ -451,12 +508,7 @@ impl Client {
                 warn!("list: skipped {skipped} entries without an integer program");
             }
         }
-        self.snapshot.params = self.payload(&Request::Get {
-            param: None,
-            track: None,
-            bus: None,
-            master: false,
-        });
+        self.snapshot.params = self.payload(&self.rack_get());
         let project_open = project_name(self.snapshot.status.as_ref()).is_some();
         self.snapshot.items = if project_open {
             self.payload(&Request::Items)

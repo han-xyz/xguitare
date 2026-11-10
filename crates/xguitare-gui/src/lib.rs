@@ -1,5 +1,7 @@
 pub mod app;
 pub mod client;
+mod mixer;
+pub mod mixer_model;
 pub mod model;
 mod project;
 pub mod project_model;

@@ -406,13 +406,15 @@ pub fn project_end(status: &Value, items: &[ItemBlock]) -> u64 {
 pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) -> bool {
     match key {
         KeyEvent::Space | KeyEvent::R | KeyEvent::Home | KeyEvent::End => !widget_focused,
-        KeyEvent::Digit(..) | KeyEvent::CtrlS | KeyEvent::CtrlR => {
-            shortcuts_active(text_edit_focused)
-        }
+        KeyEvent::Digit(..)
+        | KeyEvent::CtrlS
+        | KeyEvent::CtrlR
+        | KeyEvent::CtrlM
+        | KeyEvent::CtrlAltR => shortcuts_active(text_edit_focused),
     }
 }
 
-/// Reaper's keys while a Project is open; the digit keys load no Preset then.
+/// Reaper's keys while a Project is open, Ctrl+M (mixer) and Ctrl+Alt+R (Render dialog) among them; the digit keys load no Preset then.
 pub fn project_key_to_command(
     key: KeyEvent,
     status: &Value,
@@ -427,6 +429,8 @@ pub fn project_key_to_command(
         KeyEvent::Home => Some(Command::Locate(0)),
         KeyEvent::End => Some(Command::Locate(project_end(status, items))),
         KeyEvent::CtrlS => Some(Command::ProjectSave),
+        KeyEvent::CtrlM => Some(Command::ToggleMixer),
+        KeyEvent::CtrlAltR => Some(Command::OpenRenderDialog),
         KeyEvent::Digit(..) => None,
     }
 }
