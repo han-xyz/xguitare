@@ -21,6 +21,7 @@ use xguitare_gui::project_model::AutosaveOffer;
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
+const TALL_WINDOW: Vec2 = Vec2::new(1440.0, 1200.0);
 const MIN_WINDOW: Vec2 = Vec2::new(1024.0, 640.0);
 const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
 const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
@@ -1172,8 +1173,10 @@ fn mixer_snapshots() {
     click_button(&mut mixer, "Mixer");
     write_png(&mut mixer, "mixer");
 
-    click_button(&mut mixer, "Rack of Verb");
-    write_png(&mut mixer, "mixer-bus-rack");
+    let (mut bus_rack, _, _dir) = harness_with(TALL_WINDOW, mixer_snapshot());
+    click_button(&mut bus_rack, "Mixer");
+    click_button(&mut bus_rack, "Rack of Verb");
+    write_png(&mut bus_rack, "mixer-bus-rack");
 
     let file = "/home/you/Music/xguitare/demo-song/renders/demo-song.wav";
     let running = json!({"name": "demo-song", "range": "project", "progress": 0.42,
