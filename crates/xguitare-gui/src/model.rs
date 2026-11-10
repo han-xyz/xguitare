@@ -25,6 +25,7 @@ pub const EAR_HOLE_RADIUS: f32 = 4.0;
 pub const EAR_HOLE_INSET: f32 = 22.0;
 pub const NEUTRAL_ACCENT: (u8, u8, u8) = (120, 120, 120);
 pub const CLIP_DB: f64 = 0.0;
+pub const PEAK_HOLD_FOR: Duration = Duration::from_secs(2);
 pub const CENTS_SPAN: i64 = 50;
 pub const IN_TUNE_CENTS: i64 = 3;
 
@@ -212,16 +213,48 @@ impl ClipLatch {
     }
 }
 
-/// The Rack position a unit dragged from `from` lands on: the unit under `pointer_y`, given each unit's top edge in Rack order; above the first unit is the front, below the last the end.
-pub fn drop_index(from: usize, pointer_y: f32, unit_tops: &[f32]) -> usize {
-    if unit_tops.is_empty() {
+/// The Rack position a unit dragged from `from` lands on: the unit under `pointer_y`, given each unit's top edge in Rack order; above the first unit is the front, below the last the end. A release outside the window (`None`) or an empty Rack leaves it at `from`.
+pub fn drop_index(from: usize, pointer_y: Option<f32>, unit_tops: &[f32]) -> usize {
+    let Some(pointer_y) = pointer_y.filter(|_| !unit_tops.is_empty()) else {
         return from;
-    }
+    };
     unit_tops
         .iter()
         .filter(|&&top| top <= pointer_y)
         .count()
         .saturating_sub(1)
+}
+
+/// The peak text's value: the largest peak seen, held for [`PEAK_HOLD_FOR`], then the current one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PeakHold {
+    held_db: f64,
+    since: Option<Instant>,
+}
+
+impl Default for PeakHold {
+    fn default() -> PeakHold {
+        PeakHold {
+            held_db: SILENCE_DB,
+            since: None,
+        }
+    }
+}
+
+impl PeakHold {
+    pub fn observe(&mut self, peak_db: f64, now: Instant) {
+        let expired = self
+            .since
+            .is_none_or(|since| now.saturating_duration_since(since) >= PEAK_HOLD_FOR);
+        if expired || peak_db >= self.held_db {
+            self.held_db = peak_db;
+            self.since = Some(now);
+        }
+    }
+
+    pub fn held_db(&self) -> f64 {
+        self.held_db
+    }
 }
 
 /// The open Module ids as kept in eframe storage.

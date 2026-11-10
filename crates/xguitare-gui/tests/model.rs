@@ -14,10 +14,10 @@ use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
-    KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, Rgb, Throttle,
-    TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir, cents_fraction,
-    cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout, failed_set,
-    filter_bank, in_tune, ir_names, key_to_command, knob_angle_deg, knob_fraction,
+    KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, PeakHold, Rgb,
+    Throttle, TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir,
+    cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout,
+    failed_set, filter_bank, in_tune, ir_names, key_to_command, knob_angle_deg, knob_fraction,
     knob_param_value, knob_points, knob_value_from_drag, ladder_segments, latency_ms,
     meter_fraction, module_types, move_target, open_units_from_string, open_units_to_string,
     palette, param_rows, peak_fraction, quit_commands, rack_channels, refresh_decision,
@@ -986,25 +986,53 @@ const UNIT_TOPS: [f32; 4] = [100.0, 170.0, 240.0, 430.0];
 
 #[test]
 fn drop_index_above_the_top_unit_is_the_front() {
-    assert_eq!(drop_index(2, 40.0, &UNIT_TOPS), 0);
-    assert_eq!(drop_index(2, 120.0, &UNIT_TOPS), 0);
+    assert_eq!(drop_index(2, Some(40.0), &UNIT_TOPS), 0);
+    assert_eq!(drop_index(2, Some(120.0), &UNIT_TOPS), 0);
 }
 
 #[test]
 fn drop_index_in_the_middle_is_the_unit_under_the_pointer() {
-    assert_eq!(drop_index(0, 300.0, &UNIT_TOPS), 2);
-    assert_eq!(drop_index(3, 170.0, &UNIT_TOPS), 1);
+    assert_eq!(drop_index(0, Some(300.0), &UNIT_TOPS), 2);
+    assert_eq!(drop_index(3, Some(170.0), &UNIT_TOPS), 1);
 }
 
 #[test]
 fn drop_index_below_the_bottom_unit_is_the_end() {
-    assert_eq!(drop_index(0, 900.0, &UNIT_TOPS), 3);
+    assert_eq!(drop_index(0, Some(900.0), &UNIT_TOPS), 3);
 }
 
 #[test]
 fn drop_index_over_its_own_unit_is_the_same_place() {
-    assert_eq!(drop_index(1, 200.0, &UNIT_TOPS), 1);
-    assert_eq!(drop_index(0, 0.0, &[]), 0);
+    assert_eq!(drop_index(1, Some(200.0), &UNIT_TOPS), 1);
+    assert_eq!(drop_index(2, Some(0.0), &[]), 2);
+}
+
+#[test]
+fn drop_index_released_outside_the_window_stays() {
+    assert_eq!(drop_index(2, None, &UNIT_TOPS), 2);
+}
+
+#[test]
+fn peak_hold_holds_a_spike_for_two_seconds() {
+    let start = Instant::now();
+    let mut hold = PeakHold::default();
+    hold.observe(-3.0, start);
+    hold.observe(-30.0, start + Duration::from_millis(500));
+    hold.observe(-40.0, start + Duration::from_millis(1990));
+    assert_eq!(hold.held_db(), -3.0);
+    hold.observe(-1.0, start + Duration::from_millis(1995));
+    assert_eq!(hold.held_db(), -1.0);
+}
+
+#[test]
+fn peak_hold_releases_to_the_current_value_after_two_seconds() {
+    let start = Instant::now();
+    let mut hold = PeakHold::default();
+    hold.observe(-3.0, start);
+    hold.observe(-40.0, start + Duration::from_secs(2));
+    assert_eq!(hold.held_db(), -40.0);
+    hold.observe(-50.0, start + Duration::from_millis(2100));
+    assert_eq!(hold.held_db(), -40.0);
 }
 
 #[test]

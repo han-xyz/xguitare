@@ -9,7 +9,7 @@ use std::time::Instant;
 use egui::{
     Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CursorIcon, Event, Frame, Grid,
     InnerResponse, Key, Label, Layout, Margin, Modifiers, Panel, Rect, Response, RichText,
-    ScrollArea, Sense, Stroke, TextEdit, Theme, Ui, Vec2, pos2, vec2,
+    ScrollArea, Sense, Stroke, TextEdit, Theme, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use serde_json::Value;
 use tracing::{error, info};
@@ -18,9 +18,9 @@ use xguitare_core::{BankKind, Config};
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KeyEvent, KeyModifiers, Link,
-    ModuleType, ParamRow, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command,
-    bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, engine_readout, filter_bank,
-    in_tune, key_to_command, knob_fraction, knob_param_value, link_text, move_target,
+    ModuleType, ParamRow, PeakHold, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading,
+    add_command, bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, engine_readout,
+    filter_bank, in_tune, key_to_command, knob_fraction, knob_param_value, link_text, move_target,
     open_units_from_string, open_units_to_string, palette, param_rows, peak_db, quit_commands,
     rack_channels, tuner_reading, tuner_toggle, unit_suffix,
 };
@@ -89,6 +89,7 @@ pub struct App {
     muted_by_us: bool,
     tuner_mute: bool,
     clips: [ClipLatch; 2],
+    holds: [PeakHold; 2],
     open_units: BTreeSet<String>,
     bank_query: String,
     save_as_name: Option<String>,
@@ -144,6 +145,7 @@ impl App {
             muted_by_us: false,
             tuner_mute,
             clips: [ClipLatch::default(); 2],
+            holds: [PeakHold::default(); 2],
             open_units,
             bank_query: String::new(),
             save_as_name: None,
@@ -189,15 +191,24 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         let mut latest = None;
+        let now = Instant::now();
         for snapshot in self.snapshots.try_iter() {
             if let Some(status) = &snapshot.status {
-                for ((_, key), clip) in METERS.iter().zip(&mut self.clips) {
+                for (((_, key), clip), hold) in
+                    METERS.iter().zip(&mut self.clips).zip(&mut self.holds)
+                {
                     clip.observe(peak_db(status, key));
+                    hold.observe(peak_db(status, key), now);
                 }
             }
             latest = Some(snapshot);
         }
         if let Some(snapshot) = latest {
+            if let Some(params) = &snapshot.params {
+                let rack = param_rows(params);
+                self.open_units
+                    .retain(|id| rack.iter().any(|(module, _)| module == id));
+            }
             if snapshot.last_message != self.snapshot.last_message
                 && let Some((text, at)) = &snapshot.last_message
             {
@@ -246,6 +257,7 @@ impl eframe::App for App {
             knobs: &mut knobs,
             tuner: &mut tuner,
             clips: &mut self.clips,
+            holds: &self.holds,
             open_units: &mut self.open_units,
         };
         CentralPanel::default().show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
@@ -457,6 +469,7 @@ struct RackView<'a, 'b> {
     knobs: &'a mut Knobs<'b>,
     tuner: &'a mut Tuner<'b>,
     clips: &'a mut [ClipLatch; 2],
+    holds: &'a [PeakHold; 2],
     open_units: &'a mut BTreeSet<String>,
 }
 
@@ -469,7 +482,7 @@ fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Comma
             .inner_margin(Margin::symmetric(RAIL_WIDTH, 0))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = UNIT_GAP;
-                meter_bridge(ui, snapshot, view.clips);
+                meter_bridge(ui, snapshot, view.clips, view.holds);
                 commands.extend(tuner_unit(ui, snapshot, view.tuner));
                 commands.extend(module_units(
                     ui,
@@ -485,7 +498,6 @@ fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Comma
     commands
 }
 
-/// One rack unit: `fill` behind `content`, the bevel edges, and both ears over the sides.
 fn rack_unit<R>(
     ui: &mut Ui,
     fill: Rgb,
@@ -522,12 +534,9 @@ fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
     widgets::lamp(ui.painter(), rect.center(), lit_colour, lit);
 }
 
-fn unit_name(ui: &mut Ui, name: &str) -> Response {
+fn unit_name(ui: &mut Ui, name: &str) {
     let text = RichText::new(name).strong().size(UNIT_NAME_SIZE);
-    ui.add_sized(
-        vec2(UNIT_NAME_WIDTH, 0.0),
-        Label::new(text).sense(Sense::click()),
-    )
+    ui.add_sized(vec2(UNIT_NAME_WIDTH, 0.0), Label::new(text));
 }
 
 fn muted_text(text: impl Into<String>) -> RichText {
@@ -537,10 +546,15 @@ fn muted_text(text: impl Into<String>) -> RichText {
 }
 
 /// A click on either ladder clears both clip lamps.
-fn meter_bridge(ui: &mut Ui, snapshot: &Snapshot, clips: &mut [ClipLatch; 2]) {
+fn meter_bridge(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    clips: &mut [ClipLatch; 2],
+    holds: &[PeakHold; 2],
+) {
     let mut cleared = false;
     rack_unit(ui, palette().meter_bridge, METER_BRIDGE_HEIGHT, |ui| {
-        for ((label, key), clip) in METERS.iter().zip(clips.iter()) {
+        for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
             ui.horizontal(|ui| {
                 ui.add_sized(vec2(METER_LABEL_WIDTH, 0.0), Label::new(muted_text(*label)));
                 let db = snapshot
@@ -551,7 +565,7 @@ fn meter_bridge(ui: &mut Ui, snapshot: &Snapshot, clips: &mut [ClipLatch; 2]) {
                     .interact(Sense::click())
                     .on_hover_text(CLEAR_CLIP_HINT);
                 cleared |= ladder.clicked();
-                ui.label(muted_text(peak_text(db, clip.is_clipped())));
+                ui.label(muted_text(peak_text(hold.held_db(), clip.is_clipped())));
             });
         }
     });
@@ -670,12 +684,9 @@ fn module_units(
         placed.push((rect, ears));
     }
     let tops: Vec<f32> = placed.iter().map(|(rect, _)| rect.top()).collect();
-    let Some(pointer_y) = ui
+    let pointer_y = ui
         .input(|input| input.pointer.latest_pos())
-        .map(|pos| pos.y)
-    else {
-        return commands;
-    };
+        .map(|pos| pos.y);
     for (from, (_, ears)) in placed.iter().enumerate() {
         let to = drop_index(from, pointer_y, &tops);
         if ears.dragged() {
@@ -727,9 +738,12 @@ fn module_unit(
     let mut toggled = false;
     let inner = rack_unit(ui, fill, height, |ui| {
         let mut commands = Vec::new();
-        ui.horizontal(|ui| {
+        let header = UiBuilder::new()
+            .layout(Layout::left_to_right(Align::Center))
+            .sense(Sense::click());
+        let header = ui.scope_builder(header, |ui| {
             unit_lamp(ui, accent, true);
-            toggled |= unit_name(ui, &module_label(module, unit.rows)).clicked();
+            unit_name(ui, &module_label(module, unit.rows));
             let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
             toggled |= ui.small_button(chevron).clicked();
             let knobs_width = (ui.available_width() - MOVE_BUTTONS_WIDTH).max(0.0);
@@ -743,6 +757,7 @@ fn module_unit(
                 commands.extend(move_buttons(ui, module, unit.place));
             });
         });
+        toggled |= header.response.clicked();
         if open {
             ui.horizontal_wrapped(|ui| {
                 commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
