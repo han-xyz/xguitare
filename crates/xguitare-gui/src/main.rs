@@ -1,4 +1,6 @@
 mod app;
+mod rack;
+mod sidebar;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
