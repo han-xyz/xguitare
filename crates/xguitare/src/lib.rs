@@ -69,10 +69,18 @@ enum Cmd {
     },
     /// Turn Mute on or off
     Mute { state: MuteState },
+    /// Bypass a Module (on) or switch it back in (off)
+    Bypass { id: String, state: BypassState },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum MuteState {
+    On,
+    Off,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum BypassState {
     On,
     Off,
 }

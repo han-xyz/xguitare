@@ -7,7 +7,7 @@ use std::time::Duration;
 use xguitare_client::Transport;
 use xguitare_core::control::{Request, Response, Value};
 
-use crate::{Cmd, IrCmd, MuteState, RackCmd, parse};
+use crate::{BypassState, Cmd, IrCmd, MuteState, RackCmd, parse};
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
@@ -138,6 +138,10 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         Cmd::Mute { state } => Request::Mute {
             on: matches!(state, MuteState::On),
         },
+        Cmd::Bypass { id, state } => Request::Bypass {
+            id,
+            on: matches!(state, BypassState::On),
+        },
     })
 }
 
@@ -178,6 +182,14 @@ fn render(req: &Request, payload: &Value) -> String {
                 "muted\n".to_string()
             } else {
                 "unmuted\n".to_string()
+            }
+        }
+        Request::Bypass { id, .. } => {
+            let id = without_control_chars(id);
+            if payload["bypass"] == true {
+                format!("{id}: bypassed\n")
+            } else {
+                format!("{id}: on\n")
             }
         }
         Request::IrList => items(&payload["irs"])

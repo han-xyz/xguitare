@@ -660,3 +660,43 @@ fn rack_alone_is_error_line() {
     assert!(out.requests.is_empty());
     assert!(out.stdout.is_empty());
 }
+
+#[test]
+fn bypass_on_off_prints() {
+    let out = cli(
+        &["bypass", "preamp", "on"],
+        reply(r#"{"ok":true,"bypass":true}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Bypass {
+            id: "preamp".to_string(),
+            on: true
+        }]
+    );
+    assert_eq!(out.stdout, "preamp: bypassed\n");
+    assert_eq!(out.code, 0);
+    let out = cli(
+        &["bypass", "preamp", "off"],
+        reply(r#"{"ok":true,"bypass":false}"#),
+    );
+    assert_eq!(
+        out.requests,
+        [Request::Bypass {
+            id: "preamp".to_string(),
+            on: false
+        }]
+    );
+    assert_eq!(out.stdout, "preamp: on\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn bypass_unknown_module_prints_error() {
+    let out = cli(
+        &["bypass", "wah", "on"],
+        reply(r#"{"ok":false,"error":"no module 'wah'"}"#),
+    );
+    assert_eq!(out.stderr, "error: no module 'wah'\n");
+    assert_eq!(out.code, 1);
+}

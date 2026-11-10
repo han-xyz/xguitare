@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -46,8 +46,8 @@ Response:
 | `sample_rate` | JACK sample rate in Hz; follows a rate change while the Daemon runs, and the Rack and the Tuner are rebuilt at the new rate. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
-| `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
+| `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `bypass`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
@@ -158,7 +158,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"params":[{"default":40.0,"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
+{"ok":true,"params":[{"bypass":false,"default":40.0,"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
 ```
 
 | Key | Value |
@@ -172,6 +172,7 @@ Response:
 | `params[].min`, `params[].max` | The Parameter's range. |
 | `params[].default` | The value a new Module of this type starts with. |
 | `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`, `cabinet.low_cut`, `cabinet.high_cut`); `set` and the Module round other values. |
+| `params[].bypass` | Whether the Module is bypassed (see `bypass`); the same on every entry of one Module. |
 | `params[].ir` | Cabinet entries only: the Module's Cabinet IR name, as in the Preset's `ir` (`null` when it has none). Other Modules' entries have no `ir` key. |
 
 Errors:
@@ -455,6 +456,35 @@ Response:
 | `muted` | The Mute state now. |
 
 Errors: `on` missing or not a boolean gets the transport's `invalid request: ` error, e.g. ``invalid request: missing field `on` ``; Mute is unchanged.
+
+## bypass
+
+Bypasses one Module of the running Rack (`on: true`) or switches it back in (`on: false`). A bypassed Module passes its input through unchanged and keeps its Parameters; the switch crossfades over 10 ms between the Module's output and its input. Once the fade to bypassed has ended the Module is not processed; switched back in, it starts from silence (delay and reverb tails restart). The change is not written to the Preset file until `save`, which writes `bypass = true` on the Module. The Revision increments and `status` shows `modified: true`.
+
+Request:
+
+```json
+{"cmd":"bypass","id":"preamp","on":true}
+```
+
+Response:
+
+```json
+{"ok":true,"bypass":true}
+```
+
+| Key | Value |
+| --- | --- |
+| `bypass` | Whether the Module is bypassed now. |
+
+Errors (on any of them nothing changes and the Revision stays):
+
+| `error` | When |
+| --- | --- |
+| `no module '<id>'` | The active Preset has no Module with that id, e.g. `no module 'wah'`. |
+| `no preset loaded` | No Preset is active. |
+| `engine busy` | The audio thread's command queue is full; retry. |
+| ``invalid request: missing field `on` `` | `on` is missing or not a boolean (transport error). |
 
 ## ports
 

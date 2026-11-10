@@ -33,6 +33,10 @@ pub enum Command {
         param: usize,
         value: f32,
     },
+    SetBypass {
+        module: usize,
+        on: bool,
+    },
 }
 
 pub enum FromAudio {
@@ -199,6 +203,14 @@ impl RackSwitcher {
                         .or(self.incoming.as_mut())
                         .unwrap_or(&mut self.current);
                     newest.module_mut(module).set_param(param, value);
+                }
+                Command::SetBypass { module, on } => {
+                    let newest = self
+                        .pending
+                        .as_mut()
+                        .or(self.incoming.as_mut())
+                        .unwrap_or(&mut self.current);
+                    newest.set_bypass(module, on);
                 }
                 Command::SwapRack(new) => {
                     if self.incoming.is_none() && self.pending.is_none() {

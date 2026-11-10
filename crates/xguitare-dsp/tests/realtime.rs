@@ -232,3 +232,35 @@ fn midi_parse_does_not_allocate() {
     });
     assert_eq!(programs, [Some(5), None, None]);
 }
+
+#[test]
+fn bypass_toggling_does_not_allocate() {
+    let mut rack = Rack::new(vec![
+        (
+            "drive".to_string(),
+            Box::new(Drive::new()) as Box<dyn Module>,
+        ),
+        (
+            "cabinet".to_string(),
+            Box::new(Cabinet::new(None)) as Box<dyn Module>,
+        ),
+        (
+            "delay".to_string(),
+            Box::new(Delay::new()) as Box<dyn Module>,
+        ),
+    ])
+    .expect("valid layout");
+    rack.prepare(48_000.0, BLOCK);
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for round in 0..100 {
+            let on = round % 10 < 5;
+            for idx in 0..3 {
+                rack.set_bypass(idx, on);
+            }
+            rack.process(&input, &mut left, &mut right);
+        }
+    });
+}

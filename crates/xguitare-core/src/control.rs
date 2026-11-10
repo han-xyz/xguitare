@@ -81,6 +81,10 @@ pub enum Request {
     Mute {
         on: bool,
     },
+    Bypass {
+        id: String,
+        on: bool,
+    },
     IrList,
     RackIr {
         ir: String,
@@ -222,6 +226,7 @@ fn handle_from(
         Request::RackMove { id, to } => rack_move(state, &id, to, &mut warnings),
         Request::Tuner => Ok(tuner(state)),
         Request::Mute { on } => Ok(mute(state, on)),
+        Request::Bypass { id, on } => bypass(state, &id, on),
         Request::IrList => ir_list(state),
         Request::RackIr { ir, id } => rack_ir(state, &ir, id.as_deref(), &mut warnings),
         Request::Ports => ports.ok_or(NO_AUDIO_PORTS.to_string()).map(|ports| {
@@ -522,6 +527,20 @@ fn set(state: &mut EngineState, address: &str, value: f64) -> Result<Value, Stri
     }))
 }
 
+fn bypass(state: &mut EngineState, id: &str, on: bool) -> Result<Value, String> {
+    let (_, preset) = state.active.as_mut().ok_or(NO_PRESET)?;
+    let module = module_index(&preset.modules, id)?;
+    state
+        .queues
+        .commands
+        .push(Command::SetBypass { module, on })
+        .map_err(|_| ENGINE_BUSY.to_string())?;
+    preset.modules[module].bypass = on;
+    state.revision += 1;
+    state.modified = true;
+    Ok(json!({ "bypass": on }))
+}
+
 fn save(state: &mut EngineState) -> Result<Value, String> {
     let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
     if state.bank.position(file).is_none() {
@@ -742,6 +761,7 @@ fn rack_add(
                 id: id.clone(),
                 type_name: type_name.to_string(),
                 ir: None,
+                bypass: false,
                 params: spec
                     .params
                     .iter()
@@ -1091,6 +1111,7 @@ fn param_json(module: &PresetModule, param: usize) -> Value {
         "max": shortest_f64(spec.max),
         "default": shortest_f64(spec.default),
         "integer": spec.integer,
+        "bypass": module.bypass,
     });
     if module.type_name == CABINET_TYPE {
         entry["ir"] = json!(module.ir);

@@ -22,6 +22,7 @@ pub struct PresetModule {
     pub id: String,
     pub type_name: String,
     pub ir: Option<String>,
+    pub bypass: bool,
     pub params: Vec<(String, f32)>,
 }
 
@@ -73,6 +74,8 @@ struct ModuleEntry {
     id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ir: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    bypass: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     params: BTreeMap<String, f64>,
 }
@@ -139,6 +142,7 @@ impl Preset {
                     type_name: module.type_name.clone(),
                     id: Some(module.id.clone()),
                     ir: module.ir.clone(),
+                    bypass: module.bypass,
                     params: module
                         .params
                         .iter()
@@ -197,6 +201,9 @@ impl Preset {
         for idx in 0..rack.modules().len() {
             rack.module_mut(idx).reset();
         }
+        for (idx, _) in self.modules.iter().enumerate().filter(|(_, m)| m.bypass) {
+            rack.start_bypassed(idx);
+        }
         Ok((rack, warnings))
     }
 }
@@ -245,8 +252,13 @@ fn resolve_entry(entry: ModuleEntry, spec: &ModuleSpec) -> Result<PresetModule, 
         id,
         type_name: entry.type_name,
         ir: entry.ir,
+        bypass: entry.bypass,
         params,
     })
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// `ir_dir/<ir>` when it exists, else `bank_dir/<ir>`; neither existing gives the `ir_dir` path, so the load error names it.

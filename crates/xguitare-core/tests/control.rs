@@ -115,6 +115,13 @@ fn error((response, _): (Response, Vec<BuildWarning>)) -> String {
     }
 }
 
+fn bypass(id: &str, on: bool) -> Request {
+    Request::Bypass {
+        id: id.to_string(),
+        on,
+    }
+}
+
 fn set(param: &str, value: f64) -> Request {
     Request::Set {
         param: param.to_string(),
@@ -328,7 +335,7 @@ fn set_without_preset() {
 #[test]
 fn get_all_and_one() {
     let (mut state, _audio, _dir) = state("get");
-    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "default": 0.0, "integer": false});
+    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "default": 0.0, "integer": false, "bypass": false});
     let all = ok(handle(&mut state, Request::Get { param: None }));
     assert_eq!(all, json!({"params": [expected]}));
     let module = ok(handle(
@@ -753,6 +760,7 @@ fn cabinet(id: &str) -> PresetModule {
         id: id.to_string(),
         type_name: "cabinet".to_string(),
         ir: None,
+        bypass: false,
         params: Vec::new(),
     }
 }
@@ -1520,6 +1528,7 @@ fn modified_tracks_changes() {
         rack_move("gate", 1),
         rack_remove("gate"),
         rack_ir("cabs/x.wav", None),
+        bypass("gain", true),
     ] {
         ok(handle(&mut state, Request::Save { name: None }));
         assert!(!is_modified(&mut state));
@@ -1737,4 +1746,65 @@ fn save_as_numbers_past_99() {
         let payload = ok(handle(&mut state, save_as(name)));
         assert_eq!(payload["path"], bank.join(file).display().to_string());
     }
+}
+
+#[test]
+fn bypass_switches_the_module_and_shows_in_get() {
+    let (mut state, mut audio, _dir) = state("bypass");
+    assert_eq!(
+        ok(handle(&mut state, bypass("gain", true))),
+        json!({"bypass": true})
+    );
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SetBypass {
+            module: 0,
+            on: true
+        })
+    ));
+    let all = ok(handle(&mut state, Request::Get { param: None }));
+    assert_eq!(all["params"][0]["bypass"], true);
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["modified"], true);
+    assert_eq!(status["revision"], 2);
+    assert_eq!(
+        ok(handle(&mut state, bypass("gain", false))),
+        json!({"bypass": false})
+    );
+    let all = ok(handle(&mut state, Request::Get { param: None }));
+    assert_eq!(all["params"][0]["bypass"], false);
+}
+
+#[test]
+fn bypass_errors_verbatim() {
+    let (mut state, _audio, _dir) = state("bypass-errors");
+    assert_eq!(
+        error(handle(&mut state, bypass("delay", true))),
+        "no module 'delay'"
+    );
+    assert_eq!(ok(handle(&mut state, Request::Status))["revision"], 1);
+    state.active = None;
+    assert_eq!(
+        error(handle(&mut state, bypass("gain", true))),
+        "no preset loaded"
+    );
+}
+
+#[test]
+fn bypass_request_line() {
+    let (mut state, _audio, _dir) = state("bypass-line");
+    let connection = open_connection(&mut state);
+    let line = r#"{"cmd":"bypass","id":"gain","on":true}"#;
+    let (response, _) = handle_line(&mut state, None, connection, line);
+    assert_eq!(response, r#"{"ok":true,"bypass":true}"#);
+}
+
+#[test]
+fn save_writes_bypass() {
+    let (mut state, _audio, _dir) = state("bypass-save");
+    ok(handle(&mut state, bypass("gain", true)));
+    ok(handle(&mut state, Request::Save { name: None }));
+    let file = state.config.bank_dir.join("01-clean.toml");
+    let saved = Preset::parse(&fs::read_to_string(&file).unwrap()).unwrap();
+    assert!(saved.modules[0].bypass);
 }

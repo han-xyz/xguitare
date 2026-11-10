@@ -212,3 +212,21 @@ fn grown_block_cuts_to_fitting_incoming_and_keeps_pending() {
     }
     assert!((out[BLOCK - 1] - 0.05).abs() < 1e-6, "{}", out[BLOCK - 1]);
 }
+
+#[test]
+fn set_bypass_fades_the_newest_rack_to_its_input() {
+    let (mut switcher, mut control) = switcher(&[6.0]);
+    assert!(
+        control
+            .commands
+            .push(Command::SetBypass {
+                module: 0,
+                on: true
+            })
+            .is_ok()
+    );
+    for _ in 0..8 {
+        block(&mut switcher);
+    }
+    assert_eq!(block(&mut switcher), [0.5; BLOCK]);
+}

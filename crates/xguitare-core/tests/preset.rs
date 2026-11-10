@@ -89,6 +89,7 @@ fn omitted_params_take_defaults() {
             id: "boost".to_string(),
             type_name: "gain".to_string(),
             ir: None,
+            bypass: false,
             params: vec![("level".to_string(), 0.0)],
         }]
     );
@@ -311,4 +312,33 @@ fn ir_resolves_ir_dir_then_bank() {
             "{test}: {error}"
         );
     }
+}
+
+#[test]
+fn bypass_round_trips_and_defaults_to_off() {
+    let preset = Preset::parse(
+        "name = \"X\"\n[[module]]\ntype = \"gain\"\nbypass = true\n[[module]]\ntype = \"gate\"\n",
+    )
+    .unwrap();
+    let bypassed: Vec<bool> = preset.modules.iter().map(|m| m.bypass).collect();
+    assert_eq!(bypassed, [true, false]);
+    let text = preset.to_toml();
+    assert_eq!(text.matches("bypass = true").count(), 1, "{text}");
+    assert!(!text.contains("bypass = false"), "{text}");
+    assert_eq!(Preset::parse(&text).unwrap(), preset);
+}
+
+#[test]
+fn bypassed_module_builds_without_a_fade() {
+    let preset = Preset::parse(
+        "name = \"X\"\n[[module]]\ntype = \"gain\"\nbypass = true\n[module.params]\nlevel = -6\n",
+    )
+    .unwrap();
+    let (mut rack, _) = preset
+        .build(48_000.0, 128, Path::new("."), Path::new("."), 100.0)
+        .unwrap();
+    let input: Vec<f32> = (0..128).map(|n| n as f32 / 128.0).collect();
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    rack.process(&input, &mut left, &mut right);
+    assert_eq!(left.as_slice(), input.as_slice());
 }

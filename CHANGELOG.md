@@ -9,6 +9,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - The Daemon follows a sample-rate change of the audio server: it rebuilds the Rack (Cabinet IRs resampled) and the Tuner at the new rate, logs `sample rate changed: 48000 -> 96000`, and `status` shows the new `sample_rate`.
 - `get` on a cabinet ends with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none).
 - The Daemon serves at most 32 connections at once; one more gets `too many connections` and is closed. A connection idle for 300 seconds is closed.
+- Bypass per Module: `xguitare bypass <id> on|off` and the Control API `bypass` request switch one Module to passing its input through, with a 10 ms crossfade; a Preset's `[[module]]` takes `bypass = true`, `save` writes it, and `get` entries carry `bypass`.
 
 ### Changed
 

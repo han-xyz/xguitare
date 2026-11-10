@@ -102,6 +102,7 @@ mix = 10
 
 - Each `[[module]]` is one Module of the Rack, in signal order. `type` is required. `id` is optional and defaults to the type; give one when a Preset has two Modules of the same type (ids must be unique). The CLI addresses Parameters as `<id>.<param>`.
 - Omitted Parameters take their defaults; values outside a Parameter's range are clamped.
+- `bypass = true` on a `[[module]]` starts that Module bypassed: it passes its input through unchanged and keeps its Parameters. Omitted means `false`. `xguitare bypass <id> on|off` switches it live, and `save` writes it.
 - `cabinet` needs `ir`: the name of a Cabinet IR, a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo). The name is looked up under the IR directory (config `ir_dir`, default the Bank directory) and, when no file of that name is there, under the Bank directory. Only the first `ir_max_ms` of the file is read, and an IR with a NaN or infinite sample is refused. It must be a relative name: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. Every IR is normalised to unit energy on load (a stereo IR to unit energy per channel on average, so it plays as loud in total as a mono IR), so IRs sit at one loudness and `level` balances the cabinet against the rest. `xguitare ir list` shows the names in the IR directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
 
 Modules and Parameters (`min..max default unit`):
@@ -273,6 +274,15 @@ $ xguitare mute on
 muted
 $ xguitare mute off
 unmuted
+```
+
+`bypass <id> on|off` bypasses one Module, which then passes its input through unchanged and keeps its Parameters, or switches it back in; the switch fades over 10 ms, and a Module switched back in starts from silence (delay and reverb tails restart). Like `set`, it changes the running sound until `save` writes it to the Preset:
+
+```console
+$ xguitare bypass preamp on
+preamp: bypassed
+$ xguitare bypass preamp off
+preamp: on
 ```
 
 ## GUI

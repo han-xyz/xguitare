@@ -50,6 +50,10 @@ fn rack_switcher_does_not_allocate() {
         value: -6.0,
     };
     assert!(control.commands.push(set).is_ok());
+    for on in [true, false] {
+        let bypass = Command::SetBypass { module: 0, on };
+        assert!(control.commands.push(bypass).is_ok());
+    }
     assert!(
         control
             .commands
