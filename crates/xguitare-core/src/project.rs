@@ -1,13 +1,14 @@
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write};
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::control::{slug, temp_path};
-use crate::preset::{ModuleEntry, is_relative_name, module_entries, parse_modules};
+use crate::preset::{ModuleEntry, module_entries, parse_modules};
 use crate::{Preset, PresetError, PresetModule};
 
 pub const PROJECT_FILE: &str = "project.toml";
@@ -19,6 +20,15 @@ pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 const DEFAULT_TEMPO_BPM: f64 = 120.0;
 const DEFAULT_METER: (u32, u32) = (4, 4);
+const TEMPO_BPM: RangeInclusive<f64> = 20.0..=300.0;
+const METER_BEATS: RangeInclusive<u32> = 1..=16;
+const METER_NOTES: [u32; 4] = [2, 4, 8, 16];
+const LATENCY_OFFSET_MS: RangeInclusive<f64> = -1000.0..=1000.0;
+const VOLUME_DB: RangeInclusive<f32> = -60.0..=6.0;
+const PAN: RangeInclusive<f32> = -1.0..=1.0;
+/// The largest frame a TOML integer holds, so every saved frame loads again.
+const LAST_FRAME: u64 = i64::MAX as u64;
+const TAKE_EXTENSION: &str = ".wav";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
@@ -94,6 +104,18 @@ pub enum ProjectError {
         error: PresetError,
     },
     TooManyTracks,
+    Tempo,
+    Meter,
+    SampleRate,
+    LatencyOffset,
+    Loop,
+    LoopPastLastFrame,
+    Volume(String),
+    Pan(String),
+    ItemPastLastFrame {
+        track: String,
+        item: usize,
+    },
     TakeOutsideProject(String),
     NoTake {
         track: String,
@@ -158,8 +180,6 @@ impl Project {
             }
             created => created.map_err(io_error(&dir))?,
         }
-        let takes = dir.join(TAKES_DIR);
-        fs::create_dir(&takes).map_err(io_error(&takes))?;
         let project = Project {
             name: name.to_string(),
             sample_rate: DEFAULT_SAMPLE_RATE,
@@ -169,7 +189,14 @@ impl Project {
             latency_offset_ms: 0.0,
             tracks: Vec::new(),
         };
-        project.save(&dir)?;
+        let takes = dir.join(TAKES_DIR);
+        let filled = fs::create_dir(&takes)
+            .map_err(io_error(&takes))
+            .and_then(|()| project.save(&dir));
+        if let Err(error) = filled {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(error);
+        }
         Ok((dir, project))
     }
 
@@ -177,7 +204,7 @@ impl Project {
     ///
     /// # Errors
     ///
-    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, there are more than [`MAX_TRACKS`] Tracks, a Take file is not a relative path inside the folder, or an Item's active Take does not exist.
+    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, or an Item's active Take that does not exist.
     pub fn load(dir: &Path) -> Result<Project, ProjectError> {
         read(&dir.join(PROJECT_FILE))
     }
@@ -195,7 +222,7 @@ impl Project {
     ///
     /// # Errors
     ///
-    /// [`ProjectError::TooManyTracks`], or [`ProjectError::Io`] when the file cannot be written.
+    /// The [`ProjectError`] [`Project::load`] would give for a value out of range, or [`ProjectError::Io`] when the file cannot be written.
     pub fn save(&self, dir: &Path) -> Result<(), ProjectError> {
         write(&dir.join(PROJECT_FILE), self)
     }
@@ -233,11 +260,12 @@ impl Project {
 
     /// # Errors
     ///
-    /// [`ProjectError::TooManyTracks`] when the Project already has [`MAX_TRACKS`].
+    /// [`ProjectError::TooManyTracks`] when the Project already has [`MAX_TRACKS`], or the error [`Project::load`] would give for a value of the Track out of range.
     pub fn add_track(&mut self, track: Track) -> Result<(), ProjectError> {
         if self.tracks.len() >= MAX_TRACKS {
             return Err(ProjectError::TooManyTracks);
         }
+        check_track(&track)?;
         self.tracks.push(track);
         Ok(())
     }
@@ -289,12 +317,12 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
     if file.tracks.len() > MAX_TRACKS {
         return Err(ProjectError::TooManyTracks);
     }
-    let tracks = file
+    let tracks: Vec<Track> = file
         .tracks
         .into_iter()
         .map(track_from_file)
         .collect::<Result<_, _>>()?;
-    Ok(Project {
+    let project = Project {
         name: file.name,
         sample_rate: file.sample_rate,
         tempo_bpm: file.tempo_bpm,
@@ -302,7 +330,73 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         loop_region: file.loop_region,
         latency_offset_ms: file.latency_offset_ms,
         tracks,
-    })
+    };
+    check_project(&project)?;
+    Ok(project)
+}
+
+fn check_project(project: &Project) -> Result<(), ProjectError> {
+    if project.tracks.len() > MAX_TRACKS {
+        return Err(ProjectError::TooManyTracks);
+    }
+    if !TEMPO_BPM.contains(&project.tempo_bpm) {
+        return Err(ProjectError::Tempo);
+    }
+    let (beats, note) = project.meter;
+    if !METER_BEATS.contains(&beats) || !METER_NOTES.contains(&note) {
+        return Err(ProjectError::Meter);
+    }
+    if project.sample_rate == 0 {
+        return Err(ProjectError::SampleRate);
+    }
+    if !LATENCY_OFFSET_MS.contains(&project.latency_offset_ms) {
+        return Err(ProjectError::LatencyOffset);
+    }
+    let LoopRegion { start, end, on } = project.loop_region;
+    if start.max(end) > LAST_FRAME {
+        return Err(ProjectError::LoopPastLastFrame);
+    }
+    if on && start >= end {
+        return Err(ProjectError::Loop);
+    }
+    project.tracks.iter().try_for_each(check_track)
+}
+
+fn check_track(track: &Track) -> Result<(), ProjectError> {
+    if !VOLUME_DB.contains(&track.volume_db) {
+        return Err(ProjectError::Volume(track.name.clone()));
+    }
+    if !PAN.contains(&track.pan) {
+        return Err(ProjectError::Pan(track.name.clone()));
+    }
+    for (index, item) in track.items.iter().enumerate() {
+        if let Some(take) = item.takes.iter().find(|take| !is_take_file(&take.file)) {
+            return Err(ProjectError::TakeOutsideProject(take.file.clone()));
+        }
+        if item.take >= item.takes.len() {
+            return Err(ProjectError::NoTake {
+                track: track.name.clone(),
+                item: index,
+                take: item.take,
+            });
+        }
+        let longest = item.takes.iter().map(|take| take.frames).max().unwrap_or(0);
+        if item.position.saturating_add(longest) > LAST_FRAME {
+            return Err(ProjectError::ItemPastLastFrame {
+                track: track.name.clone(),
+                item: index,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Whether `file` is `takes/<name>.wav`: one file directly in the Project's `takes/` folder.
+fn is_take_file(file: &str) -> bool {
+    file.strip_prefix(TAKES_DIR)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .and_then(|name| name.strip_suffix(TAKE_EXTENSION))
+        .is_some_and(|stem| !stem.is_empty() && !stem.contains('/'))
 }
 
 fn track_from_file(file: TrackFile) -> Result<Track, ProjectError> {
@@ -310,18 +404,6 @@ fn track_from_file(file: TrackFile) -> Result<Track, ProjectError> {
         track: file.name.clone(),
         error,
     })?;
-    for (index, item) in file.items.iter().enumerate() {
-        if let Some(take) = item.takes.iter().find(|take| !is_relative_name(&take.file)) {
-            return Err(ProjectError::TakeOutsideProject(take.file.clone()));
-        }
-        if item.take >= item.takes.len() {
-            return Err(ProjectError::NoTake {
-                track: file.name,
-                item: index,
-                take: item.take,
-            });
-        }
-    }
     Ok(Track {
         name: file.name,
         input: file.input,
@@ -336,9 +418,7 @@ fn track_from_file(file: TrackFile) -> Result<Track, ProjectError> {
 }
 
 fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
-    if project.tracks.len() > MAX_TRACKS {
-        return Err(ProjectError::TooManyTracks);
-    }
+    check_project(project)?;
     let file = ProjectFile {
         name: project.name.clone(),
         sample_rate: project.sample_rate,
@@ -362,10 +442,8 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
             })
             .collect(),
     };
-    let text = toml::to_string_pretty(&file).map_err(|err| ProjectError::Io {
-        path: path.to_path_buf(),
-        source: io::Error::other(err),
-    })?;
+    let text = toml::to_string_pretty(&file)
+        .expect("a checked Project serialises: every frame fits a TOML integer");
     replace_file(path, text.as_bytes()).map_err(io_error(path))
 }
 
@@ -402,6 +480,23 @@ impl fmt::Display for ProjectError {
             ProjectError::Track { track, error } => write!(f, "track '{track}': {error}"),
             ProjectError::TooManyTracks => {
                 write!(f, "a project has at most {MAX_TRACKS} tracks")
+            }
+            ProjectError::Tempo => f.write_str("tempo must be between 20 and 300 bpm"),
+            ProjectError::Meter => {
+                f.write_str("meter must be 1 to 16 beats of a 2, 4, 8 or 16 note")
+            }
+            ProjectError::SampleRate => f.write_str("sample rate must be above 0"),
+            ProjectError::LatencyOffset => {
+                f.write_str("latency offset must be between -1000 and 1000 ms")
+            }
+            ProjectError::Loop => f.write_str("loop start must be before loop end"),
+            ProjectError::LoopPastLastFrame => f.write_str("loop region ends past the last frame"),
+            ProjectError::Volume(track) => {
+                write!(f, "track '{track}' volume must be between -60 and 6 dB")
+            }
+            ProjectError::Pan(track) => write!(f, "track '{track}' pan must be between -1 and 1"),
+            ProjectError::ItemPastLastFrame { track, item } => {
+                write!(f, "track '{track}' item {item} ends past the last frame")
             }
             ProjectError::TakeOutsideProject(file) => write!(
                 f,

@@ -277,6 +277,12 @@ fn take_paths_outside_the_project_are_rejected() {
         "takes/../../x.wav",
         "",
         "takes//x.wav",
+        "project.toml",
+        "x.wav",
+        "takes/a/b.wav",
+        "takes/x.mp3",
+        "takes/.wav",
+        "takes/../x.wav",
     ] {
         assert_eq!(
             load_error(&dir.0, &with_take_file(file)),
@@ -353,4 +359,172 @@ fn autosave_newer_compares_mtimes() {
     assert!(autosave_newer(&folder));
     set_mtime(&folder.join(PROJECT_FILE), now);
     assert!(!autosave_newer(&folder));
+    fs::remove_file(folder.join(PROJECT_FILE)).unwrap();
+    assert!(autosave_newer(&folder));
+}
+
+fn assert_load_errors(test: &str, find: &str, replacements: &[&str], message: &str) {
+    let dir = temp_dir(test);
+    assert!(TWO_TRACKS.contains(find), "{find}");
+    for replacement in replacements {
+        assert_eq!(
+            load_error(&dir.0, &TWO_TRACKS.replacen(find, replacement, 1)),
+            message,
+            "{replacement}"
+        );
+    }
+}
+
+#[test]
+fn tempo_out_of_range_is_rejected() {
+    assert_load_errors(
+        "tempo",
+        "tempo_bpm = 96.5",
+        &[
+            "tempo_bpm = 19.9",
+            "tempo_bpm = 300.1",
+            "tempo_bpm = nan",
+            "tempo_bpm = inf",
+        ],
+        "tempo must be between 20 and 300 bpm",
+    );
+}
+
+#[test]
+fn meter_out_of_range_is_rejected() {
+    assert_load_errors(
+        "meter",
+        "meter = [7, 8]",
+        &[
+            "meter = [0, 4]",
+            "meter = [17, 4]",
+            "meter = [4, 3]",
+            "meter = [4, 0]",
+            "meter = [4, 32]",
+        ],
+        "meter must be 1 to 16 beats of a 2, 4, 8 or 16 note",
+    );
+}
+
+#[test]
+fn zero_sample_rate_is_rejected() {
+    assert_load_errors(
+        "sample-rate",
+        "sample_rate = 48000",
+        &["sample_rate = 0"],
+        "sample rate must be above 0",
+    );
+}
+
+#[test]
+fn latency_offset_out_of_range_is_rejected() {
+    assert_load_errors(
+        "latency",
+        "latency_offset_ms = 2.5",
+        &[
+            "latency_offset_ms = 1000.5",
+            "latency_offset_ms = -1000.5",
+            "latency_offset_ms = nan",
+        ],
+        "latency offset must be between -1000 and 1000 ms",
+    );
+}
+
+#[test]
+fn loop_on_needs_start_before_end() {
+    assert_load_errors(
+        "loop",
+        "start = 1000\nend = 96000",
+        &["start = 96000\nend = 96000", "start = 96001\nend = 96000"],
+        "loop start must be before loop end",
+    );
+    let dir = temp_dir("loop-off");
+    let off = TWO_TRACKS.replace(
+        "start = 1000\nend = 96000\non = true",
+        "start = 5\nend = 0\non = false",
+    );
+    fs::write(dir.0.join(PROJECT_FILE), off).unwrap();
+    assert!(!Project::load(&dir.0).unwrap().loop_region.on);
+}
+
+#[test]
+fn track_volume_out_of_range_is_rejected() {
+    assert_load_errors(
+        "volume",
+        "volume_db = -3.0",
+        &["volume_db = -60.5", "volume_db = 6.5", "volume_db = nan"],
+        "track 'Guitar' volume must be between -60 and 6 dB",
+    );
+}
+
+#[test]
+fn track_pan_out_of_range_is_rejected() {
+    assert_load_errors(
+        "pan",
+        "pan = -0.5",
+        &["pan = -1.5", "pan = 1.01", "pan = nan"],
+        "track 'Guitar' pan must be between -1 and 1",
+    );
+}
+
+#[test]
+fn item_ending_past_the_last_frame_is_rejected() {
+    assert_load_errors(
+        "item-end",
+        "position = 48000",
+        &["position = 9223372036854775807"],
+        "track 'Guitar' item 0 ends past the last frame",
+    );
+}
+
+#[test]
+fn save_refuses_what_load_would_reject() {
+    let dir = temp_dir("save-checks");
+    let (folder, project) = Project::new(&dir.0, "Song").unwrap();
+    let saved = fs::read_to_string(folder.join(PROJECT_FILE)).unwrap();
+
+    let mut slow = project.clone();
+    slow.tempo_bpm = 0.0;
+    assert_eq!(
+        slow.save(&folder).unwrap_err().to_string(),
+        "tempo must be between 20 and 300 bpm"
+    );
+    let mut endless = project.clone();
+    endless.loop_region.end = u64::MAX;
+    assert_eq!(
+        endless.save(&folder).unwrap_err().to_string(),
+        "loop region ends past the last frame"
+    );
+    let mut stray = project;
+    let mut track = Track::from_preset("Gtr", &Preset::parse("name = \"P\"\n").unwrap());
+    track.items.push(Item {
+        position: 0,
+        take: 0,
+        takes: vec![Take {
+            file: "project.toml".to_string(),
+            frames: 1,
+        }],
+    });
+    stray.tracks.push(track);
+    assert_eq!(
+        stray.save(&folder).unwrap_err().to_string(),
+        "take file 'project.toml' must be a relative path inside the project folder"
+    );
+    assert_eq!(
+        fs::read_to_string(folder.join(PROJECT_FILE)).unwrap(),
+        saved
+    );
+}
+
+#[test]
+fn add_track_checks_the_track() {
+    let dir = temp_dir("add-track");
+    let (_, mut project) = Project::new(&dir.0, "Song").unwrap();
+    let mut track = Track::from_preset("Loud", &Preset::parse("name = \"P\"\n").unwrap());
+    track.volume_db = 12.0;
+    assert_eq!(
+        project.add_track(track).unwrap_err().to_string(),
+        "track 'Loud' volume must be between -60 and 6 dB"
+    );
+    assert_eq!(project.tracks, []);
 }
