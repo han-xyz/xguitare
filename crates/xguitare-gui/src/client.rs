@@ -62,7 +62,7 @@ struct Client {
     settings_fetched: bool,
     projects_fetched: bool,
     tuner_answered: bool,
-    /// The Bus or Master Rack the mixer panel shows; `None` for the selected Track's.
+    /// The Rack the window last named; a Track stands for the selected one.
     shown_rack: Option<MixerTarget>,
     snapshot: Snapshot,
 }
@@ -289,29 +289,20 @@ impl Client {
         }
     }
 
-    /// Keeps the Rack the last [`Command::ShowRack`] or [`Command::TrackSelect`] among `queued` names; `true` when a `ShowRack` came, so that its Rack is read now.
+    /// Mirrors the Rack the window names by the last [`Command::ShowRack`] among `queued`; a Project opened or closed names none. `true` when it changed, so that its Rack is read now.
     fn follow_shown_rack(&mut self, queued: &[Command]) -> bool {
-        let mut moved = false;
-        let mut shown = self.shown_rack;
+        let before = self.shown_rack;
         for command in queued {
             match command {
-                Command::ShowRack(MixerTarget::Track(_)) | Command::TrackSelect(_) => {
-                    moved |= matches!(command, Command::ShowRack(_));
-                    shown = None;
-                }
-                Command::ShowRack(target) => {
-                    moved = true;
-                    shown = Some(*target);
-                }
+                Command::ShowRack(target) => self.shown_rack = Some(*target),
                 Command::ProjectNew(_)
                 | Command::ProjectOpen(_)
                 | Command::ProjectClose
-                | Command::RestoreAutosave(_) => shown = None,
+                | Command::RestoreAutosave(_) => self.shown_rack = None,
                 _ => {}
             }
         }
-        self.shown_rack = shown;
-        moved
+        self.shown_rack != before
     }
 
     /// The `get` of the Rack shown: the Bus or Master Rack the mixer panel shows, else the Daemon's own choice (the selected Track's).

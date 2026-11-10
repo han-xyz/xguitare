@@ -9,15 +9,15 @@ use std::time::Instant;
 use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
-use xguitare_core::control::BusRef;
+use xguitare_core::control::{BusRef, TrackRef};
 use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
 use crate::mixer::{MixerView, RenderDraft, mixer_panel, render_dialog};
-use crate::mixer_model::{MASTER, MixerTarget};
+use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
-    RemovedUnit, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
+    RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
     forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, palette,
     param_rows, peak_db, quit_commands, remember_removes,
 };
@@ -203,8 +203,10 @@ impl App {
 impl App {
     /// The last [`Command::RackRemove`] among `commands` becomes the footer's Undo, from the `get` payload shown when it was sent; a `load` or a Bank kind change drops it, even of the same Preset, and the footer drops it when the active Preset changes ([`crate::model::shown_undo`]); an IR-folder-only settings change keeps it.
     fn remember_undo(&mut self, commands: &[Command], now: Instant) {
+        let mut aimed = None;
         for command in commands {
             match command {
+                Command::ShowRack(target) => aimed = Some(*target),
                 Command::RackRemove { id } => {
                     let status = self.snapshot.status.as_ref();
                     let removed = self
@@ -213,7 +215,9 @@ impl App {
                         .as_ref()
                         .and_then(|params| RemovedUnit::new(params, status, id, now));
                     if let Some(mut removed) = removed {
-                        self.aim_restore_at_shown_rack(&mut removed);
+                        if let Some(target) = aimed {
+                            aim_restore(&mut removed.restore, status, target);
+                        }
                         self.removed = Some(removed);
                     }
                 }
@@ -232,47 +236,43 @@ impl App {
 }
 
 impl App {
-    /// A Module removed from the Bus or Master Rack the mixer panel shows goes back there; a Bus is named, so that Undo finds it after another Bus is removed.
-    fn aim_restore_at_shown_rack(&self, removed: &mut RemovedUnit) {
-        let restore = &mut removed.restore;
-        match self.mixer.shown_rack() {
-            Some(MixerTarget::Bus(index)) => {
-                let name =
-                    self.snapshot.status.as_ref().and_then(|status| {
-                        status["buses"][index]["name"].as_str().map(str::to_string)
-                    });
-                restore.track = None;
-                restore.bus = Some(name.map_or(BusRef::Index(index), BusRef::Name));
-            }
-            Some(MixerTarget::Master) => {
-                restore.track = None;
-                restore.master = true;
-            }
-            Some(MixerTarget::Track(_)) | None => {}
+    /// Aims every Rack request at the Rack the window shows ([`aim_rack_commands`]) and takes the window's own commands out: Ctrl+M or `Mixer` opens or closes the mixer panel, Ctrl+Alt+R or `Render` opens the Render dialog.
+    fn keep_window_commands(&mut self, commands: Vec<Command>) -> Vec<Command> {
+        let focus = RackFocus {
+            mixer_open: self.mixer.open,
+            shown: self.mixer.rack,
+            selected: self.snapshot.status.as_ref().and_then(selected_index),
+        };
+        let (mut commands, focus) = aim_rack_commands(focus, commands);
+        self.mixer.open = focus.mixer_open;
+        self.mixer.rack = focus.shown;
+        if commands.contains(&Command::OpenRenderDialog) {
+            self.mixer.render = Some(RenderDraft::new(&self.snapshot));
         }
+        commands
+            .retain(|command| !matches!(command, Command::ToggleMixer | Command::OpenRenderDialog));
+        commands
     }
+}
 
-    /// Takes the window's own commands out of `commands`: Ctrl+M or `Mixer` opens or closes the mixer panel (the selected Track's Rack comes back on close), Ctrl+Alt+R or `Render` opens the Render dialog.
-    fn keep_window_commands(&mut self, commands: &mut Vec<Command>) {
-        let mut follow_up = Vec::new();
-        commands.retain(|command| match command {
-            Command::ToggleMixer => {
-                self.mixer.open = !self.mixer.open;
-                let selected = self.snapshot.status.as_ref().and_then(selected_track);
-                if let (Some(MixerTarget::Bus(_) | MixerTarget::Master), Some(selected)) =
-                    (self.mixer.rack.take(), selected)
-                {
-                    follow_up.push(Command::ShowRack(selected));
-                }
-                false
-            }
-            Command::OpenRenderDialog => {
-                self.mixer.render = Some(RenderDraft::new(&self.snapshot));
-                false
-            }
-            _ => true,
-        });
-        commands.extend(follow_up);
+/// A Module goes back to the Rack its remove was aimed at; a Track and a Bus are named, so that Undo finds them after another is removed.
+fn aim_restore(restore: &mut Restore, status: Option<&Value>, target: MixerTarget) {
+    let name = |key: &str, index: usize| {
+        status.and_then(|status| status[key][index]["name"].as_str().map(str::to_string))
+    };
+    match target {
+        MixerTarget::Track(index) => {
+            restore.track =
+                Some(name("tracks", index).map_or(TrackRef::Index(index), TrackRef::Name));
+        }
+        MixerTarget::Bus(index) => {
+            restore.track = None;
+            restore.bus = Some(name("buses", index).map_or(BusRef::Index(index), BusRef::Name));
+        }
+        MixerTarget::Master => {
+            restore.track = None;
+            restore.master = true;
+        }
     }
 }
 
@@ -425,7 +425,7 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 commands.extend(central_view(ui, snapshot, &mut self.mixer, &mut view));
             });
-        self.keep_window_commands(&mut commands);
+        let commands = self.keep_window_commands(commands);
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);
         for command in commands {
@@ -568,7 +568,7 @@ fn central_view(
     let shown = if mixer.open {
         mixer.rack
     } else {
-        selected_track(status)
+        selected_index(status).map(MixerTarget::Track)
     };
     if let Some(target) = shown {
         rack_heading(ui, status, target);
@@ -592,11 +592,11 @@ fn open_render_dialog(
     commands
 }
 
-fn selected_track(status: &Value) -> Option<MixerTarget> {
+fn selected_index(status: &Value) -> Option<usize> {
     track_rows(status)
         .into_iter()
         .find(|row| row.selected)
-        .map(|row| MixerTarget::Track(row.index))
+        .map(|row| row.index)
 }
 
 /// Names the Track, Bus or Master whose Rack is shown.

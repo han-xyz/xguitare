@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
-    Audibility, MixerColumn, MixerTarget, RenderView, SendView, StereoPeakHold,
-    default_render_name, fader_db, fader_position, mixer_columns, rack_selectors, render_view,
-    send_fraction, send_level, send_text,
+    Audibility, MixerColumn, MixerTarget, RackFocus, RenderView, SendView, StereoPeakHold,
+    aim_rack_commands, default_render_name, fader_db, fader_position, mixer_columns,
+    rack_selectors, render_view, send_fraction, send_level, send_text,
 };
 use xguitare_gui::model::{Command, KeyEvent, key_to_command};
 use xguitare_gui::project_model::project_key_to_command;
@@ -311,4 +311,98 @@ fn render_name_defaults_to_the_project_folder() {
         Some("demo-song".to_string())
     );
     assert_eq!(default_render_name(None, &status), None);
+}
+
+fn rack_add() -> Command {
+    Command::RackAdd {
+        type_name: "reverb".to_string(),
+        after: None,
+        at: None,
+    }
+}
+
+fn mixer_showing(shown: MixerTarget, selected: usize) -> RackFocus {
+    RackFocus {
+        mixer_open: true,
+        shown: Some(shown),
+        selected: Some(selected),
+    }
+}
+
+#[test]
+fn selecting_a_track_closes_the_bus_rack_and_aims_at_the_track() {
+    let (commands, focus) = aim_rack_commands(
+        mixer_showing(MixerTarget::Bus(0), 0),
+        vec![Command::TrackSelect(2), rack_add()],
+    );
+    assert_eq!(
+        commands,
+        [
+            Command::TrackSelect(2),
+            Command::ShowRack(MixerTarget::Track(2)),
+            rack_add(),
+        ]
+    );
+    assert_eq!(focus.shown, Some(MixerTarget::Track(2)));
+}
+
+#[test]
+fn removing_the_shown_bus_closes_its_rack() {
+    let (commands, focus) = aim_rack_commands(
+        mixer_showing(MixerTarget::Bus(1), 0),
+        vec![Command::BusRemove(1), rack_add()],
+    );
+    assert_eq!(
+        commands,
+        [
+            Command::BusRemove(1),
+            Command::ShowRack(MixerTarget::Track(0)),
+            rack_add(),
+        ]
+    );
+    assert_eq!(focus.shown, None);
+}
+
+#[test]
+fn removing_an_earlier_bus_keeps_the_shown_bus() {
+    let set = Command::Set {
+        param: "reverb.mix".to_string(),
+        value: 40.0,
+    };
+    let (commands, focus) = aim_rack_commands(
+        mixer_showing(MixerTarget::Bus(2), 0),
+        vec![Command::BusRemove(0), set.clone()],
+    );
+    assert_eq!(
+        commands,
+        [
+            Command::BusRemove(0),
+            Command::ShowRack(MixerTarget::Bus(1)),
+            set,
+        ]
+    );
+    assert_eq!(focus.shown, Some(MixerTarget::Bus(1)));
+}
+
+#[test]
+fn closing_the_mixer_shows_the_selected_track_again() {
+    let (commands, focus) = aim_rack_commands(
+        mixer_showing(MixerTarget::Master, 1),
+        vec![Command::ToggleMixer],
+    );
+    assert_eq!(
+        commands,
+        [
+            Command::ToggleMixer,
+            Command::ShowRack(MixerTarget::Track(1)),
+        ]
+    );
+    assert!(!focus.mixer_open);
+    assert_eq!(focus.shown, None);
+}
+
+#[test]
+fn rack_requests_without_a_project_name_no_rack() {
+    let (commands, _) = aim_rack_commands(RackFocus::default(), vec![rack_add()]);
+    assert_eq!(commands, [rack_add()]);
 }

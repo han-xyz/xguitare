@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_core::control::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
+use crate::model::Command;
 use crate::project_model::project_name;
 
 /// The fader position of 0 dB; the top is +6 dB.
@@ -238,6 +239,97 @@ pub fn rack_selectors(rack: Option<MixerTarget>) -> (Option<TrackRef>, Option<Bu
         Some(MixerTarget::Bus(index)) => (None, Some(BusRef::Index(index)), false),
         Some(MixerTarget::Master) => (None, None, true),
     }
+}
+
+/// What the window knows of the Rack it shows: the mixer panel's open state and the column it opened, and the selected Track (`None` with no Project open).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RackFocus {
+    pub mixer_open: bool,
+    pub shown: Option<MixerTarget>,
+    pub selected: Option<usize>,
+}
+
+impl RackFocus {
+    /// The Rack that Rack requests act on: the column opened in the mixer panel while it is open, else the selected Track's.
+    pub fn target(&self) -> Option<MixerTarget> {
+        self.shown
+            .filter(|_| self.mixer_open)
+            .or(self.selected.map(MixerTarget::Track))
+    }
+
+    fn follow(&mut self, command: &Command) {
+        match command {
+            Command::ShowRack(target) => self.shown = Some(*target),
+            Command::TrackSelect(index) => {
+                self.selected = Some(*index);
+                if self.shown.is_some() {
+                    self.shown = Some(MixerTarget::Track(*index));
+                }
+            }
+            Command::BusRemove(removed) => {
+                self.shown = match self.shown {
+                    Some(MixerTarget::Bus(index)) if index == *removed => None,
+                    Some(MixerTarget::Bus(index)) if index > *removed => {
+                        Some(MixerTarget::Bus(index - 1))
+                    }
+                    shown => shown,
+                };
+            }
+            Command::ToggleMixer => {
+                self.mixer_open = !self.mixer_open;
+                self.shown = None;
+            }
+            Command::ProjectNew(_)
+            | Command::ProjectOpen(_)
+            | Command::ProjectClose
+            | Command::RestoreAutosave(_) => self.shown = None,
+            _ => {}
+        }
+    }
+}
+
+fn is_rack_request(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Load(_)
+            | Command::Set { .. }
+            | Command::RackAdd { .. }
+            | Command::RackRemove { .. }
+            | Command::RackMove { .. }
+            | Command::Bypass { .. }
+            | Command::RackIr { .. }
+    )
+}
+
+/// `commands` with a [`Command::ShowRack`] of the window's Rack before each Rack request and wherever a command moves it, so that the client thread aims at the Rack the window shows; and the focus after them.
+pub fn aim_rack_commands(
+    mut focus: RackFocus,
+    commands: Vec<Command>,
+) -> (Vec<Command>, RackFocus) {
+    let mut aimed = Vec::new();
+    let mut named = None;
+    for command in commands {
+        let target = focus.target();
+        if is_rack_request(&command)
+            && let Some(target) = target
+            && named != Some(target)
+        {
+            aimed.push(Command::ShowRack(target));
+            named = Some(target);
+        }
+        focus.follow(&command);
+        let shows = matches!(command, Command::ShowRack(_));
+        aimed.push(command);
+        if shows {
+            named = focus.target();
+        } else if focus.target() != target
+            && let Some(moved) = focus.target()
+        {
+            aimed.push(Command::ShowRack(moved));
+            named = Some(moved);
+        }
+    }
+    (aimed, focus)
 }
 
 /// The Render dialog's state from `status` `render`: none yet, running at a progress from 0 to 1, or how the last one ended.

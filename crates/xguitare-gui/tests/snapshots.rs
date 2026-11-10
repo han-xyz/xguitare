@@ -546,15 +546,17 @@ fn undo_after_selecting_another_track_restores_to_the_first() {
     harness.run_steps(2);
     let sent = sent_now(&sent);
     assert_eq!(
-        sent[..2],
+        sent[..4],
         [
+            Command::ShowRack(MixerTarget::Track(0)),
             Command::RackRemove {
                 id: "compressor".to_string(),
             },
             Command::TrackSelect(1),
+            Command::ShowRack(MixerTarget::Track(1)),
         ]
     );
-    let Command::Restore(restore) = &sent[2] else {
+    let Command::Restore(restore) = &sent[4] else {
         panic!("no Restore in {sent:?}");
     };
     assert_eq!(restore.track, Some(TrackRef::Name("Guitar".to_string())));
@@ -608,7 +610,13 @@ fn clicking_a_track_row_selects_it() {
     let (mut harness, sent, _dir) = project_harness("stopped");
     harness.get_by_label("Track Keys").click();
     harness.run_steps(2);
-    assert_eq!(sent_now(&sent), [Command::TrackSelect(2)]);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::TrackSelect(2),
+            Command::ShowRack(MixerTarget::Track(2))
+        ]
+    );
 }
 
 #[test]

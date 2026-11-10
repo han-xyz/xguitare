@@ -132,7 +132,7 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
                     selected,
                     open: view.rack == Some(column.target),
                 };
-                commands.extend(mixer_column(ui, column, hold, &shape, &mut view.rack));
+                commands.extend(mixer_column(ui, column, hold, &shape));
             }
         });
     });
@@ -151,7 +151,6 @@ fn mixer_column(
     column: &MixerColumn,
     hold: StereoPeakHold,
     shape: &Shape,
-    rack: &mut Option<MixerTarget>,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
@@ -167,7 +166,7 @@ fn mixer_column(
         .show(ui, |ui| {
             ui.set_width(COLUMN_WIDTH);
             ui.vertical_centered(|ui| {
-                commands.extend(name_button(ui, column, shape, rack));
+                commands.extend(name_button(ui, column, shape));
                 let sends_height = TO_MASTER_HEIGHT + SEND_ROW_HEIGHT * shape.send_rows as f32;
                 ui.allocate_ui(vec2(COLUMN_WIDTH, sends_height), |ui| {
                     ui.set_min_height(sends_height);
@@ -186,12 +185,7 @@ fn mixer_column(
 }
 
 /// Opens the column's Rack below the panel; a Bus's name also has `Remove` in its context menu.
-fn name_button(
-    ui: &mut Ui,
-    column: &MixerColumn,
-    shape: &Shape,
-    rack: &mut Option<MixerTarget>,
-) -> Vec<Command> {
+fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
     let text_colour = if column.audibility == Audibility::Silent {
@@ -214,7 +208,6 @@ fn name_button(
         WidgetInfo::labeled(Role::Button, true, format!("Rack of {}", column.name))
     });
     if response.clicked() {
-        *rack = Some(column.target);
         if let MixerTarget::Track(index) = column.target
             && shape.selected != Some(index)
         {
@@ -226,9 +219,6 @@ fn name_button(
         response.context_menu(|ui| {
             if ui.button("Remove").clicked() {
                 commands.push(Command::BusRemove(index));
-                if *rack == Some(column.target) {
-                    *rack = None;
-                }
                 ui.close();
             }
         });
