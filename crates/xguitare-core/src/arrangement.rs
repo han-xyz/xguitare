@@ -560,7 +560,7 @@ impl Arrangement {
     }
 
     /// Marks the Tracks from `track` and the Buses from `bus` as moved or gone, so their clip flags are cleared once this Arrangement has replaced the running one.
-    pub fn clear_clips_from(&mut self, track: usize, bus: usize) {
+    pub(crate) fn clear_clips_from(&mut self, track: usize, bus: usize) {
         self.moved_from = (self.moved_from.0.min(track), self.moved_from.1.min(bus));
     }
 

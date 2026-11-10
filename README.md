@@ -393,7 +393,7 @@ master: -3 dB; out -120.0/-120.0 dB
 - `track edit <track> --to-master off` keeps a Track's own sound out of Master, so it is heard only through its Sends.
 - `rack add|remove|move`, `set`, `get`, `bypass` and `ir set` take `--bus <bus>` or `--master` to edit that Rack instead of the selected Track's; a Bus or Master Rack takes every Module type but the cabinet (`a cabinet is not allowed on a Bus or Master`), in any order, and `load` puts a Preset only into a Track.
 - Solo is solo in place: while anything is soloed, the soloed Tracks and Buses sound, with the Buses a soloed Track sends to and the Tracks that send to a soloed Bus. Mute always wins.
-- `status` shows each Track's, Bus's and Master's output peaks (left/right, after the volume) since the last `status`, and `clip` once a side has reached 0 dBFS. The clip flag stays until `clip reset` (all), `clip reset track <track>`, `clip reset bus <bus>` or `clip reset master`.
+- `status` shows each Track's, Bus's and Master's output peaks (left/right, after the volume) since the last `status`, and `clip` once a side has reached 0 dBFS. The clip flag stays until `clip reset` (all), `clip reset track <track>`, `clip reset bus <bus>` or `clip reset master`. Removing a Track or Bus clears the clip flags of the Tracks or Buses after it.
 
 ### Latency compensation
 

@@ -1129,4 +1129,6 @@ Response: the index cleared, as `{"track": <index>}`, `{"bus": <index>}` or `{"m
 {"ok":true,"bus":0}
 ```
 
+Removing a Track or Bus clears the clip flags of the Tracks or Buses after it, whose indexes move.
+
 Errors: `no project open` (a `track`, `bus` or `master` given while no Project is open); `no track '<track>'`; `no bus '<bus>'`; `give track, bus or master, not more than one`.
