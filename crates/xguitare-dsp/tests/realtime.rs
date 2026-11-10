@@ -190,7 +190,7 @@ fn full_chain_does_not_allocate() {
         for idx in 0..rack.modules().len() {
             let module = rack.module_mut(idx);
             let spec = &module.spec().params[0];
-            module.set_param(0, (spec.min + spec.max) / 2.0);
+            module.set_param(0, f32::midpoint(spec.min, spec.max));
         }
         for _ in 0..100 {
             rack.process(&input, &mut left, &mut right);

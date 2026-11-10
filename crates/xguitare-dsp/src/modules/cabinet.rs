@@ -95,6 +95,10 @@ impl Cabinet {
     }
 
     // A cut at its default (outermost) value is bypassed: the samples are not touched, so default Presets stay bit-exact.
+    #[allow(
+        clippy::float_cmp,
+        reason = "a cut left exactly at its default disengages its filter"
+    )]
     fn update_cuts(&mut self) {
         let rate = self.sample_rate;
         let low_cut = f64::from(self.low_cut_hz);
@@ -163,12 +167,11 @@ impl Module for Cabinet {
     fn process(&mut self, io: &mut AudioBuffers) {
         let frames = io.frames;
         let (left, right) = (&mut io.left[..frames], &mut io.right[..frames]);
-        match &mut self.convolver {
-            Some(convolver) => convolver.process(&io.mono[..frames], left, right),
-            None => {
-                left.copy_from_slice(&io.mono[..frames]);
-                right.copy_from_slice(&io.mono[..frames]);
-            }
+        if let Some(convolver) = &mut self.convolver {
+            convolver.process(&io.mono[..frames], left, right);
+        } else {
+            left.copy_from_slice(&io.mono[..frames]);
+            right.copy_from_slice(&io.mono[..frames]);
         }
         self.high_pass.process(left, right);
         self.low_pass.process(left, right);
@@ -218,7 +221,11 @@ impl Biquad {
     fn high_pass(freq: f64, rate: f64) -> Biquad {
         let (cos, alpha) = angle(freq, rate);
         Biquad::normalised(
-            [(1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0],
+            [
+                f64::midpoint(1.0, cos),
+                -(1.0 + cos),
+                f64::midpoint(1.0, cos),
+            ],
             [1.0 + alpha, -2.0 * cos, 1.0 - alpha],
         )
     }

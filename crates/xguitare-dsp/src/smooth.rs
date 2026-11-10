@@ -41,7 +41,9 @@ impl Smoother {
     }
 
     pub fn advance(&mut self, frames: usize) -> f32 {
-        self.current = self.target + self.coeff.powi(frames as i32) * (self.current - self.target);
+        self.current = self.target
+            + self.coeff.powi(i32::try_from(frames).unwrap_or(i32::MAX))
+                * (self.current - self.target);
         self.current
     }
 }

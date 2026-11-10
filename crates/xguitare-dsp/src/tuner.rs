@@ -47,6 +47,7 @@ pub fn note_name(hz: f32, reference_hz: f32) -> Note {
 }
 
 /// McLeod pitch detection over a sliding window of the most recent 85 ms (rounded up to a power of two); all buffers are allocated in `new`, so `push` and `analyse` never allocate.
+#[allow(clippy::doc_markdown, reason = "McLeod is a surname, not code")]
 pub struct Detector {
     sample_rate: f32,
     window: Vec<f32>,

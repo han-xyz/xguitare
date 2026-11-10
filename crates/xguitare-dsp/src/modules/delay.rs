@@ -149,7 +149,7 @@ impl Module for Delay {
             let (written, wet) = if pingpong {
                 (
                     [
-                        (*left + *right) * 0.5 + feedback * delayed[1],
+                        f32::midpoint(*left, *right) + feedback * delayed[1],
                         feedback * delayed[0],
                     ],
                     [delayed[1], delayed[0]],

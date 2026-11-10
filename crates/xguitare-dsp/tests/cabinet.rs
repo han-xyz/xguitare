@@ -20,11 +20,11 @@ fn cabinet_rack(ir: Option<CabinetIr>) -> Rack {
     rack
 }
 
-fn mono_ir(taps: Vec<f32>) -> Option<CabinetIr> {
-    Some(CabinetIr {
+fn mono_ir(taps: Vec<f32>) -> CabinetIr {
+    CabinetIr {
         left: taps,
         right: None,
-    })
+    }
 }
 
 fn run(rack: &mut Rack, input: &[f32], block: usize) -> (Vec<f32>, Vec<f32>) {
@@ -77,7 +77,7 @@ fn assert_close(actual: &[f32], expected: &[f32], tolerance: f32) {
 
 #[test]
 fn unit_impulse_is_identity() {
-    let mut rack = cabinet_rack(mono_ir(vec![1.0]));
+    let mut rack = cabinet_rack(Some(mono_ir(vec![1.0])));
     let input = sine(10 * BLOCK);
     let (left, right) = run(&mut rack, &input, BLOCK);
     assert_close(&left, &input, 1e-5);
@@ -88,7 +88,7 @@ fn unit_impulse_is_identity() {
 fn matches_direct_convolution() {
     let ir = noise(64, 7);
     let input = noise(10 * BLOCK, 11);
-    let mut rack = cabinet_rack(mono_ir(ir.clone()));
+    let mut rack = cabinet_rack(Some(mono_ir(ir.clone())));
     let (left, right) = run(&mut rack, &input, BLOCK);
     let expected = direct_convolution(&input, &ir);
     assert_close(&left, &expected, 1e-4);
@@ -99,7 +99,7 @@ fn matches_direct_convolution() {
 fn long_ir_matches_direct() {
     let ir: Vec<f32> = noise(1000, 3).iter().map(|h| h * 0.05).collect();
     let input = noise(20 * BLOCK, 5);
-    let mut rack = cabinet_rack(mono_ir(ir.clone()));
+    let mut rack = cabinet_rack(Some(mono_ir(ir.clone())));
     let (left, _) = run(&mut rack, &input, BLOCK);
     assert_close(&left, &direct_convolution(&input, &ir), 1e-3);
 }
@@ -128,8 +128,12 @@ fn passthrough_duplicates_mono() {
 #[test]
 fn short_block_matches() {
     let input = sine(10 * BLOCK);
-    let (full, _) = run(&mut cabinet_rack(mono_ir(vec![1.0])), &input, BLOCK);
-    let (short, _) = run(&mut cabinet_rack(mono_ir(vec![1.0])), &input, BLOCK / 2);
+    let (full, _) = run(&mut cabinet_rack(Some(mono_ir(vec![1.0]))), &input, BLOCK);
+    let (short, _) = run(
+        &mut cabinet_rack(Some(mono_ir(vec![1.0]))),
+        &input,
+        BLOCK / 2,
+    );
     assert_close(&full, &input, 1e-5);
     assert_close(&short, &input, 1e-5);
 }
@@ -137,7 +141,7 @@ fn short_block_matches() {
 #[test]
 fn throughput_report() {
     let ir: Vec<f32> = noise(4800, 17).iter().map(|h| h * 0.01).collect();
-    let mut rack = cabinet_rack(mono_ir(ir));
+    let mut rack = cabinet_rack(Some(mono_ir(ir)));
     let input = noise(SAMPLE_RATE as usize, 19);
     let start = Instant::now();
     run(&mut rack, &input, BLOCK);
@@ -152,10 +156,10 @@ fn short_block_matches_long_ir() {
     let ir: Vec<f32> = noise(300, 23).iter().map(|h| h * 0.1).collect();
     let input = noise(20 * BLOCK, 29);
     let expected = direct_convolution(&input, &ir);
-    let (full, _) = run(&mut cabinet_rack(mono_ir(ir.clone())), &input, BLOCK);
+    let (full, _) = run(&mut cabinet_rack(Some(mono_ir(ir.clone()))), &input, BLOCK);
     assert_close(&full, &expected, 1e-4);
 
-    let mut rack = cabinet_rack(mono_ir(ir));
+    let mut rack = cabinet_rack(Some(mono_ir(ir)));
     let mut left = vec![0.0; input.len()];
     let mut right = vec![0.0; input.len()];
     let sizes = [64, 32, 128, 96, 128, 16, 1, 127];
@@ -180,7 +184,7 @@ const LOW_CUT: usize = 1;
 const HIGH_CUT: usize = 2;
 
 fn tone_gain_db(cut: (usize, f32), freq: f32) -> f32 {
-    let mut rack = cabinet_rack(mono_ir(vec![1.0]));
+    let mut rack = cabinet_rack(Some(mono_ir(vec![1.0])));
     rack.module_mut(0).set_param(cut.0, cut.1);
     let input = common::sine(0.5, freq, SAMPLE_RATE, SAMPLE_RATE as usize);
     let (left, _) = run(&mut rack, &input, BLOCK);
@@ -203,8 +207,9 @@ fn default_cuts_are_bit_exact() {
     assert_eq!(right, input);
 
     let ir = noise(300, 37);
-    let (fresh_left, fresh_right) = run(&mut cabinet_rack(mono_ir(ir.clone())), &input, BLOCK);
-    let mut restored = cabinet_rack(mono_ir(ir));
+    let (fresh_left, fresh_right) =
+        run(&mut cabinet_rack(Some(mono_ir(ir.clone()))), &input, BLOCK);
+    let mut restored = cabinet_rack(Some(mono_ir(ir)));
     restored.module_mut(0).set_param(LOW_CUT, 150.0);
     restored.module_mut(0).set_param(HIGH_CUT, 4000.0);
     restored.process(&input[..BLOCK], &mut [0.0; BLOCK], &mut [0.0; BLOCK]);
@@ -242,7 +247,7 @@ fn normalise_unit_energy() {
     };
     ir.normalise();
     let scaled = ir.right.clone().expect("right kept");
-    let mean = (energy(&ir.left) + energy(&scaled)) / 2.0;
+    let mean = f32::midpoint(energy(&ir.left), energy(&scaled));
     assert!((mean - 1.0).abs() <= 1e-4, "{mean}");
     let factor = ir.left[0] / left[0];
     for (n, (s, r)) in scaled.iter().zip(&right).enumerate() {

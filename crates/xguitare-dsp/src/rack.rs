@@ -33,6 +33,9 @@ pub enum RackError {
 }
 
 impl Rack {
+    /// # Errors
+    ///
+    /// A [`RackError`] when the Module order breaks a layout rule: a stereo Module before the Cabinet, a mono one after it, or two Cabinets.
     pub fn new(modules: Vec<(String, Box<dyn Module>)>) -> Result<Rack, RackError> {
         let mut has_cabinet = false;
         for (id, module) in &modules {

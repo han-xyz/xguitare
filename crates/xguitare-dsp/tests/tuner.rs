@@ -39,7 +39,7 @@ fn detects_sines_within_one_cent() {
 
 #[test]
 fn silence_and_noise_are_not_confident() {
-    assert!(detect(&[0.0; 8192], 48_000.0).is_none());
+    assert!(detect(&vec![0.0; 8192], 48_000.0).is_none());
     let quiet = detect(&noise(0.0003, 8192), 48_000.0);
     assert!(quiet.is_none_or(|pitch| !pitch.confident), "{quiet:?}");
 }

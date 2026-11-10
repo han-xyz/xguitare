@@ -94,7 +94,11 @@ impl Biquad {
     fn high_pass(freq: f64, q: f64, rate: f64) -> Biquad {
         let (cos, alpha) = Self::angle(freq, q, rate);
         Self::normalised(
-            [(1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0],
+            [
+                f64::midpoint(1.0, cos),
+                -(1.0 + cos),
+                f64::midpoint(1.0, cos),
+            ],
             [1.0 + alpha, -2.0 * cos, 1.0 - alpha],
         )
     }

@@ -100,6 +100,10 @@ impl Module for Tonestack {
         self.values[idx]
     }
 
+    #[allow(
+        clippy::many_single_char_names,
+        reason = "b, a, s, x, y are the difference equation's textbook names"
+    )]
     fn process(&mut self, io: &mut AudioBuffers) {
         let position = self
             .positions

@@ -141,7 +141,7 @@ impl Module for Reverb {
             let input = (*left + *right) * FIXED_GAIN;
             let wet_left = self.channels[0].process(input, feedback, damping);
             let wet_right = self.channels[1].process(input, feedback, damping);
-            let wet1 = (width + 1.0) / 2.0;
+            let wet1 = f32::midpoint(width, 1.0);
             let wet2 = (1.0 - width) / 2.0;
             *left = *left * (1.0 - mix) + (wet_left * wet1 + wet_right * wet2) * mix;
             *right = *right * (1.0 - mix) + (wet_right * wet1 + wet_left * wet2) * mix;
