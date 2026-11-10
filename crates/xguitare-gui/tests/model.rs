@@ -1334,6 +1334,7 @@ fn drive_restore() -> Restore {
         values: vec![("gain".to_string(), 80.0), ("tone".to_string(), 60.0)],
         bypass: true,
         ir: None,
+        track: None,
     }
 }
 

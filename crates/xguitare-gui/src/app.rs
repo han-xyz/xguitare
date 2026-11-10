@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, Theme, Ui};
+use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_core::{BankKind, Config};
@@ -15,12 +15,12 @@ use crate::client::{self, TICK};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
-    forget_removed_units, key_active, key_to_command, open_units_from_string, open_units_to_string,
-    palette, param_rows, peak_db, project_key_to_command, project_name, quit_commands,
-    remember_removes,
+    forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, palette,
+    param_rows, peak_db, quit_commands, remember_removes,
 };
-use crate::project::{
-    ARRANGEMENT_HEIGHT, ProjectView, arrangement, autosave_prompt, transport_bar,
+use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
+use crate::project_model::{
+    AutosaveOffer, item_blocks, key_active, project_key_to_command, project_name, track_rows,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
@@ -29,6 +29,7 @@ use crate::widgets;
 const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
+const RACK_HEADING_SIZE: f32 = 18.0;
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
@@ -67,7 +68,7 @@ pub struct App {
     configured_bank_kind: BankKind,
     new_project: String,
     project_view: ProjectView,
-    autosave_prompt: Option<String>,
+    autosave_prompt: Option<AutosaveOffer>,
 }
 
 impl App {
@@ -134,6 +135,7 @@ impl App {
                 ports: None,
                 settings: None,
                 projects: None,
+                items: None,
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
@@ -208,7 +210,11 @@ impl App {
                 Command::Load(_)
                 | Command::SetSettings {
                     bank_kind: Some(_), ..
-                } => self.removed = None,
+                }
+                | Command::ProjectNew(_)
+                | Command::ProjectOpen(_)
+                | Command::ProjectClose
+                | Command::RestoreAutosave(_) => self.removed = None,
                 _ => {}
             }
         }
@@ -261,9 +267,9 @@ impl eframe::App for App {
                 }
             }
             if snapshot.autosave_offer != self.snapshot.autosave_offer
-                && let Some((name, _)) = &snapshot.autosave_offer
+                && let Some((offer, _)) = &snapshot.autosave_offer
             {
-                self.autosave_prompt = Some(name.clone());
+                self.autosave_prompt = Some(offer.clone());
             }
             if snapshot.params != self.snapshot.params
                 && let Some(params) = &snapshot.params
@@ -286,10 +292,11 @@ impl eframe::App for App {
             .status
             .as_ref()
             .filter(|status| project_name(Some(status)).is_some());
+        let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
             .filter_map(|key| match project_status {
-                Some(status) => project_key_to_command(key, status),
+                Some(status) => project_key_to_command(key, status, &items),
                 None => key_to_command(key, &rows),
             })
             .collect();
@@ -321,24 +328,21 @@ impl eframe::App for App {
             .frame(sidebar_frame)
             .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut panel)));
         if project_status.is_some() {
-            Panel::top("transport")
-                .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
-                .show(ui, |ui| commands.extend(transport_bar(ui, snapshot)));
-            Panel::top("arrangement")
-                .resizable(true)
-                .default_size(ARRANGEMENT_HEIGHT)
-                .frame(Frame::new().fill(widgets::colour(palette().rail)))
-                .show(ui, |ui| {
-                    commands.extend(arrangement(ui, snapshot, &mut self.project_view));
-                });
+            let feedback = (&mut self.feedback, now);
+            commands.extend(project_panels(
+                ui,
+                snapshot,
+                &mut self.project_view,
+                feedback,
+            ));
         } else {
             self.project_view = ProjectView::default();
         }
-        if let Some(name) = self.autosave_prompt.clone()
-            && let Some(restore) = autosave_prompt(ui.ctx(), &name)
+        if let Some(offer) = self.autosave_prompt.clone()
+            && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)
         {
             if restore {
-                commands.push(Command::RestoreAutosave(name));
+                commands.push(Command::RestoreAutosave(offer.folder));
             }
             self.autosave_prompt = None;
         }
@@ -359,7 +363,12 @@ impl eframe::App for App {
         };
         CentralPanel::default()
             .frame(Frame::central_panel(ui.style()).inner_margin(RACK_MARGIN))
-            .show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
+            .show(ui, |ui| {
+                if let Some(status) = project_status {
+                    rack_heading(ui, status);
+                }
+                commands.extend(rack_view(ui, snapshot, &mut view));
+            });
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);
         for command in commands {
@@ -445,6 +454,35 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
         Key::Home => Some(KeyEvent::Home),
         Key::End => Some(KeyEvent::End),
         _ => None,
+    }
+}
+
+/// The transport bar, then the Tracks with their timeline, above the rack.
+fn project_panels(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    view: &mut ProjectView,
+    feedback: (&mut Feedback, Instant),
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    Panel::top("transport")
+        .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
+        .show(ui, |ui| {
+            commands.extend(transport_bar(ui, snapshot, feedback));
+        });
+    Panel::top("timeline")
+        .resizable(true)
+        .default_size(TIMELINE_HEIGHT)
+        .frame(Frame::new().fill(widgets::colour(palette().rail)))
+        .show(ui, |ui| commands.extend(tracks_view(ui, snapshot, view)));
+    commands
+}
+
+/// Names the Track whose Rack is shown.
+fn rack_heading(ui: &mut Ui, status: &Value) {
+    if let Some(track) = track_rows(status).into_iter().find(|row| row.selected) {
+        let heading = format!("{} — Rack", track.name);
+        ui.label(RichText::new(heading).size(RACK_HEADING_SIZE).strong());
     }
 }
 

@@ -8,6 +8,8 @@ use xguitare_core::BankKind;
 use xguitare_core::control::{Position, Request, Response, SILENCE_DB, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
 
+use crate::project_model::AutosaveOffer;
+
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
 pub const METER_FLOOR_DB: f64 = -60.0;
@@ -43,7 +45,7 @@ pub enum Link {
     Starting { since: Instant },
 }
 
-/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get`, `tuner`, `ports`, `settings` and `project_list` replies as sent, `module_types` the `modules` reply of the current connection, `irs` the last `ir_list` reply's names, `autosave_offer` the Project whose `project_open` answered that its autosave is newer.
+/// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get`, `tuner`, `ports`, `settings`, `project_list` and `items` replies as sent, `module_types` the `modules` reply of the current connection, `irs` the last `ir_list` reply's names, `autosave_offer` the Project whose `project_open` answered that its autosave is newer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub link: Link,
@@ -54,12 +56,13 @@ pub struct Snapshot {
     pub ports: Option<Value>,
     pub settings: Option<Value>,
     pub projects: Option<Value>,
+    pub items: Option<Value>,
     pub module_types: Vec<ModuleType>,
     pub irs: Vec<String>,
     pub last_message: Option<(String, Instant)>,
     pub failed_set: Option<(String, Instant)>,
     pub refused_remove: Option<(String, Instant)>,
-    pub autosave_offer: Option<(String, Instant)>,
+    pub autosave_offer: Option<(AutosaveOffer, Instant)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -430,9 +433,11 @@ pub struct Restore {
     pub values: Vec<(String, f64)>,
     pub bypass: bool,
     pub ir: Option<String>,
+    /// The Track the Module was removed from; `None` for the Preset's Rack.
+    pub track: Option<TrackRef>,
 }
 
-/// The [`Restore`] of Module `id`; `None` when the payload has no such Module.
+/// The [`Restore`] of Module `id`, for the Rack `get_payload` shows; `None` when the payload has no such Module.
 pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
     let modules = param_rows(get_payload);
     let index = modules.iter().position(|(module, _)| module == id)?;
@@ -450,6 +455,7 @@ pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
             .collect(),
         bypass: bypassed(get_payload, id),
         ir: cabinet_ir(get_payload, id),
+        track: None,
     })
 }
 
@@ -462,7 +468,7 @@ impl Restore {
             r#type: self.type_name.clone(),
             after,
             at,
-            track: None,
+            track: self.track.clone(),
         }
     }
 
@@ -471,17 +477,17 @@ impl Restore {
         let sets = self.values.iter().map(|(param, value)| Request::Set {
             param: format!("{id}.{param}"),
             value: *value,
-            track: None,
+            track: self.track.clone(),
         });
         let bypass = self.bypass.then(|| Request::Bypass {
             id: id.to_string(),
             on: true,
-            track: None,
+            track: self.track.clone(),
         });
         let ir = self.ir.clone().map(|ir| Request::RackIr {
             ir,
             id: Some(id.to_string()),
-            track: None,
+            track: self.track.clone(),
         });
         sets.chain(bypass).chain(ir).collect()
     }
@@ -499,7 +505,7 @@ pub struct RemovedUnit {
 }
 
 impl RemovedUnit {
-    /// `None` when `get_payload` has no Module `id`, so that there is nothing to undo.
+    /// `None` when `get_payload` has no Module `id`, so that there is nothing to undo. While a Project is open the Restore names the selected Track, so that Undo goes back to it whichever Track is selected then.
     pub fn new(
         get_payload: &Value,
         status: Option<&Value>,
@@ -508,7 +514,10 @@ impl RemovedUnit {
     ) -> Option<RemovedUnit> {
         Some(RemovedUnit {
             id: id.to_string(),
-            restore: restore(get_payload, id)?,
+            restore: Restore {
+                track: selected_track(status),
+                ..restore(get_payload, id)?
+            },
             preset: preset_of(status),
             since: now,
         })
@@ -535,6 +544,13 @@ pub fn shown_undo<'a>(
 }
 
 /// The `status` payload's Preset name and program; nulls without a status.
+fn selected_track(status: Option<&Value>) -> Option<TrackRef> {
+    let status = status.filter(|status| status["project"].is_string())?;
+    let selected = usize::try_from(status["selected"].as_u64()?).ok()?;
+    let name = status["tracks"][selected]["name"].as_str()?;
+    Some(TrackRef::Name(name.to_string()))
+}
+
 fn preset_of(status: Option<&Value>) -> (Value, Value) {
     status.map_or((Value::Null, Value::Null), |status| {
         (status["preset"].clone(), status["program"].clone())
@@ -1585,488 +1601,4 @@ pub fn failed_set(req: &Request, response: &Result<Response, ClientError>) -> Op
         (Request::Set { param, .. }, _) => Some(param.clone()),
         _ => None,
     }
-}
-
-/// The Daemon's answer while a closed Project still gets its last Takes.
-pub const PROJECT_CLOSING: &str = "a project is still closing; try again";
-/// Track colours in Track order, repeating after the last.
-pub const TRACK_COLOURS: [Rgb; 6] = [
-    (60, 120, 220),
-    (235, 130, 40),
-    (70, 180, 80),
-    (150, 90, 210),
-    (40, 170, 160),
-    (210, 50, 45),
-];
-
-pub fn track_colour(index: usize) -> Rgb {
-    TRACK_COLOURS[index % TRACK_COLOURS.len()]
-}
-
-/// Grid lines closer than this are thinned: beats first, then every other bar, and so on.
-pub const MIN_GRID_PX: f64 = 8.0;
-pub const MIN_FRAMES_PER_PX: f64 = 1.0;
-/// One second per pixel at 48 kHz.
-pub const MAX_FRAMES_PER_PX: f64 = 48_000.0;
-/// The loop region the loop key sets when there is none.
-pub const DEFAULT_LOOP_BARS: u64 = 4;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Tempo {
-    pub bpm: f64,
-    pub beats_per_bar: u32,
-    /// The note value of one beat; the Daemon counts `bpm` in these beats.
-    pub note: u32,
-}
-
-impl Tempo {
-    pub fn frames_per_beat(self, sample_rate: f64) -> f64 {
-        sample_rate * 60.0 / self.bpm
-    }
-
-    pub fn frames_per_bar(self, sample_rate: f64) -> f64 {
-        self.frames_per_beat(sample_rate) * f64::from(self.beats_per_bar)
-    }
-}
-
-/// The open Project's name from a `status` payload.
-pub fn project_name(status: Option<&Value>) -> Option<&str> {
-    status.and_then(|status| status["project"].as_str())
-}
-
-pub fn project_tempo(status: &Value) -> Option<Tempo> {
-    let tempo = &status["tempo"];
-    let bpm = tempo["bpm"].as_f64().filter(|bpm| *bpm > 0.0)?;
-    let beats = u32::try_from(tempo["meter"][0].as_u64()?).ok()?;
-    let note = u32::try_from(tempo["meter"][1].as_u64()?).ok()?;
-    Some(Tempo {
-        bpm,
-        beats_per_bar: beats.max(1),
-        note,
-    })
-}
-
-pub fn sample_rate(status: &Value) -> f64 {
-    status["sample_rate"].as_f64().unwrap_or(48_000.0)
-}
-
-/// `<bar>.<beat>.<hundredths of a beat>`, bars and beats counted from 1.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "a non-negative beat count far below u64::MAX"
-)]
-pub fn bars_beats_text(frames: u64, sample_rate: f64, tempo: Tempo) -> String {
-    let beats = frames as f64 / tempo.frames_per_beat(sample_rate);
-    let hundredths = (beats * 100.0).round() as u64;
-    let beat = hundredths / 100;
-    let per_bar = u64::from(tempo.beats_per_bar);
-    format!(
-        "{}.{}.{:02}",
-        beat / per_bar + 1,
-        beat % per_bar + 1,
-        hundredths % 100
-    )
-}
-
-/// `m:ss.mmm`.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "a non-negative millisecond count far below u64::MAX"
-)]
-pub fn time_text(frames: u64, sample_rate: f64) -> String {
-    let millis = (frames as f64 * 1000.0 / sample_rate).round() as u64;
-    format!(
-        "{}:{:02}.{:03}",
-        millis / 60_000,
-        millis / 1000 % 60,
-        millis % 1000
-    )
-}
-
-/// The visible part of the timeline: the frame at its left edge and the zoom.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TimelineView {
-    pub first_frame: f64,
-    pub frames_per_px: f64,
-}
-
-impl TimelineView {
-    /// Ten seconds per thousand pixels.
-    pub fn new(sample_rate: f64) -> TimelineView {
-        TimelineView {
-            first_frame: 0.0,
-            frames_per_px: sample_rate / 100.0,
-        }
-    }
-
-    /// Pixels from the timeline's left edge.
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "screen coordinates fit an f32"
-    )]
-    pub fn x_of(self, frame: f64) -> f32 {
-        ((frame - self.first_frame) / self.frames_per_px) as f32
-    }
-
-    /// Never before the Project start.
-    pub fn frame_at(self, x: f32) -> f64 {
-        (self.first_frame + f64::from(x) * self.frames_per_px).max(0.0)
-    }
-
-    /// `factor` above 1 zooms in; the frame at `anchor_x` stays where it is.
-    #[must_use]
-    pub fn zoomed(self, factor: f64, anchor_x: f32) -> TimelineView {
-        let anchor = self.first_frame + f64::from(anchor_x) * self.frames_per_px;
-        let frames_per_px =
-            (self.frames_per_px / factor).clamp(MIN_FRAMES_PER_PX, MAX_FRAMES_PER_PX);
-        TimelineView {
-            first_frame: (anchor - f64::from(anchor_x) * frames_per_px).max(0.0),
-            frames_per_px,
-        }
-    }
-
-    #[must_use]
-    pub fn scrolled(self, dx_px: f32) -> TimelineView {
-        TimelineView {
-            first_frame: (self.first_frame + f64::from(dx_px) * self.frames_per_px).max(0.0),
-            ..self
-        }
-    }
-}
-
-/// A vertical line of the bar/beat grid; `beat` 1 is a bar line.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GridLine {
-    pub frame: f64,
-    pub bar: u64,
-    pub beat: u32,
-}
-
-/// The grid lines inside `width_px` of `view`: every beat when beats are [`MIN_GRID_PX`] apart, else every bar, every second bar, every fourth, as far as needed.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "non-negative beat indices far below u64::MAX"
-)]
-pub fn grid_lines(
-    view: TimelineView,
-    width_px: f32,
-    sample_rate: f64,
-    tempo: Tempo,
-) -> Vec<GridLine> {
-    let frames_per_beat = tempo.frames_per_beat(sample_rate);
-    let per_bar = u64::from(tempo.beats_per_bar);
-    let beat_px = frames_per_beat / view.frames_per_px;
-    let mut step = 1;
-    if beat_px < MIN_GRID_PX {
-        step = per_bar;
-        while beat_px * (step as f64) < MIN_GRID_PX {
-            step *= 2;
-        }
-    }
-    let last_frame = view.first_frame + f64::from(width_px) * view.frames_per_px;
-    let first_beat = (view.first_frame / frames_per_beat).ceil() as u64;
-    let first = first_beat.div_ceil(step) * step;
-    (first..)
-        .step_by(usize::try_from(step).unwrap_or(usize::MAX))
-        .map(|beat| (beat, beat as f64 * frames_per_beat))
-        .take_while(|(_, frame)| *frame <= last_frame)
-        .map(|(beat, frame)| GridLine {
-            frame,
-            bar: beat / per_bar + 1,
-            beat: u32::try_from(beat % per_bar).unwrap_or(0) + 1,
-        })
-        .collect()
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "a non-negative frame far below u64::MAX"
-)]
-pub fn snap_to_beat(frame: f64, sample_rate: f64, tempo: Tempo) -> u64 {
-    let frames_per_beat = tempo.frames_per_beat(sample_rate);
-    ((frame.max(0.0) / frames_per_beat).round() * frames_per_beat).round() as u64
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransportState {
-    Stopped,
-    Playing,
-    Recording,
-}
-
-/// The transport bar's state from a `status` payload.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TransportView {
-    pub state: TransportState,
-    pub frames: u64,
-    pub loop_region: LoopRegion,
-    pub click: bool,
-    pub count_in: u32,
-    pub disk_overflows: u64,
-}
-
-impl TransportView {
-    pub fn play_lit(&self) -> bool {
-        self.state != TransportState::Stopped
-    }
-
-    pub fn record_lit(&self) -> bool {
-        self.state == TransportState::Recording
-    }
-
-    pub fn disk_warning(&self) -> Option<String> {
-        (self.disk_overflows > 0).then(|| {
-            format!(
-                "disk too slow: frames dropped {} times",
-                self.disk_overflows
-            )
-        })
-    }
-}
-
-/// `None` while no Project is open.
-pub fn transport_view(status: &Value) -> Option<TransportView> {
-    project_name(Some(status))?;
-    let state = match status["transport"].as_str()? {
-        "playing" => TransportState::Playing,
-        "recording" => TransportState::Recording,
-        _ => TransportState::Stopped,
-    };
-    Some(TransportView {
-        state,
-        frames: status["position"]["frames"].as_u64().unwrap_or_default(),
-        loop_region: loop_region(status),
-        click: status["click"]["on"].as_bool().unwrap_or_default(),
-        count_in: status["click"]["count_in"]
-            .as_u64()
-            .and_then(|bars| u32::try_from(bars).ok())
-            .unwrap_or_default(),
-        disk_overflows: status["disk_overflows"].as_u64().unwrap_or_default(),
-    })
-}
-
-fn loop_region(status: &Value) -> LoopRegion {
-    let region = &status["loop"];
-    LoopRegion {
-        start: region["start"].as_u64().unwrap_or_default(),
-        end: region["end"].as_u64().unwrap_or_default(),
-        on: region["on"].as_bool().unwrap_or_default(),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "mute, solo, arm and selection are independent"
-)]
-pub struct TrackRow {
-    pub index: usize,
-    pub name: String,
-    pub input: Option<String>,
-    pub volume_db: f64,
-    pub pan: f64,
-    pub mute: bool,
-    pub solo: bool,
-    pub armed: bool,
-    pub input_peak_db: f64,
-    pub selected: bool,
-}
-
-pub fn track_rows(status: &Value) -> Vec<TrackRow> {
-    let selected = status["selected"].as_u64();
-    status["tracks"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .map(|(index, track)| TrackRow {
-            index,
-            name: track["name"].as_str().unwrap_or_default().to_string(),
-            input: track["input"].as_str().map(str::to_string),
-            volume_db: track["volume_db"].as_f64().unwrap_or_default(),
-            pan: track["pan"].as_f64().unwrap_or_default(),
-            mute: track["mute"].as_bool().unwrap_or_default(),
-            solo: track["solo"].as_bool().unwrap_or_default(),
-            armed: track["armed"].as_bool().unwrap_or_default(),
-            input_peak_db: track["input_peak_db"].as_f64().unwrap_or(SILENCE_DB),
-            selected: selected == Some(index as u64),
-        })
-        .collect()
-}
-
-/// One Item on the timeline: where it sits and the name of its active Take, its file name without `.wav`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ItemBlock {
-    pub track: usize,
-    pub position: u64,
-    pub length: u64,
-    pub take_name: String,
-    /// The active Take's index among `takes`.
-    pub take: usize,
-    pub takes: usize,
-}
-
-impl ItemBlock {
-    /// The Take name, with `(active/count)` when the Item has more than one Take.
-    pub fn label(&self) -> String {
-        if self.takes > 1 {
-            format!("{} ({}/{})", self.take_name, self.take + 1, self.takes)
-        } else {
-            self.take_name.clone()
-        }
-    }
-
-    pub fn end(&self) -> u64 {
-        self.position.saturating_add(self.length)
-    }
-}
-
-/// The Items of every Track in a `status` payload's `tracks[].items` (`position`, `length` in frames, `take` index, `takes` file names).
-pub fn item_blocks(status: &Value) -> Vec<ItemBlock> {
-    let tracks = status["tracks"].as_array().map(Vec::as_slice);
-    tracks
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-        .flat_map(|(track, entry)| {
-            entry["items"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(move |item| item_block(track, item))
-        })
-        .collect()
-}
-
-fn item_block(track: usize, item: &Value) -> Option<ItemBlock> {
-    let takes = item["takes"].as_array()?;
-    let take = usize::try_from(item["take"].as_u64()?).ok()?;
-    let file = takes.get(take)?.as_str()?;
-    Some(ItemBlock {
-        track,
-        position: item["position"].as_u64()?,
-        length: item["length"].as_u64()?,
-        take_name: file.strip_suffix(".wav").unwrap_or(file).to_string(),
-        take,
-        takes: takes.len(),
-    })
-}
-
-/// The end of the last Item or of the loop region, whichever is later.
-pub fn project_end(status: &Value) -> u64 {
-    item_blocks(status)
-        .iter()
-        .map(ItemBlock::end)
-        .chain([loop_region(status).end])
-        .max()
-        .unwrap_or_default()
-}
-
-/// Plain keys act only while no widget has focus, so that a focused knob keeps Home and End and a focused button its Space; with modifiers they act unless a text field takes typing.
-pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) -> bool {
-    match key {
-        KeyEvent::Space | KeyEvent::R | KeyEvent::Home | KeyEvent::End => !widget_focused,
-        KeyEvent::Digit(..) | KeyEvent::CtrlS | KeyEvent::CtrlR => {
-            shortcuts_active(text_edit_focused)
-        }
-    }
-}
-
-/// Reaper's keys while a Project is open; the digit keys load no Preset then.
-pub fn project_key_to_command(key: KeyEvent, status: &Value) -> Option<Command> {
-    let transport = transport_view(status)?;
-    match key {
-        KeyEvent::Space if transport.play_lit() => Some(Command::Transport(TransportAction::Stop)),
-        KeyEvent::Space => Some(Command::Transport(TransportAction::Play)),
-        KeyEvent::CtrlR => Some(Command::Transport(TransportAction::Record)),
-        KeyEvent::R => Some(Command::Loop(toggled_loop(status, transport.loop_region))),
-        KeyEvent::Home => Some(Command::Locate(0)),
-        KeyEvent::End => Some(Command::Locate(project_end(status))),
-        KeyEvent::CtrlS => Some(Command::ProjectSave),
-        KeyEvent::Digit(..) => None,
-    }
-}
-
-/// An empty region turns on as the first [`DEFAULT_LOOP_BARS`] bars.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "a non-negative frame far below u64::MAX"
-)]
-fn toggled_loop(status: &Value, region: LoopRegion) -> LoopRegion {
-    if region.start < region.end {
-        return LoopRegion {
-            on: !region.on,
-            ..region
-        };
-    }
-    let bar = project_tempo(status).map_or(0.0, |tempo| tempo.frames_per_bar(sample_rate(status)));
-    LoopRegion {
-        start: 0,
-        end: (bar * DEFAULT_LOOP_BARS as f64).round() as u64,
-        on: true,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LoopEdge {
-    Start,
-    End,
-}
-
-/// The region with `edge` moved to `frame`; an edge dragged past the other one swaps them.
-pub fn dragged_loop(region: LoopRegion, edge: LoopEdge, frame: u64) -> LoopRegion {
-    let other = match edge {
-        LoopEdge::Start => region.end,
-        LoopEdge::End => region.start,
-    };
-    LoopRegion {
-        start: frame.min(other),
-        end: frame.max(other),
-        on: region.on,
-    }
-}
-
-/// `<beats>/<note>`, e.g. `3/4`; the Daemon checks the range.
-pub fn parse_meter(text: &str) -> Option<(u32, u32)> {
-    let (beats, note) = text.split_once('/')?;
-    Some((beats.trim().parse().ok()?, note.trim().parse().ok()?))
-}
-
-/// The Project name a `project_open` answered with a newer autosave it did not load.
-pub fn autosave_offer(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {
-    let (Request::ProjectOpen { .. }, Ok(Response::Ok(payload))) = (req, response) else {
-        return None;
-    };
-    let offered = payload["autosave_newer"].as_bool() == Some(true)
-        && payload["restored"].as_bool() == Some(false);
-    offered.then(|| payload["name"].as_str().unwrap_or_default().to_string())
-}
-
-pub fn still_closing(response: &Result<Response, ClientError>) -> bool {
-    matches!(response, Ok(Response::Err { error }) if error == PROJECT_CLOSING)
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProjectRow {
-    pub folder: String,
-    pub name: String,
-    pub valid: bool,
-}
-
-pub fn project_rows(project_list_payload: &Value) -> Vec<ProjectRow> {
-    project_list_payload["projects"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|project| ProjectRow {
-            folder: project["folder"].as_str().unwrap_or_default().to_string(),
-            name: project["name"].as_str().unwrap_or_default().to_string(),
-            valid: project["valid"].as_bool().unwrap_or_default(),
-        })
-        .collect()
 }

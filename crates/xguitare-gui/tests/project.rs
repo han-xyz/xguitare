@@ -2,11 +2,14 @@ use serde_json::{Value, json};
 use xguitare_core::control::{Position, Request, Response, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_gui::model::{
-    Command, GridLine, ItemBlock, KeyEvent, KeyModifiers, LoopEdge, Outgoing, ProjectRow, Tempo,
-    TimelineView, TrackEdit, TrackRow, TransportState, TransportView, autosave_offer,
-    bars_beats_text, dragged_loop, grid_lines, item_blocks, key_active, key_to_command,
-    parse_meter, project_end, project_key_to_command, project_name, project_rows, project_tempo,
-    requests_until_quit, response_text, snap_to_beat, still_closing, time_text, track_rows,
+    Command, KeyEvent, KeyModifiers, Outgoing, RemovedUnit, TrackEdit, requests_until_quit,
+    response_text, restore,
+};
+use xguitare_gui::project_model::{
+    AutosaveOffer, GridLine, ItemBlock, LoopEdge, ProjectRow, Tempo, TimelineView, TrackRow,
+    TransportState, TransportView, autosave_offer, bars_beats_text, dragged_loop, grid_lines,
+    item_blocks, key_active, parse_meter, project_end, project_key_to_command, project_name,
+    project_rows, project_tempo, snap_to_beat, still_closing, time_text, track_rows,
     transport_view,
 };
 
@@ -24,16 +27,26 @@ fn project_status(transport: &str) -> Value {
         "tempo": {"bpm": 120.0, "meter": [4, 4]},
         "loop": {"start": 0, "end": 192_000, "on": true},
         "click": {"on": true, "count_in": 1},
-        "disk_overflows": 0,
+        "count_in_remaining": 0, "disk_overflows": 0, "loaded_audio_bytes": 3_840_000,
         "selected": 1,
         "tracks": [
             {"name": "Guitar", "input": "in A", "volume_db": -3.0, "pan": -0.25, "mute": false,
-             "solo": false, "armed": true, "input_peak_db": -20.5,
-             "items": [{"position": 48_000, "length": 96_000, "take": 1,
-                        "takes": ["guitar-1.wav", "guitar-2.wav"]}]},
+             "solo": false, "armed": true, "input_peak_db": -20.5},
             {"name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": true,
-             "solo": false, "armed": false, "input_peak_db": -120.0,
-             "items": [{"position": 0, "length": 240_000, "take": 0, "takes": ["bass-1.wav"]}]},
+             "solo": false, "armed": false, "input_peak_db": -120.0},
+        ],
+    })
+}
+
+fn project_items() -> Value {
+    json!({
+        "sample_rate": 48000,
+        "tracks": [
+            {"id": 0, "name": "Guitar", "items": [{"position": 48_000, "bars_beats": "1.3",
+             "offset": 0, "length": 96_000, "take": 1,
+             "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"]}]},
+            {"id": 1, "name": "Bass", "items": [{"position": 0, "bars_beats": "1.1",
+             "offset": 0, "length": 240_000, "take": 0, "takes": ["takes/bass-1.wav"]}]},
         ],
     })
 }
@@ -174,9 +187,13 @@ fn transport_view_from_status() {
             },
             click: true,
             count_in: 1,
+            count_in_remaining: 0,
             disk_overflows: 0,
+            loaded_audio_bytes: 3_840_000,
         }
     );
+    assert_eq!(recording.count_in_text(), None);
+    assert_eq!(recording.loaded_audio_text(), "audio 3.8 MB");
     assert!(recording.play_lit());
     assert!(recording.record_lit());
     let stopped = transport_view(&project_status("stopped")).unwrap();
@@ -186,6 +203,16 @@ fn transport_view_from_status() {
     assert!(playing.play_lit());
     assert!(!playing.record_lit());
     assert_eq!(transport_view(&json!({"project": null})), None);
+}
+
+#[test]
+fn a_running_count_in_shows_the_beats_left() {
+    let mut status = project_status("recording");
+    status["count_in_remaining"] = json!(3);
+    assert_eq!(
+        transport_view(&status).unwrap().count_in_text().as_deref(),
+        Some("count-in: 3")
+    );
 }
 
 #[test]
@@ -235,12 +262,12 @@ fn track_rows_from_status() {
 
 #[test]
 fn items_show_their_active_take() {
-    let blocks = item_blocks(&project_status("stopped"));
+    let blocks = item_blocks(&project_items());
     assert_eq!(
         blocks,
         [
             ItemBlock {
-                track: 0,
+                track: "Guitar".to_string(),
                 position: 48_000,
                 length: 96_000,
                 take_name: "guitar-2".to_string(),
@@ -248,7 +275,7 @@ fn items_show_their_active_take() {
                 takes: 2,
             },
             ItemBlock {
-                track: 1,
+                track: "Bass".to_string(),
                 position: 0,
                 length: 240_000,
                 take_name: "bass-1".to_string(),
@@ -263,43 +290,45 @@ fn items_show_their_active_take() {
 
 #[test]
 fn tracks_without_items_have_no_blocks() {
-    let status = json!({"tracks": [{"name": "Guitar"}]});
-    assert_eq!(item_blocks(&status), []);
+    let items = json!({"tracks": [{"id": 0, "name": "Guitar", "items": []}]});
+    assert_eq!(item_blocks(&items), []);
 }
 
 #[test]
 fn project_end_is_the_last_item_or_loop_end() {
-    assert_eq!(project_end(&project_status("stopped")), 240_000);
+    let items = item_blocks(&project_items());
+    assert_eq!(project_end(&project_status("stopped"), &items), 240_000);
     let mut status = project_status("stopped");
     status["loop"]["end"] = json!(480_000);
-    assert_eq!(project_end(&status), 480_000);
+    assert_eq!(project_end(&status, &items), 480_000);
 }
 
 #[test]
 fn project_keys_follow_reaper() {
+    let items = item_blocks(&project_items());
     let none = KeyModifiers::default();
     let stopped = project_status("stopped");
     let playing = project_status("playing");
     let recording = project_status("recording");
     let transport = |action| Some(Command::Transport(action));
     assert_eq!(
-        project_key_to_command(KeyEvent::Space, &stopped),
+        project_key_to_command(KeyEvent::Space, &stopped, &items),
         transport(TransportAction::Play)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Space, &playing),
+        project_key_to_command(KeyEvent::Space, &playing, &items),
         transport(TransportAction::Stop)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Space, &recording),
+        project_key_to_command(KeyEvent::Space, &recording, &items),
         transport(TransportAction::Stop)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlR, &stopped),
+        project_key_to_command(KeyEvent::CtrlR, &stopped, &items),
         transport(TransportAction::Record)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::R, &stopped),
+        project_key_to_command(KeyEvent::R, &stopped, &items),
         Some(Command::Loop(LoopRegion {
             start: 0,
             end: 192_000,
@@ -307,19 +336,19 @@ fn project_keys_follow_reaper() {
         }))
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Home, &stopped),
+        project_key_to_command(KeyEvent::Home, &stopped, &items),
         Some(Command::Locate(0))
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::End, &stopped),
+        project_key_to_command(KeyEvent::End, &stopped, &items),
         Some(Command::Locate(240_000))
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlS, &stopped),
+        project_key_to_command(KeyEvent::CtrlS, &stopped, &items),
         Some(Command::ProjectSave)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Digit(1, none), &stopped),
+        project_key_to_command(KeyEvent::Digit(1, none), &stopped, &items),
         None
     );
 }
@@ -328,8 +357,9 @@ fn project_keys_follow_reaper() {
 fn loop_key_on_an_empty_region_loops_four_bars() {
     let mut status = project_status("stopped");
     status["loop"] = json!({"start": 0, "end": 0, "on": false});
+    let items = [];
     assert_eq!(
-        project_key_to_command(KeyEvent::R, &status),
+        project_key_to_command(KeyEvent::R, &status, &items),
         Some(Command::Loop(LoopRegion {
             start: 0,
             end: 384_000,
@@ -339,15 +369,18 @@ fn loop_key_on_an_empty_region_loops_four_bars() {
 }
 
 #[test]
-fn project_keys_do_nothing_without_a_project() {
+fn project_keys_need_an_open_project() {
+    let mut closed = project_status("stopped");
+    closed["project"] = json!(null);
     for key in [
         KeyEvent::Space,
         KeyEvent::R,
         KeyEvent::CtrlR,
         KeyEvent::Home,
         KeyEvent::End,
+        KeyEvent::CtrlS,
     ] {
-        assert_eq!(key_to_command(key, &[]), None, "{key:?}");
+        assert_eq!(project_key_to_command(key, &closed, &[]), None, "{key:?}");
     }
 }
 
@@ -527,8 +560,11 @@ fn a_newer_autosave_is_offered_once_opened() {
         })))
     };
     assert_eq!(
-        autosave_offer(&open, &answer(true, false)).as_deref(),
-        Some("Demo Song")
+        autosave_offer(&open, &answer(true, false)),
+        Some(AutosaveOffer {
+            folder: "demo-song".to_string(),
+            name: "Demo Song".to_string(),
+        })
     );
     assert_eq!(autosave_offer(&open, &answer(false, false)), None);
     assert_eq!(autosave_offer(&open, &answer(true, true)), None);
@@ -573,13 +609,48 @@ fn project_list_rows() {
             ProjectRow {
                 folder: "demo-song".to_string(),
                 name: "Demo Song".to_string(),
-                valid: true,
+                error: None,
             },
             ProjectRow {
                 folder: "broken".to_string(),
                 name: "broken".to_string(),
-                valid: false,
+                error: Some("line 1".to_string()),
             },
         ]
     );
+}
+
+#[test]
+fn undo_goes_back_to_the_track_the_module_left() {
+    let rack = json!({"params": [
+        {"module": "drive", "type": "drive", "param": "gain", "value": 30.0, "bypass": true},
+        {"module": "cabinet", "type": "cabinet", "param": "level", "value": 3.0,
+         "ir": "guitar-cab.wav"},
+    ]});
+    let status = project_status("stopped");
+    let removed =
+        RemovedUnit::new(&rack, Some(&status), "cabinet", std::time::Instant::now()).unwrap();
+    let bass = Some(TrackRef::Name("Bass".to_string()));
+    assert_eq!(removed.restore.track, bass);
+    assert_eq!(
+        removed.restore.add_request(&["drive".to_string()]),
+        Request::RackAdd {
+            r#type: "cabinet".to_string(),
+            after: Some("drive".to_string()),
+            at: None,
+            track: bass.clone(),
+        }
+    );
+    let tracks: Vec<Option<TrackRef>> = removed
+        .restore
+        .follow_up_requests("cabinet")
+        .into_iter()
+        .map(|req| match req {
+            Request::Set { track, .. } | Request::RackIr { track, .. } => track,
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(tracks, [bass.clone(), bass]);
+    let preset_rack = restore(&rack, "cabinet").unwrap();
+    assert_eq!(preset_rack.track, None);
 }

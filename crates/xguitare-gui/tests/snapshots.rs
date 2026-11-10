@@ -9,11 +9,13 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
+use xguitare_core::control::TrackRef;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 use xguitare_core::{BankKind, Config};
 use xguitare_gui::app::App;
 use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
+use xguitare_gui::project_model::AutosaveOffer;
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
@@ -162,6 +164,7 @@ fn funk_snapshot() -> Snapshot {
         last_message: None,
         failed_set: None,
         refused_remove: None,
+        items: None,
         autosave_offer: None,
     }
 }
@@ -188,28 +191,34 @@ fn muted_snapshot() -> Snapshot {
 fn project_snapshot(transport: &str) -> Snapshot {
     let mut snapshot = funk_snapshot();
     let status = snapshot.status.as_mut().unwrap();
+    let count_in_remaining = if transport == "recording" { 3 } else { 0 };
     let project = json!({
         "project": "Demo Song", "transport": transport, "selected": 0, "disk_overflows": 0,
+        "count_in_remaining": count_in_remaining, "loaded_audio_bytes": 61_440_000,
         "position": {"frames": 230_400, "bars_beats": "3.2"},
         "tempo": {"bpm": 120.0, "meter": [4, 4]},
         "loop": {"start": 96_000, "end": 384_000, "on": true},
         "click": {"on": true, "count_in": 1},
         "tracks": [
             {"name": "Guitar", "input": CAPTURE, "volume_db": -3.0, "pan": -0.25,
-             "mute": false, "solo": false, "armed": true, "input_peak_db": -14.0,
-             "items": [{"position": 96_000, "length": 288_000, "take": 1,
-                        "takes": ["guitar-1.wav", "guitar-2.wav"]}]},
+             "mute": false, "solo": false, "armed": true, "input_peak_db": -14.0},
             {"name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0,
-             "mute": true, "solo": false, "armed": false, "input_peak_db": -120.0,
-             "items": [{"position": 0, "length": 480_000, "take": 0, "takes": ["bass-1.wav"]}]},
+             "mute": true, "solo": false, "armed": false, "input_peak_db": -120.0},
             {"name": "Keys", "input": null, "volume_db": -6.0, "pan": 0.5,
-             "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0,
-             "items": []},
+             "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0},
         ],
     });
     for (key, value) in project.as_object().unwrap() {
         status[key] = value.clone();
     }
+    snapshot.items = Some(json!({"sample_rate": 48000, "tracks": [
+        {"id": 0, "name": "Guitar", "items": [{"position": 96_000, "bars_beats": "2.1",
+         "offset": 0, "length": 288_000, "take": 1,
+         "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"]}]},
+        {"id": 1, "name": "Bass", "items": [{"position": 0, "bars_beats": "1.1", "offset": 0,
+         "length": 480_000, "take": 0, "takes": ["takes/bass-1.wav"]}]},
+        {"id": 2, "name": "Keys", "items": []},
+    ]}));
     snapshot
 }
 
@@ -423,7 +432,13 @@ fn project_snapshots() {
     write_png(&mut section, "project-section");
 
     let mut offered = project_snapshot("stopped");
-    offered.autosave_offer = Some(("Demo Song".to_string(), std::time::Instant::now()));
+    offered.autosave_offer = Some((
+        AutosaveOffer {
+            folder: "demo-song".to_string(),
+            name: "Demo Song".to_string(),
+        },
+        std::time::Instant::now(),
+    ));
     write_png(&mut harness_with(WINDOW, offered).0, "restore-prompt");
 }
 
@@ -444,6 +459,45 @@ fn project_window_has_transport_tracks_and_the_rack() {
         harness.get_by_label(&format!("Track {track}"));
     }
     harness.get_by_label("compressor unit");
+}
+
+#[test]
+fn project_keys_do_nothing_without_a_project() {
+    let (mut harness, sent, _dir) = harness();
+    for key in [Key::Space, Key::R, Key::Home, Key::End] {
+        harness.key_press(key);
+        harness.run_steps(1);
+    }
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::R);
+    harness.run_steps(1);
+    harness.key_press(Key::Num2);
+    harness.run_steps(1);
+    assert_eq!(sent_now(&sent), [Command::Load("1".to_string())]);
+}
+
+#[test]
+fn undo_after_selecting_another_track_restores_to_the_first() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let from = unit_header_point(&harness, "compressor");
+    drag_and_release(&mut harness, from, pos2(100.0, 600.0));
+    harness.get_by_label("Track Bass").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.run_steps(2);
+    let sent = sent_now(&sent);
+    assert_eq!(
+        sent[..2],
+        [
+            Command::RackRemove {
+                id: "compressor".to_string(),
+            },
+            Command::TrackSelect(1),
+        ]
+    );
+    let Command::Restore(restore) = &sent[2] else {
+        panic!("no Restore in {sent:?}");
+    };
+    assert_eq!(restore.track, Some(TrackRef::Name("Guitar".to_string())));
 }
 
 #[test]
@@ -572,13 +626,19 @@ fn dragging_the_loop_start_sends_the_snapped_region() {
 #[test]
 fn restore_prompt_restores_the_autosave() {
     let mut offered = project_snapshot("stopped");
-    offered.autosave_offer = Some(("Demo Song".to_string(), std::time::Instant::now()));
+    offered.autosave_offer = Some((
+        AutosaveOffer {
+            folder: "demo-song".to_string(),
+            name: "Demo Song".to_string(),
+        },
+        std::time::Instant::now(),
+    ));
     let (mut harness, sent, _dir) = harness_with(WINDOW, offered);
     harness.get_by_label("Restore").click();
     harness.run_steps(2);
     assert_eq!(
         sent_now(&sent),
-        [Command::RestoreAutosave("Demo Song".to_string())]
+        [Command::RestoreAutosave("demo-song".to_string())]
     );
     assert!(harness.query_by_label("Open saved").is_none());
 }
@@ -668,6 +728,7 @@ fn unit_dropped_outside_the_rack_is_removed_and_undo_restores_it() {
             values,
             bypass: false,
             ir: None,
+            track: None,
         })]
     );
     assert!(harness.query_by_label("Undo").is_none());

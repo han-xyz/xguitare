@@ -9,10 +9,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::model::{
-    Command, Link, Outgoing, Restore, Snapshot, autosave_offer, bank_rows, counts_toward_spawn,
-    failed_set, ir_names, module_types, param_rows, project_name, refresh_decision, refused_remove,
-    requests_until_quit, response_text, spawn_policy, still_closing,
+    Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
+    ir_names, module_types, param_rows, refresh_decision, refused_remove, requests_until_quit,
+    response_text, spawn_policy,
 };
+use crate::project_model::{PROJECT_CLOSING, autosave_offer, project_name, still_closing};
 use serde_json::Value;
 use tracing::{info, warn};
 use xguitare_client::{ClientError, Connection};
@@ -92,6 +93,7 @@ impl Client {
                 ports: None,
                 settings: None,
                 projects: None,
+                items: None,
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
@@ -216,8 +218,8 @@ impl Client {
         if let Some(param) = failed_set(req, &response) {
             self.snapshot.failed_set = Some((param, Instant::now()));
         }
-        if let Some(name) = autosave_offer(req, &response) {
-            self.snapshot.autosave_offer = Some((name, Instant::now()));
+        if let Some(offer) = autosave_offer(req, &response) {
+            self.snapshot.autosave_offer = Some((offer, Instant::now()));
         }
         if let Some(id) = refused_remove(req, &response) {
             self.snapshot.refused_remove = Some((id, Instant::now()));
@@ -232,11 +234,16 @@ impl Client {
         payload
     }
 
-    /// The follow-ups go to the id the Daemon gave the re-added Module, and only when it was added.
+    /// The follow-ups go to the id the Daemon gave the re-added Module, and only when it was added. A Module of a Track is placed by that Track's Rack, read again, since another Track may be selected now.
     fn restore(&mut self, restore: &Restore) {
-        let present: Vec<String> = self
-            .snapshot
-            .params
+        let rack = match &restore.track {
+            Some(track) => self.payload(&Request::Get {
+                param: None,
+                track: Some(track.clone()),
+            }),
+            None => self.snapshot.params.clone(),
+        };
+        let present: Vec<String> = rack
             .as_ref()
             .map(param_rows)
             .unwrap_or_default()
@@ -279,6 +286,7 @@ impl Client {
             thread::sleep(TICK);
         }
         warn!("project_open: still closing after {REOPEN_TRIES} tries");
+        self.snapshot.last_message = Some((format!("error: {PROJECT_CLOSING}"), Instant::now()));
     }
 
     fn poll(&mut self, now: Instant) {
@@ -444,6 +452,12 @@ impl Client {
             param: None,
             track: None,
         });
+        let project_open = project_name(self.snapshot.status.as_ref()).is_some();
+        self.snapshot.items = if project_open {
+            self.payload(&Request::Items)
+        } else {
+            None
+        };
         if self.connection.is_none() {
             return;
         }

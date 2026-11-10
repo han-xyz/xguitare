@@ -12,10 +12,10 @@ use xguitare_core::BankKind;
 use crate::model::{
     AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
     SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
-    filter_bank, link_text, palette, param_rows, port_choices, project_name, project_rows,
-    rack_channels, set_ports_command, set_settings_command, settings_draft, shown_undo,
-    tuner_toggle,
+    filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
+    set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
+use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
 
@@ -209,7 +209,7 @@ fn section_body(
     }
 }
 
-/// While a Project is open: its name, `Save` and `Close`; else a name field with `New`, and `Open` listing the Daemon's Projects, read again when the menu opens.
+/// While a Project is open: its name, the Take audio it holds in memory, `Save` and `Close`; else a name field with `New`, and `Open` listing the Daemon's Projects, read again when the menu opens.
 fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> Vec<Command> {
     let button_size = vec2(
         (ui.available_width() - ui.spacing().item_spacing.x) / 2.0,
@@ -218,6 +218,10 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
     let mut commands = Vec::new();
     if let Some(name) = project_name(snapshot.status.as_ref()) {
         ui.label(RichText::new(name).size(SECTION_TITLE_SIZE * 1.5).strong());
+        let transport = snapshot.status.as_ref().and_then(transport_view);
+        if let Some(transport) = transport {
+            ui.label(muted_text(transport.loaded_audio_text()));
+        }
         ui.horizontal(|ui| {
             if ui
                 .add(primary_button("Save").min_size(button_size))
@@ -264,8 +268,11 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
                 ui.label(muted_text(NO_PROJECTS));
             }
             for row in &rows {
-                let item = ui.add_enabled(row.valid, Button::selectable(false, &row.name));
-                if item.clicked() {
+                let item =
+                    ui.add_enabled(row.error.is_none(), Button::selectable(false, &row.name));
+                if let Some(error) = &row.error {
+                    item.on_disabled_hover_text(error);
+                } else if item.clicked() {
                     commands.push(Command::ProjectOpen(row.folder.clone()));
                 }
             }

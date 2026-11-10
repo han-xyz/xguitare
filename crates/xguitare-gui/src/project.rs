@@ -6,18 +6,22 @@ use egui::{
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 
+use std::time::Instant;
+
 use crate::model::{
-    Command, GridLine, ItemBlock, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, LoopEdge,
-    METER_FLOOR_DB, Snapshot, Tempo, TimelineView, TrackEdit, TrackRow, TransportView,
-    bars_beats_text, dragged_loop, grid_lines, item_blocks, palette, parse_meter, port_choices,
-    project_key_to_command, project_tempo, sample_rate, snap_to_beat, time_text, track_colour,
-    track_rows, transport_view,
+    Command, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB, Snapshot,
+    TrackEdit, palette, port_choices,
+};
+use crate::project_model::{
+    GridLine, ItemBlock, LoopEdge, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text,
+    dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command, project_tempo,
+    sample_rate, snap_to_beat, time_text, track_colour, track_rows, transport_view,
 };
 use crate::rack::muted_text;
 use crate::widgets::{self, KnobSize, colour, outlined_button, primary_button};
 
 pub const TRACK_LIST_WIDTH: f32 = 400.0;
-pub const ARRANGEMENT_HEIGHT: f32 = 360.0;
+pub const TIMELINE_HEIGHT: f32 = 360.0;
 const TRACK_ROW_HEIGHT: f32 = 72.0;
 const RULER_HEIGHT: f32 = 26.0;
 const TRANSPORT_HEIGHT: f32 = 44.0;
@@ -31,7 +35,8 @@ const SWATCH_WIDTH: f32 = 5.0;
 const ITEM_INSET: f32 = 6.0;
 const ITEM_RADIUS: u8 = 3;
 const ITEM_FILL_ALPHA: u8 = 150;
-const LOOP_ALPHA: u8 = 25;
+const LOOP_ALPHA: u8 = 30;
+const SELECTED_OUTLINE: f32 = 2.0;
 const EDGE_GRAB_PX: f32 = 6.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
 const LABEL_SIZE: f32 = 12.0;
@@ -50,15 +55,19 @@ pub struct LoopDrag {
     now: LoopRegion,
 }
 
-/// The arrangement's own state: the visible stretch of the timeline and a loop edge being dragged.
+/// The Track and timeline view's own state: the visible stretch of the timeline and a loop edge being dragged.
 #[derive(Debug, Default)]
 pub struct ProjectView {
     pub timeline: Option<TimelineView>,
     pub loop_drag: Option<LoopDrag>,
 }
 
-/// Play, Stop, Record, Loop, Click with its count-in, tempo, meter and the position, left to right.
-pub fn transport_bar(ui: &mut Ui, snapshot: &Snapshot) -> Vec<Command> {
+/// Play, Stop, Record (a second click stops recording) with the count-in beats left, Loop, Click with its count-in, tempo, meter and the position, left to right. A meter that is no `<beats>/<note>` goes to `feedback`.
+pub fn transport_bar(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    (feedback, now): (&mut Feedback, Instant),
+) -> Vec<Command> {
     let mut commands = Vec::new();
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
@@ -81,7 +90,11 @@ pub fn transport_bar(ui: &mut Ui, snapshot: &Snapshot) -> Vec<Command> {
                 "● Record",
                 transport.record_lit(),
                 colours.red,
-                TransportAction::Record,
+                if transport.record_lit() {
+                    TransportAction::Stop
+                } else {
+                    TransportAction::Record
+                },
             ),
         ];
         for (text, lit, lit_colour, action) in buttons {
@@ -89,13 +102,16 @@ pub fn transport_bar(ui: &mut Ui, snapshot: &Snapshot) -> Vec<Command> {
                 commands.push(Command::Transport(action));
             }
         }
+        if let Some(count_in) = transport.count_in_text() {
+            ui.label(RichText::new(count_in).color(colour(colours.red)).strong());
+        }
         ui.separator();
         let loop_on = transport.loop_region.on;
         if ui
             .add(lit_button("Loop", loop_on, colour(colours.yellow)))
             .clicked()
         {
-            commands.extend(project_key_to_command(KeyEvent::R, status));
+            commands.extend(project_key_to_command(KeyEvent::R, status, &[]));
         }
         if ui
             .add(lit_button("Click", transport.click, colour(colours.yellow)))
@@ -108,7 +124,7 @@ pub fn transport_bar(ui: &mut Ui, snapshot: &Snapshot) -> Vec<Command> {
         }
         commands.extend(count_in_picker(ui, transport.count_in));
         ui.separator();
-        commands.extend(tempo_fields(ui, tempo));
+        commands.extend(tempo_fields(ui, tempo, (feedback, now)));
         ui.separator();
         position_readout(ui, &transport, sample_rate(status), tempo);
         if let Some(warning) = transport.disk_warning() {
@@ -160,17 +176,23 @@ fn count_in_picker(ui: &mut Ui, count_in: u32) -> Option<Command> {
     })
 }
 
-/// The tempo is sent while dragged or typed; the meter, typed as `3/4`, on Enter.
-fn tempo_fields(ui: &mut Ui, tempo: Tempo) -> Vec<Command> {
+/// The tempo is sent when typed or when a drag ends; the meter, typed as `3/4`, on Enter.
+fn tempo_fields(
+    ui: &mut Ui,
+    tempo: Tempo,
+    (feedback, now): (&mut Feedback, Instant),
+) -> Vec<Command> {
     let mut commands = Vec::new();
     let label = ui.label("Tempo");
-    let mut bpm = tempo.bpm;
-    let field = DragValue::new(&mut bpm)
-        .range(20.0..=300.0)
-        .speed(0.5)
-        .fixed_decimals(1)
-        .suffix(" bpm");
-    if ui.add(field).labelled_by(label.id).changed() {
+    let (bpm, field) = released_value(ui, Id::unique("tempo"), tempo.bpm, |bpm| {
+        DragValue::new(bpm)
+            .range(20.0..=300.0)
+            .speed(0.5)
+            .fixed_decimals(1)
+            .suffix(" bpm")
+    });
+    field.labelled_by(label.id);
+    if let Some(bpm) = bpm {
         commands.push(Command::Tempo {
             bpm: Some(bpm),
             meter: None,
@@ -179,12 +201,33 @@ fn tempo_fields(ui: &mut Ui, tempo: Tempo) -> Vec<Command> {
     let label = ui.label("Meter");
     let shown = format!("{}/{}", tempo.beats_per_bar, tempo.note);
     if let Some(text) = edited_text(ui, Id::unique("meter"), &shown, 44.0, label.id) {
-        commands.extend(parse_meter(&text).map(|meter| Command::Tempo {
-            bpm: None,
-            meter: Some(meter),
-        }));
+        match parse_meter(&text) {
+            Some(meter) => commands.push(Command::Tempo {
+                bpm: None,
+                meter: Some(meter),
+            }),
+            None => feedback.show(format!("error: '{text}' is not a meter like 3/4"), now),
+        }
     }
     commands
+}
+
+/// A number field that shows its own value while dragged and returns the value once the drag ends or a typed value is entered.
+fn released_value(
+    ui: &mut Ui,
+    id: Id,
+    value: f64,
+    field: impl FnOnce(&mut f64) -> DragValue<'_>,
+) -> (Option<f64>, Response) {
+    let mut shown = ui.data(|data| data.get_temp::<f64>(id)).unwrap_or(value);
+    let response = ui.add(field(&mut shown));
+    if response.dragged() {
+        ui.data_mut(|data| data.insert_temp(id, shown));
+        return (None, response);
+    }
+    ui.data_mut(|data| data.remove_temp::<f64>(id));
+    let done = response.drag_stopped() || response.changed();
+    (done.then_some(shown), response)
 }
 
 /// A text field that holds its edit while focused and returns it on Enter.
@@ -210,7 +253,7 @@ fn position_readout(ui: &mut Ui, transport: &TransportView, rate: f64, tempo: Te
 }
 
 /// The ruler with the loop region, then one row per Track: its controls on the left, its lane of Items on the right.
-pub fn arrangement(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> Vec<Command> {
+pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> Vec<Command> {
     let mut commands = Vec::new();
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
@@ -250,7 +293,7 @@ pub fn arrangement(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         transport.loop_region,
     ));
     let rows = track_rows(status);
-    let items = item_blocks(status);
+    let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
     let ports = snapshot
         .ports
         .as_ref()
@@ -475,6 +518,14 @@ fn track(
     painter.rect_filled(list, 0, colour(fill));
     let swatch = Rect::from_min_size(list.min, vec2(SWATCH_WIDTH, list.height()));
     painter.rect_filled(swatch, 0, colour(track_colour(row.index)));
+    if row.selected {
+        painter.rect_stroke(
+            list.shrink(SELECTED_OUTLINE / 2.0),
+            0,
+            Stroke::new(SELECTED_OUTLINE, colour(colours.text)),
+            egui::StrokeKind::Inside,
+        );
+    }
     painter.hline(
         rect.x_range(),
         rect.bottom() - 0.5,
@@ -501,7 +552,7 @@ fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock]
     scene.paint_loop(painter, lane);
     scene.paint_grid(painter, lane);
     let (r, g, b) = track_colour(row.index);
-    for item in items.iter().filter(|item| item.track == row.index) {
+    for item in items.iter().filter(|item| item.track == row.name) {
         let span = Rect::from_x_y_ranges(
             scene.x(lane, item.position)..=scene.x(lane, item.end()),
             lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET,
@@ -622,7 +673,7 @@ fn input_meter(ui: &mut Ui, db: f64) {
     painter.rect_filled(level, 1, colour(lit));
 }
 
-/// A small knob over a number field; either sends the new value at once, a double-click on the knob the middle (0 dB, centre).
+/// A small knob over a number field; either returns its value when a drag ends or a value is typed, a double-click on the knob the middle (0 dB, centre).
 fn track_knob(
     ui: &mut Ui,
     (what, track): (&str, &str),
@@ -636,24 +687,30 @@ fn track_knob(
         let knob = widgets::rack_knob(ui, KnobSize::Small, fraction, colour(palette().text));
         knob.response
             .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("{what} {track}")));
-        let mut typed = value;
-        let field = DragValue::new(&mut typed)
-            .range(min..=max)
-            .speed((max - min) / 200.0)
-            .fixed_decimals(if suffix.is_empty() { 2 } else { 1 })
-            .suffix(suffix.to_string());
-        let field = ui.add(field);
+        let field_id = knob.response.id.with("field");
+        let (typed, field) = released_value(ui, field_id, value, |typed| {
+            DragValue::new(typed)
+                .range(min..=max)
+                .speed((max - min) / 200.0)
+                .fixed_decimals(if suffix.is_empty() { 2 } else { 1 })
+                .suffix(suffix.to_string())
+        });
         field.widget_info(|| {
             WidgetInfo::labeled(Role::SpinButton, true, format!("{what} {track} value"))
         });
         if knob.reset {
             return Some(0.0);
         }
+        let dragged_id = knob.response.id.with("dragged");
         if knob.response.dragged() {
-            let dragged = min + f64::from(knob.fraction) * (max - min);
-            return ((dragged - value).abs() > f64::EPSILON).then_some(dragged);
+            ui.data_mut(|data| data.insert_temp(dragged_id, knob.fraction));
         }
-        field.changed().then_some(typed)
+        if knob.response.drag_stopped()
+            && let Some(fraction) = ui.data_mut(|data| data.remove_temp::<f32>(dragged_id))
+        {
+            return Some(min + f64::from(fraction) * (max - min));
+        }
+        typed
     })
     .inner
 }
