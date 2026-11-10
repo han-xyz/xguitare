@@ -63,6 +63,10 @@ enum Cmd {
     #[command(subcommand, arg_required_else_help = false)]
     Ir(IrCmd),
     /// Print the Tuner reading; --watch keeps printing until Ctrl-C and, with tuner_mute, mutes meanwhile
+    #[allow(
+        clippy::doc_markdown,
+        reason = "clap prints this doc as help text, where backticks would show"
+    )]
     Tuner {
         #[arg(long)]
         watch: bool,

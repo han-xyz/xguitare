@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -193,7 +194,7 @@ fn render(req: &Request, payload: &Value) -> String {
             }
         }
         Request::IrList => items(&payload["irs"])
-            .map(|name| format!("{}\n", text(name)))
+            .map(|name| text(name) + "\n")
             .collect(),
         Request::RackIr { .. } => {
             format!("ir {} {}\n", text(&payload["id"]), text(&payload["ir"]))
@@ -218,7 +219,7 @@ fn render_get(payload: &Value, key: Option<&str>) -> String {
             text(&param["value"]),
             text(&param["unit"])
         );
-        lines.push_str(&format!("{}\n", line.trim_end()));
+        let _ = writeln!(lines, "{}", line.trim_end());
         let is_last_of_module = params
             .get(index + 1)
             .is_none_or(|next| next["module"] != param["module"]);
@@ -231,21 +232,22 @@ fn render_get(payload: &Value, key: Option<&str>) -> String {
             } else {
                 text(ir)
             };
-            lines.push_str(&format!("{module}.ir = {name}\n"));
+            let _ = writeln!(lines, "{module}.ir = {name}");
         }
         if let Some(bypass) = param
             .get("bypass")
             .filter(|_| is_last_of_module && !names_one_param)
         {
             let answer = if bypass == true { "yes" } else { "no" };
-            lines.push_str(&format!("{module}.bypass = {answer}\n"));
+            let _ = writeln!(lines, "{module}.bypass = {answer}");
         }
     }
     lines
 }
 
 fn render_status(payload: &Value) -> String {
-    let mut lines: String = [
+    let mut lines = String::new();
+    for key in [
         "preset",
         "program",
         "modified",
@@ -259,17 +261,17 @@ fn render_status(payload: &Value) -> String {
         "xruns",
         "callback_max_us",
         "callback_last_us",
-    ]
-    .iter()
-    .map(|key| format!("{key}: {}\n", status_text(key, &payload[key])))
-    .collect();
+    ] {
+        let _ = writeln!(lines, "{key}: {}", status_text(key, &payload[key]));
+    }
     lines.push_str("connections:\n");
     for connection in items(&payload["connections"]) {
-        lines.push_str(&format!(
-            "  {} -> {}\n",
+        let _ = writeln!(
+            lines,
+            "  {} -> {}",
             text(&connection["from"]),
             text(&connection["to"])
-        ));
+        );
     }
     lines
 }
@@ -299,19 +301,20 @@ fn render_list(payload: &Value) -> String {
 }
 
 fn render_modules(payload: &Value) -> String {
-    items(&payload["modules"])
-        .map(|module| {
-            let params: Vec<String> = items(&module["params"])
-                .map(|param| text(&param["name"]))
-                .collect();
-            format!(
-                "{:<12}{:<16}{}\n",
-                text(&module["type"]),
-                text(&module["channels"]),
-                params.join(",")
-            )
-        })
-        .collect()
+    let mut lines = String::new();
+    for module in items(&payload["modules"]) {
+        let params: Vec<String> = items(&module["params"])
+            .map(|param| text(&param["name"]))
+            .collect();
+        let _ = writeln!(
+            lines,
+            "{:<12}{:<16}{}",
+            text(&module["type"]),
+            text(&module["channels"]),
+            params.join(",")
+        );
+    }
+    lines
 }
 
 fn items(value: &Value) -> impl Iterator<Item = &Value> {

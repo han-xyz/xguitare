@@ -78,7 +78,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
             }
             built.unwrap_or_else(|| passthrough_rack(sample_rate, max_frames))
         },
-        Arc::clone(&shared),
+        &shared,
         audio_queues,
     )
     .map_err(DaemonError::Jack)?;
@@ -114,9 +114,10 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         let _requests = state_guard(&state);
         Arc::try_unwrap(session)
     };
-    match session {
-        Ok(session) => session.stop().map_err(DaemonError::Jack)?,
-        Err(_) => error!("jack session still borrowed at stop"),
+    if let Ok(session) = session {
+        session.stop().map_err(DaemonError::Jack)?;
+    } else {
+        error!("jack session still borrowed at stop");
     }
     info!("stopped");
     Ok(())
@@ -439,7 +440,7 @@ fn follow_sample_rate_change(state: &mut EngineState) {
         }
         Err(err) => {
             let new = state.shared.sample_rate.load(Ordering::Relaxed);
-            warn!("cannot rebuild rack at {new} Hz: {err}; retrying")
+            warn!("cannot rebuild rack at {new} Hz: {err}; retrying");
         }
     }
 }

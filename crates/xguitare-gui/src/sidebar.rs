@@ -90,7 +90,7 @@ pub fn sidebar(ui: &mut Ui, snapshot: &Snapshot, view: &mut SidebarView) -> Vec<
         for section in SECTIONS {
             let title = section.title(view.bank_kind);
             section_box(ui, section, title, |ui| {
-                commands.extend(section_body(ui, section, snapshot, view))
+                commands.extend(section_body(ui, section, snapshot, view));
             });
         }
     });

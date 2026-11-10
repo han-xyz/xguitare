@@ -323,16 +323,15 @@ fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) {
 }
 
 fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
-    ui.horizontal(|ui| match reading {
-        Some(reading) => {
+    ui.horizontal(|ui| {
+        if let Some(reading) = reading {
             let colour = widgets::tune_colour(in_tune(reading.cents));
             ui.label(RichText::new(&reading.note).size(NOTE_SIZE).color(colour));
             ui.vertical(|ui| {
                 widgets::cents_arc(ui, Some(cents_fraction(reading.cents)), colour);
                 ui.label(RichText::new(format!("{:.1} Hz", reading.hz)).color(colour));
             });
-        }
-        None => {
+        } else {
             ui.label(RichText::new(NO_SIGNAL).size(NO_SIGNAL_SIZE));
             widgets::cents_arc(ui, None, Color32::GRAY);
         }
@@ -466,6 +465,10 @@ struct ModuleUnit<'a> {
 }
 
 /// The unit's commands, its rect, and the drag response of its header and its two ears.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one unit laid out top to bottom in drawing order"
+)]
 fn module_unit(
     ui: &mut Ui,
     unit: &ModuleUnit,
@@ -662,6 +665,10 @@ fn param_knobs(
 }
 
 /// A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click focuses the knob's value field.
+#[allow(
+    clippy::float_cmp,
+    reason = "an untouched knob returns the exact value it was shown"
+)]
 fn param_knob(
     ui: &mut Ui,
     row: &ParamRow,

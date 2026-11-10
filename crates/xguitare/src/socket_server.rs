@@ -53,6 +53,10 @@ pub struct ControlSocket {
 }
 
 /// Creates the `/tmp` fallback directory of `socket` if missing and refuses it unless it is ours and private (see `secure_socket_dir`).
+///
+/// # Errors
+///
+/// A [`SocketDirError`] naming the directory when it cannot be created or is not ours and private.
 pub fn secure_fallback_dir(socket: &Path) -> Result<(), SocketDirError> {
     let dir = socket.parent().unwrap_or(Path::new("/"));
     create_socket_dir(dir).map_err(|err| SocketDirError {
@@ -64,6 +68,10 @@ pub fn secure_fallback_dir(socket: &Path) -> Result<(), SocketDirError> {
 
 /// Binds the Control API socket at `path`, refusing when another Daemon holds `<path>.lock`, a Daemon already answers there or the path is not a socket, and replacing a stale socket.
 /// Each connection past `max_connections` gets one `too many connections` error line and is closed; a connection that sends nothing for `idle_timeout` is closed.
+///
+/// # Errors
+///
+/// [`SocketError::AnotherDaemon`] or [`SocketError::Lock`] when the lock is held or cannot be taken, [`SocketError::AlreadyRunning`] when a Daemon answers at `path`, [`SocketError::NotASocket`] when `path` is something else, [`SocketError::Bind`] when the directory, stale socket or bind fails.
 pub fn bind(
     path: &Path,
     max_connections: usize,
@@ -146,6 +154,10 @@ fn lock_daemon(lock_path: &Path) -> Result<File, SocketError> {
 
 impl ControlSocket {
     /// Accepts connections on a thread named `control` until `stop` is set, then removes the socket file; each connection gets its own thread `control-<n>`.
+    ///
+    /// # Errors
+    ///
+    /// [`SocketError::Spawn`] when the `control` thread cannot be spawned.
     pub fn spawn(
         self,
         state: Arc<Mutex<EngineState>>,

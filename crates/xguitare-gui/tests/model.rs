@@ -81,13 +81,21 @@ fn spawn_policy_three_failures_then_backoff() {
     let now = Instant::now();
     assert!(!spawn_policy(2, None, now));
     assert!(spawn_policy(3, None, now));
-    assert!(!spawn_policy(3, Some(now - Duration::from_secs(1)), now));
     assert!(!spawn_policy(
-        9,
-        Some(now - Duration::from_millis(4_999)),
+        3,
+        Some(now.checked_sub(Duration::from_secs(1)).unwrap()),
         now
     ));
-    assert!(spawn_policy(4, Some(now - Duration::from_secs(5)), now));
+    assert!(!spawn_policy(
+        9,
+        Some(now.checked_sub(Duration::from_millis(4_999)).unwrap()),
+        now
+    ));
+    assert!(spawn_policy(
+        4,
+        Some(now.checked_sub(Duration::from_secs(5)).unwrap()),
+        now
+    ));
 }
 
 #[test]
@@ -185,7 +193,7 @@ fn refresh_decision_on_revision_change() {
 #[test]
 fn link_text() {
     let now = Instant::now();
-    let since = now - Duration::from_millis(12_400);
+    let since = now.checked_sub(Duration::from_millis(12_400)).unwrap();
     assert_eq!(
         xguitare_gui::model::link_text(&Link::Connected, now),
         "connected"
@@ -197,7 +205,7 @@ fn link_text() {
     assert_eq!(
         xguitare_gui::model::link_text(
             &Link::Starting {
-                since: now - Duration::from_secs(3)
+                since: now.checked_sub(Duration::from_secs(3)).unwrap()
             },
             now
         ),
@@ -324,7 +332,7 @@ fn param_rows_in_rack_order_with_units() {
             ),
         ]
     );
-    assert!(param_rows(&json!({})).is_empty());
+    assert_eq!(param_rows(&json!({})), []);
 }
 
 #[test]
@@ -481,7 +489,7 @@ fn throttle_flushes_pending_without_new_drag() {
     let mut throttle = Throttle::default();
     throttle.on_drag("preamp.gain", 10.0, at(0));
     assert_eq!(throttle.on_drag("preamp.gain", 13.0, at(10)), None);
-    assert!(throttle.tick(at(20)).is_empty());
+    assert_eq!(throttle.tick(at(20)), []);
     assert_eq!(
         throttle.tick(at(31)),
         [Command::Set {
@@ -489,7 +497,7 @@ fn throttle_flushes_pending_without_new_drag() {
             value: 13.0
         }]
     );
-    assert!(throttle.tick(at(70)).is_empty());
+    assert_eq!(throttle.tick(at(70)), []);
 }
 
 #[test]
@@ -668,7 +676,7 @@ fn module_types_from_payload() {
     assert_eq!(channels("reverb"), Some("stereo"));
     let cabinet = types.iter().find(|t| t.type_name == "cabinet").unwrap();
     assert_eq!(cabinet.label(), "cabinet (mono_to_stereo)");
-    assert!(module_types(&json!({})).is_empty());
+    assert_eq!(module_types(&json!({})), Vec::<ModuleType>::new());
 }
 
 #[test]
@@ -925,7 +933,10 @@ fn ir_names_from_payload() {
         ir_names(&payload),
         vec!["Loud.WAV", "bass-cab.wav", "celestion/v30.wav"]
     );
-    assert!(ir_names(&json!({"ok": true, "ir_dir": "/srv/irs", "irs": []})).is_empty());
+    assert_eq!(
+        ir_names(&json!({"ok": true, "ir_dir": "/srv/irs", "irs": []})),
+        Vec::<String>::new()
+    );
 }
 
 #[test]

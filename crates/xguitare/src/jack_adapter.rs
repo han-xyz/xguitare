@@ -39,7 +39,7 @@ pub fn start(
     buffer_size: u32,
     crossfade_ms: f32,
     build_rack: impl FnOnce(f32, usize) -> Rack,
-    shared: Arc<EngineShared>,
+    shared: &Arc<EngineShared>,
     queues: AudioQueues,
 ) -> Result<Session, JackError> {
     let (client, _status) =
@@ -61,19 +61,19 @@ pub fn start(
             SWITCHER_MAX_FRAMES,
             FadeLengths::at(sample_rate, crossfade_ms),
             queues,
-            Arc::clone(&shared),
+            Arc::clone(shared),
         ),
         input,
         out_l,
         out_r,
         midi_in,
-        shared: Arc::clone(&shared),
+        shared: Arc::clone(shared),
     };
     shared
         .sample_rate
         .store(built_sample_rate, Ordering::Relaxed);
     let notifications = Notifications {
-        shared: Arc::clone(&shared),
+        shared: Arc::clone(shared),
     };
     let client = client
         .activate_async(notifications, process)

@@ -315,7 +315,7 @@ impl ClipLatch {
 pub fn drop_slot(pointer_y: f32, unit_edges: &[f32]) -> usize {
     unit_edges
         .windows(2)
-        .filter(|edges| (edges[0] + edges[1]) / 2.0 < pointer_y)
+        .filter(|edges| f32::midpoint(edges[0], edges[1]) < pointer_y)
         .count()
 }
 
@@ -975,6 +975,10 @@ pub fn in_tune(cents: i64) -> bool {
 }
 
 /// Opens or closes the Tuner view: (open after, command to send, whether the Mute is ours after). Opening mutes when `mute_default` and Mute is off (`muted_now` false); closing unmutes only a Mute this view turned on.
+#[allow(
+    clippy::fn_params_excessive_bools,
+    reason = "four independent states, matched as one truth table"
+)]
 pub fn tuner_toggle(
     open_now: bool,
     mute_default: bool,
@@ -1179,6 +1183,10 @@ pub fn typed_text(spec: &ParamRow, value: f64) -> String {
 }
 
 /// The value typed into a value field, or the footer message for text that is no number.
+///
+/// # Errors
+///
+/// The footer message `error: '<text>' is not a number` when `text` does not parse.
 pub fn typed_value(text: &str) -> Result<f64, String> {
     parse_typed_value(text).ok_or_else(|| format!("error: '{}' is not a number", text.trim()))
 }

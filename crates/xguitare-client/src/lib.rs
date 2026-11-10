@@ -12,6 +12,9 @@ const READ_TIMEOUT: Duration = Duration::from_secs(1);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub trait Transport {
+    /// # Errors
+    ///
+    /// A [`ClientError`] when the request cannot reach the Daemon or its reply is no Response line.
     fn request(&mut self, req: &Request) -> Result<Response, ClientError>;
 }
 
@@ -51,6 +54,9 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// # Errors
+    ///
+    /// [`ClientError::NotRunning`] when no Daemon listens at the config's socket, [`ClientError::InsecureSocketDir`] when its `/tmp` fallback directory is not ours and 0700, [`ClientError::Io`] for any other connect failure.
     pub fn connect(config: &Config) -> Result<Connection, ClientError> {
         let reader = connect(config, READ_TIMEOUT, WRITE_TIMEOUT)?;
         Ok(Connection {
@@ -59,6 +65,9 @@ impl Connection {
         })
     }
 
+    /// # Errors
+    ///
+    /// [`ClientError::Io`] with `NotConnected` after an earlier error; otherwise [`ClientError::NotResponding`] on a timeout, [`ClientError::Protocol`] for a closed connection or a line that is no Response, [`ClientError::Io`] for any other I/O failure.
     pub fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
         let reader = self
             .reader
@@ -130,9 +139,7 @@ fn connect(
     check_fallback_dir(config)?;
     let path = &config.socket;
     let stream = UnixStream::connect(path).map_err(|err| match err.kind() {
-        ErrorKind::NotFound | ErrorKind::ConnectionRefused => {
-            ClientError::NotRunning(path.to_path_buf())
-        }
+        ErrorKind::NotFound | ErrorKind::ConnectionRefused => ClientError::NotRunning(path.clone()),
         _ => ClientError::Io(err),
     })?;
     stream

@@ -37,6 +37,10 @@ pub fn spawn(
     (command_tx, snapshot_rx, handle)
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent per-request fetch flags, not states of one machine"
+)]
 struct Client {
     config: Config,
     config_path: Option<PathBuf>,

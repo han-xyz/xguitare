@@ -45,13 +45,13 @@ fn cli(argv: &[&str], reply: Result<Response, ClientError>) -> Outcome {
         is_tty: false,
         stop: Arc::new(AtomicBool::new(false)),
     };
-    cli_with(argv, vec![reply], env, None)
+    cli_with(argv, vec![reply], &env, None)
 }
 
 fn cli_with(
     argv: &[&str],
     replies: Vec<Result<Response, ClientError>>,
-    env: CliEnv,
+    env: &CliEnv,
     stop_after_tuner_requests: Option<usize>,
 ) -> Outcome {
     let argv: Vec<String> = std::iter::once("xguitare")
@@ -65,7 +65,7 @@ fn cli_with(
             .map(|count| (count, Arc::clone(&env.stop))),
     };
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
-    let code = run_cli(&argv, &mut transport, &mut stdout, &mut stderr, &env);
+    let code = run_cli(&argv, &mut transport, &mut stdout, &mut stderr, env);
     Outcome {
         code,
         stdout: String::from_utf8(stdout).unwrap(),
@@ -74,6 +74,10 @@ fn cli_with(
     }
 }
 
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "a canned transport reply is a Result"
+)]
 fn reply(line: &str) -> Result<Response, ClientError> {
     Ok(Response::from_line(line).unwrap())
 }
@@ -177,8 +181,8 @@ fn set_non_numeric_value() {
     let out = cli(&["set", "gain.level", "loud"], reply(r#"{"ok":true}"#));
     assert_eq!(out.code, 1);
     assert_eq!(out.stderr, "error: value must be a number\n");
-    assert!(out.requests.is_empty());
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.requests, []);
+    assert_eq!(out.stdout, "");
 }
 
 #[test]
@@ -205,7 +209,7 @@ fn error_response_exit_1() {
     );
     assert_eq!(out.code, 1);
     assert_eq!(out.stderr, "error: no module 'drive'\n");
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, "");
 }
 
 #[test]
@@ -261,7 +265,7 @@ fn run_main_no_args_is_usage_error() {
             .starts_with("error:"),
         "{stderr}"
     );
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, Vec::<u8>::new());
 }
 
 #[test]
@@ -468,7 +472,7 @@ fn tuner_watch_two_readings_mutes_around() {
             reply(r#"{"ok":true,"hz":null,"note":null,"cents":null,"confident":false}"#),
             reply(r#"{"ok":true,"muted":false}"#),
         ],
-        watch_env(true),
+        &watch_env(true),
         Some(2),
     );
     assert_eq!(
@@ -489,7 +493,7 @@ fn tuner_watch_without_tuner_mute_sends_no_mute() {
     let out = cli_with(
         &["tuner", "--watch"],
         vec![reply(E1_READING), reply(E1_READING)],
-        watch_env(false),
+        &watch_env(false),
         Some(2),
     );
     assert_eq!(out.requests, [Request::Tuner, Request::Tuner]);
@@ -513,7 +517,7 @@ fn mute_on_off_prints() {
 fn mute_bad_value_is_usage_error() {
     let out = cli(&["mute", "maybe"], reply(r#"{"ok":true}"#));
     assert_eq!(out.code, 1);
-    assert!(out.requests.is_empty());
+    assert_eq!(out.requests, []);
     assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
     assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
 }
@@ -544,7 +548,7 @@ fn tuner_watch_unmutes_after_error() {
             Err(ClientError::Protocol("boom".into())),
             reply(r#"{"ok":true,"muted":false}"#),
         ],
-        watch_env(true),
+        &watch_env(true),
         None,
     );
     assert_eq!(out.requests.last(), Some(&Request::Mute { on: false }));
@@ -612,7 +616,7 @@ fn ir_set_error() {
         out.stderr,
         "error: /srv/irs/bad.wav: unsupported wav format: 8-bit int\n"
     );
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, "");
     assert_eq!(out.code, 1);
 }
 
@@ -622,8 +626,8 @@ fn ir_alone_is_usage_error() {
     assert_eq!(out.code, 1);
     assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
     assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
-    assert!(out.requests.is_empty());
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.requests, []);
+    assert_eq!(out.stdout, "");
 }
 
 #[test]
@@ -678,8 +682,8 @@ fn rack_alone_is_error_line() {
     assert_eq!(out.code, 1);
     assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
     assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
-    assert!(out.requests.is_empty());
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.requests, []);
+    assert_eq!(out.stdout, "");
 }
 
 #[test]

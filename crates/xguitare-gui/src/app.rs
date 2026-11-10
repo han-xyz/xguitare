@@ -66,19 +66,23 @@ pub struct App {
 impl App {
     pub fn new(
         cc: &eframe::CreationContext,
-        config: Config,
+        config: &Config,
         config_path: Option<PathBuf>,
         stop: Arc<AtomicBool>,
     ) -> App {
         let ctx = cc.egui_ctx.clone();
         let (commands, snapshots, client) =
             client::spawn(config.clone(), config_path, Arc::clone(&stop), move || {
-                ctx.request_repaint()
+                ctx.request_repaint();
             });
-        App::assemble(cc, &config, commands, snapshots, Some(client), stop)
+        App::assemble(cc, config, commands, snapshots, Some(client), stop)
     }
 
     /// An App with no client thread: `snapshot` arrives as the only client update and its commands go to `commands`.
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the expect is an invariant: the receiver is held in this scope"
+    )]
     pub fn with_snapshot(
         cc: &eframe::CreationContext,
         config: &Config,
@@ -267,7 +271,7 @@ impl eframe::App for App {
             .collect();
         commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| {
-            commands.extend(footer(ui, snapshot, &self.feedback, &mut self.removed, now))
+            commands.extend(footer(ui, snapshot, &self.feedback, &mut self.removed, now));
         });
         let mut tuner = Tuner {
             open: &mut self.tuner_open,

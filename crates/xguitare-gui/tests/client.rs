@@ -103,12 +103,12 @@ fn set_goes_out_before_the_next_poll() {
             value: 1.0,
         })
         .unwrap();
-    let set = next_arrival(&received, "set");
+    let set_arrival = next_arrival(&received, "set");
     assert!(
-        set.duration_since(sent) < Duration::from_millis(25),
+        set_arrival.duration_since(sent) < Duration::from_millis(25),
         "set took {:?} after the send, {:?} after the poll",
-        set.duration_since(sent),
-        set.duration_since(polled)
+        set_arrival.duration_since(sent),
+        set_arrival.duration_since(polled)
     );
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();

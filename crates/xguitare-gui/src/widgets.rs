@@ -264,6 +264,10 @@ pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) ->
     }
 }
 
+#[allow(
+    clippy::similar_names,
+    reason = "painter is egui's name, pointer the knob's"
+)]
 fn paint_rack_knob(painter: &Painter, rect: Rect, fraction: f32, accent: Color32, hovered: bool) {
     let colours = palette();
     let centre = rect.center();
