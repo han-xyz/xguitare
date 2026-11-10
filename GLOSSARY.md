@@ -59,3 +59,7 @@ _Avoid_: pitch detector, tuner module, tuner effect
 **Mute**:
 The Daemon state in which the Rack output is silent while the input is still analysed, for tuning.
 _Avoid_: bypass, standby, kill switch
+
+**Bypass**:
+A Module's switched-off state: a bypassed Module passes its input through unchanged and keeps its Parameters. Saved in the Preset.
+_Avoid_: disabled, off, muted (for a Module)
