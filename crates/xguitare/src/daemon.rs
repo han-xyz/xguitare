@@ -21,6 +21,7 @@ use xguitare_core::control::{
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
+use xguitare_core::ports::{AudioPorts, capture_track_inputs};
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
     ClosedProject, LastTakes, ProjectEvent, Projects, add_finished_takes, autosave_if_due,
@@ -196,6 +197,10 @@ impl ProjectDisk {
                 }
             }
             ProjectEvent::Inputs(inputs) => {
+                let (inputs, warnings) = capture_track_inputs(&inputs, &session.audio_ports().0);
+                for warning in warnings {
+                    warn!("{warning}");
+                }
                 session.connect_track_inputs(&inputs);
             }
             ProjectEvent::Closed(closed) => {

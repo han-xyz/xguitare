@@ -645,7 +645,7 @@ Errors:
 
 ## project_open
 
-Opens the Project in `<projects_dir>/<slug of name>/`: loads its active Takes into memory, connects each Track's input, and plays it instead of the active Preset's Rack. The transport starts stopped at frame 0, with the click and count-in the Project saved. With `"restore":true` it loads `project.autosave.toml` instead of `project.toml`; the Project then counts as changed.
+Opens the Project in `<projects_dir>/<slug of name>/`: loads its active Takes into memory, connects each Track's input (an input that is not a capture port of another client stays unconnected, with a warning in the Daemon log), and plays it instead of the active Preset's Rack. The transport starts stopped at frame 0, with the click and count-in the Project saved. With `"restore":true` it loads `project.autosave.toml` instead of `project.toml`; the Project then counts as changed.
 
 Request:
 

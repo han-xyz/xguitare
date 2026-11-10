@@ -30,6 +30,30 @@ pub trait AudioPorts {
     fn disconnect(&self, from: &str, to: &str) -> Result<(), String>;
 }
 
+/// The Track inputs to connect, Track n's at index n - 1: each one `capture` lists, else `None`; and a warning for each one left out, so a `project.toml` from elsewhere cannot link a Track to a port that is not a capture port.
+pub fn capture_track_inputs(
+    inputs: &[Option<String>],
+    capture: &[AvailablePort],
+) -> (Vec<Option<String>>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let listed = inputs
+        .iter()
+        .enumerate()
+        .map(|(idx, input)| {
+            let input = input.as_ref()?;
+            if capture.iter().any(|port| port.name == *input) {
+                return Some(input.clone());
+            }
+            warnings.push(format!(
+                "track {} input '{input}' is not a capture port; it stays unconnected",
+                idx + 1
+            ));
+            None
+        })
+        .collect();
+    (listed, warnings)
+}
+
 /// The `(from, to)` links to drop and to make so that the Daemon's ports are linked to exactly the wanted ports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectPlan {

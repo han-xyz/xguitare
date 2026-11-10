@@ -1,5 +1,7 @@
 use xguitare_core::Ports;
-use xguitare_core::ports::{AvailablePort, ConnectPlan, choose_ports, connect_plan, foreign_ports};
+use xguitare_core::ports::{
+    AvailablePort, ConnectPlan, capture_track_inputs, choose_ports, connect_plan, foreign_ports,
+};
 
 fn available(list: &[&str], is_physical: bool) -> Vec<AvailablePort> {
     list.iter()
@@ -210,5 +212,24 @@ fn connect_plan_replaces_changed_links_only() {
                 link("xguitare:out_r", "card:playback_FR"),
             ],
         }
+    );
+}
+
+#[test]
+fn track_inputs_that_are_not_capture_ports_stay_unconnected() {
+    let inputs = [
+        Some("card:capture_FR".to_string()),
+        Some("player:out_left".to_string()),
+        None,
+    ];
+    assert_eq!(
+        capture_track_inputs(&inputs, &capture()),
+        (
+            vec![Some("card:capture_FR".to_string()), None, None],
+            vec![
+                "track 2 input 'player:out_left' is not a capture port; it stays unconnected"
+                    .to_string()
+            ],
+        )
     );
 }
