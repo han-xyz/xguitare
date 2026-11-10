@@ -599,7 +599,7 @@ fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<Pat
         file = dir.join(format!("{prefix:02}-{slug}.toml"));
         match write_new(&file, text, |tmp, path| fs::hard_link(tmp, path)) {
             Ok(()) => return Ok(file),
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
             Err(err) => return Err(format!("cannot save {}: {err}", file.display())),
         }
     }
@@ -875,6 +875,10 @@ fn module_index(modules: &[PresetModule], id: &str) -> Result<usize, String> {
         .ok_or_else(|| ResolveError::UnknownModule(id.to_string()).to_string())
 }
 
+#[allow(
+    clippy::maybe_infinite_iter,
+    reason = "a finite Rack leaves some suffix free, so find returns"
+)]
 fn free_id(modules: &[PresetModule], type_name: &str) -> String {
     let is_taken = |id: &str| modules.iter().any(|m| m.id == id);
     if !is_taken(type_name) {
@@ -899,13 +903,13 @@ fn port_names(ports: &dyn AudioPorts) -> (Vec<String>, Vec<String>) {
 fn connected(state: &EngineState, ports: &dyn AudioPorts) -> Value {
     let own = ports.own_ports();
     let linked = |own_port: &str, is_input: bool| {
-        state
-            .connections
-            .iter()
-            .find_map(|(from, to)| match is_input {
-                true => (to == own_port).then_some(from),
-                false => (from == own_port).then_some(to),
-            })
+        state.connections.iter().find_map(|(from, to)| {
+            if is_input {
+                (to == own_port).then_some(from)
+            } else {
+                (from == own_port).then_some(to)
+            }
+        })
     };
     json!({
         "input": linked(&own.input, true),
@@ -1010,10 +1014,10 @@ fn set_settings(
     config.state.banks.insert(kind, bank.dir.clone());
     config.state.bank_kind = Some(kind);
     if !config.ir_dir_in_config && config.state.ir_dir.is_none() {
-        config.ir_dir = bank.dir.clone();
+        config.ir_dir.clone_from(&bank.dir);
     }
     config.bank_kind = kind;
-    config.bank_dir = bank.dir.clone();
+    config.bank_dir.clone_from(&bank.dir);
     let (rack, active, build_warnings) = first_program(state, &config, &bank);
     swap_saving_state(state, &config, rack)?;
     *warnings = build_warnings;

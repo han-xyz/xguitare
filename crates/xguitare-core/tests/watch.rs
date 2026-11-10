@@ -59,6 +59,7 @@ fn active_level(state: &EngineState) -> f32 {
 }
 
 #[test]
+#[allow(clippy::float_cmp, reason = "the test sets this exact value")]
 fn active_file_changed_reloads() {
     let (mut state, mut audio) = state("reload");
     let file = active_file(&state);
@@ -212,7 +213,10 @@ fn stamp(secs: u64, len: u64) -> FileStamp {
 fn unchanged_stat_is_filtered_out() {
     let file = PathBuf::from("/bank/01-clean.toml");
     let snapshot = HashMap::from([(file.clone(), stamp(100, 80))]);
-    assert!(changed_paths(&snapshot, &snapshot.clone(), &[file]).is_empty());
+    assert_eq!(
+        changed_paths(&snapshot, &snapshot.clone(), &[file]),
+        Vec::<PathBuf>::new()
+    );
 }
 
 #[test]

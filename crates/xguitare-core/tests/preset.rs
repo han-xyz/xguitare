@@ -115,7 +115,7 @@ fn build_gain_preset_runs() {
     let (mut rack, warnings) = preset
         .build(48_000.0, 128, Path::new("."), Path::new("."), 100.0)
         .unwrap();
-    assert!(warnings.is_empty());
+    assert_eq!(warnings, []);
     let input = [0.5; 128];
     let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
     rack.process(&input, &mut left, &mut right);

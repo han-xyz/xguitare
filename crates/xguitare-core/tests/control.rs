@@ -63,7 +63,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     shared.callback_ns_max.store(250_000, Ordering::Relaxed);
     shared.callback_ns_last.store(90_000, Ordering::Relaxed);
     let mut config = empty_config(&dir.0);
-    config.bank_dir = dir.0.clone();
+    config.bank_dir.clone_from(&dir.0);
     let (queues, audio, tap) = engine_queues(QUEUE_CAPACITY);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let state = EngineState {
@@ -197,6 +197,7 @@ fn load_returns_build_warnings() {
 }
 
 #[test]
+#[allow(clippy::float_cmp, reason = "the test sets this exact value")]
 fn load_by_name_and_number() {
     let (mut state, mut audio, _dir) = state("load");
     let payload = ok(handle(
@@ -242,6 +243,7 @@ fn load_invalid_entry_is_error() {
 }
 
 #[test]
+#[allow(clippy::float_cmp, reason = "the test sets this exact value")]
 fn set_clamps_and_reports() {
     let (mut state, mut audio, _dir) = state("set");
     let payload = ok(handle(&mut state, set("gain.level", 50.0)));
@@ -260,6 +262,7 @@ fn set_clamps_and_reports() {
 }
 
 #[test]
+#[allow(clippy::float_cmp, reason = "the test sets this exact value")]
 fn set_rounds_integer_param() {
     let (mut state, mut audio, _dir) = amp_state("set-rounds-integer");
     let (_, preset) = state.active.as_mut().unwrap();
@@ -504,7 +507,7 @@ fn save_through_symlink() {
     );
     let saved = Preset::parse(&fs::read_to_string(&target).unwrap()).unwrap();
     assert_eq!(saved.modules[0].params[0], ("level".to_string(), -6.0));
-    assert!(tmp_files(&elsewhere).is_empty());
+    assert_eq!(tmp_files(&elsewhere), Vec::<PathBuf>::new());
 }
 
 const SAVES_IN_THIS_BINARY_BOUND: u64 = 1024;
@@ -551,7 +554,7 @@ fn save_after_active_removed_is_error() {
         fs::read_to_string(state.config.bank_dir.join("02-loud.toml")).unwrap(),
         loud
     );
-    assert!(tmp_files(&state.config.bank_dir).is_empty());
+    assert_eq!(tmp_files(&state.config.bank_dir), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -574,7 +577,7 @@ fn failed_save_leaves_no_tmp() {
     fs::write(target.join("occupied"), "").unwrap();
     let message = error(handle(&mut state, Request::Save { name: None }));
     assert!(message.starts_with("cannot save"), "{message}");
-    assert!(tmp_files(&state.config.bank_dir).is_empty());
+    assert_eq!(tmp_files(&state.config.bank_dir), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -1512,7 +1515,7 @@ fn bank_files(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".toml"))
+        .filter(|name| Path::new(name).extension().is_some_and(|ext| ext == "toml"))
         .collect();
     names.sort();
     names
@@ -1587,7 +1590,7 @@ fn save_as_creates_and_loads() {
         ok(handle(&mut state, Request::List))["entries"][3]["name"],
         "My Lead Tone!"
     );
-    assert!(tmp_files(&state.config.bank_dir).is_empty());
+    assert_eq!(tmp_files(&state.config.bank_dir), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -1662,7 +1665,7 @@ fn write_new_falls_back_when_hard_links_fail() {
     let err = write_new(&taken, "replaced", refuse).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
     assert_eq!(fs::read_to_string(&taken).unwrap(), before);
-    assert!(tmp_files(&dir.0).is_empty());
+    assert_eq!(tmp_files(&dir.0), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -1710,7 +1713,7 @@ fn save_as_numbers_past_unindexed_files() {
         "unindexed"
     );
     assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
-    assert!(tmp_files(&bank).is_empty());
+    assert_eq!(tmp_files(&bank), Vec::<PathBuf>::new());
 }
 
 #[test]

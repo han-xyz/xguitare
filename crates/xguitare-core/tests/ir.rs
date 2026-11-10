@@ -160,7 +160,7 @@ fn truncates_to_max_ms() {
     write_float(
         &path,
         spec(1, 48_000, 32, SampleFormat::Float),
-        &[0.1; 48_000],
+        &vec![0.1; 48_000],
     );
     let ir = load_ir(&path, "ir.wav", 48_000, 100.0).unwrap();
     assert_eq!(ir.left.len(), 4800);
@@ -178,7 +178,7 @@ fn load_ir_has_unit_energy() {
     );
     let ir = load_ir(&path, "ir.wav", 48_000, 1000.0).unwrap();
     let right = ir.right.expect("stereo file has a right channel");
-    let mean = (energy(&ir.left) + energy(&right)) / 2.0;
+    let mean = f32::midpoint(energy(&ir.left), energy(&right));
     assert!((mean - 1.0).abs() <= 1e-4, "{mean}");
     for (left, right) in ir.left.iter().zip(&right) {
         assert!((right - left / 2.0).abs() <= 1e-6, "{left} {right}");
@@ -254,7 +254,7 @@ fn ir_reads_at_most_max_ms() {
     write_float(
         &path,
         spec(1, 48_000, 32, SampleFormat::Float),
-        &[0.1; 48_000],
+        &vec![0.1; 48_000],
     );
     let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
     let unread_tail_bytes = 40_000 * 4;

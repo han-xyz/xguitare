@@ -64,6 +64,7 @@ const TAP_CAPACITY: usize = 16384;
 const MUTE_RAMP_MS: f32 = 10.0;
 
 /// PipeWire's default `clock.quantum-limit`: the largest block the switcher's own scratch is prepared for, so a swap to a Rack re-prepared for any quantum up to it never allocates on the audio thread.
+#[allow(clippy::doc_markdown, reason = "PipeWire is a product name, not code")]
 pub const SWITCHER_MAX_FRAMES: usize = 8192;
 
 /// The crossfade and Mute ramp lengths at one sample rate, computed on the control side so the audio thread does no conversion.
@@ -294,6 +295,10 @@ impl RackSwitcher {
         }
     }
 
+    #[allow(
+        clippy::float_cmp,
+        reason = "the ramp clamps to the target, so it lands on 0.0 or 1.0 exactly"
+    )]
     fn apply_mute(&mut self, out_l: &mut [f32], out_r: &mut [f32]) {
         let target = if self.shared.muted.load(Ordering::Relaxed) {
             0.0

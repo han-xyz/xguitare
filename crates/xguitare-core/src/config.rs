@@ -21,6 +21,10 @@ const IR_MAX_MS_MAX: f32 = 10000.0;
 pub const AUTO_PORT: &str = "auto";
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent config flags, not states of one machine"
+)]
 pub struct Config {
     pub bank_dir: PathBuf,
     pub bank_kind: BankKind,
@@ -53,6 +57,7 @@ pub struct Config {
 /// `"auto"`: among physical ports only, the only device's first port in JACK's channel order (`output_right`: its second); several devices connect nothing and warn with their port names.
 /// `""`: do not connect.
 /// A pattern: an exact port name, or a glob where `*` matches any run of characters and the rest must match the whole name (e.g. `"Scarlett*capture_FL"`; a leading or trailing `*` for a suffix or prefix), matched against every audio port of that direction, physical or not (PipeWire split nodes, other apps), except the Daemon's own; the first match in sorted order wins.
+#[allow(clippy::doc_markdown, reason = "PipeWire is a product name, not code")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ports {

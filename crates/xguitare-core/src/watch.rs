@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -19,9 +20,9 @@ pub enum Action {
 pub type FileStamp = (SystemTime, u64);
 
 /// Returns the event paths whose stamp differs between the two snapshots; a path missing from a snapshot does not exist at that time.
-pub fn changed_paths(
-    previous: &HashMap<PathBuf, FileStamp>,
-    current: &HashMap<PathBuf, FileStamp>,
+pub fn changed_paths<S: BuildHasher>(
+    previous: &HashMap<PathBuf, FileStamp, S>,
+    current: &HashMap<PathBuf, FileStamp, S>,
     events: &[PathBuf],
 ) -> Vec<PathBuf> {
     events
