@@ -26,6 +26,8 @@ const COLUMN_GAP: f32 = 4.0;
 const MASTER_WIDTH: f32 = COLUMN_WIDTH + 10.0;
 const NAME_HEIGHT: f32 = 26.0;
 const SEND_ROW_HEIGHT: f32 = 40.0;
+/// The Send rows a column shows before they scroll.
+const SEND_ROWS_SHOWN: usize = 2;
 const TO_MASTER_HEIGHT: f32 = 28.0;
 const PAN_HEIGHT: f32 = 58.0;
 const FADER_SIZE: egui::Vec2 = egui::Vec2::new(26.0, 140.0);
@@ -182,7 +184,8 @@ fn mixer_column(
             ui.set_width(COLUMN_WIDTH);
             ui.vertical_centered(|ui| {
                 commands.extend(name_button(ui, column, shape));
-                let sends_height = TO_MASTER_HEIGHT + SEND_ROW_HEIGHT * shape.send_rows as f32;
+                let shown_rows = shape.send_rows.min(SEND_ROWS_SHOWN);
+                let sends_height = TO_MASTER_HEIGHT + SEND_ROW_HEIGHT * shown_rows as f32;
                 ui.allocate_ui(vec2(COLUMN_WIDTH, sends_height), |ui| {
                     ui.set_min_height(sends_height);
                     commands.extend(track_routing(ui, column, shape.bus_names));
@@ -241,7 +244,7 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
     commands
 }
 
-/// `to Master` and one Send knob with a `pre` toggle per Bus; nothing for a Bus or Master.
+/// `to Master` and one Send knob with a `pre` toggle per Bus, the Sends in their own scroll past two rows; nothing for a Bus or Master.
 fn track_routing(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec<Command> {
     let mut commands = Vec::new();
     let (MixerTarget::Track(track), Some(to_master)) = (column.target, column.to_master) else {
@@ -263,10 +266,15 @@ fn track_routing(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec
             },
         });
     }
-    for send in &column.sends {
-        let bus = bus_names.get(send.bus).map_or("", String::as_str);
-        commands.extend(send_row(ui, track, (&column.name, bus), send));
-    }
+    ScrollArea::vertical()
+        .id_salt(("sends", track))
+        .max_height(SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32)
+        .show(ui, |ui| {
+            for send in &column.sends {
+                let bus = bus_names.get(send.bus).map_or("", String::as_str);
+                commands.extend(send_row(ui, track, (&column.name, bus), send));
+            }
+        });
     commands
 }
 
