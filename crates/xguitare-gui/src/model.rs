@@ -1159,7 +1159,9 @@ pub fn requests_until_quit(
                 level,
                 pre,
             },
-            Command::MasterSet(volume) => Request::MasterSet { volume },
+            Command::MasterSet(volume) => Request::MasterSet {
+                volume: SendLevel::Db(volume),
+            },
             Command::ClipReset(target) => {
                 let (track, bus, master) = rack_selectors(Some(target));
                 Request::ClipReset { track, bus, master }

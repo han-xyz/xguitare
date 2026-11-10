@@ -1138,9 +1138,19 @@ fn send_master_and_clip_commands_send_their_requests_and_print_the_answer() {
         ),
         (
             &["master", "-3"],
-            Request::MasterSet { volume: -3.0 },
+            Request::MasterSet {
+                volume: SendLevel::Db(-3.0),
+            },
             r#"{"ok":true,"volume_db":-3.0}"#,
             "master -3 dB\n",
+        ),
+        (
+            &["master", "off"],
+            Request::MasterSet {
+                volume: SendLevel::Off,
+            },
+            r#"{"ok":true,"volume_db":null}"#,
+            "master off\n",
         ),
         (
             &["clip", "reset"],
@@ -1291,6 +1301,42 @@ fn rack_commands_take_a_bus_or_master() {
 }
 
 #[test]
+fn mixer_volume_and_pan_must_be_finite() {
+    for (argv, message) in [
+        (
+            &["bus", "edit", "0", "--volume", "nan"][..],
+            "volume must be between -60 and 6 dB",
+        ),
+        (
+            &["bus", "edit", "0", "--pan", "inf"][..],
+            "pan must be between -1 and 1",
+        ),
+        (
+            &["track", "edit", "0", "--volume", "inf"][..],
+            "volume must be between -60 and 6 dB",
+        ),
+        (
+            &["track", "edit", "0", "--pan", "NaN"][..],
+            "pan must be between -1 and 1",
+        ),
+    ] {
+        let out = cli(argv, reply(r#"{"ok":true}"#));
+        assert_eq!(out.code, 1, "{argv:?}");
+        assert!(out.requests.is_empty(), "{argv:?}");
+        assert!(
+            out.stderr.starts_with("error: invalid value"),
+            "{}",
+            out.stderr
+        );
+        assert!(
+            out.stderr.contains(&format!("': {message};")),
+            "{}",
+            out.stderr
+        );
+    }
+}
+
+#[test]
 fn mixer_usage_errors_print_one_line() {
     for (argv, stderr) in [
         (
@@ -1300,6 +1346,14 @@ fn mixer_usage_errors_print_one_line() {
         (
             &["clip", "reset", "master", "0"][..],
             "error: clip reset master takes no name\n",
+        ),
+        (
+            &["master", "inf"][..],
+            "error: master volume must be off or between -60 and 6 dB\n",
+        ),
+        (
+            &["master", "loud"][..],
+            "error: master volume must be off or between -60 and 6 dB\n",
         ),
         (
             &["clip", "reset", "bus"][..],

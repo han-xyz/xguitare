@@ -227,7 +227,9 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             level: Some(parse_level(&level)?),
             pre: pre.map(is_on),
         },
-        Cmd::Master { volume } => Request::MasterSet { volume },
+        Cmd::Master { volume } => Request::MasterSet {
+            volume: parse_master_volume(&volume)?,
+        },
         Cmd::Clip(ClipCmd::Reset { kind, name }) => clip_reset_request(kind, name)?,
         Cmd::Render(args) => render_request(args),
     })
@@ -299,6 +301,19 @@ fn parse_level(level: &str) -> Result<SendLevel, String> {
         .filter(|db: &f32| db.is_finite())
         .map(SendLevel::Db)
         .ok_or_else(|| "level must be a number in dB or off".to_string())
+}
+
+/// `off`, or a finite number in dB.
+fn parse_master_volume(volume: &str) -> Result<SendLevel, String> {
+    if volume == "off" {
+        return Ok(SendLevel::Off);
+    }
+    volume
+        .parse()
+        .ok()
+        .filter(|db: &f32| db.is_finite())
+        .map(SendLevel::Db)
+        .ok_or_else(|| "master volume must be off or between -60 and 6 dB".to_string())
 }
 
 fn clip_reset_request(kind: Option<ClipKind>, name: Option<String>) -> Result<Request, String> {
@@ -489,7 +504,7 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
             level_text(&payload["level"]),
             pre_text(&payload["pre"])
         ),
-        Request::MasterSet { .. } => format!("master {} dB\n", text(&payload["volume_db"])),
+        Request::MasterSet { .. } => master_line(&payload["volume_db"]),
         Request::ClipReset { .. } => "clip reset\n".to_string(),
         Request::Render { .. } => format!("rendering {}\n", text(&payload["file"])),
         Request::RenderCancel => "render cancelling\n".to_string(),
@@ -847,6 +862,13 @@ fn render_modules(payload: &Value) -> String {
 
 fn items(value: &Value) -> impl Iterator<Item = &Value> {
     value.as_array().into_iter().flatten()
+}
+
+fn master_line(volume_db: &Value) -> String {
+    if volume_db.is_null() {
+        return "master off\n".to_string();
+    }
+    format!("master {} dB\n", text(volume_db))
 }
 
 fn text(value: &Value) -> String {

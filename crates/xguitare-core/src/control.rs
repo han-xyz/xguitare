@@ -241,7 +241,7 @@ pub enum Request {
         pre: Option<bool>,
     },
     MasterSet {
-        volume: f32,
+        volume: SendLevel,
     },
     /// Starts a Render of the open Project.
     Render {

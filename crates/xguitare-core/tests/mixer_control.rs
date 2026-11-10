@@ -327,6 +327,13 @@ fn send_set_takes_a_level_in_db_or_off_and_pre() {
     assert_eq!(
         error(
             &mut s,
+            r#"{"cmd":"send_set","track":1,"bus":0,"level":-1e40}"#
+        ),
+        "track 'Keys' send level must be -inf or between -60 and 6 dB"
+    );
+    assert_eq!(
+        error(
+            &mut s,
             r#"{"cmd":"send_set","track":1,"bus":"Echo","level":0}"#
         ),
         "no bus 'Echo'"
@@ -363,6 +370,19 @@ fn master_set_checks_the_volume_and_sends_it() {
     assert_eq!(set, json!({"ok": true, "volume_db": -3.0}));
     assert_eq!(arrangement_commands(&mut s), ["MasterVolume { db: -3.0 }"]);
     assert_eq!(saved(&mut s).master.volume_db, -3.0);
+    assert_eq!(
+        error(&mut s, r#"{"cmd":"master_set","volume":-1e40}"#),
+        "master volume must be -inf or between -60 and 6 dB"
+    );
+    let off = ok(&mut s, r#"{"cmd":"master_set","volume":"off"}"#);
+    assert_eq!(off, json!({"ok": true, "volume_db": null}));
+    assert_eq!(arrangement_commands(&mut s), ["MasterVolume { db: -inf }"]);
+    assert_eq!(saved(&mut s).master.volume_db, f32::NEG_INFINITY);
+    let loud = error(&mut s, r#"{"cmd":"master_set","volume":"loud"}"#);
+    assert!(
+        loud.starts_with(r#"invalid request: level must be a number in dB or "off""#),
+        "{loud}"
+    );
 }
 
 #[test]

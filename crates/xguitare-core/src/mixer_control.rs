@@ -142,6 +142,11 @@ pub(crate) fn send_set(
     });
     let entry = &mut sends[send_index];
     entry.level_db = match level {
+        Some(SendLevel::Db(db)) if !db.is_finite() => {
+            return Err(
+                ProjectError::SendLevel(project.tracks[track_index].name.clone()).to_string(),
+            );
+        }
         Some(SendLevel::Db(db)) => db,
         Some(SendLevel::Off) => f32::NEG_INFINITY,
         None => entry.level_db,
@@ -171,8 +176,15 @@ pub(crate) fn send_set(
     }))
 }
 
-pub(crate) fn master_set(state: &mut EngineState, volume: f32) -> Result<Value, String> {
+pub(crate) fn master_set(state: &mut EngineState, volume: SendLevel) -> Result<Value, String> {
     let mut project = current_project(state)?.clone();
+    let volume = match volume {
+        SendLevel::Db(db) if !db.is_finite() => {
+            return Err(ProjectError::MasterVolume.to_string());
+        }
+        SendLevel::Db(db) => db,
+        SendLevel::Off => f32::NEG_INFINITY,
+    };
     project.master.volume_db = volume;
     check_project(&project).map_err(|err| err.to_string())?;
     send(state, &[ArrangementCommand::MasterVolume { db: volume }])?;

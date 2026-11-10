@@ -96,7 +96,7 @@ Response:
 | `selected` | Index of the selected Track. |
 | `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
 | `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
-| `master` | `volume_db` (`null` for -inf, which only `project.toml` can set), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
+| `master` | `volume_db` (`null` when off), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
 
 Errors: none besides the transport errors.
 
@@ -1092,7 +1092,7 @@ Errors:
 
 ## master_set
 
-Sets the Master volume. Master is a stereo Rack (empty in a new Project) with this volume; its output goes to the outputs, and the click is added after it.
+Sets the Master volume: `volume` is dB, −60 to 6, or `"off"`. Master is a stereo Rack (empty in a new Project) with this volume; its output goes to the outputs, and the click is added after it.
 
 Request:
 
@@ -1106,12 +1106,15 @@ Response:
 {"ok":true,"volume_db":-3.0}
 ```
 
+`volume_db` is `null` when off.
+
 Errors:
 
 | `error` | When |
 | --- | --- |
 | `no project open` | No Project is open. |
-| `master volume must be -inf or between -60 and 6 dB` | `volume` is out of range. |
+| `master volume must be -inf or between -60 and 6 dB` | `volume` is a number out of range. |
+| `invalid request: level must be a number in dB or "off"` | `volume` is a string other than `"off"` (followed by the parser's position). |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
 ## clip_reset

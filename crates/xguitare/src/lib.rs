@@ -121,10 +121,10 @@ enum Cmd {
         #[arg(long)]
         pre: Option<Switch>,
     },
-    /// Set the Master volume in dB, -60 to 6
+    /// Set the Master volume: dB (-60 to 6) or off
     Master {
-        #[arg(allow_negative_numbers = true)]
-        volume: f32,
+        #[arg(allow_hyphen_values = true)]
+        volume: String,
     },
     /// Reset clip indicators: of one Track, Bus or Master, or all
     #[command(subcommand, arg_required_else_help = false)]
@@ -189,10 +189,10 @@ enum BusCmd {
         #[arg(long)]
         name: Option<String>,
         /// dB, -60 to 6
-        #[arg(long, allow_negative_numbers = true)]
+        #[arg(long, allow_negative_numbers = true, value_parser = finite_volume)]
         volume: Option<f32>,
         /// -1 (left) to 1 (right)
-        #[arg(long, allow_negative_numbers = true)]
+        #[arg(long, allow_negative_numbers = true, value_parser = finite_pan)]
         pan: Option<f32>,
         #[arg(long)]
         mute: Option<Switch>,
@@ -258,10 +258,10 @@ enum TrackCmd {
         #[arg(long)]
         input: Option<String>,
         /// dB, -60 to 6
-        #[arg(long, allow_negative_numbers = true)]
+        #[arg(long, allow_negative_numbers = true, value_parser = finite_volume)]
         volume: Option<f32>,
         /// -1 (left) to 1 (right)
-        #[arg(long, allow_negative_numbers = true)]
+        #[arg(long, allow_negative_numbers = true, value_parser = finite_pan)]
         pan: Option<f32>,
         #[arg(long)]
         mute: Option<Switch>,
@@ -334,6 +334,21 @@ enum IrCmd {
 }
 
 /// Parses `argv` and runs the command; returns the process exit code (0 on success, `--help` and `--version`; 1 on any error, after one line on stderr).
+fn finite_volume(text: &str) -> Result<f32, String> {
+    finite(text, "volume must be between -60 and 6 dB")
+}
+
+fn finite_pan(text: &str) -> Result<f32, String> {
+    finite(text, "pan must be between -1 and 1")
+}
+
+fn finite(text: &str, range: &str) -> Result<f32, String> {
+    text.parse()
+        .ok()
+        .filter(|value: &f32| value.is_finite())
+        .ok_or_else(|| range.to_string())
+}
+
 pub fn run_main<I, T>(argv: I) -> i32
 where
     I: IntoIterator<Item = T>,

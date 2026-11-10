@@ -390,7 +390,7 @@ master: -3 dB; out -120.0/-120.0 dB
 
 - `bus add [name]` adds a Bus with an empty Rack at 0 dB, centred; without a name it is `Bus <n>`, the first number free. A Project has at most 8 Buses; Bus names follow the Track name rules. `bus remove <bus>` removes it and every Send to it. `bus edit <bus>` takes `--name`, `--volume <dB>` (−60 to 6), `--pan <−1..1>` and `--mute|--solo on|off`. A Bus is named by its zero-based index or its name.
 - `send <track> <bus> <level>` sets a Track's Send to a Bus: a level in dB (−60 to 6) or `off`, the default. A Send is taken after the Track's volume and pan (post-fader); `--pre on` takes it after the Rack and pan, before the volume.
-- `master <dB>` sets the Master volume (−60 to 6).
+- `master <dB>|off` sets the Master volume (−60 to 6, or off).
 - `track edit <track> --to-master off` keeps a Track's own sound out of Master, so it is heard only through its Sends.
 - `rack add|remove|move`, `set`, `get`, `bypass` and `ir set` take `--bus <bus>` or `--master` to edit that Rack instead of the selected Track's; a Bus or Master Rack takes every Module type but the cabinet (`a cabinet is not allowed on a Bus or Master`), in any order, and `load` puts a Preset only into a Track.
 - Solo is solo in place: while anything is soloed, the soloed Tracks and Buses sound, with the Buses a soloed Track sends to and the Tracks that send to a soloed Bus. Mute always wins.
