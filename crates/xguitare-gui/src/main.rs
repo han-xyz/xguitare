@@ -1,7 +1,3 @@
-mod app;
-mod rack;
-mod sidebar;
-
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -11,8 +7,7 @@ use clap::Parser;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing_subscriber::EnvFilter;
 use xguitare_core::Config;
-
-use crate::app::App;
+use xguitare_gui::app::App;
 
 const APP_NAME: &str = "xguitare";
 const WINDOW_SIZE: [f32; 2] = [960.0, 640.0];

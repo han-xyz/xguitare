@@ -7,14 +7,15 @@ use egui::{
     UiBuilder, Vec2, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
-use xguitare_gui::model::{
+
+use crate::model::{
     ClipLatch, Command, Direction, EAR_WIDTH, KnobKey, ModuleType, NO_SIGNAL, ParamRow, PeakHold,
     Rgb, Snapshot, Throttle, TunerReading, add_command, autoscroll_delta, cabinet_ir,
     cents_fraction, drop_index, in_tune, key_step, knob_fraction, knob_param_value, move_target,
     palette, param_rows, parse_typed_value, peak_db, peak_text, rack_channels, tuner_header_text,
     tuner_reading, tuner_toggle, unit_suffix,
 };
-use xguitare_gui::widgets::{self, KnobSize, colour};
+use crate::widgets::{self, KnobSize, colour};
 
 const NO_IR: &str = "none";
 const CABINET: &str = "cabinet";

@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
@@ -10,16 +10,16 @@ use egui::{CentralPanel, Event, Key, Modifiers, Panel, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_core::{BankKind, Config};
-use xguitare_gui::client::{self, TICK};
-use xguitare_gui::model::{
+
+use crate::client::{self, TICK};
+use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, SET_INTERVAL, Snapshot,
     Throttle, bank_rows, forget_removed_units, key_to_command, open_units_from_string,
     open_units_to_string, param_rows, peak_db, quit_commands, remember_removes, shortcuts_active,
 };
-use xguitare_gui::widgets;
-
 use crate::rack::{Knobs, METERS, RackView, Tuner, rack_view};
 use crate::sidebar::{BankView, footer, sidebar};
+use crate::widgets;
 
 const BANK_WIDTH: f32 = 220.0;
 const OPEN_UNITS_KEY: &str = "open_units";
@@ -64,26 +64,47 @@ impl App {
         stop: Arc<AtomicBool>,
     ) -> App {
         let ctx = cc.egui_ctx.clone();
+        let (commands, snapshots, client) =
+            client::spawn(config.clone(), config_path, Arc::clone(&stop), move || {
+                ctx.request_repaint()
+            });
+        App::assemble(cc, &config, commands, snapshots, Some(client), stop)
+    }
+
+    /// An App with no client thread: `snapshot` arrives as the only client update and commands go nowhere.
+    pub fn with_snapshot(cc: &eframe::CreationContext, config: &Config, snapshot: Snapshot) -> App {
+        let (commands, _) = mpsc::channel();
+        let (updates, snapshots) = mpsc::channel();
+        updates
+            .send(snapshot)
+            .expect("the receiver is held in this scope");
+        let stop = Arc::new(AtomicBool::new(false));
+        App::assemble(cc, config, commands, snapshots, None, stop)
+    }
+
+    fn assemble(
+        cc: &eframe::CreationContext,
+        config: &Config,
+        commands: Sender<Command>,
+        snapshots: Receiver<Snapshot>,
+        client: Option<JoinHandle<()>>,
+        stop: Arc<AtomicBool>,
+    ) -> App {
         let open_units = cc
             .storage
             .and_then(|storage| storage.get_string(OPEN_UNITS_KEY))
             .map(|stored| open_units_from_string(&stored))
             .unwrap_or_default();
-        ctx.set_theme(Theme::Dark);
-        ctx.set_visuals_of(Theme::Dark, widgets::visuals());
-        let tuner_mute = config.tuner_mute;
+        cc.egui_ctx.set_theme(Theme::Dark);
+        cc.egui_ctx.set_visuals_of(Theme::Dark, widgets::visuals());
         let bank_heading = match config.bank_kind {
             BankKind::Guitar => "Guitar Bank",
             BankKind::Bass => "Bass Bank",
         };
-        let (commands, snapshots, client) =
-            client::spawn(config, config_path, Arc::clone(&stop), move || {
-                ctx.request_repaint()
-            });
         App {
             commands,
             snapshots,
-            client: Some(client),
+            client,
             snapshot: Snapshot {
                 link: Link::Disconnected {
                     since: Instant::now(),
@@ -104,7 +125,7 @@ impl App {
             feedback: Feedback::default(),
             tuner_open: false,
             muted_by_us: false,
-            tuner_mute,
+            tuner_mute: config.tuner_mute,
             clips: [ClipLatch::default(); 2],
             holds: [PeakHold::default(); 2],
             open_units,

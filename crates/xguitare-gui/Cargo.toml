@@ -16,3 +16,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 xguitare-client = { path = "../xguitare-client" }
 xguitare-core = { path = "../xguitare-core" }
+
+[dev-dependencies]
+egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot", "eframe"] }
+egui_system_font_provider = "0.37.0"

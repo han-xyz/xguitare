@@ -1,10 +1,10 @@
 use std::time::Instant;
 
 use egui::{Button, Grid, Key, Panel, RichText, ScrollArea, TextEdit, Ui, vec2};
-use xguitare_gui::model::{
+
+use crate::model::{
     BankRow, Command, Feedback, Link, Snapshot, engine_readout, filter_bank, link_text,
 };
-
 use crate::rack::{UNIT_MARGIN, muted_text};
 
 const NO_PRESET: &str = "no preset";
