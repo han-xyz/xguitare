@@ -8,7 +8,7 @@ use serde_json::json;
 use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
-use xguitare_core::control::{EngineState, PeakMeters, handle};
+use xguitare_core::control::{EngineState, PeakMeters, SILENCE_DB, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
@@ -19,10 +19,10 @@ use xguitare_gui::model::{
     cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout,
     failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_to_command,
     knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
-    ladder_segments, latency_ms, meter_fraction, module_types, move_target, open_units_from_string,
-    open_units_to_string, palette, param_rows, peak_fraction, peak_text, quit_commands,
-    rack_channels, refresh_decision, requests_until_quit, response_text, spawn_policy, status_line,
-    tuner_header_text, tuner_reading, tuner_toggle, unit_suffix,
+    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
+    open_units_to_string, palette, param_rows, peak_db, peak_text, quit_commands, rack_channels,
+    refresh_decision, requests_until_quit, response_text, spawn_policy, tuner_header_text,
+    tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -158,20 +158,11 @@ fn commands_before_quit_are_sent_in_order() {
 }
 
 #[test]
-fn meter_fraction_bounds() {
-    assert_eq!(meter_fraction(-120.0), 0.0);
-    assert_eq!(meter_fraction(-60.0), 0.0);
-    assert_eq!(meter_fraction(-30.0), 0.5);
-    assert_eq!(meter_fraction(0.0), 1.0);
-    assert_eq!(meter_fraction(3.0), 1.0);
-}
-
-#[test]
 fn null_or_missing_peak_reads_as_silence() {
     let status = json!({"input_peak_db": null, "output_peak_db": -30.0});
-    assert_eq!(peak_fraction(&status, "input_peak_db"), 0.0);
-    assert_eq!(peak_fraction(&status, "output_peak_db"), 0.5);
-    assert_eq!(peak_fraction(&json!({}), "output_peak_db"), 0.0);
+    assert_eq!(peak_db(&status, "input_peak_db"), SILENCE_DB);
+    assert_eq!(peak_db(&status, "output_peak_db"), -30.0);
+    assert_eq!(peak_db(&json!({}), "output_peak_db"), SILENCE_DB);
 }
 
 #[test]
@@ -179,27 +170,6 @@ fn refresh_decision_on_revision_change() {
     assert!(refresh_decision(None, 1));
     assert!(!refresh_decision(Some(1), 1));
     assert!(refresh_decision(Some(1), 2));
-}
-
-#[test]
-fn status_line_format() {
-    let status = json!({
-        "preset": "clean",
-        "sample_rate": 48000,
-        "buffer_size": 128,
-        "prepared_frames": 128,
-        "revision": 4,
-        "input_peak_db": -20.5,
-        "output_peak_db": -18.0,
-        "xruns": 0,
-        "callback_max_us": 40,
-        "callback_last_us": 12,
-        "connections": [],
-    });
-    assert_eq!(
-        status_line(&status),
-        "48000 Hz · 128/128 frames · xruns 0 · cb 12/40 µs"
-    );
 }
 
 #[test]

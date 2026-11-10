@@ -8,7 +8,6 @@ use xguitare_core::control::{Request, Response, SILENCE_DB};
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
 pub const METER_FLOOR_DB: f64 = -60.0;
-pub const METER_RED_DB: f64 = -6.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);
 pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
 pub const INVALID_PRESET: &str = "invalid preset";
@@ -643,30 +642,9 @@ pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {
     last_seen != Some(revision)
 }
 
-pub fn meter_fraction(db: f64) -> f32 {
-    ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0) as f32
-}
-
 /// A peak the payload lacks or carries as `null` (a non-finite value serialises as `null`) reads as −120 dB.
-pub fn peak_fraction(status: &Value, key: &str) -> f32 {
-    meter_fraction(peak_db(status, key))
-}
-
-/// The peak behind [`peak_fraction`], in dB.
 pub fn peak_db(status: &Value, key: &str) -> f64 {
     status[key].as_f64().unwrap_or(SILENCE_DB)
-}
-
-pub fn status_line(status: &Value) -> String {
-    format!(
-        "{} Hz · {}/{} frames · xruns {} · cb {}/{} µs",
-        status["sample_rate"],
-        status["buffer_size"],
-        status["prepared_frames"],
-        status["xruns"],
-        status["callback_last_us"],
-        status["callback_max_us"],
-    )
 }
 
 /// How long one buffer of `buffer` frames lasts at `rate` Hz.
