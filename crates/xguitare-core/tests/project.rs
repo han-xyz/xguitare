@@ -293,6 +293,22 @@ fn take_paths_other_than_takes_name_wav_are_rejected() {
 }
 
 #[test]
+fn track_names_follow_the_rules_of_track_add() {
+    let dir = temp_dir("track-names");
+    let with_name =
+        |name: &str| TWO_TRACKS.replace(r#"name = "Bass""#, &format!(r#"name = "{name}""#));
+    for (name, error) in [
+        ("GUITAR", "a track named 'GUITAR' already exists"),
+        ("42", "track name must not be only digits"),
+        (r" \u0007 ", "track name must not be empty"),
+    ] {
+        assert_eq!(load_error(&dir.0, &with_name(name)), error);
+    }
+    fs::write(dir.0.join(PROJECT_FILE), with_name(r" Ba\u001bss ")).unwrap();
+    assert_eq!(Project::load(&dir.0).unwrap().tracks[1].name, "Bass");
+}
+
+#[test]
 fn track_module_errors_name_the_track() {
     let dir = temp_dir("module-error");
     let text = TWO_TRACKS.replace("type = \"drive\"", "type = \"wah\"");

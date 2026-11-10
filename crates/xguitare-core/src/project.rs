@@ -30,6 +30,8 @@ const PAN: RangeInclusive<f32> = -1.0..=1.0;
 /// The largest frame a TOML integer holds, so every saved frame loads again.
 const LAST_FRAME: u64 = i64::MAX as u64;
 const TAKE_EXTENSION: &str = ".wav";
+const EMPTY_TRACK_NAME: &str = "track name must not be empty";
+const DIGITS_TRACK_NAME: &str = "track name must not be only digits";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
@@ -137,6 +139,8 @@ pub enum ProjectError {
     },
     EmptyName,
     Exists(String),
+    /// A Track name that `track_add` would refuse, with its message.
+    TrackName(String),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -322,6 +326,29 @@ pub fn autosave_newer(dir: &Path) -> bool {
     }
 }
 
+/// The name without control characters or surrounding blanks, refused when empty, only digits, or when another of `tracks` (but the one at `except`) has it in any letter case.
+pub(crate) fn checked_name(
+    tracks: &[Track],
+    name: &str,
+    except: Option<usize>,
+) -> Result<String, String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).collect();
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(EMPTY_TRACK_NAME.to_string());
+    }
+    if name.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(DIGITS_TRACK_NAME.to_string());
+    }
+    let taken = tracks.iter().enumerate().any(|(idx, track)| {
+        Some(idx) != except && track.name.to_lowercase() == name.to_lowercase()
+    });
+    if taken {
+        return Err(format!("a track named '{name}' already exists"));
+    }
+    Ok(name.to_string())
+}
+
 fn read(path: &Path) -> Result<Project, ProjectError> {
     let text = fs::read_to_string(path).map_err(io_error(path))?;
     let file: ProjectFile = toml::from_str(&text).map_err(|error| {
@@ -336,11 +363,15 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
     if file.tracks.len() > MAX_TRACKS {
         return Err(ProjectError::TooManyTracks);
     }
-    let tracks: Vec<Track> = file
+    let mut tracks: Vec<Track> = file
         .tracks
         .into_iter()
         .map(track_from_file)
         .collect::<Result<_, _>>()?;
+    for idx in 0..tracks.len() {
+        tracks[idx].name = checked_name(&tracks[..idx], &tracks[idx].name, None)
+            .map_err(ProjectError::TrackName)?;
+    }
     let project = Project {
         name: file.name,
         sample_rate: file.sample_rate,
@@ -553,6 +584,7 @@ impl fmt::Display for ProjectError {
             }
             ProjectError::EmptyName => f.write_str("project name must not be empty"),
             ProjectError::Exists(name) => write!(f, "a project named '{name}' already exists"),
+            ProjectError::TrackName(error) => f.write_str(error),
         }
     }
 }

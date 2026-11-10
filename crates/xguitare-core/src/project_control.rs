@@ -15,7 +15,7 @@ use crate::engine::{Command, transport_from_code};
 use crate::ports::AudioPorts;
 use crate::project::{
     LoopRegion, PROJECT_FILE, Project, Track, autosave_due, autosave_newer, check_project,
-    check_track,
+    check_track, checked_name,
 };
 use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
 use crate::{BuildWarning, Config, Preset, PresetModule};
@@ -23,14 +23,12 @@ use crate::{BuildWarning, Config, Preset, PresetModule};
 pub(crate) const NO_PROJECT: &str = "no project open";
 const PROJECT_IS_OPEN: &str = "a project is open; close it first";
 const NO_TRACKS: &str = "the project has no tracks";
-const EMPTY_TRACK_NAME: &str = "track name must not be empty";
 const NOTHING_ARMED: &str = "no track is armed";
 const NEEDS_POSITION: &str = "locate needs a position";
 const BAD_POSITION: &str = "position must be <bar>.<beat> or <seconds>s";
 const POSITION_TOO_FAR: &str = "position is more than an hour past the end of the project";
 /// The answer to `project_new` and `project_open` while a closed Project still gets its last Takes.
 pub const STILL_CLOSING: &str = "a project is still closing; try again";
-const DIGITS_TRACK_NAME: &str = "track name must not be only digits";
 /// How far past the Project's last Item or loop end `locate` may move the playhead.
 const LOCATE_SECONDS_PAST_END: f64 = 3600.0;
 const DEFAULT_TRACK_NAME: &str = "Track";
@@ -444,7 +442,7 @@ pub(crate) fn project_list(state: &EngineState) -> Result<Value, String> {
 pub(crate) fn track_add(state: &mut EngineState, name: Option<&str>) -> Result<Value, String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
     let name = match name {
-        Some(name) => checked_name(&open.project, name, None)?,
+        Some(name) => checked_name(&open.project.tracks, name, None)?,
         None => free_track_name(&open.project),
     };
     let modules = state
@@ -515,7 +513,7 @@ pub(crate) fn track_set(
     let old = &open.project.tracks[index];
     let mut new = old.clone();
     if let Some(name) = &change.name {
-        new.name = checked_name(&open.project, name, Some(index))?;
+        new.name = checked_name(&open.project.tracks, name, Some(index))?;
     }
     if let Some(input) = &change.input {
         if open.recording && (old.arm || change.arm == Some(true)) {
@@ -1004,25 +1002,6 @@ fn resolve_track(project: &Project, track: &TrackRef) -> Result<usize, String> {
     })
 }
 
-/// The name without control characters or surrounding blanks, refused when empty or when another Track has it in any letter case.
-fn checked_name(project: &Project, name: &str, except: Option<usize>) -> Result<String, String> {
-    let name: String = name.chars().filter(|c| !c.is_control()).collect();
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(EMPTY_TRACK_NAME.to_string());
-    }
-    if name.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(DIGITS_TRACK_NAME.to_string());
-    }
-    let taken = project.tracks.iter().enumerate().any(|(idx, track)| {
-        Some(idx) != except && track.name.to_lowercase() == name.to_lowercase()
-    });
-    if taken {
-        return Err(format!("a track named '{name}' already exists"));
-    }
-    Ok(name.to_string())
-}
-
 #[allow(
     clippy::maybe_infinite_iter,
     reason = "a Project has at most 16 Tracks, so some number is free"
@@ -1030,7 +1009,7 @@ fn checked_name(project: &Project, name: &str, except: Option<usize>) -> Result<
 fn free_track_name(project: &Project) -> String {
     (project.tracks.len() + 1..)
         .map(|n| format!("{DEFAULT_TRACK_NAME} {n}"))
-        .find(|name| checked_name(project, name, None).is_ok())
+        .find(|name| checked_name(&project.tracks, name, None).is_ok())
         .expect("a Project has at most 16 Tracks, so some number is free")
 }
 
