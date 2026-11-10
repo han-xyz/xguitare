@@ -1651,6 +1651,25 @@ fn save_as_never_replaces_a_file() {
 }
 
 #[test]
+fn save_as_at_the_largest_number_does_not_overflow() {
+    let (mut state, _audio, _dir) = state("save-as-max-prefix");
+    let bank = state.config.bank_dir.clone();
+    fs::write(
+        bank.join(format!("{}-x.toml", u64::MAX)),
+        "name = \"X\"\n[[module]]\ntype = \"gain\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&bank).unwrap();
+    let payload = ok(handle(&mut state, save_as("Y")));
+    assert_eq!(
+        payload["path"],
+        bank.join(format!("{}-y.toml", u64::MAX))
+            .display()
+            .to_string()
+    );
+}
+
+#[test]
 fn save_as_numbers_past_99() {
     let (mut state, _audio, _dir) = state("save-as-past-99");
     let bank = state.config.bank_dir.clone();

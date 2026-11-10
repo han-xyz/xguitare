@@ -522,7 +522,7 @@ fn save_as(state: &mut EngineState, name: &str) -> Result<Value, String> {
 /// Writes `text` to the first of `SAVE_AS_TRIES` names `<NN>-<slug>.toml` from `first` on that no file takes, since one may appear after the Bank was read.
 fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<PathBuf, String> {
     let mut file = PathBuf::new();
-    for prefix in first..first + SAVE_AS_TRIES {
+    for prefix in first..=first.saturating_add(SAVE_AS_TRIES - 1) {
         file = dir.join(format!("{prefix:02}-{slug}.toml"));
         match write_new(&file, text) {
             Ok(()) => return Ok(file),
@@ -546,7 +546,7 @@ fn slug(name: &str) -> String {
     slug.trim_end_matches('-').to_string()
 }
 
-/// One more than the highest number before the first `-` among the Bank's file names.
+/// One more than the highest number before the first `-` among the Bank's file names, at most `u64::MAX`.
 fn next_prefix(bank: &Bank) -> u64 {
     bank.entries
         .iter()
@@ -556,11 +556,11 @@ fn next_prefix(bank: &Bank) -> u64 {
             if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
                 return None;
             }
-            prefix.parse().ok()
+            prefix.parse::<u64>().ok()
         })
         .max()
         .unwrap_or(0)
-        + 1
+        .saturating_add(1)
 }
 
 /// Replaces the file `path` names, through a symlink, by a temp file and rename beside it, keeping the old file's mode.
