@@ -31,7 +31,7 @@ pub fn changed_paths(
         .collect()
 }
 
-/// Applies a batch of changed paths in the Bank dir: re-scans the Bank when any `*.toml` changed, and swaps in the active Preset's file when its content differs from the live Preset; a broken or removed active file keeps the running Rack.
+/// Applies a batch of changed paths in the Bank dir: re-scans the Bank when any `*.toml` changed, and swaps in the active Preset's file when its content differs from the live Preset and from what `save` last wrote there; a broken or removed active file keeps the running Rack.
 pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
     let changed: Vec<&PathBuf> = changed.iter().filter(|path| is_toml(path)).collect();
     if changed.is_empty() {
@@ -74,10 +74,16 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
         }
         BankEntry::Valid { preset, .. } => preset.clone(),
     };
-    if state
-        .active
+    let own_write = state
+        .saved
+        .remove(state.bank.entries[program].file())
         .as_ref()
-        .is_some_and(|(_, live)| *live == preset)
+        == Some(&preset);
+    if own_write
+        || state
+            .active
+            .as_ref()
+            .is_some_and(|(_, live)| *live == preset)
     {
         return vec![Action::Nothing];
     }

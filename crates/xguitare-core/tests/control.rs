@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::fs;
+use std::io;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,7 +11,7 @@ use serde_json::{Value, json};
 use xguitare_core::control::{
     EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, follow_sample_rate,
     handle, handle_line, needs_reprepare, open_connection, passthrough_rack, prepared_max_frames,
-    reprepare,
+    reprepare, write_new,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
@@ -77,6 +79,7 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
         revision: 1,
         modified: false,
         peaks: PeakMeters::default(),
+        saved: HashMap::new(),
     };
     (state, audio, dir)
 }
@@ -1600,6 +1603,49 @@ fn save_as_rejects_empty_and_duplicate() {
     );
     assert_eq!(bank_files(&state.config.bank_dir), before);
     assert!(!is_modified(&mut state));
+}
+
+#[test]
+fn save_as_strips_control_characters() {
+    let (mut state, _audio, _dir) = state("save-as-control");
+    assert_eq!(
+        error(handle(&mut state, save_as("\u{7}"))),
+        "preset name must not be empty"
+    );
+    assert_eq!(
+        error(handle(&mut state, save_as(" \u{1b}\u{7f}\t "))),
+        "preset name must not be empty"
+    );
+    let payload = ok(handle(&mut state, save_as("\u{1b}[31m Lead\u{7}\n\u{7f}")));
+    let saved =
+        Preset::parse(&fs::read_to_string(payload["path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(saved.name, "[31m Lead");
+    assert_eq!(
+        ok(handle(&mut state, Request::Status))["preset"],
+        "[31m Lead"
+    );
+}
+
+#[test]
+fn write_new_falls_back_when_hard_links_fail() {
+    let dir = bank_dir("write-new-fallback");
+    for (n, errno) in [1, 18, 95].into_iter().enumerate() {
+        let file = dir.0.join(format!("0{n}-new.toml"));
+        let refuse = |_: &Path, _: &Path| Err(io::Error::from_raw_os_error(errno));
+        write_new(&file, "name = \"New\"\n", refuse).unwrap();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "name = \"New\"\n",
+            "{errno}"
+        );
+    }
+    let taken = dir.0.join("01-clean.toml");
+    let before = fs::read_to_string(&taken).unwrap();
+    let refuse = |_: &Path, _: &Path| Err(io::Error::from_raw_os_error(95));
+    let err = write_new(&taken, "replaced", refuse).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(fs::read_to_string(&taken).unwrap(), before);
+    assert!(tmp_files(&dir.0).is_empty());
 }
 
 #[test]

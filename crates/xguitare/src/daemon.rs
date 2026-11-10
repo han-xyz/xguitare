@@ -95,6 +95,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         revision: 1,
         modified: false,
         peaks: PeakMeters::default(),
+        saved: HashMap::new(),
     }));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);
     let control = socket

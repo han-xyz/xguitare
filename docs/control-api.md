@@ -203,7 +203,7 @@ Response:
 | --- | --- |
 | `path` | The file written. |
 
-With `as`, writes the active Preset, with its current Parameter values and the given name (leading and trailing whitespace removed), to a new file in the Bank directory instead, and makes that the active Preset; the Bank is read again. An existing file is never replaced. The file is `<NN>-<slug>.toml`: `NN` is one more than the highest number before the first `-` in a Bank file name, at least two digits; `slug` is the name lowercased with ASCII letters and digits kept and every other run of characters replaced by one `-`, without a `-` at either end. The name reaches the file name only through the slug, so the file is always directly in the Bank directory.
+With `as`, writes the active Preset, with its current Parameter values and the given name (control characters U+0000 to U+001F and U+007F removed, then leading and trailing whitespace), to a new file in the Bank directory instead, and makes that the active Preset; the Bank is read again. An existing file is never replaced: the new file is a hard link to a temp file written beside it, or, on a filesystem without hard links, is created and written directly. The file is `<NN>-<slug>.toml`: `NN` is one more than the highest number before the first `-` in a Bank file name, at least two digits; `slug` is the name lowercased with ASCII letters and digits kept and every other run of characters replaced by one `-`, without a `-` at either end. The name reaches the file name only through the slug, so the file is always directly in the Bank directory.
 
 Request:
 

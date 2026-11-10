@@ -37,6 +37,8 @@ const AFTER_OR_AT: &str = "give either after or at";
 const NO_CABINET: &str = "no cabinet module";
 const EMPTY_PRESET_NAME: &str = "preset name must not be empty";
 const SAVE_AS_TRIES: u64 = 8;
+/// Linux `EPERM`, which `hard_link` returns on a filesystem without hard links; `EACCES` shares its `ErrorKind`.
+const EPERM: i32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -104,6 +106,8 @@ pub struct EngineState {
     /// Whether the live Rack has changed since the active Preset was loaded, reloaded or saved.
     pub modified: bool,
     pub peaks: PeakMeters,
+    /// The Preset `save` last wrote to each file, until the Bank watcher sees that file change.
+    pub saved: HashMap<PathBuf, Preset>,
 }
 
 /// One Control API connection, from `open_connection` to `close_connection`; `status` reports and clears only its own peaks.
@@ -480,6 +484,7 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
     write_through(file, &text).map_err(|err| format!("cannot save {}: {err}", file.display()))?;
     let payload = json!({"path": file.display().to_string()});
     let saved = Preset::parse(&text).expect("a saved Preset parses back");
+    state.saved.insert(file.clone(), saved.clone());
     if let Some((_, active)) = state.active.as_mut() {
         *active = saved;
     }
@@ -491,6 +496,7 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
 /// Writes the live Preset, renamed `name`, to a new `<NN>-<slug>.toml` in the Bank dir and makes it the active Preset; the name reaches the path only through the slug.
 fn save_as(state: &mut EngineState, name: &str) -> Result<Value, String> {
     let (_, live) = state.active.as_ref().ok_or(NO_PRESET)?;
+    let name: String = name.chars().filter(|c| !c.is_ascii_control()).collect();
     let name = name.trim();
     let slug = slug(name);
     if slug.is_empty() {
@@ -513,6 +519,7 @@ fn save_as(state: &mut EngineState, name: &str) -> Result<Value, String> {
     let file = write_next_free(&dir, next_prefix(&bank), &slug, &text)?;
     state.bank = Bank::load_dir(&dir).map_err(cannot_read)?;
     let saved = Preset::parse(&text).expect("a saved Preset parses back");
+    state.saved.insert(file.clone(), saved.clone());
     state.active = Some((file.clone(), saved));
     state.revision += 1;
     state.modified = false;
@@ -524,7 +531,7 @@ fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<Pat
     let mut file = PathBuf::new();
     for prefix in first..=first.saturating_add(SAVE_AS_TRIES - 1) {
         file = dir.join(format!("{prefix:02}-{slug}.toml"));
-        match write_new(&file, text) {
+        match write_new(&file, text, |tmp, path| fs::hard_link(tmp, path)) {
             Ok(()) => return Ok(file),
             Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
             Err(err) => return Err(format!("cannot save {}: {err}", file.display())),
@@ -595,14 +602,37 @@ fn write_through(path: &Path, text: &str) -> io::Result<()> {
     written
 }
 
-/// Creates the file `path` names by hard-linking a temp file beside it, so a file or symlink already there fails with `AlreadyExists` and is left as it is.
-fn write_new(path: &Path, text: &str) -> io::Result<()> {
+/// Creates the file `path` names with `text` by `link`ing a temp file beside it to `path` (`save` with `as` passes `fs::hard_link`), so a file or symlink already there fails with `AlreadyExists` and is left as it is. When the filesystem has no hard links (EPERM, EOPNOTSUPP, EXDEV), `path` is created and written directly, still never replacing a file.
+pub fn write_new(
+    path: &Path,
+    text: &str,
+    link: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     let tmp = temp_path(path);
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     let written = file
         .write_all(text.as_bytes())
-        .and_then(|()| fs::hard_link(&tmp, path));
+        .and_then(|()| link(&tmp, path));
     let _ = fs::remove_file(&tmp);
+    match written {
+        Err(err) if has_no_hard_links(&err) => create_and_write(path, text),
+        written => written,
+    }
+}
+
+fn has_no_hard_links(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        ErrorKind::Unsupported | ErrorKind::CrossesDevices
+    ) || err.raw_os_error() == Some(EPERM)
+}
+
+fn create_and_write(path: &Path, text: &str) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    let written = file.write_all(text.as_bytes());
+    if written.is_err() {
+        let _ = fs::remove_file(path);
+    }
     written
 }
 

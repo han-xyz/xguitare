@@ -45,6 +45,7 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
         revision: 1,
         modified: false,
         peaks: PeakMeters::default(),
+        saved: HashMap::new(),
     };
     (state, audio)
 }
@@ -243,6 +244,63 @@ fn reindex_and_reload_bump_revision() {
         [Action::Reindex, Action::Reload { program: 0 }]
     );
     assert_eq!(state.revision, 4);
+}
+
+fn module_ids(state: &EngineState) -> Vec<String> {
+    let (_, preset) = state.active.as_ref().unwrap();
+    preset
+        .modules
+        .iter()
+        .map(|module| module.id.clone())
+        .collect()
+}
+
+#[test]
+fn own_save_keeps_later_live_change() {
+    for (test, name) in [
+        ("own-save", None),
+        ("own-save-as", Some("Saved".to_string())),
+    ] {
+        let (mut state, _audio) = state(test);
+        let add = Request::RackAdd {
+            r#type: "gate".to_string(),
+            after: None,
+            at: Some(0),
+        };
+        assert!(matches!(handle(&mut state, add).0, Response::Ok(_)));
+        assert!(matches!(
+            handle(&mut state, Request::Save { name }).0,
+            Response::Ok(_)
+        ));
+        let saved = state.active.as_ref().unwrap().0.clone();
+        let rack_move = Request::RackMove {
+            id: "gate".to_string(),
+            to: 1,
+        };
+        assert!(matches!(handle(&mut state, rack_move).0, Response::Ok(_)));
+        assert_eq!(
+            apply(&mut state, &[saved]),
+            [Action::Reindex, Action::Nothing]
+        );
+        assert_eq!(module_ids(&state), ["gain", "gate"], "{test}");
+        assert!(state.modified, "{test}");
+    }
+}
+
+#[test]
+fn outside_edit_after_save_reloads() {
+    let (mut state, _audio) = state("outside-after-save");
+    assert!(matches!(
+        handle(&mut state, Request::Save { name: None }).0,
+        Response::Ok(_)
+    ));
+    let file = active_file(&state);
+    fs::write(&file, CLEAN.replace("level = -3", "level = 2")).unwrap();
+    assert_eq!(
+        apply(&mut state, &[file]),
+        [Action::Reindex, Action::Reload { program: 0 }]
+    );
+    assert_eq!(active_level(&state), 2.0);
 }
 
 fn empty_config(dir: &Path) -> Config {

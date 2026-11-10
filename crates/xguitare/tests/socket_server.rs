@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -60,6 +61,7 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
         revision: 1,
         modified: false,
         peaks: PeakMeters::default(),
+        saved: HashMap::new(),
     };
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket

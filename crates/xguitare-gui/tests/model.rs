@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -60,6 +60,7 @@ fn registry_modules(test: &str) -> serde_json::Value {
         revision: 0,
         modified: false,
         peaks: PeakMeters::default(),
+        saved: HashMap::new(),
     };
     match handle(&mut state, Request::Modules).0 {
         Response::Ok(payload) => payload,
