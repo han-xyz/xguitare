@@ -79,6 +79,27 @@ pub(crate) fn read_state(path: &Path) -> (SavedState, Option<String>) {
 /// Replaces `path` by a new file of mode 0600 holding `state`, written beside it and renamed into place.
 pub(crate) fn write_state(path: &Path, state: &SavedState) -> io::Result<()> {
     let text = toml::to_string(state).map_err(io::Error::other)?;
+    write_private(path, text.as_bytes())
+}
+
+/// The bytes of `path`, or `None` when there is no such file, for `restore_state`.
+pub(crate) fn read_state_bytes(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// Puts back what `read_state_bytes` returned: the old bytes, or no file.
+pub(crate) fn restore_state(path: &Path, bytes: Option<&[u8]>) -> io::Result<()> {
+    match bytes {
+        Some(bytes) => write_private(path, bytes),
+        None => fs::remove_file(path),
+    }
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = temp_path(path);
     let mut file = OpenOptions::new()
         .write(true)
@@ -86,7 +107,8 @@ pub(crate) fn write_state(path: &Path, state: &SavedState) -> io::Result<()> {
         .mode(STATE_FILE_MODE)
         .open(&tmp)?;
     let written = file
-        .write_all(text.as_bytes())
+        .write_all(bytes)
+        .and_then(|()| file.sync_all())
         .and_then(|()| fs::rename(&tmp, path));
     if written.is_err() {
         let _ = fs::remove_file(&tmp);

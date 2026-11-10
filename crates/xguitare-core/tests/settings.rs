@@ -31,6 +31,7 @@ impl Drop for TempDir {
 #[derive(Default)]
 struct FakePorts {
     log: RefCell<Vec<String>>,
+    refused: Option<&'static str>,
 }
 
 fn port(name: &str, is_physical: bool) -> AvailablePort {
@@ -64,6 +65,9 @@ impl AudioPorts for FakePorts {
     }
 
     fn connect(&self, from: &str, to: &str) -> Result<(), String> {
+        if self.refused == Some(to) {
+            return Err("refused".to_string());
+        }
         self.log
             .borrow_mut()
             .push(format!("connect {from} -> {to}"));
@@ -290,7 +294,7 @@ fn set_settings_bank_kind_seeds_and_loads_program_0() {
     let status = ok(handle(&mut state, Request::Status));
     assert_eq!(status["preset"], "Blues");
     assert_eq!(status["program"], 0);
-    assert_eq!(status["revision"], 4);
+    assert_eq!(status["revision"], 3);
     assert_eq!(state.bank.dir, bass_dir);
     assert_eq!(state.bank.entries.len(), 5);
     let config = reloaded(&dir);
@@ -382,4 +386,111 @@ fn set_settings_ir_dir_must_be_a_directory() {
     let config = reloaded(&dir);
     assert_eq!(config.ir_dir, irs);
     assert_eq!(config.ports.input, "card:capture_FL");
+}
+
+fn fill_queue(state: &mut EngineState) {
+    let first = ok(handle(state, Request::Get { param: None }))["params"][0].clone();
+    let param = format!(
+        "{}.{}",
+        first["module"].as_str().unwrap(),
+        first["param"].as_str().unwrap()
+    );
+    while let Response::Ok(_) = handle(
+        state,
+        Request::Set {
+            param: param.clone(),
+            value: 0.0,
+        },
+    )
+    .0
+    {}
+}
+
+#[test]
+fn set_settings_engine_busy_changes_nothing() {
+    let (mut state, _audio, dir) = state("bank-kind-busy", "");
+    let state_file = dir.0.join("state.toml");
+    fs::write(&state_file, "ir_dir = \"/srv/xg/irs\"\n").unwrap();
+    state.config = reloaded(&dir);
+    let before_settings = ok(handle(&mut state, Request::Settings));
+    fill_queue(&mut state);
+    let before_status = ok(handle(&mut state, Request::Status));
+    assert_eq!(
+        error(handle(&mut state, set_settings(Some(BankKind::Bass), None))),
+        "engine busy"
+    );
+    assert_eq!(ok(handle(&mut state, Request::Settings)), before_settings);
+    assert_eq!(ok(handle(&mut state, Request::Status)), before_status);
+    assert_eq!(state.bank.dir, dir.0.join("bank"));
+    assert_eq!(
+        fs::read_to_string(&state_file).unwrap(),
+        "ir_dir = \"/srv/xg/irs\"\n"
+    );
+}
+
+#[test]
+fn set_settings_engine_busy_without_state_file_leaves_none() {
+    let (mut state, _audio, dir) = state("bank-kind-busy-new", "");
+    fill_queue(&mut state);
+    assert_eq!(
+        error(handle(&mut state, set_settings(Some(BankKind::Bass), None))),
+        "engine busy"
+    );
+    assert!(!dir.0.join("state.toml").exists());
+}
+
+#[test]
+fn set_ports_reports_failed_link_after_the_others() {
+    let (mut state, _audio, _dir) = state("set-ports-refused", "");
+    let ports = FakePorts {
+        refused: Some("card:playback_FR"),
+        ..FakePorts::default()
+    };
+    assert_eq!(
+        error(handle_with_ports(
+            &mut state,
+            &ports,
+            set_ports("card:capture_FL", "card:playback_FL", "card:playback_FR"),
+        )),
+        "cannot connect xguitare:out_r -> card:playback_FR: refused"
+    );
+    assert_eq!(
+        ok(handle_with_ports(&mut state, &ports, Request::Ports))["connected"],
+        json!({"input": "card:capture_FL", "output_left": "card:playback_FL", "output_right": null})
+    );
+}
+
+#[test]
+fn unwritable_state_file_changes_nothing() {
+    let (mut state, _audio, dir) = state("state-unwritable", "");
+    state.config.state_file = dir.0.join("config.toml/state.toml");
+    let ports = FakePorts::default();
+    let message = error(handle_with_ports(
+        &mut state,
+        &ports,
+        set_ports("card:capture_FL", "card:playback_FL", "card:playback_FR"),
+    ));
+    let prefix = format!("cannot save {}: ", state.config.state_file.display());
+    assert!(message.starts_with(&prefix), "{message}");
+    assert!(ports.log.borrow().is_empty());
+    assert_eq!(state.connections[0], link("old:capture_1", OWN_INPUT));
+    assert_eq!(state.config.ports.input, "auto");
+    let message = error(handle(&mut state, set_settings(None, Some(&dir.0))));
+    assert!(message.starts_with(&prefix), "{message}");
+    assert_eq!(state.config.ir_dir, dir.0.join("bank"));
+    assert_eq!(revision(&mut state), 1);
+}
+
+#[test]
+fn set_settings_refuses_relative_ir_dir_and_stores_no_same_kind() {
+    let (mut state, _audio, dir) = state("ir-dir-relative", "");
+    assert_eq!(
+        error(handle(&mut state, set_settings(None, Some(Path::new("."))))),
+        "ir_dir '.' is not a directory"
+    );
+    ok(handle(
+        &mut state,
+        set_settings(Some(BankKind::Guitar), None),
+    ));
+    assert_eq!(reloaded(&dir).state.bank_kind, None);
 }

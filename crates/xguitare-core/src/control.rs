@@ -21,7 +21,7 @@ use crate::engine::{
 use crate::firstrun::{BASS_IR, DEFAULT_IR, ensure_bank};
 use crate::ports::{AudioPorts, AvailablePort, connect_plan};
 use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
-use crate::state::{SavedState, write_state};
+use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
 use crate::tuner::Tuner;
 use crate::{
     Bank, BankEntry, BankKind, BuildWarning, Config, ModuleRegistry, ParamAddress, Ports, Preset,
@@ -41,7 +41,6 @@ const EMPTY_PRESET_NAME: &str = "preset name must not be empty";
 const SAVE_AS_TRIES: u64 = 8;
 const NO_AUDIO_PORTS: &str = "audio ports are not available";
 const BANK_DIR_IN_CONFIG: &str = "bank_dir is set in config.toml; edit it there";
-const FIRST_PROGRAM: &str = "0";
 /// Linux `EPERM`, which `hard_link` returns on a filesystem without hard links; `EACCES` shares its `ErrorKind`.
 const EPERM: i32 = 1;
 
@@ -951,45 +950,54 @@ fn settings(state: &EngineState) -> Value {
     })
 }
 
-/// Stores `bank_kind` and `ir_dir` in `state.toml` and applies them: a changed `bank_kind` records the Bank directory in use under the current kind in `[banks]`, switches to the new kind's directory (seeded when missing) and loads Program 0 (the passthrough Rack when that fails); on an error nothing changes.
+/// Stores `bank_kind` and `ir_dir` in `state.toml` and applies them: a changed `bank_kind` records the Bank directory in use under the current kind in `[banks]`, switches to the new kind's directory (seeded when missing) and plays Program 0 (the passthrough Rack when it does not build). On an error the state and `state.toml` are unchanged; only a seeded Bank directory may stay.
 fn set_settings(
     state: &mut EngineState,
     bank_kind: Option<BankKind>,
     ir_dir: Option<PathBuf>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    if let Some(dir) = ir_dir.as_ref().filter(|dir| !dir.is_dir()) {
+    if let Some(dir) = ir_dir
+        .as_ref()
+        .filter(|dir| !dir.is_absolute() || !dir.is_dir())
+    {
         return Err(format!("ir_dir '{}' is not a directory", dir.display()));
     }
     let switch = bank_kind.filter(|kind| *kind != state.config.bank_kind);
-    let switched = match switch {
-        Some(_) if state.config.bank_dir_in_config => return Err(BANK_DIR_IN_CONFIG.to_string()),
-        Some(kind) => Some((kind, switched_bank(state, kind)?)),
-        None => None,
+    if switch.is_some() && state.config.bank_dir_in_config {
+        return Err(BANK_DIR_IN_CONFIG.to_string());
+    }
+    let mut config = state.config.clone();
+    if let Some(dir) = ir_dir {
+        config.state.ir_dir = Some(dir.clone());
+        config.ir_dir = dir;
+    }
+    let Some(kind) = switch else {
+        save_state(&config, &config.state)?;
+        state.config = config;
+        state.revision += 1;
+        return Ok(settings(state));
     };
-    let mut saved = state.config.state.clone();
-    if let Some((kind, bank)) = &switched {
-        saved
-            .banks
-            .insert(state.config.bank_kind, state.config.bank_dir.clone());
-        saved.banks.insert(*kind, bank.dir.clone());
+    let bank = switched_bank(state, kind)?;
+    config
+        .state
+        .banks
+        .insert(config.bank_kind, config.bank_dir.clone());
+    config.state.banks.insert(kind, bank.dir.clone());
+    config.state.bank_kind = Some(kind);
+    if !config.ir_dir_in_config && config.state.ir_dir.is_none() {
+        config.ir_dir = bank.dir.clone();
     }
-    saved.bank_kind = bank_kind.or(saved.bank_kind);
-    saved.ir_dir = ir_dir.or(saved.ir_dir);
-    save_state(&state.config, &saved)?;
-    if let Some(dir) = &saved.ir_dir {
-        state.config.ir_dir = dir.clone();
-    }
-    state.config.state = saved;
-    if let Some((kind, bank)) = switched {
-        if !state.config.ir_dir_in_config && state.config.state.ir_dir.is_none() {
-            state.config.ir_dir = bank.dir.clone();
-        }
-        state.config.bank_kind = kind;
-        state.config.bank_dir = bank.dir.clone();
-        state.bank = bank;
-        load_first_program(state, warnings)?;
-    }
+    config.bank_kind = kind;
+    config.bank_dir = bank.dir.clone();
+    let (rack, active, build_warnings) = first_program(state, &config, &bank);
+    swap_saving_state(state, &config, rack)?;
+    *warnings = build_warnings;
+    state.config = config;
+    state.bank = bank;
+    state.active = active;
+    state.modified = false;
+    state.saved.clear();
     state.revision += 1;
     Ok(settings(state))
 }
@@ -1001,21 +1009,38 @@ fn switched_bank(state: &EngineState, kind: BankKind) -> Result<Bank, String> {
     Bank::load_dir(&dir).map_err(|err| format!("cannot read bank {}: {err}", dir.display()))
 }
 
-fn load_first_program(
-    state: &mut EngineState,
-    warnings: &mut Vec<BuildWarning>,
-) -> Result<(), String> {
-    state.saved.clear();
-    if load(state, FIRST_PROGRAM, warnings).is_ok() {
-        return Ok(());
+/// Program 0's Rack built with `config`, and the Preset it plays; the passthrough Rack and no Preset when Program 0 is missing, invalid or does not build.
+fn first_program(
+    state: &EngineState,
+    config: &Config,
+    bank: &Bank,
+) -> (Rack, Option<(PathBuf, Preset)>, Vec<BuildWarning>) {
+    if let Some(BankEntry::Valid { file, preset }) = bank.entries.first()
+        && let Ok((rack, warnings)) =
+            build_rack(config, state.sample_rate, state.max_frames, preset)
+    {
+        return (rack, Some((file.clone(), preset.clone())), warnings);
     }
-    swap_rack(
-        &mut state.queues,
-        passthrough_rack(state.sample_rate, state.max_frames),
-    )?;
-    state.active = None;
-    state.modified = false;
-    Ok(())
+    let rack = passthrough_rack(state.sample_rate, state.max_frames);
+    (rack, None, Vec::new())
+}
+
+/// Saves `config.state` to `state.toml`, then swaps `rack` in; when the swap is refused, the previous `state.toml` (or its absence) is put back.
+fn swap_saving_state(state: &mut EngineState, config: &Config, rack: Rack) -> Result<(), String> {
+    let cannot_save =
+        |err: io::Error| format!("cannot save {}: {err}", config.state_file.display());
+    let previous = read_state_bytes(&config.state_file).map_err(cannot_save)?;
+    save_state(config, &config.state)?;
+    let Err(busy) = swap_rack(&mut state.queues, rack) else {
+        return Ok(());
+    };
+    restore_state(&config.state_file, previous.as_deref()).map_err(|err| {
+        format!(
+            "{busy}; cannot restore {}: {err}",
+            config.state_file.display()
+        )
+    })?;
+    Err(busy)
 }
 
 fn get(state: &EngineState, key: Option<&str>) -> Result<Value, String> {

@@ -527,8 +527,8 @@ Response:
 
 Stores and applies `bank_kind`, `ir_dir`, or both; a key left out keeps its value. Both are stored in `state.toml`; `config.toml` is not changed. The Revision increments.
 
-- `bank_kind` different from the current one switches the Bank. The Bank directory in use is stored as the current kind's in `state.toml` `[banks]`; the new kind uses the directory `[banks]` holds for it, else `<config dir>/bank-<kind>` (`bank-guitar` or `bank-bass`), where `<config dir>` holds the config file, and that is stored too. A missing directory is first created with that kind's starter Presets and cabinet IR. Program 0 of the new Bank then loads; if it does not, the passthrough Rack runs and no Preset is active. When `ir_dir` is set neither in `config.toml` nor through `set_settings`, the IR directory follows the Bank directory. The same `bank_kind` as now changes nothing but is stored.
-- `ir_dir` must be an existing directory; `ir_list` lists it from then on, and Cabinet IR names are looked up there first. The Rack playing now is not rebuilt.
+- `bank_kind` different from the current one switches the Bank. The Bank directory in use is stored as the current kind's in `state.toml` `[banks]`; the new kind uses the directory `[banks]` holds for it, else `<config dir>/bank-<kind>` (`bank-guitar` or `bank-bass`), where `<config dir>` holds the config file, and that is stored too. A missing directory is first created with that kind's starter Presets and cabinet IR. Program 0 of the new Bank then plays; when it is missing, invalid or does not build, the passthrough Rack runs and no Preset is active. When `ir_dir` is set neither in `config.toml` nor through `set_settings`, the IR directory follows the Bank directory. The same `bank_kind` as now changes nothing and is not stored.
+- `ir_dir` must be an absolute path to an existing directory; `ir_list` lists it from then on, and Cabinet IR names are looked up there first. The Rack playing now is not rebuilt.
 
 Request:
 
@@ -542,12 +542,13 @@ Response: as `settings`, after the change.
 {"ok":true,"bank_kind":"bass","bank_dir":"/home/you/.config/xguitare/bank-bass","ir_dir":"/home/you/.config/xguitare/bank-bass"}
 ```
 
-Errors (on each, nothing changes):
+Errors (on each, the Daemon's state and `state.toml` are unchanged):
 
 | `error` | When |
 | --- | --- |
 | `bank_dir is set in config.toml; edit it there` | `bank_kind` would switch the Bank, but the config file names `bank_dir`. |
-| `ir_dir '<path>' is not a directory` | `ir_dir` does not exist or is not a directory. |
-| `cannot create bank <dir>: <reason>`, `cannot read bank <dir>: <reason>` | The new Bank directory cannot be seeded or read. |
+| `ir_dir '<path>' is not a directory` | `ir_dir` is relative, does not exist or is not a directory. |
+| `cannot create bank <dir>: <reason>`, `cannot read bank <dir>: <reason>` | The new Bank directory cannot be seeded or read; the Bank is not switched, but a partly seeded directory may stay. |
 | `cannot save <path>: <reason>` | `state.toml` cannot be written. |
+| `engine busy` | The new Bank's Rack could not be queued; `state.toml` is put back as it was. |
 | `invalid request: unknown variant ...` | `bank_kind` is neither `guitar` nor `bass`. |

@@ -61,7 +61,7 @@ pub struct Ports {
     pub output_right: String,
 }
 
-/// Which starter Bank the first run seeds into a missing `bank_dir`, and without a `bank_dir` in the config file which directory is the Bank: `<config dir>/bank` or `<config dir>/bank-bass`.
+/// Which starter Bank the first run seeds into a missing `bank_dir`; without a `bank_dir` in the config file, `[banks]` in `state.toml` can name each kind's directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BankKind {
