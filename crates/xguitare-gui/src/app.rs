@@ -6,7 +6,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
+use egui::{
+    CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, ScrollArea, Theme, Ui,
+};
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_core::control::{BusRef, TrackRef};
@@ -37,6 +39,8 @@ const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const RACK_HEADING_SIZE: f32 = 18.0;
 const MIXER_GAP: f32 = 8.0;
+/// The height kept for the Rack under the mixer panel; the columns above scroll up and down in the rest.
+const RACK_MIN_HEIGHT: f32 = 240.0;
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
@@ -569,7 +573,10 @@ fn central_view(
     };
     let mut commands = Vec::new();
     if mixer.open {
-        commands.extend(mixer_panel(ui, snapshot, mixer));
+        ScrollArea::vertical()
+            .id_salt("mixer_columns")
+            .max_height((ui.available_height() - RACK_MIN_HEIGHT).max(0.0))
+            .show(ui, |ui| commands.extend(mixer_panel(ui, snapshot, mixer)));
         ui.add_space(MIXER_GAP);
     }
     let shown = if mixer.open {

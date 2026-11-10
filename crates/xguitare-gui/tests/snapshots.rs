@@ -4,7 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Role, Vec2, pos2};
+use egui::{
+    Event, Key, Modifiers, MouseWheelSource, MouseWheelUnit, PointerButton, Pos2, Role, TouchPhase,
+    Vec2, pos2,
+};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use egui_system_font_provider::SystemFontProvider;
@@ -21,6 +24,7 @@ use xguitare_gui::project_model::AutosaveOffer;
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
+/// Tall enough for the mixer columns to show whole above the Rack.
 const TALL_WINDOW: Vec2 = Vec2::new(1440.0, 1200.0);
 const MIN_WINDOW: Vec2 = Vec2::new(1024.0, 640.0);
 const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
@@ -270,6 +274,27 @@ fn mixer_snapshot() -> Snapshot {
         param("reverb", "damping", 40.0, (0.0, 100.0, 50.0, "%", false)),
         param("reverb", "mix", 100.0, (0.0, 100.0, 30.0, "%", false)),
     ]}));
+    snapshot
+}
+
+/// [`mixer_snapshot`] with eight Buses, Guitar sending to each.
+fn eight_buses_snapshot() -> Snapshot {
+    let mut snapshot = mixer_snapshot();
+    let status = snapshot.status.as_mut().unwrap();
+    let names = [
+        "Verb", "Delay", "Room", "Plate", "Echo", "Chorus", "Crush", "Sub",
+    ];
+    status["buses"] = names
+        .iter()
+        .enumerate()
+        .map(|(id, name)| {
+            json!({"id": id, "name": name, "volume_db": 0.0, "pan": 0.0, "mute": false,
+                "solo": false, "peak_db": [-120.0, -120.0], "clip": false})
+        })
+        .collect();
+    status["tracks"][0]["sends"] = (0..names.len())
+        .map(|bus| json!({"bus": bus, "level_db": -6.0, "pre": false}))
+        .collect();
     snapshot
 }
 
@@ -1166,10 +1191,26 @@ fn mixer_snapshots() {
     click_button(&mut mixer, "Mixer");
     write_png(&mut mixer, "mixer");
 
-    let (mut bus_rack, _, _dir) = harness_with(TALL_WINDOW, mixer_snapshot());
-    click_button(&mut bus_rack, "Mixer");
+    let (mut bus_rack, _, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
+    bus_rack.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    bus_rack.run_steps(2);
     click_button(&mut bus_rack, "Rack of Verb");
     write_png(&mut bus_rack, "mixer-bus-rack");
+
+    let (mut eight_buses, _, _dir) = harness_with(DEFAULT_WINDOW, eight_buses_snapshot());
+    eight_buses.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    eight_buses.run_steps(2);
+    write_png(&mut eight_buses, "mixer-eight-buses");
+    eight_buses.event(Event::PointerMoved(pos2(700.0, 420.0)));
+    eight_buses.event(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, -1000.0),
+        phase: TouchPhase::Move,
+        source: MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    });
+    eight_buses.run_steps(2);
+    write_png(&mut eight_buses, "mixer-eight-buses-scrolled");
 
     let file = "/home/you/Music/xguitare/demo-song/renders/demo-song.wav";
     let running = json!({"name": "demo-song", "range": "project", "progress": 0.42,
@@ -1188,7 +1229,7 @@ fn mixer_snapshots() {
 
 #[test]
 fn mixer_columns_send_their_commands() {
-    let (mut harness, sent, _dir) = harness_with(WINDOW, mixer_snapshot());
+    let (mut harness, sent, _dir) = harness_with(TALL_WINDOW, mixer_snapshot());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
     for label in [
