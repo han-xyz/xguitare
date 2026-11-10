@@ -17,6 +17,10 @@ use crate::model::{
 };
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
+
+const CABINET: &str = "cabinet";
+/// The Daemon's `rack_add` error for a cabinet on a Bus or Master Rack.
+const CABINET_REFUSED: &str = "a cabinet is not allowed on a Bus or Master";
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
 
 const NO_PRESET: &str = "no preset";
@@ -78,6 +82,8 @@ pub struct SidebarView<'a, 'b> {
     pub query: &'a mut String,
     pub save_as_name: &'a mut Option<String>,
     pub add: &'a mut AddDraft,
+    /// Whether the Rack shown is a Bus or Master Rack, which takes no cabinet.
+    pub stereo_rack: bool,
     pub tuner: &'a mut Tuner<'b>,
     pub ports: &'a mut Option<PortSelection>,
     pub settings: &'a mut Option<SettingsDraft>,
@@ -198,7 +204,9 @@ fn section_body(
                 .into_iter()
                 .collect()
         }
-        Section::Rack => add_module(ui, snapshot, view.add).into_iter().collect(),
+        Section::Rack => add_module(ui, snapshot, view.add, view.stereo_rack)
+            .into_iter()
+            .collect(),
         Section::Tuner => tuner_and_mute(ui, snapshot, view.tuner),
         Section::Audio => audio_ports(ui, snapshot, view.ports),
         Section::Settings => settings(ui, snapshot, view.settings).into_iter().collect(),
@@ -351,7 +359,13 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
 }
 
 /// One tile per Module type: a click adds the type at the Place menu's place, a drag carries it into the Rack.
-fn add_module(ui: &mut Ui, snapshot: &Snapshot, add: &mut AddDraft) -> Option<Command> {
+/// On a Bus or Master Rack (`stereo_rack`) the cabinet tile is greyed out, with the Daemon's refusal on hover.
+fn add_module(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    add: &mut AddDraft,
+    stereo_rack: bool,
+) -> Option<Command> {
     let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     let rack = rack_channels(&modules, &snapshot.module_types);
     let width = ui.available_width();
@@ -365,7 +379,13 @@ fn add_module(ui: &mut Ui, snapshot: &Snapshot, add: &mut AddDraft) -> Option<Co
     for row in snapshot.module_types.chunks(TILE_COLUMNS) {
         ui.horizontal(|ui| {
             for module_type in row {
-                if module_tile(ui, module_type, tile_size).clicked() {
+                if stereo_rack && module_type.type_name == CABINET {
+                    ui.add_enabled_ui(false, |ui| {
+                        module_tile(ui, module_type, tile_size);
+                    })
+                    .response
+                    .on_disabled_hover_text(CABINET_REFUSED);
+                } else if module_tile(ui, module_type, tile_size).clicked() {
                     clicked = Some(module_type);
                 }
             }

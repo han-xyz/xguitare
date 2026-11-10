@@ -12,8 +12,10 @@ use serde_json::{Value, json};
 use xguitare_core::control::TrackRef;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
+use xguitare_core::render::{RenderBits, RenderRange};
 use xguitare_core::{BankKind, Config};
 use xguitare_gui::app::App;
+use xguitare_gui::mixer_model::MixerTarget;
 use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
 use xguitare_gui::project_model::AutosaveOffer;
 
@@ -220,6 +222,64 @@ fn project_snapshot(transport: &str) -> Snapshot {
         {"id": 2, "name": "Keys", "items": []},
     ]}));
     snapshot
+}
+
+/// The Project with two Buses: Guitar clipped and sending pre-fader to Verb, Bass muted and sending to Delay, Keys not to Master and sending to Verb, Verb soloed.
+fn mixer_snapshot() -> Snapshot {
+    let mut snapshot = project_snapshot("playing");
+    let status = snapshot.status.as_mut().unwrap();
+    let mixer = [
+        (
+            json!([{"bus": 0, "level_db": -6.0, "pre": true}]),
+            [-2.1, 0.0],
+            true,
+            true,
+        ),
+        (
+            json!([{"bus": 1, "level_db": -12.0, "pre": false}]),
+            [-120.0, -120.0],
+            false,
+            true,
+        ),
+        (
+            json!([{"bus": 0, "level_db": -3.0, "pre": false}]),
+            [-18.4, -12.7],
+            false,
+            false,
+        ),
+    ];
+    for (track, (sends, peak, clip, to_master)) in mixer.into_iter().enumerate() {
+        let entry = &mut status["tracks"][track];
+        entry["sends"] = sends;
+        entry["peak_db"] = json!(peak);
+        entry["clip"] = json!(clip);
+        entry["to_master"] = json!(to_master);
+    }
+    status["buses"] = json!([
+        {"id": 0, "name": "Verb", "volume_db": -4.0, "pan": 0.0, "mute": false, "solo": true,
+         "peak_db": [-14.5, -15.2], "clip": false},
+        {"id": 1, "name": "Delay", "volume_db": 0.0, "pan": 0.3, "mute": false, "solo": false,
+         "peak_db": [-120.0, -120.0], "clip": false},
+    ]);
+    status["master"] = json!({"volume_db": -1.5, "peak_db": [-6.3, -5.9], "clip": false});
+    status["render"] = json!(null);
+    snapshot.params = Some(json!({"params": [
+        param("reverb", "size", 70.0, (0.0, 100.0, 50.0, "%", false)),
+        param("reverb", "damping", 40.0, (0.0, 100.0, 50.0, "%", false)),
+        param("reverb", "mix", 100.0, (0.0, 100.0, 30.0, "%", false)),
+    ]}));
+    snapshot
+}
+
+fn render_snapshot(render: Value) -> Snapshot {
+    let mut snapshot = mixer_snapshot();
+    snapshot.status.as_mut().unwrap()["render"] = render;
+    snapshot
+}
+
+fn click_button(harness: &mut Harness<App>, label: &str) {
+    harness.get_by_role_and_label(Role::Button, label).click();
+    harness.run_steps(2);
 }
 
 fn project_harness(transport: &str) -> (Harness<'static, App>, Receiver<Command>, TempDir) {
@@ -1095,4 +1155,111 @@ fn typed_tempo_is_sent_on_enter_only() {
             meter: None,
         }]
     );
+}
+
+#[test]
+fn mixer_snapshots() {
+    let (mut mixer, _, _dir) = harness_with(WINDOW, mixer_snapshot());
+    click_button(&mut mixer, "Mixer");
+    write_png(&mut mixer, "mixer");
+
+    click_button(&mut mixer, "Rack of Verb");
+    write_png(&mut mixer, "mixer-bus-rack");
+
+    let file = "/home/you/Music/xguitare/demo-song/renders/demo-song.wav";
+    let running = json!({"name": "demo-song", "range": "project", "progress": 0.42,
+        "state": "running", "file": file});
+    let (mut dialog, _, _dir) = harness_with(WINDOW, render_snapshot(running));
+    dialog.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::R);
+    write_png(&mut dialog, "render-running");
+
+    let failed = json!({"name": "demo-song", "range": "project", "progress": 0.42,
+        "state": "failed", "file": file, "error": "No space left on device (os error 28)"});
+    let (mut dialog, _, _dir) = harness_with(WINDOW, render_snapshot(failed));
+    click_button(&mut dialog, "Render");
+    dialog.run_steps(2);
+    write_png(&mut dialog, "render-failed");
+}
+
+#[test]
+fn mixer_columns_send_their_commands() {
+    let (mut harness, sent, _dir) = harness_with(WINDOW, mixer_snapshot());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run_steps(2);
+    for label in [
+        "Clip Guitar",
+        "pre Guitar Verb",
+        "to Master Keys",
+        "Solo Verb",
+        "+ Add Bus",
+        "Rack of Verb",
+    ] {
+        click_button(&mut harness, label);
+    }
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::ClipReset(MixerTarget::Track(0)),
+            Command::SendSet {
+                track: 0,
+                bus: 0,
+                level: None,
+                pre: Some(false),
+            },
+            Command::TrackSet {
+                track: 2,
+                edit: TrackEdit {
+                    to_master: Some(true),
+                    ..TrackEdit::default()
+                },
+            },
+            Command::BusSet {
+                bus: 0,
+                volume: None,
+                pan: None,
+                mute: None,
+                solo: Some(false),
+            },
+            Command::BusAdd,
+            Command::ShowRack(MixerTarget::Bus(0)),
+        ]
+    );
+    assert!(harness.query_by_label("Verb — Rack").is_some());
+    click_button(&mut harness, "cabinet (mono)");
+    assert_eq!(sent_now(&sent), []);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), [Command::ShowRack(MixerTarget::Track(0))]);
+    assert!(harness.query_by_label("Rack of Master").is_none());
+    assert!(harness.query_by_label("Guitar — Rack").is_some());
+}
+
+#[test]
+fn render_dialog_sends_render_and_cancel() {
+    let (mut harness, sent, _dir) = harness_with(WINDOW, mixer_snapshot());
+    click_button(&mut harness, "Render");
+    harness.run_steps(2);
+    harness.get_by_label("16").click();
+    harness.run_steps(2);
+    harness
+        .get_all_by_role_and_label(Role::Button, "Render")
+        .last()
+        .unwrap()
+        .click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Render {
+            range: RenderRange::Project,
+            bits: RenderBits::Pcm16,
+            name: Some("demo-song".to_string()),
+        }]
+    );
+    let running = json!({"name": "demo-song", "range": "loop", "progress": 0.5,
+        "state": "running", "file": "/tmp/x.wav"});
+    let (mut harness, sent, _dir) = harness_with(WINDOW, render_snapshot(running));
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::R);
+    harness.run_steps(2);
+    click_button(&mut harness, "Cancel");
+    assert_eq!(sent_now(&sent), [Command::RenderCancel]);
 }

@@ -9,16 +9,22 @@ use std::time::Instant;
 use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
+use xguitare_core::control::BusRef;
 use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
+use crate::mixer::{MixerView, RenderDraft, mixer_panel, render_dialog};
+use crate::mixer_model::{MASTER, MixerTarget};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
     forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, palette,
     param_rows, peak_db, quit_commands, remember_removes,
 };
-use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
+use crate::project::{
+    ProjectView, TIMELINE_HEIGHT, TIMELINE_HEIGHT_WITH_MIXER, autosave_prompt, tracks_view,
+    transport_bar,
+};
 use crate::project_model::{
     AutosaveOffer, item_blocks, key_active, project_key_to_command, project_name, track_rows,
 };
@@ -30,6 +36,7 @@ const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const RACK_HEADING_SIZE: f32 = 18.0;
+const MIXER_GAP: f32 = 8.0;
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
@@ -68,6 +75,7 @@ pub struct App {
     configured_bank_kind: BankKind,
     new_project: String,
     project_view: ProjectView,
+    mixer: MixerView,
     autosave_prompt: Option<AutosaveOffer>,
 }
 
@@ -163,6 +171,7 @@ impl App {
             configured_bank_kind: config.bank_kind,
             new_project: String::new(),
             project_view: ProjectView::default(),
+            mixer: MixerView::default(),
             autosave_prompt: None,
         }
     }
@@ -203,8 +212,9 @@ impl App {
                         .params
                         .as_ref()
                         .and_then(|params| RemovedUnit::new(params, status, id, now));
-                    if removed.is_some() {
-                        self.removed = removed;
+                    if let Some(mut removed) = removed {
+                        self.aim_restore_at_shown_rack(&mut removed);
+                        self.removed = Some(removed);
                     }
                 }
                 Command::Load(_)
@@ -218,6 +228,51 @@ impl App {
                 _ => {}
             }
         }
+    }
+}
+
+impl App {
+    /// A Module removed from the Bus or Master Rack the mixer panel shows goes back there; a Bus is named, so that Undo finds it after another Bus is removed.
+    fn aim_restore_at_shown_rack(&self, removed: &mut RemovedUnit) {
+        let restore = &mut removed.restore;
+        match self.mixer.shown_rack() {
+            Some(MixerTarget::Bus(index)) => {
+                let name =
+                    self.snapshot.status.as_ref().and_then(|status| {
+                        status["buses"][index]["name"].as_str().map(str::to_string)
+                    });
+                restore.track = None;
+                restore.bus = Some(name.map_or(BusRef::Index(index), BusRef::Name));
+            }
+            Some(MixerTarget::Master) => {
+                restore.track = None;
+                restore.master = true;
+            }
+            Some(MixerTarget::Track(_)) | None => {}
+        }
+    }
+
+    /// Takes the window's own commands out of `commands`: Ctrl+M or `Mixer` opens or closes the mixer panel (the selected Track's Rack comes back on close), Ctrl+Alt+R or `Render` opens the Render dialog.
+    fn keep_window_commands(&mut self, commands: &mut Vec<Command>) {
+        let mut follow_up = Vec::new();
+        commands.retain(|command| match command {
+            Command::ToggleMixer => {
+                self.mixer.open = !self.mixer.open;
+                let selected = self.snapshot.status.as_ref().and_then(selected_track);
+                if let (Some(MixerTarget::Bus(_) | MixerTarget::Master), Some(selected)) =
+                    (self.mixer.rack.take(), selected)
+                {
+                    follow_up.push(Command::ShowRack(selected));
+                }
+                false
+            }
+            Command::OpenRenderDialog => {
+                self.mixer.render = Some(RenderDraft::new(&self.snapshot));
+                false
+            }
+            _ => true,
+        });
+        commands.extend(follow_up);
     }
 }
 
@@ -244,6 +299,7 @@ impl eframe::App for App {
                     clip.observe(peak_db(status, key));
                     hold.observe(peak_db(status, key), now);
                 }
+                self.mixer.observe(status, now);
             }
             latest = Some(snapshot);
         }
@@ -315,6 +371,7 @@ impl eframe::App for App {
             query: &mut self.bank_query,
             save_as_name: &mut self.save_as_name,
             add: &mut self.add_draft,
+            stereo_rack: self.mixer.shows_stereo_rack(),
             tuner: &mut tuner,
             ports: &mut self.ports_draft,
             settings: &mut self.settings_draft,
@@ -332,12 +389,14 @@ impl eframe::App for App {
             commands.extend(project_panels(
                 ui,
                 snapshot,
-                &mut self.project_view,
+                (&mut self.project_view, self.mixer.open),
                 feedback,
             ));
         } else {
             self.project_view = ProjectView::default();
+            self.mixer = MixerView::default();
         }
+        commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)
         {
@@ -364,11 +423,9 @@ impl eframe::App for App {
         CentralPanel::default()
             .frame(Frame::central_panel(ui.style()).inner_margin(RACK_MARGIN))
             .show(ui, |ui| {
-                if let Some(status) = project_status {
-                    rack_heading(ui, status);
-                }
-                commands.extend(rack_view(ui, snapshot, &mut view));
+                commands.extend(central_view(ui, snapshot, &mut self.mixer, &mut view));
             });
+        self.keep_window_commands(&mut commands);
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);
         for command in commands {
@@ -421,8 +478,14 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         if input.consume_key(Modifiers::COMMAND, Key::S) {
             keys.push(KeyEvent::CtrlS);
         }
+        if input.consume_key(Modifiers::COMMAND | Modifiers::ALT, Key::R) {
+            keys.push(KeyEvent::CtrlAltR);
+        }
         if input.consume_key(Modifiers::COMMAND, Key::R) {
             keys.push(KeyEvent::CtrlR);
+        }
+        if input.consume_key(Modifiers::COMMAND, Key::M) {
+            keys.push(KeyEvent::CtrlM);
         }
         keys
     });
@@ -461,29 +524,90 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
 fn project_panels(
     ui: &mut Ui,
     snapshot: &Snapshot,
-    view: &mut ProjectView,
+    (view, mixer_open): (&mut ProjectView, bool),
     feedback: (&mut Feedback, Instant),
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     Panel::top("transport")
         .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
         .show(ui, |ui| {
-            commands.extend(transport_bar(ui, snapshot, feedback));
+            commands.extend(transport_bar(ui, snapshot, mixer_open, feedback));
         });
-    Panel::top("timeline")
+    let (timeline_id, timeline_height) = if mixer_open {
+        ("timeline_with_mixer", TIMELINE_HEIGHT_WITH_MIXER)
+    } else {
+        ("timeline", TIMELINE_HEIGHT)
+    };
+    Panel::top(timeline_id)
         .resizable(true)
-        .default_size(TIMELINE_HEIGHT)
+        .default_size(timeline_height)
         .frame(Frame::new().fill(widgets::colour(palette().rail)))
         .show(ui, |ui| commands.extend(tracks_view(ui, snapshot, view)));
     commands
 }
 
-/// Names the Track whose Rack is shown.
-fn rack_heading(ui: &mut Ui, status: &Value) {
-    if let Some(track) = track_rows(status).into_iter().find(|row| row.selected) {
-        let heading = format!("{} — Rack", track.name);
-        ui.label(RichText::new(heading).size(RACK_HEADING_SIZE).strong());
+/// The Rack alone with no Project open; with one, the mixer panel while it is open with the Rack of the column chosen in it below, else the selected Track's Rack.
+fn central_view(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    mixer: &mut MixerView,
+    view: &mut RackView,
+) -> Vec<Command> {
+    let Some(status) = snapshot
+        .status
+        .as_ref()
+        .filter(|status| project_name(Some(status)).is_some())
+    else {
+        return rack_view(ui, snapshot, view);
+    };
+    let mut commands = Vec::new();
+    if mixer.open {
+        commands.extend(mixer_panel(ui, snapshot, mixer));
+        ui.add_space(MIXER_GAP);
     }
+    let shown = if mixer.open {
+        mixer.rack
+    } else {
+        selected_track(status)
+    };
+    if let Some(target) = shown {
+        rack_heading(ui, status, target);
+        commands.extend(rack_view(ui, snapshot, view));
+    }
+    commands
+}
+
+fn open_render_dialog(
+    ctx: &egui::Context,
+    snapshot: &Snapshot,
+    mixer: &mut MixerView,
+) -> Vec<Command> {
+    let Some(draft) = &mut mixer.render else {
+        return Vec::new();
+    };
+    let (commands, open) = render_dialog(ctx, snapshot, draft);
+    if !open {
+        mixer.render = None;
+    }
+    commands
+}
+
+fn selected_track(status: &Value) -> Option<MixerTarget> {
+    track_rows(status)
+        .into_iter()
+        .find(|row| row.selected)
+        .map(|row| MixerTarget::Track(row.index))
+}
+
+/// Names the Track, Bus or Master whose Rack is shown.
+fn rack_heading(ui: &mut Ui, status: &Value, target: MixerTarget) {
+    let name = match target {
+        MixerTarget::Track(index) => status["tracks"][index]["name"].as_str(),
+        MixerTarget::Bus(index) => status["buses"][index]["name"].as_str(),
+        MixerTarget::Master => Some(MASTER),
+    };
+    let heading = format!("{} — Rack", name.unwrap_or_default());
+    ui.label(RichText::new(heading).size(RACK_HEADING_SIZE).strong());
 }
 
 fn revision(snapshot: &Snapshot) -> u64 {

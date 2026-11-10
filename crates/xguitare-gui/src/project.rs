@@ -27,6 +27,9 @@ const RULER_HEIGHT: f32 = 26.0;
 const TRANSPORT_HEIGHT: f32 = 44.0;
 const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(84.0, 32.0);
 const POSITION_SIZE: f32 = 22.0;
+const PANEL_BUTTON: egui::Vec2 = egui::Vec2::new(56.0, 32.0);
+/// The Tracks and timeline's height while the mixer panel is open below them.
+pub const TIMELINE_HEIGHT_WITH_MIXER: f32 = 200.0;
 const NAME_WIDTH: f32 = 140.0;
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(28.0, 24.0);
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
@@ -41,7 +44,7 @@ const EDGE_GRAB_PX: f32 = 6.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
 const LABEL_SIZE: f32 = 12.0;
 const VOLUME_DB: (f64, f64) = (-60.0, 6.0);
-const PAN: (f64, f64) = (-1.0, 1.0);
+pub(crate) const PAN: (f64, f64) = (-1.0, 1.0);
 const NO_INPUT: &str = "no input";
 const NO_TRACKS: &str = "No Tracks yet: Add Track";
 const COUNT_IN_BARS: [u32; 3] = [0, 1, 2];
@@ -62,10 +65,11 @@ pub struct ProjectView {
     pub loop_drag: Option<LoopDrag>,
 }
 
-/// Play, Stop, Record (a second click stops recording) with the count-in beats left, Loop, Click with its count-in, tempo, meter and the position, left to right. A meter that is no `<beats>/<note>` goes to `feedback`.
+/// Play, Stop, Record (a second click stops recording) with the count-in beats left, Loop, Click with its count-in, tempo, meter, the position, then `Mixer` (lit while `mixer_open`) and `Render`, left to right. A meter that is no `<beats>/<note>` goes to `feedback`.
 pub fn transport_bar(
     ui: &mut Ui,
     snapshot: &Snapshot,
+    mixer_open: bool,
     (feedback, now): (&mut Feedback, Instant),
 ) -> Vec<Command> {
     let mut commands = Vec::new();
@@ -127,6 +131,17 @@ pub fn transport_bar(
         commands.extend(tempo_fields(ui, tempo, (feedback, now)));
         ui.separator();
         position_readout(ui, &transport, sample_rate(status), tempo);
+        ui.separator();
+        let mixer = lit_button("Mixer", mixer_open, colour(colours.text)).min_size(PANEL_BUTTON);
+        if ui.add(mixer).clicked() {
+            commands.push(Command::ToggleMixer);
+        }
+        if ui
+            .add(outlined_button("Render").min_size(PANEL_BUTTON))
+            .clicked()
+        {
+            commands.push(Command::OpenRenderDialog);
+        }
         if let Some(warning) = transport.disk_warning() {
             ui.label(RichText::new(warning).color(colour(colours.red)).strong());
         }
@@ -134,7 +149,7 @@ pub fn transport_bar(
     commands
 }
 
-fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'static> {
+pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'static> {
     let button = if lit {
         Button::new(RichText::new(text).strong().color(colour(palette().ground)))
             .fill(lit_colour)
@@ -213,7 +228,7 @@ fn tempo_fields(
 }
 
 /// A number field that shows its own value while dragged and returns the value once the drag ends or a typed value is entered with Enter or focus loss.
-fn released_value(
+pub(crate) fn released_value(
     ui: &mut Ui,
     id: Id,
     value: f64,
@@ -674,7 +689,7 @@ fn input_meter(ui: &mut Ui, db: f64) {
 }
 
 /// A small knob over a number field; either returns its value when a drag ends or a value is typed, a double-click on the knob the middle (0 dB, centre).
-fn track_knob(
+pub(crate) fn track_knob(
     ui: &mut Ui,
     (what, track): (&str, &str),
     value: f64,
