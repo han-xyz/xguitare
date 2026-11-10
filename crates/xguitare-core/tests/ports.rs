@@ -162,6 +162,7 @@ fn choose_ports_auto_uses_jack_order() {
 fn foreign_ports_drop_own_client_and_mark_physical() {
     let all = [
         "xguitare:out_l",
+        "xguitare-123:in",
         "Scarlett:capture_MONO",
         "xguitare-gui:in",
         "Firefox:output_FL",
@@ -170,7 +171,7 @@ fn foreign_ports_drop_own_client_and_mark_physical() {
     .to_vec();
     let physical = ["Scarlett:capture_MONO".to_string()];
     assert_eq!(
-        foreign_ports("xguitare", all, &physical),
+        foreign_ports(&["xguitare", "xguitare-123"], all, &physical),
         [
             AvailablePort {
                 name: "Scarlett:capture_MONO".to_string(),

@@ -53,16 +53,20 @@ pub fn connect_plan(current: &[(String, String)], own: &Ports, wanted: &Ports) -
     }
 }
 
-/// The ports in `names` that do not belong to the client `client_name`, each marked physical when it is in `physical`.
+/// The ports in `names` that do not belong to any of the clients `own_clients`, each marked physical when it is in `physical`.
 pub fn foreign_ports(
-    client_name: &str,
+    own_clients: &[&str],
     names: Vec<String>,
     physical: &[String],
 ) -> Vec<AvailablePort> {
-    let own_prefix = format!("{client_name}:");
     names
         .into_iter()
-        .filter(|name| !name.starts_with(&own_prefix))
+        .filter(|name| {
+            !own_clients.iter().any(|client| {
+                name.strip_prefix(client)
+                    .is_some_and(|rest| rest.starts_with(':'))
+            })
+        })
         .map(|name| AvailablePort {
             is_physical: physical.contains(&name),
             name,

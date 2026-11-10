@@ -205,7 +205,7 @@ fn foreign_audio_ports(client: &Client, direction: PortFlags) -> Vec<AvailablePo
         direction | PortFlags::IS_PHYSICAL,
     );
     let all = client.ports(None, Some(AUDIO_PORT_TYPE), direction);
-    foreign_ports(client.name(), all, &physical)
+    foreign_ports(&[CLIENT_NAME, client.name()], all, &physical)
 }
 
 struct Notifications {
