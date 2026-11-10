@@ -285,7 +285,7 @@ fn an_invalid_metronome_value_in_state_toml_is_ignored_with_a_warning() {
         config.state_warning.as_deref(),
         Some(
             format!(
-                "{}: metronome: bpm must be between 20 and 300; ignored",
+                "{}: metronome: bpm must be between 20 and 300",
                 state.display()
             )
             .as_str()

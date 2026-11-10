@@ -115,7 +115,7 @@ pub(crate) fn read_state(path: &Path) -> (SavedState, Option<String>) {
             let warning = state
                 .metronome
                 .drop_invalid()
-                .map(|reasons| format!("{}: metronome: {reasons}; ignored", path.display()));
+                .map(|reasons| format!("{}: metronome: {reasons}", path.display()));
             (state, warning)
         }
         Err(err) => {
