@@ -300,7 +300,7 @@ Projects live under `projects_dir`, by default `~/Music/xguitare`; the Control A
 
 ```text
 ~/Music/xguitare/demo-song/
-  project.toml            name, sample rate, tempo, meter, loop, Tracks with their Modules, Items and Takes
+  project.toml            name, sample rate, tempo, meter, loop, click, count-in, Tracks with their Modules, Items and Takes
   project.autosave.toml   the latest autosave, when there is one
   takes/guitar-1.wav      one mono 32-bit float WAV per Take, at the Project's sample rate
 ```
@@ -336,11 +336,11 @@ $ xguitare project close
 closed Live
 ```
 
-- `project new|open|save|close|list`: `open <name> --restore` loads the autosave; `close` saves first. A sample rate other than the audio server's is refused.
-- `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name; `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off` and `--name`.
+- `project new|open|save|close|list`: `open <name> --restore` loads the autosave; `close` saves, and saves again once the Takes still being written are added (a `project new` or `open` meanwhile answers `a project is still closing; try again`). A sample rate other than the audio server's is refused.
+- `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name (a name cannot be only digits); `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off` and `--name`.
 - An armed Track monitors its input through its Rack, also while stopped, and records while recording; an unarmed Track plays its Items.
-- `play`, `stop` (the playhead stays), `record` (from stopped, after the count-in) and `locate <bar>.<beat>|<bar>|<seconds>s`, e.g. `locate 3.2` or `locate 12.5s`.
-- `tempo <bpm> [<beats>/<note>]`, e.g. `tempo 100 3/4`; `click on|off [--count-in 0|1|2]`. The click and count-in are not saved with the Project. The loop region is set through the Control API `loop`.
+- `play`, `stop` (the playhead stays), `record` (from stopped, after the count-in) and `locate <bar>.<beat>|<bar>|<seconds>s`, e.g. `locate 3.2` or `locate 12.5s`, up to an hour past the last Take or the loop end.
+- `tempo <bpm> [<beats>/<note>]`, e.g. `tempo 100 3/4`; `click on|off [--count-in 0|1|2]`; all are saved with the Project. The loop region is set through the Control API `loop`.
 - While recording, a Track cannot be removed and an armed Track's input cannot change; `stop` first.
 
 Each Track records the dry input; its Rack is applied on playback, so its sound can still change after recording. A recording becomes a Take on a new Item; with the loop on, each pass after a wrap becomes another Take of the same Item, the newest one playing.

@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use xguitare_core::project_control::Projects;
 
 use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
+use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config};

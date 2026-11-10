@@ -634,14 +634,15 @@ Errors:
 | `error` | When |
 | --- | --- |
 | `a project is open; close it first` | A Project is open. |
+| `a project is still closing; try again` | A Project closed less than about 200 ms ago is still getting its last Takes added and saved. |
 | `project name must not be empty` | The name has no ASCII letter or digit. |
 | `a project named '<name>' already exists` | The folder is already there. |
 | `<path>: <reason>` | A folder or file cannot be written. |
-| `engine busy` | The audio thread's command queue is full; retry. |
+| `<error>; the project was created, open it with project_open` | The folder was written but the Project could not start playing, e.g. `engine busy; the project was created, open it with project_open`. |
 
 ## project_open
 
-Opens the Project in `<projects_dir>/<slug of name>/`: loads its active Takes into memory, connects each Track's input, and plays it instead of the active Preset's Rack. The transport starts stopped at frame 0, with the click off and no count-in. With `"restore":true` it loads `project.autosave.toml` instead of `project.toml`; the Project then counts as changed.
+Opens the Project in `<projects_dir>/<slug of name>/`: loads its active Takes into memory, connects each Track's input, and plays it instead of the active Preset's Rack. The transport starts stopped at frame 0, with the click and count-in the Project saved. With `"restore":true` it loads `project.autosave.toml` instead of `project.toml`; the Project then counts as changed.
 
 Request:
 
@@ -665,6 +666,7 @@ Errors:
 | `error` | When |
 | --- | --- |
 | `a project is open; close it first` | A Project is open. |
+| `a project is still closing; try again` | As `project_new`. |
 | `no project '<name>'` | The folder has no `project.toml`, e.g. `no project '../etc'`. |
 | `project rate <rate> Hz differs from the engine rate <rate> Hz` | The Project was recorded at another sample rate. |
 | `cannot load take <file>: <reason>` | A Take file cannot be read or is not mono. |
@@ -691,7 +693,7 @@ Errors: `no project open`; `<path>: <reason>` when the file cannot be written.
 
 ## project_close
 
-Saves the open Project to `project.toml`, stops playing it and goes back to the active Preset's Rack. When it closes while recording, the Daemon adds the Takes still being written once they are finished and saves `project.toml` again.
+Saves the open Project to `project.toml`, stops playing it and goes back to the active Preset's Rack. The Daemon then adds the Takes still being written once they are finished and saves `project.toml` again; until then `project_new` and `project_open` answer `a project is still closing; try again`.
 
 Request:
 
@@ -754,12 +756,13 @@ Errors:
 | `no project open` | No Project is open. |
 | `a track named '<name>' already exists` | Another Track has the name, in any letter case. |
 | `track name must not be empty` | The name is empty after control characters and surrounding blanks are removed. |
+| `track name must not be only digits` | The name is all digits, which the CLI reads as an index. |
 | `a project has at most 16 tracks` | The Project has 16 Tracks. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
 ## track_remove
 
-Removes a Track (`track`: index or name, see Track scope). Its Take files stay in `takes/`.
+Removes a Track (`track`: index or name, see Track scope). Its Take files stay in `takes/`. A Take of another Track that the disk is still writing lands on that Track wherever it moved.
 
 Request:
 
@@ -810,7 +813,7 @@ Errors:
 | `track '<name>' pan must be between -1 and 1` | `pan` is out of range. |
 | `no capture port '<input>'` | `input` is not a capture port. |
 | `cannot change an armed track's input while recording` | `input` is given for a Track that is or becomes armed, after `record` until `stop` or `play`. |
-| `a track named '<name>' already exists`, `track name must not be empty` | As `track_add`. |
+| `a track named '<name>' already exists`, `track name must not be empty`, `track name must not be only digits` | As `track_add`. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
 ## track_select
@@ -838,7 +841,7 @@ Runs the transport. `action` is one of:
 - `play`: plays from the playhead; armed Tracks keep monitoring.
 - `stop`: stops; the playhead stays where it is.
 - `record`: records every armed Track; from stopped, after `count_in` bars of click (see `click`). Each Take becomes an Item placed earlier by the input and output latency and the Project's `latency_offset_ms`.
-- `locate`: moves the playhead to `position`: a frame (JSON number), or text `<bar>.<beat>`, `<bar>` (beat 1), or `<seconds>s`, with bars and beats counted from 1 at the Project's tempo and meter.
+- `locate`: moves the playhead to `position`: a frame (JSON number), or text `<bar>.<beat>`, `<bar>` (beat 1), or `<seconds>s`, with bars and beats counted from 1 at the Project's tempo and meter. It may be at most one hour past the end of the Project's last Take or loop region.
 
 Request:
 
@@ -860,6 +863,7 @@ Errors:
 | `no track is armed` | `record` with no armed Track. |
 | `locate needs a position` | `locate` without `position`. |
 | `position must be <bar>.<beat> or <seconds>s` | The text is neither, the bar or beat is 0, the beat is past the meter, or the seconds are negative or not finite. |
+| `position is more than an hour past the end of the project` | The position is past that limit, e.g. `1e300s` or frame 18446744073709551615. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
 ## loop
@@ -900,7 +904,7 @@ Errors: `no project open`; `tempo must be between 20 and 300 bpm`; `meter must b
 
 ## click
 
-Turns the click (a short blip on every beat, higher on beat 1) on or off and sets the count-in: 0, 1 or 2 bars of click before `record` starts from stopped. A key left out keeps its value. Neither is saved with the Project; opening a Project starts with the click off and no count-in.
+Turns the click (a short blip on every beat, higher on beat 1) on or off and sets the count-in: 0, 1 or 2 bars of click before `record` starts from stopped. A key left out keeps its value. Both are saved with the Project (`click`, `count_in` in `project.toml`).
 
 Request:
 

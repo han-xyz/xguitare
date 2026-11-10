@@ -6,7 +6,6 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use xguitare_core::project_control::Projects;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
@@ -18,6 +17,7 @@ use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
     engine_queues, raise_peak,
 };
+use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::apply;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, ModuleRegistry, Preset, PresetModule};

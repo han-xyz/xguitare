@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use xguitare_core::project_control::Projects;
 
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
 use xguitare_core::control::{EngineState, PeakMeters, Value};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
 use xguitare_core::ports::{AudioPorts, AvailablePort};
+use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config, Ports};
 

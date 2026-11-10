@@ -60,10 +60,18 @@ pub struct TakeReader {
     marks: Consumer<Mark>,
 }
 
+/// One Track's Take reader, queued on the disk thread with the Track's name (for its Take files) and an id that stays the Track's while other Tracks are added or removed.
+pub struct TrackReader {
+    pub track_id: u64,
+    pub name: String,
+    pub reader: TakeReader,
+}
+
 /// A Take the disk thread wrote to `file` (relative to the Project folder).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FinishedTake {
-    pub track: usize,
+    /// The `track_id` of the [`TrackReader`] that read it.
+    pub track_id: u64,
     pub file: String,
     pub span: TakeSpan,
 }
@@ -257,7 +265,7 @@ pub fn load_take(project_dir: &Path, file: &str) -> Result<Arc<[f32]>, hound::Er
     Ok(samples.into())
 }
 
-/// Loads a finished Take into `takes` and adds it as a Take on its Track at its latency-compensated placement; `None` when that Track no longer exists.
+/// Loads a finished Take into `takes` and adds it as a Take on Track `track` at its latency-compensated placement; `None` when that Track does not exist.
 ///
 /// # Errors
 ///
@@ -266,6 +274,7 @@ pub fn add_finished_take<S: BuildHasher>(
     project: &mut Project,
     project_dir: &Path,
     takes: &mut HashMap<String, Arc<[f32]>, S>,
+    track: usize,
     finished: &FinishedTake,
     latency: Latency,
 ) -> Result<Option<TakePlacement>, hound::Error> {
@@ -276,7 +285,7 @@ pub fn add_finished_take<S: BuildHasher>(
         project.latency_offset_ms,
         project.sample_rate,
     );
-    let Some(track) = project.tracks.get_mut(finished.track) else {
+    let Some(track) = project.tracks.get_mut(track) else {
         return Ok(None);
     };
     let samples = load_take(project_dir, &finished.file)?;

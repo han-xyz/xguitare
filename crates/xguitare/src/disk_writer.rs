@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use tracing::warn;
-use xguitare_core::take_capture::{FinishedTake, ReadStop, TakeReader, next_take_file};
+use xguitare_core::take_capture::{FinishedTake, ReadStop, TrackReader, next_take_file};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -23,8 +23,7 @@ pub struct TakeWriter {
 }
 
 struct TrackWriter {
-    name: String,
-    readers: VecDeque<TakeReader>,
+    readers: VecDeque<TrackReader>,
     output: Output,
     written: u64,
 }
@@ -54,15 +53,13 @@ impl TakeWriter {
         }
     }
 
-    /// Queues one reader per Track, in Track order and with the Track's name, behind the readers already queued for that Track: a Take that a replaced Arrangement handed over continues in the same file.
-    pub fn add_readers(&mut self, readers: Vec<(String, TakeReader)>) {
-        for (idx, (name, reader)) in readers.into_iter().enumerate() {
+    /// Queues one reader per Track, in Track order, behind the readers already queued at that position: a Take that a replaced Arrangement handed over continues in the same file. A Take file is named after the Track of the reader that starts it, and a finished Take carries the id of the reader that ends it.
+    pub fn add_readers(&mut self, readers: Vec<TrackReader>) {
+        for (idx, reader) in readers.into_iter().enumerate() {
             if let Some(track) = self.tracks.get_mut(idx) {
-                track.name = name;
                 track.readers.push_back(reader);
             } else {
                 self.tracks.push(TrackWriter {
-                    name,
                     readers: VecDeque::from([reader]),
                     output: Output::Closed,
                     written: 0,
@@ -74,10 +71,11 @@ impl TakeWriter {
     /// Writes what the rings hold and returns the Takes that ended, each closed in its own file.
     pub fn drain(&mut self) -> Vec<FinishedTake> {
         let mut finished = Vec::new();
-        for (idx, track) in self.tracks.iter_mut().enumerate() {
-            while let Some(reader) = track.readers.front_mut() {
-                let stop = reader.read(track.written, &mut self.buffer);
-                track.write(&self.buffer, &self.project_dir, self.spec);
+        for track in &mut self.tracks {
+            while let Some(front) = track.readers.front_mut() {
+                let stop = front.reader.read(track.written, &mut self.buffer);
+                let (track_id, name) = (front.track_id, front.name.clone());
+                track.write(&self.buffer, &self.project_dir, &name, self.spec);
                 match stop {
                     ReadStop::Empty => break,
                     ReadStop::HandedOver => {
@@ -92,7 +90,7 @@ impl TakeWriter {
                     ReadStop::TakeEnd(span) => {
                         if let Some(file) = track.close() {
                             finished.push(FinishedTake {
-                                track: idx,
+                                track_id,
                                 file,
                                 span,
                             });
@@ -106,13 +104,13 @@ impl TakeWriter {
 }
 
 impl TrackWriter {
-    fn write(&mut self, samples: &[f32], project_dir: &Path, spec: WavSpec) {
+    fn write(&mut self, samples: &[f32], project_dir: &Path, name: &str, spec: WavSpec) {
         if samples.is_empty() {
             return;
         }
         self.written += samples.len() as u64;
         if matches!(self.output, Output::Closed) {
-            let file = next_take_file(project_dir, &self.name);
+            let file = next_take_file(project_dir, name);
             let created = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -157,7 +155,7 @@ impl TrackWriter {
 
 /// The disk thread: runs a [`TakeWriter`] every few milliseconds and hands back the Takes it finished.
 pub struct DiskThread {
-    readers: Sender<Vec<(String, TakeReader)>>,
+    readers: Sender<Vec<TrackReader>>,
     finished: Receiver<FinishedTake>,
     stop: Arc<AtomicBool>,
     handle: JoinHandle<()>,
@@ -168,7 +166,7 @@ impl DiskThread {
     ///
     /// The error from spawning the thread.
     pub fn spawn(mut writer: TakeWriter) -> io::Result<DiskThread> {
-        let (readers_tx, readers_rx) = mpsc::channel::<Vec<(String, TakeReader)>>();
+        let (readers_tx, readers_rx) = mpsc::channel::<Vec<TrackReader>>();
         let (finished_tx, finished_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = Arc::clone(&stop);
@@ -198,7 +196,7 @@ impl DiskThread {
     }
 
     /// Queues the readers of a newly built Arrangement; see [`TakeWriter::add_readers`].
-    pub fn add_readers(&self, readers: Vec<(String, TakeReader)>) {
+    pub fn add_readers(&self, readers: Vec<TrackReader>) {
         let _ = self.readers.send(readers);
     }
 

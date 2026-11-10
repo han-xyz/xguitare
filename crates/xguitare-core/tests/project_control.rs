@@ -15,7 +15,8 @@ use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, r
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{PROJECT_FILE, Project};
 use xguitare_core::project_control::{
-    ProjectEvent, Projects, add_finished_takes, autosave_if_due, take_project_events,
+    ProjectEvent, Projects, add_finished_takes, autosave_if_due, finish_closed, finish_stopped,
+    take_project_events,
 };
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
 use xguitare_core::tuner::Tuner;
@@ -176,6 +177,45 @@ fn status(state: &mut EngineState) -> Value {
     ok(handle(state, Request::Status))
 }
 
+/// Closes the Project as the Daemon does when no Take was still being written.
+fn close(state: &mut EngineState) {
+    ok(handle(state, Request::ProjectClose));
+    for event in take_project_events(state) {
+        if let ProjectEvent::Closed(closed) = event {
+            finish_closed(state, closed, &[], |_| Latency::default());
+        }
+    }
+}
+
+fn take(track_id: u64, file: &str, start: u64, frames: u64) -> FinishedTake {
+    FinishedTake {
+        track_id,
+        file: file.to_string(),
+        span: TakeSpan {
+            start,
+            frames,
+            loop_take: false,
+        },
+    }
+}
+
+/// The Track id each Track's reader carries in the last `Readers` event.
+fn reader_ids(state: &mut EngineState) -> Vec<(String, u64)> {
+    take_project_events(state)
+        .into_iter()
+        .filter_map(|event| match event {
+            ProjectEvent::Readers(readers) => Some(
+                readers
+                    .into_iter()
+                    .map(|reader| (reader.name, reader.track_id))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .next_back()
+        .unwrap_or_default()
+}
+
 fn saved(state: &EngineState, folder: &str) -> Project {
     Project::load(&state.config.projects_dir.join(folder)).unwrap()
 }
@@ -247,7 +287,7 @@ fn project_names_stay_inside_projects_dir() {
     new_project(&mut state, "../../escape");
     assert!(state.config.projects_dir.join("escape").is_dir());
     assert!(!dir.0.join("escape").exists());
-    ok(handle(&mut state, Request::ProjectClose));
+    close(&mut state);
     for name in ["..", "../bank", "/etc"] {
         assert_eq!(
             error(handle(
@@ -309,7 +349,7 @@ fn project_errors_without_an_open_project() {
 fn project_open_refuses_a_rate_other_than_the_engine_rate() {
     let (mut state, _audio, _dir) = state("rate");
     new_project(&mut state, "Song");
-    ok(handle(&mut state, Request::ProjectClose));
+    close(&mut state);
     state.sample_rate = 96_000.0;
     assert_eq!(
         error(handle(
@@ -329,7 +369,7 @@ fn project_open_reports_a_newer_autosave_and_restores_it() {
     let (mut state, _audio, _dir) = state("restore");
     new_project(&mut state, "Song");
     add_track(&mut state, "Guitar");
-    ok(handle(&mut state, Request::ProjectClose));
+    close(&mut state);
     let folder = state.config.projects_dir.join("song");
     let mut autosave = Project::load(&folder).unwrap();
     let mut bass = autosave.tracks[0].clone();
@@ -345,7 +385,7 @@ fn project_open_reports_a_newer_autosave_and_restores_it() {
     assert_eq!(opened["autosave_newer"], true);
     assert_eq!(opened["restored"], false);
     assert_eq!(status(&mut state)["tracks"].as_array().unwrap().len(), 1);
-    ok(handle(&mut state, Request::ProjectClose));
+    close(&mut state);
     std::thread::sleep(Duration::from_millis(20));
     autosave.save_autosave(&folder).unwrap();
     let restored = ok(handle(&mut state, open(true)));
@@ -404,9 +444,9 @@ fn project_list_names_each_project_and_marks_broken_ones() {
         json!({"projects": []})
     );
     new_project(&mut state, "B Song");
-    ok(handle(&mut state, Request::ProjectClose));
+    close(&mut state);
     new_project(&mut state, "A Song");
-    ok(handle(&mut state, Request::ProjectClose));
+    close(&mut state);
     let broken = state.config.projects_dir.join("broken");
     fs::create_dir_all(&broken).unwrap();
     fs::write(broken.join(PROJECT_FILE), "name = ").unwrap();
@@ -675,13 +715,33 @@ fn locate_takes_frames_bars_beats_or_seconds() {
             "Locate(288000)"
         ]
     );
-    for bad in ["0.1", "1.5", "x", "-1s", "1.2.3", "infs"] {
+    for bad in ["0.1", "1.5", "x", "-1s", "1.2.3", "infs", "NaNs", "-0.5s"] {
         assert_eq!(
             error(handle(&mut state, locate(Position::Text(bad.to_string())))),
             "position must be <bar>.<beat> or <seconds>s",
             "{bad}"
         );
     }
+    ok(handle(
+        &mut state,
+        locate(Position::Text("3600s".to_string())),
+    ));
+    let too_far = [
+        Position::Text("1e300s".to_string()),
+        Position::Text("3601s".to_string()),
+        Position::Text("18446744073709551615.1".to_string()),
+        Position::Text("4611686018427387904".to_string()),
+        Position::Frames(u64::MAX),
+        Position::Frames(172_800_001),
+    ];
+    for bad in too_far {
+        assert_eq!(
+            error(handle(&mut state, locate(bad.clone()))),
+            "position is more than an hour past the end of the project",
+            "{bad:?}"
+        );
+    }
+    assert_eq!(arrangement_commands(&mut audio), ["Locate(172800000)"]);
     assert_eq!(
         error(handle(&mut state, transport(TransportAction::Locate, None))),
         "locate needs a position"
@@ -906,24 +966,19 @@ fn finished_takes_become_items_and_close_hands_the_project_over() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, ProjectEvent::Readers(readers) if readers.len() == 1 && readers[0].0 == "Guitar"))
+            .any(|event| matches!(event, ProjectEvent::Readers(readers) if readers.len() == 1 && readers[0].name == "Guitar"))
     );
     write_take(&folder.join("takes/guitar-1.wav"), &[0.25; 100]);
-    let finished = FinishedTake {
-        track: 0,
-        file: "takes/guitar-1.wav".to_string(),
-        span: TakeSpan {
-            start: 1000,
-            frames: 100,
-            loop_take: false,
-        },
+    let Some(ProjectEvent::Readers(readers)) = events.last() else {
+        panic!("track_add should end with a Readers event");
     };
+    let finished = take(readers[0].track_id, "takes/guitar-1.wav", 1000, 100);
     let latency = Latency {
         capture: 100,
         playback: 50,
     };
     assert_eq!(
-        add_finished_takes(&mut state, &[(finished, latency)]),
+        add_finished_takes(&mut state, &[finished], |_| latency),
         Vec::<String>::new()
     );
     assert!(
@@ -968,4 +1023,169 @@ fn projects_dir_from_settings_must_be_absolute() {
             file.join("x").display()
         ))
     );
+}
+
+#[test]
+fn a_project_still_closing_cannot_be_opened_until_its_last_takes_are_saved() {
+    let (mut state, _audio, _dir) = state("closing");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let id = reader_ids(&mut state)[0].1;
+    ok(handle(&mut state, Request::ProjectClose));
+    let open = Request::ProjectOpen {
+        name: "Song".to_string(),
+        restore: false,
+    };
+    assert_eq!(
+        error(handle(&mut state, open.clone())),
+        "a project is still closing; try again"
+    );
+    assert_eq!(
+        error(handle(
+            &mut state,
+            Request::ProjectNew {
+                name: "Other".to_string()
+            }
+        )),
+        "a project is still closing; try again"
+    );
+    let Some(ProjectEvent::Closed(closed)) = take_project_events(&mut state).pop() else {
+        panic!("close should end with a Closed event");
+    };
+    let folder = closed.dir.clone();
+    write_take(&folder.join("takes/guitar-1.wav"), &[0.5; 10]);
+    let last = finish_closed(
+        &mut state,
+        closed,
+        &[take(id, "takes/guitar-1.wav", 500, 10)],
+        |_| Latency::default(),
+    );
+    assert_eq!(last.added, ["takes/guitar-1.wav"]);
+    assert_eq!(last.saved, Some(folder.join(PROJECT_FILE)));
+    assert_eq!(saved(&state, "song").tracks[0].items[0].position, 500);
+    ok(handle(&mut state, open));
+    assert_eq!(status(&mut state)["project"], "Song");
+}
+
+#[test]
+fn the_daemon_stop_autosaves_the_last_takes() {
+    let (mut state, _audio, _dir) = state("stopped");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    ok(handle(&mut state, Request::ProjectSave));
+    let id = reader_ids(&mut state)[0].1;
+    let closed = xguitare_core::project_control::close_for_stop(&mut state).unwrap();
+    let folder = closed.dir.clone();
+    write_take(&folder.join("takes/guitar-1.wav"), &[0.5; 10]);
+    let last = finish_stopped(closed, &[take(id, "takes/guitar-1.wav", 0, 10)], |_| {
+        Latency::default()
+    });
+    assert_eq!(
+        last.saved,
+        Some(folder.join(xguitare_core::project::AUTOSAVE_FILE))
+    );
+    assert_eq!(
+        Project::load_autosave(&folder).unwrap().tracks[0]
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(saved(&state, "song").tracks[0].items.len(), 0);
+}
+
+#[test]
+fn a_take_finished_after_its_track_moved_lands_on_that_track() {
+    let (mut state, _audio, _dir) = state("moved");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    add_track(&mut state, "Bass");
+    let ids = reader_ids(&mut state);
+    ok(handle(&mut state, Request::TrackRemove { track: index(0) }));
+    let folder = state.config.projects_dir.join("song");
+    write_take(&folder.join("takes/bass-1.wav"), &[0.5; 10]);
+    write_take(&folder.join("takes/guitar-1.wav"), &[0.5; 10]);
+    let mut latency_asked = Vec::new();
+    let failures = add_finished_takes(
+        &mut state,
+        &[
+            take(ids[1].1, "takes/bass-1.wav", 100, 10),
+            take(ids[0].1, "takes/guitar-1.wav", 100, 10),
+        ],
+        |track| {
+            latency_asked.push(track);
+            Latency::default()
+        },
+    );
+    assert_eq!(
+        failures,
+        ["take takes/guitar-1.wav has no track; its file is kept"]
+    );
+    assert_eq!(latency_asked, [0]);
+    ok(handle(&mut state, Request::ProjectSave));
+    let project = saved(&state, "song");
+    assert_eq!(project.tracks[0].name, "Bass");
+    assert_eq!(project.tracks[0].items[0].takes[0].file, "takes/bass-1.wav");
+}
+
+#[test]
+fn click_and_count_in_are_saved_with_the_project() {
+    let (mut state, mut audio, _dir) = state("click-saved");
+    new_project(&mut state, "Song");
+    ok(handle(
+        &mut state,
+        Request::Click {
+            on: Some(true),
+            count_in: Some(2),
+        },
+    ));
+    close(&mut state);
+    let project = saved(&state, "song");
+    assert_eq!((project.click, project.count_in), (true, 2));
+    drain_commands(&mut audio);
+    ok(handle(
+        &mut state,
+        Request::ProjectOpen {
+            name: "Song".to_string(),
+            restore: false,
+        },
+    ));
+    assert_eq!(
+        status(&mut state)["click"],
+        json!({"on": true, "count_in": 2})
+    );
+    assert_eq!(
+        arrangement_commands(&mut audio),
+        ["Click(true)", "CountIn(2)"]
+    );
+}
+
+#[test]
+fn track_names_of_digits_only_are_refused() {
+    let (mut state, _audio, _dir) = state("digits");
+    new_project(&mut state, "Song");
+    assert_eq!(
+        error(handle(
+            &mut state,
+            Request::TrackAdd {
+                name: Some("2".to_string())
+            }
+        )),
+        "track name must not be only digits"
+    );
+}
+
+#[test]
+fn a_refused_set_settings_creates_no_projects_dir() {
+    let (mut state, _audio, dir) = state("projects-dir-refused");
+    let wanted = dir.0.join("songs");
+    let error = error(handle(
+        &mut state,
+        Request::SetSettings {
+            bank_kind: None,
+            ir_dir: Some(PathBuf::from("relative")),
+            projects_dir: Some(wanted.clone()),
+        },
+    ));
+    assert_eq!(error, "ir_dir 'relative' is not a directory");
+    assert!(!wanted.exists());
 }

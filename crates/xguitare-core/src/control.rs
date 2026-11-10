@@ -1239,11 +1239,8 @@ fn set_settings(
     projects_dir: Option<PathBuf>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    if let Some(dir) = &projects_dir {
-        if !dir.is_absolute() {
-            return Err(PROJECTS_DIR_NOT_ABSOLUTE.to_string());
-        }
-        create_projects_dir(dir)?;
+    if projects_dir.as_ref().is_some_and(|dir| !dir.is_absolute()) {
+        return Err(PROJECTS_DIR_NOT_ABSOLUTE.to_string());
     }
     if let Some(dir) = ir_dir
         .as_ref()
@@ -1262,6 +1259,7 @@ fn set_settings(
     }
     let mut config = state.config.clone();
     if let Some(dir) = projects_dir {
+        create_projects_dir(&dir)?;
         config.state.projects_dir = Some(dir.clone());
         config.projects_dir = dir;
     }

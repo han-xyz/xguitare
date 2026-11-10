@@ -559,3 +559,17 @@ fn item_offset_round_trips_and_is_range_checked() {
         "track 'Gtr' item 0 offset is past the last frame"
     );
 }
+
+#[test]
+fn click_defaults_off_and_count_in_is_range_checked() {
+    let dir = temp_dir("click");
+    fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
+    let project = Project::load(&dir.0).unwrap();
+    assert_eq!((project.click, project.count_in), (false, 0));
+    assert_load_errors(
+        "count-in",
+        "tempo_bpm = 96.5",
+        &["tempo_bpm = 96.5\ncount_in = 3"],
+        "count-in must be 0, 1 or 2 bars",
+    );
+}

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavReader};
 use xguitare::disk_writer::{DiskThread, TakeWriter};
-use xguitare_core::take_capture::{FinishedTake, TakeSpan, take_ring};
+use xguitare_core::take_capture::{FinishedTake, TakeSpan, TrackReader, take_ring};
 
 struct TempDir(PathBuf);
 
@@ -41,7 +41,11 @@ fn writes_exactly_the_pushed_frames_into_a_wav() {
     let dir = temp_dir("exact");
     let (mut recorder, reader) = take_ring(1000);
     let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
-    writer.add_readers(vec![("Lead Gtr".to_string(), reader)]);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "Lead Gtr".to_string(),
+        reader,
+    }]);
     let input = ramp(700);
     recorder.push(4800, &input[..300]);
     assert_eq!(writer.drain(), []);
@@ -51,7 +55,7 @@ fn writes_exactly_the_pushed_frames_into_a_wav() {
     assert_eq!(
         finished,
         [FinishedTake {
-            track: 0,
+            track_id: 0,
             file: "takes/lead-gtr-1.wav".to_string(),
             span: TakeSpan {
                 start: 4800,
@@ -69,13 +73,21 @@ fn a_handed_over_ring_continues_its_take_in_the_next_reader() {
     let (mut old, old_reader) = take_ring(1000);
     let (mut new, new_reader) = take_ring(1000);
     let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
-    writer.add_readers(vec![("t".to_string(), old_reader)]);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader: old_reader,
+    }]);
     let input = ramp(250);
     old.push(0, &input[..100]);
     new.continue_from(&mut old);
     drop(old);
     assert_eq!(writer.drain(), []);
-    writer.add_readers(vec![("t".to_string(), new_reader)]);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader: new_reader,
+    }]);
     new.push(100, &input[100..]);
     new.end_take(false);
     let finished = writer.drain();
@@ -89,7 +101,11 @@ fn a_ring_dropped_mid_take_finishes_that_take_and_the_next_take_gets_its_own_fil
     let dir = temp_dir("dropped");
     let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
     let (mut dropped, reader) = take_ring(1000);
-    writer.add_readers(vec![("t".to_string(), reader)]);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
     let input = ramp(300);
     dropped.push(480, &input);
     assert_eq!(writer.drain(), []);
@@ -97,7 +113,7 @@ fn a_ring_dropped_mid_take_finishes_that_take_and_the_next_take_gets_its_own_fil
     assert_eq!(
         writer.drain(),
         [FinishedTake {
-            track: 0,
+            track_id: 0,
             file: "takes/t-1.wav".to_string(),
             span: TakeSpan {
                 start: 480,
@@ -109,7 +125,11 @@ fn a_ring_dropped_mid_take_finishes_that_take_and_the_next_take_gets_its_own_fil
     assert_eq!(wav_samples(&dir.0, "takes/t-1.wav"), input);
 
     let (mut next, reader) = take_ring(1000);
-    writer.add_readers(vec![("t".to_string(), reader)]);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
     next.push(0, &[0.5; 100]);
     next.end_take(false);
     let finished = writer.drain();
@@ -126,8 +146,16 @@ fn disk_thread_reports_each_finished_take() {
     let (mut first, first_reader) = take_ring(1000);
     let (mut second, second_reader) = take_ring(1000);
     disk.add_readers(vec![
-        ("a".to_string(), first_reader),
-        ("b".to_string(), second_reader),
+        TrackReader {
+            track_id: 0,
+            name: "a".to_string(),
+            reader: first_reader,
+        },
+        TrackReader {
+            track_id: 1,
+            name: "b".to_string(),
+            reader: second_reader,
+        },
     ]);
     first.push(0, &[0.5; 64]);
     first.end_take(true);

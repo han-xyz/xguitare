@@ -36,6 +36,8 @@ fn project(tracks: Vec<Track>) -> Project {
         meter: (4, 4),
         loop_region: LoopRegion::default(),
         latency_offset_ms: 0.0,
+        click: false,
+        count_in: 0,
         tracks,
     }
 }

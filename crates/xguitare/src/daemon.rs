@@ -9,7 +9,6 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
-use xguitare_core::project_control::Projects;
 
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
@@ -24,10 +23,10 @@ use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
-    ClosedProject, ProjectEvent, add_finished_takes, autosave_if_due, close_for_stop,
-    take_project_events,
+    ClosedProject, LastTakes, ProjectEvent, Projects, add_finished_takes, autosave_if_due,
+    close_for_stop, finish_closed, finish_stopped, take_project_events,
 };
-use xguitare_core::take_capture::{Latency, add_finished_take};
+use xguitare_core::take_capture::Latency;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, BankKind, Config, ConfigError, Preset, SocketDirError};
@@ -134,7 +133,7 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         error!("jack session still borrowed at stop");
         Ok(())
     };
-    disk.finish_at_stop(open, &latencies);
+    disk.finish_at_stop(&mut state_guard(&state), open, &latencies);
     stopped?;
     info!("stopped");
     Ok(())
@@ -152,29 +151,27 @@ impl ProjectDisk {
     fn follow(&mut self, state: &mut EngineState, session: &Session) {
         // A Project closed on an earlier tick: the audio thread has retired its Arrangement since, and this drain drops it, which ends its open Takes.
         state.queues.drain_from_audio();
-        for (thread, mut closed) in mem::take(&mut self.closing) {
-            if add_last_takes(thread, &mut closed, |track| session.track_latency(track)) {
-                save_project(&closed);
-            }
+        for (thread, closed) in mem::take(&mut self.closing) {
+            let last = finish_closed(state, closed, &thread.stop(), |track| {
+                session.track_latency(track)
+            });
+            log_last_takes(&last);
         }
         for event in take_project_events(state) {
-            self.apply(event, session);
+            self.apply(state, event, session);
         }
         if let Some(thread) = &self.open {
-            let finished: Vec<_> = thread
-                .finished()
-                .into_iter()
-                .map(|take| {
-                    info!(
-                        "recorded {} on track {}: {} frames from frame {}",
-                        take.file, take.track, take.span.frames, take.span.start
-                    );
-                    let latency = session.track_latency(take.track);
-                    (take, latency)
-                })
-                .collect();
+            let finished = thread.finished();
+            for take in &finished {
+                info!(
+                    "recorded {}: {} frames from frame {}",
+                    take.file, take.span.frames, take.span.start
+                );
+            }
             if !finished.is_empty() {
-                for failure in add_finished_takes(state, &finished) {
+                let failures =
+                    add_finished_takes(state, &finished, |track| session.track_latency(track));
+                for failure in failures {
                     warn!("{failure}");
                 }
             }
@@ -186,7 +183,7 @@ impl ProjectDisk {
         }
     }
 
-    fn apply(&mut self, event: ProjectEvent, session: &Session) {
+    fn apply(&mut self, state: &mut EngineState, event: ProjectEvent, session: &Session) {
         match event {
             ProjectEvent::Opened { dir, sample_rate } => {
                 info!("opened project {}", dir.display());
@@ -205,64 +202,44 @@ impl ProjectDisk {
             }
             ProjectEvent::Closed(closed) => {
                 info!("closed project {}", closed.dir.display());
-                if let Some(thread) = self.open.take() {
-                    self.closing.push((thread, closed));
+                match self.open.take() {
+                    Some(thread) => self.closing.push((thread, closed)),
+                    None => {
+                        log_last_takes(&finish_closed(state, closed, &[], |_| Latency::default()));
+                    }
                 }
             }
         }
     }
 
-    /// After the JACK client stopped, which ended every open Take: adds the last Takes to the Projects closing and to the one still open; a closing Project is saved, the open one autosaved when it changed.
-    fn finish_at_stop(self, open: Option<ClosedProject>, latencies: &[Latency]) {
+    /// After the JACK client stopped, which ended every open Take: adds the last Takes to the Projects closing, which are saved, and to the one still open, which is autosaved when it changed.
+    fn finish_at_stop(
+        self,
+        state: &mut EngineState,
+        open: Option<ClosedProject>,
+        latencies: &[Latency],
+    ) {
         let latency = |track: usize| latencies.get(track).copied().unwrap_or_default();
-        for (thread, mut closed) in self.closing {
-            if add_last_takes(thread, &mut closed, latency) {
-                save_project(&closed);
-            }
+        for (thread, closed) in self.closing {
+            log_last_takes(&finish_closed(state, closed, &thread.stop(), latency));
         }
-        let (Some(thread), Some(mut open)) = (self.open, open) else {
+        let Some(open) = open else {
             return;
         };
-        if add_last_takes(thread, &mut open, latency) || open.changed {
-            match open.project.save_autosave(&open.dir) {
-                Ok(()) => info!("autosaved {}", open.dir.display()),
-                Err(err) => warn!("cannot autosave: {err}"),
-            }
-        }
+        let finished = self.open.map(DiskThread::stop).unwrap_or_default();
+        log_last_takes(&finish_stopped(open, &finished, latency));
     }
 }
 
-/// Stops the disk thread and adds the Takes it finished to `closed`; returns whether any was added.
-fn add_last_takes(
-    thread: DiskThread,
-    closed: &mut ClosedProject,
-    latency: impl Fn(usize) -> Latency,
-) -> bool {
-    let mut added = false;
-    for take in thread.stop() {
-        let placed = add_finished_take(
-            &mut closed.project,
-            &closed.dir,
-            &mut HashMap::new(),
-            &take,
-            latency(take.track),
-        );
-        match placed {
-            Ok(Some(_)) => {
-                info!("recorded {}: {} frames", take.file, take.span.frames);
-                added = true;
-            }
-            Ok(None) => warn!("take {} has no track; its file is kept", take.file),
-            Err(err) => warn!("cannot load take {}: {err}", take.file),
-        }
+fn log_last_takes(last: &LastTakes) {
+    for file in &last.added {
+        info!("added take {file}");
     }
-    added
-}
-
-fn save_project(closed: &ClosedProject) {
-    match closed.project.save(&closed.dir) {
-        Ok(()) => info!("saved {}", closed.dir.display()),
-        Err(err) => warn!("cannot save {}: {err}", closed.dir.display()),
+    for failure in &last.failures {
+        warn!("{failure}");
+    }
+    if let Some(file) = &last.saved {
+        info!("saved {}", file.display());
     }
 }
 

@@ -24,6 +24,7 @@ pub(crate) const TEMPO_BPM: RangeInclusive<f64> = 20.0..=300.0;
 pub(crate) const METER_BEATS: RangeInclusive<u32> = 1..=16;
 pub(crate) const METER_NOTES: [u32; 4] = [2, 4, 8, 16];
 const LATENCY_OFFSET_MS: RangeInclusive<f64> = -1000.0..=1000.0;
+pub(crate) const COUNT_IN_BARS: RangeInclusive<u32> = 0..=2;
 const VOLUME_DB: RangeInclusive<f32> = -60.0..=6.0;
 const PAN: RangeInclusive<f32> = -1.0..=1.0;
 /// The largest frame a TOML integer holds, so every saved frame loads again.
@@ -39,6 +40,10 @@ pub struct Project {
     pub meter: (u32, u32),
     pub loop_region: LoopRegion,
     pub latency_offset_ms: f64,
+    /// Whether the click sounds on every beat.
+    pub click: bool,
+    /// Bars of click before Recording starts from stopped.
+    pub count_in: u32,
     pub tracks: Vec<Track>,
 }
 
@@ -111,6 +116,7 @@ pub enum ProjectError {
     Meter,
     SampleRate,
     LatencyOffset,
+    CountIn,
     Loop,
     LoopPastLastFrame,
     Volume(String),
@@ -141,6 +147,10 @@ struct ProjectFile {
     tempo_bpm: f64,
     meter: (u32, u32),
     latency_offset_ms: f64,
+    #[serde(default)]
+    click: bool,
+    #[serde(default)]
+    count_in: u32,
     loop_region: LoopRegion,
     #[serde(default)]
     tracks: Vec<TrackFile>,
@@ -194,6 +204,8 @@ impl Project {
             meter: DEFAULT_METER,
             loop_region: LoopRegion::default(),
             latency_offset_ms: 0.0,
+            click: false,
+            count_in: 0,
             tracks: Vec::new(),
         };
         let takes = dir.join(TAKES_DIR);
@@ -336,6 +348,8 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         meter: file.meter,
         loop_region: file.loop_region,
         latency_offset_ms: file.latency_offset_ms,
+        click: file.click,
+        count_in: file.count_in,
         tracks,
     };
     check_project(&project)?;
@@ -358,6 +372,9 @@ pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
     }
     if !LATENCY_OFFSET_MS.contains(&project.latency_offset_ms) {
         return Err(ProjectError::LatencyOffset);
+    }
+    if !COUNT_IN_BARS.contains(&project.count_in) {
+        return Err(ProjectError::CountIn);
     }
     let LoopRegion { start, end, on } = project.loop_region;
     if start.max(end) > LAST_FRAME {
@@ -446,6 +463,8 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
         tempo_bpm: project.tempo_bpm,
         meter: project.meter,
         latency_offset_ms: project.latency_offset_ms,
+        click: project.click,
+        count_in: project.count_in,
         loop_region: project.loop_region,
         tracks: project
             .tracks
@@ -510,6 +529,7 @@ impl fmt::Display for ProjectError {
             ProjectError::LatencyOffset => {
                 f.write_str("latency offset must be between -1000 and 1000 ms")
             }
+            ProjectError::CountIn => f.write_str("count-in must be 0, 1 or 2 bars"),
             ProjectError::Loop => f.write_str("loop start must be before loop end"),
             ProjectError::LoopPastLastFrame => f.write_str("loop region ends past the last frame"),
             ProjectError::Volume(track) => {

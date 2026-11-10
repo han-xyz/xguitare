@@ -282,6 +282,8 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
             on: true,
         },
         latency_offset_ms: 0.0,
+        click: false,
+        count_in: 0,
         tracks,
     };
     (project, takes)

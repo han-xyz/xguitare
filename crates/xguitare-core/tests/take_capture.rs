@@ -261,11 +261,13 @@ fn finished_take_is_placed_latency_compensated_and_loaded() {
         meter: (4, 4),
         loop_region: LoopRegion::default(),
         latency_offset_ms: 1.0,
+        click: false,
+        count_in: 0,
         tracks: vec![track("t")],
     };
     let mut takes = HashMap::new();
     let finished = FinishedTake {
-        track: 0,
+        track_id: 0,
         file: "takes/t-1.wav".to_string(),
         span: TakeSpan {
             start: 10_000,
@@ -277,7 +279,7 @@ fn finished_take_is_placed_latency_compensated_and_loaded() {
         capture: 100,
         playback: 200,
     };
-    let position = add_finished_take(&mut project, &dir.0, &mut takes, &finished, latency);
+    let position = add_finished_take(&mut project, &dir.0, &mut takes, 0, &finished, latency);
     assert_eq!(position.unwrap(), Some(at(9652)));
     assert_eq!(&*takes["takes/t-1.wav"], [0.5, -0.5, 0.25]);
     let item = &project.tracks[0].items[0];
@@ -289,11 +291,7 @@ fn finished_take_is_placed_latency_compensated_and_loaded() {
             frames: 3
         }]
     );
-    let gone = FinishedTake {
-        track: 5,
-        ..finished
-    };
-    let position = add_finished_take(&mut project, &dir.0, &mut takes, &gone, latency);
+    let position = add_finished_take(&mut project, &dir.0, &mut takes, 5, &finished, latency);
     assert_eq!(position.unwrap(), None);
 }
 
@@ -309,11 +307,13 @@ fn a_take_recorded_from_frame_0_starts_its_item_latency_frames_into_the_take() {
         meter: (4, 4),
         loop_region: LoopRegion::default(),
         latency_offset_ms: 0.0,
+        click: false,
+        count_in: 0,
         tracks: vec![track("t")],
     };
     let mut takes = HashMap::new();
     let finished = FinishedTake {
-        track: 0,
+        track_id: 0,
         file: "takes/t-1.wav".to_string(),
         span: TakeSpan {
             start: 0,
@@ -325,7 +325,8 @@ fn a_take_recorded_from_frame_0_starts_its_item_latency_frames_into_the_take() {
         capture: 128,
         playback: 128,
     };
-    let placed = add_finished_take(&mut project, &dir.0, &mut takes, &finished, latency).unwrap();
+    let placed =
+        add_finished_take(&mut project, &dir.0, &mut takes, 0, &finished, latency).unwrap();
     assert_eq!(
         placed,
         Some(TakePlacement {

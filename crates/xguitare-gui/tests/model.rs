@@ -3,7 +3,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use xguitare_core::project_control::Projects;
 
 use serde_json::json;
 use xguitare_client::ClientError;
@@ -11,6 +10,7 @@ use xguitare_core::control::Request;
 use xguitare_core::control::Response;
 use xguitare_core::control::{EngineState, PeakMeters, SILENCE_DB, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankKind, Config};
 use xguitare_gui::model::{

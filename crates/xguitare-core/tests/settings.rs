@@ -4,7 +4,6 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use xguitare_core::project_control::Projects;
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
@@ -13,6 +12,7 @@ use xguitare_core::control::{
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
+use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BankKind, BuildWarning, Config, Ports};
 

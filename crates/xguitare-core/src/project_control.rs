@@ -17,7 +17,7 @@ use crate::project::{
     LoopRegion, PROJECT_FILE, Project, Track, autosave_due, autosave_newer, check_project,
     check_track,
 };
-use crate::take_capture::{FinishedTake, Latency, TakeReader, add_finished_take, load_take};
+use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
 use crate::{BuildWarning, Config, Preset, PresetModule};
 
 pub(crate) const NO_PROJECT: &str = "no project open";
@@ -27,8 +27,11 @@ const EMPTY_TRACK_NAME: &str = "track name must not be empty";
 const NOTHING_ARMED: &str = "no track is armed";
 const NEEDS_POSITION: &str = "locate needs a position";
 const BAD_POSITION: &str = "position must be <bar>.<beat> or <seconds>s";
-const BAD_COUNT_IN: &str = "count-in must be 0, 1 or 2 bars";
-const MAX_COUNT_IN_BARS: u32 = 2;
+const POSITION_TOO_FAR: &str = "position is more than an hour past the end of the project";
+const STILL_CLOSING: &str = "a project is still closing; try again";
+const DIGITS_TRACK_NAME: &str = "track name must not be only digits";
+/// How far past the Project's last Item or loop end `locate` may move the playhead.
+const LOCATE_SECONDS_PAST_END: f64 = 3600.0;
 const DEFAULT_TRACK_NAME: &str = "Track";
 const SECONDS_SUFFIX: char = 's';
 
@@ -37,6 +40,8 @@ const SECONDS_SUFFIX: char = 's';
 pub struct Projects {
     open: Option<OpenProject>,
     events: Vec<ProjectEvent>,
+    /// Closed Projects whose last Takes the Daemon has not yet added and saved.
+    closing: usize,
 }
 
 struct OpenProject {
@@ -46,25 +51,26 @@ struct OpenProject {
     selected: usize,
     /// Whether the last transport request was `record`; `play` and `stop` end it.
     recording: bool,
-    click: bool,
-    count_in: u32,
+    /// One id per Track, in Track order, that stays the Track's while others are added or removed; finished Takes name their Track by it.
+    track_ids: Vec<u64>,
+    next_track_id: u64,
     /// Whether the Project changed since it was opened, saved or autosaved.
     changed: bool,
     last_autosave: Instant,
 }
 
-/// Take readers, one per Track in Track order, each with its Track's name.
-pub type TrackReaders = Vec<(String, TakeReader)>;
+/// Take readers, one per Track in Track order.
+pub type TrackReaders = Vec<TrackReader>;
 
 /// Work for the Daemon, in the order it arose.
 pub enum ProjectEvent {
     /// Start a disk thread writing Takes under `dir` at `sample_rate`.
     Opened { dir: PathBuf, sample_rate: u32 },
-    /// Queue these Take readers, one per Track in Track order with the Track's name, on the disk thread.
+    /// Queue these Take readers on the disk thread.
     Readers(TrackReaders),
     /// Connect Track n's input port to `inputs[n]`, disconnecting the rest.
     Inputs(Vec<Option<String>>),
-    /// Stop the disk thread; the Takes it still finishes belong to this Project, to be added and saved.
+    /// Stop the disk thread and hand the Takes it still finishes to [`finish_closed`].
     Closed(ClosedProject),
 }
 
@@ -73,6 +79,17 @@ pub struct ClosedProject {
     pub project: Project,
     /// Whether it changed since it was last saved or autosaved.
     pub changed: bool,
+    track_ids: Vec<u64>,
+}
+
+/// What [`finish_closed`] and [`finish_stopped`] did, for the Daemon to log.
+#[derive(Debug, Default)]
+pub struct LastTakes {
+    /// The Take files added.
+    pub added: Vec<String>,
+    pub failures: Vec<String>,
+    /// The file written, if any.
+    pub saved: Option<PathBuf>,
 }
 
 /// The events since the last call.
@@ -80,23 +97,24 @@ pub fn take_project_events(state: &mut EngineState) -> Vec<ProjectEvent> {
     std::mem::take(&mut state.projects.events)
 }
 
-/// Adds the Takes the disk thread finished, each with its Track's latency, to the open Project and swaps in an Arrangement that plays them; returns one message per Take that could not be added.
+/// Adds the Takes the disk thread finished to the open Project, each on the Track its id names at the latency `latency` gives for that Track's index, and swaps in an Arrangement that plays them; returns one message per Take that could not be added.
 pub fn add_finished_takes(
     state: &mut EngineState,
-    finished: &[(FinishedTake, Latency)],
+    finished: &[FinishedTake],
+    latency: impl FnMut(usize) -> Latency,
 ) -> Vec<String> {
     let Some(open) = state.projects.open.as_mut() else {
         return Vec::new();
     };
     let mut project = open.project.clone();
-    let mut failures = Vec::new();
-    for (take, latency) in finished {
-        if let Err(err) =
-            add_finished_take(&mut project, &open.dir, &mut open.takes, take, *latency)
-        {
-            failures.push(format!("cannot load take {}: {err}", take.file));
-        }
-    }
+    let (_, mut failures) = add_takes(
+        &mut project,
+        &open.dir,
+        &mut open.takes,
+        &open.track_ids,
+        finished,
+        latency,
+    );
     let mut warnings = Vec::new();
     if let Err(err) = swap_project(state, project, &mut warnings) {
         failures.push(format!("cannot play the new takes: {err}"));
@@ -128,7 +146,102 @@ pub fn close_for_stop(state: &mut EngineState) -> Option<ClosedProject> {
         dir: open.dir,
         project: open.project,
         changed: open.changed,
+        track_ids: open.track_ids,
     })
+}
+
+/// Adds the last Takes of a Project `project_close` closed and saves its `project.toml` when any was added; from then on Projects can be opened again.
+pub fn finish_closed(
+    state: &mut EngineState,
+    mut closed: ClosedProject,
+    finished: &[FinishedTake],
+    latency: impl FnMut(usize) -> Latency,
+) -> LastTakes {
+    state.projects.closing = state.projects.closing.saturating_sub(1);
+    let mut last = last_takes(&mut closed, finished, latency);
+    if !last.added.is_empty() {
+        save_closed(
+            &closed,
+            &mut last,
+            Project::save,
+            crate::project::PROJECT_FILE,
+        );
+    }
+    last
+}
+
+/// Adds the last Takes of the Project open when the Daemon stopped and writes its `project.autosave.toml` when it changed or any Take was added.
+pub fn finish_stopped(
+    mut closed: ClosedProject,
+    finished: &[FinishedTake],
+    latency: impl FnMut(usize) -> Latency,
+) -> LastTakes {
+    let mut last = last_takes(&mut closed, finished, latency);
+    if closed.changed || !last.added.is_empty() {
+        save_closed(
+            &closed,
+            &mut last,
+            Project::save_autosave,
+            crate::project::AUTOSAVE_FILE,
+        );
+    }
+    last
+}
+
+fn last_takes(
+    closed: &mut ClosedProject,
+    finished: &[FinishedTake],
+    latency: impl FnMut(usize) -> Latency,
+) -> LastTakes {
+    let (added, failures) = add_takes(
+        &mut closed.project,
+        &closed.dir,
+        &mut HashMap::new(),
+        &closed.track_ids,
+        finished,
+        latency,
+    );
+    LastTakes {
+        added,
+        failures,
+        saved: None,
+    }
+}
+
+fn save_closed(
+    closed: &ClosedProject,
+    last: &mut LastTakes,
+    save: impl Fn(&Project, &Path) -> Result<(), crate::project::ProjectError>,
+    file: &str,
+) {
+    match save(&closed.project, &closed.dir) {
+        Ok(()) => last.saved = Some(closed.dir.join(file)),
+        Err(err) => last.failures.push(err.to_string()),
+    }
+}
+
+/// Adds each finished Take to the Track whose id it names; returns the files added and one message per Take that was not.
+fn add_takes(
+    project: &mut Project,
+    dir: &Path,
+    takes: &mut HashMap<String, Arc<[f32]>>,
+    track_ids: &[u64],
+    finished: &[FinishedTake],
+    mut latency: impl FnMut(usize) -> Latency,
+) -> (Vec<String>, Vec<String>) {
+    let mut added = Vec::new();
+    let mut failures = Vec::new();
+    for take in finished {
+        let Some(track) = track_ids.iter().position(|id| *id == take.track_id) else {
+            failures.push(format!("take {} has no track; its file is kept", take.file));
+            continue;
+        };
+        match add_finished_take(project, dir, takes, track, take, latency(track)) {
+            Ok(_) => added.push(take.file.clone()),
+            Err(err) => failures.push(format!("cannot load take {}: {err}", take.file)),
+        }
+    }
+    (added, failures)
 }
 
 /// The Track a Rack request edits: `None` while no Project is open and no Track is named, else the named Track or the selected one.
@@ -186,16 +299,25 @@ pub(crate) fn change_track_module(
 }
 
 pub(crate) fn project_new(state: &mut EngineState, name: &str) -> Result<Value, String> {
-    if state.projects.open.is_some() {
-        return Err(PROJECT_IS_OPEN.to_string());
-    }
+    check_none_open(state)?;
     let (dir, mut project) =
         Project::new(&state.config.projects_dir, name).map_err(|err| err.to_string())?;
     project.sample_rate = state.sample_rate as u32;
     project.save(&dir).map_err(|err| err.to_string())?;
     let payload = json!({"name": project.name, "path": dir.display().to_string()});
-    open(state, dir, project, HashMap::new())?;
+    open(state, dir, project, HashMap::new())
+        .map_err(|err| format!("{err}; the project was created, open it with project_open"))?;
     Ok(payload)
+}
+
+fn check_none_open(state: &EngineState) -> Result<(), String> {
+    if state.projects.open.is_some() {
+        return Err(PROJECT_IS_OPEN.to_string());
+    }
+    if state.projects.closing > 0 {
+        return Err(STILL_CLOSING.to_string());
+    }
+    Ok(())
 }
 
 pub(crate) fn project_open(
@@ -203,9 +325,7 @@ pub(crate) fn project_open(
     name: &str,
     restore: bool,
 ) -> Result<Value, String> {
-    if state.projects.open.is_some() {
-        return Err(PROJECT_IS_OPEN.to_string());
-    }
+    check_none_open(state)?;
     let folder = slug(name);
     let dir = state.config.projects_dir.join(&folder);
     if folder.is_empty() || !dir.join(PROJECT_FILE).is_file() {
@@ -272,7 +392,9 @@ pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
             dir: open.dir,
             project: open.project,
             changed: false,
+            track_ids: open.track_ids,
         }));
+    state.projects.closing += 1;
     state.revision += 1;
     Ok(payload)
 }
@@ -313,8 +435,12 @@ pub(crate) fn track_add(state: &mut EngineState, name: Option<&str>) -> Result<V
         .add_track(Track::from_preset(&name, &preset))
         .map_err(|err| err.to_string())?;
     let index = project.tracks.len() - 1;
-    swap_project(state, project, &mut Vec::new())?;
-    open_project_mut(state).selected = index;
+    let mut track_ids = open.track_ids.clone();
+    track_ids.push(open.next_track_id);
+    swap_project_with_ids(state, project, track_ids, &mut Vec::new())?;
+    let open = open_project_mut(state);
+    open.next_track_id += 1;
+    open.selected = index;
     Ok(json!({"index": index, "name": name}))
 }
 
@@ -326,7 +452,9 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     }
     let mut project = open.project.clone();
     let removed = project.tracks.remove(index);
-    swap_project(state, project, &mut Vec::new())?;
+    let mut track_ids = open.track_ids.clone();
+    track_ids.remove(index);
+    swap_project_with_ids(state, project, track_ids, &mut Vec::new())?;
     let open = open_project_mut(state);
     if index < open.selected {
         open.selected -= 1;
@@ -503,20 +631,13 @@ pub(crate) fn click(
     count_in: Option<u32>,
 ) -> Result<Value, String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
-    if count_in.is_some_and(|bars| bars > MAX_COUNT_IN_BARS) {
-        return Err(BAD_COUNT_IN.to_string());
-    }
-    let (on, count_in) = (on.unwrap_or(open.click), count_in.unwrap_or(open.count_in));
-    send(
-        state,
-        &[
-            ArrangementCommand::Click(on),
-            ArrangementCommand::CountIn(count_in),
-        ],
-    )?;
-    let open = open_project_mut(state);
-    (open.click, open.count_in) = (on, count_in);
-    state.revision += 1;
+    let mut project = open.project.clone();
+    project.click = on.unwrap_or(project.click);
+    project.count_in = count_in.unwrap_or(project.count_in);
+    check_project(&project).map_err(|err| err.to_string())?;
+    let (on, count_in) = (project.click, project.count_in);
+    send(state, &click_commands(&project))?;
+    commit(state, project);
     Ok(json!({"on": on, "count_in": count_in}))
 }
 
@@ -582,7 +703,7 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
         ("loop", json!({"start": start, "end": end, "on": on})),
         (
             "click",
-            json!({"on": open.click, "count_in": open.count_in}),
+            json!({"on": project.click, "count_in": project.count_in}),
         ),
         ("selected", json!(open.selected)),
         ("tracks", json!(tracks)),
@@ -598,6 +719,7 @@ fn open(
     project: Project,
     takes: HashMap<String, Arc<[f32]>>,
 ) -> Result<(), String> {
+    let track_ids: Vec<u64> = (0..project.tracks.len() as u64).collect();
     let (readers, _) = start_arrangement(
         &state.config,
         &mut state.queues,
@@ -605,7 +727,10 @@ fn open(
         state.max_frames,
         &project,
         &takes,
+        &track_ids,
     )?;
+    // The swap is queued, so the commands after it reach the new Arrangement; a full queue leaves the click off until the next `click`.
+    let _ = send(state, &click_commands(&project));
     let events = &mut state.projects.events;
     events.push(ProjectEvent::Opened {
         dir: dir.clone(),
@@ -619,8 +744,8 @@ fn open(
         takes,
         selected: 0,
         recording: false,
-        click: false,
-        count_in: 0,
+        next_track_id: track_ids.len() as u64,
+        track_ids,
         changed: false,
         last_autosave: Instant::now(),
     });
@@ -634,6 +759,23 @@ fn swap_project(
     project: Project,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
+    let track_ids = state
+        .projects
+        .open
+        .as_ref()
+        .ok_or(NO_PROJECT)?
+        .track_ids
+        .clone();
+    swap_project_with_ids(state, project, track_ids, warnings)
+}
+
+/// [`swap_project`] for a `project` whose Tracks have the ids `track_ids`.
+fn swap_project_with_ids(
+    state: &mut EngineState,
+    project: Project,
+    track_ids: Vec<u64>,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<(), String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
     let (readers, build_warnings) = start_arrangement(
         &state.config,
@@ -642,11 +784,20 @@ fn swap_project(
         state.max_frames,
         &project,
         &open.takes,
+        &track_ids,
     )?;
     warnings.extend(build_warnings);
     state.projects.events.push(ProjectEvent::Readers(readers));
+    open_project_mut(state).track_ids = track_ids;
     commit(state, project);
     Ok(())
+}
+
+fn click_commands(project: &Project) -> [ArrangementCommand; 2] {
+    [
+        ArrangementCommand::Click(project.click),
+        ArrangementCommand::CountIn(project.count_in),
+    ]
 }
 
 fn commit(state: &mut EngineState, project: Project) {
@@ -663,12 +814,22 @@ fn start_arrangement(
     max_frames: usize,
     project: &Project,
     takes: &HashMap<String, Arc<[f32]>>,
+    track_ids: &[u64],
 ) -> Result<(TrackReaders, Vec<BuildWarning>), String> {
     let (mut arrangement, warnings) =
         build_arrangement(config, project, takes, sample_rate, max_frames)
             .map_err(|err| err.to_string())?;
-    let names = project.tracks.iter().map(|track| track.name.clone());
-    let readers = names.zip(arrangement.take_readers()).collect();
+    let readers = project
+        .tracks
+        .iter()
+        .zip(track_ids)
+        .zip(arrangement.take_readers())
+        .map(|((track, &track_id), reader)| TrackReader {
+            track_id,
+            name: track.name.clone(),
+            reader,
+        })
+        .collect();
     swap_arrangement(queues, arrangement)?;
     Ok((readers, warnings))
 }
@@ -719,6 +880,9 @@ fn checked_name(project: &Project, name: &str, except: Option<usize>) -> Result<
     if name.is_empty() {
         return Err(EMPTY_TRACK_NAME.to_string());
     }
+    if name.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(DIGITS_TRACK_NAME.to_string());
+    }
     let taken = project.tracks.iter().enumerate().any(|(idx, track)| {
         Some(idx) != except && track.name.to_lowercase() == name.to_lowercase()
     });
@@ -751,18 +915,28 @@ fn frames_per_beat(project: &Project) -> f64 {
     f64::from(project.sample_rate) * 60.0 / project.tempo_bpm
 }
 
-/// The frame of `<bar>.<beat>` or `<bar>` (both from 1, the beat within the meter) or `<seconds>s`; a frame number is taken as it is.
+/// The frame of `<bar>.<beat>` or `<bar>` (both from 1, the beat within the meter), `<seconds>s` or a frame number, at most an hour past the Project's end.
 fn locate_frame(project: &Project, position: &Position) -> Result<u64, String> {
-    let text = match position {
-        Position::Frames(frames) => return Ok(*frames),
-        Position::Text(text) => text.trim(),
+    let frame = match position {
+        Position::Frames(frames) => *frames as f64,
+        Position::Text(text) => text_frame(project, text.trim())?,
     };
+    let last =
+        project_end(project) as f64 + LOCATE_SECONDS_PAST_END * f64::from(project.sample_rate);
+    if frame > last {
+        return Err(POSITION_TOO_FAR.to_string());
+    }
+    Ok(frame as u64)
+}
+
+/// The frame a text position names, rounded; not bounded.
+fn text_frame(project: &Project, text: &str) -> Result<f64, String> {
     if let Some(seconds) = text.strip_suffix(SECONDS_SUFFIX) {
         let seconds: f64 = seconds.parse().map_err(|_| BAD_POSITION)?;
-        if !seconds.is_finite() || seconds < 0.0 {
+        if !seconds.is_finite() || seconds.is_sign_negative() {
             return Err(BAD_POSITION.to_string());
         }
-        return Ok((seconds * f64::from(project.sample_rate)).round() as u64);
+        return Ok((seconds * f64::from(project.sample_rate)).round());
     }
     let (bar, beat) = text.split_once('.').unwrap_or((text, "1"));
     let (Ok(bar), Ok(beat)) = (bar.parse::<u64>(), beat.parse::<u64>()) else {
@@ -772,8 +946,22 @@ fn locate_frame(project: &Project, position: &Position) -> Result<u64, String> {
     if bar == 0 || beat == 0 || beat > beats_per_bar {
         return Err(BAD_POSITION.to_string());
     }
-    let beat_index = (bar - 1) * beats_per_bar + (beat - 1);
-    Ok((beat_index as f64 * frames_per_beat(project)).round() as u64)
+    let beat_index = (bar - 1) as f64 * beats_per_bar as f64 + (beat - 1) as f64;
+    Ok((beat_index * frames_per_beat(project)).round())
+}
+
+/// The last frame any Take or the loop region reaches.
+fn project_end(project: &Project) -> u64 {
+    let items = project.tracks.iter().flat_map(|track| &track.items);
+    let item_ends = items.flat_map(|item| {
+        item.takes
+            .iter()
+            .map(|take| item.position.saturating_add(take.frames))
+    });
+    item_ends
+        .chain([project.loop_region.end])
+        .max()
+        .unwrap_or(0)
 }
 
 fn bars_beats(project: &Project, frames: u64) -> String {
