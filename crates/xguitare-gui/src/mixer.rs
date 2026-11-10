@@ -11,8 +11,8 @@ use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
-    SendView, StereoPeakHold, default_render_name, fader_db, fader_position, mixer_columns,
-    render_view, send_fraction, send_level, send_text,
+    SendView, ShownRack, StereoPeakHold, default_render_name, fader_db, fader_position,
+    mixer_columns, render_view, send_fraction, send_level, send_text,
 };
 use crate::model::{Command, LADDER_RED_DB, LADDER_YELLOW_DB, Snapshot, TrackEdit, palette};
 use crate::project::{PAN, lit_button, released_value, track_knob};
@@ -48,7 +48,7 @@ const BITS: [(RenderBits, &str); 3] = [
 #[derive(Debug, Default)]
 pub struct MixerView {
     pub open: bool,
-    pub rack: Option<MixerTarget>,
+    pub rack: Option<ShownRack>,
     pub holds: HashMap<MixerTarget, StereoPeakHold>,
     pub render: Option<RenderDraft>,
 }
@@ -64,7 +64,7 @@ impl MixerView {
     }
 
     /// The Rack shown under the panel, while it is open.
-    pub fn shown_rack(&self) -> Option<MixerTarget> {
+    pub fn shown_rack(&self) -> Option<ShownRack> {
         self.rack.filter(|_| self.open)
     }
 
@@ -72,7 +72,7 @@ impl MixerView {
     pub fn shows_stereo_rack(&self) -> bool {
         matches!(
             self.shown_rack(),
-            Some(MixerTarget::Bus(_) | MixerTarget::Master)
+            Some(ShownRack::Bus(_) | ShownRack::Master)
         )
     }
 }
@@ -119,13 +119,15 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
     let selected = status["selected"]
         .as_u64()
         .and_then(|index| usize::try_from(index).ok());
+    let open = view.rack.and_then(|shown| shown.column(status));
     let show_column = |ui: &mut Ui, column: &MixerColumn| {
         let hold = view.holds.get(&column.target).copied().unwrap_or_default();
         let shape = Shape {
             bus_names: &bus_names,
             send_rows: bus_names.len(),
             selected,
-            open: view.rack == Some(column.target),
+            open: open == Some(column.target),
+            rack: ShownRack::of(status, column.target),
         };
         mixer_column(ui, column, hold, &shape)
     };
@@ -156,6 +158,7 @@ struct Shape<'a> {
     send_rows: usize,
     selected: Option<usize>,
     open: bool,
+    rack: Option<ShownRack>,
 }
 
 fn mixer_column(
@@ -225,7 +228,7 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
         {
             commands.push(Command::TrackSelect(index));
         }
-        commands.push(Command::ShowRack(column.target));
+        commands.extend(shape.rack.map(Command::ShowRack));
     }
     if let MixerTarget::Bus(index) = column.target {
         response.context_menu(|ui| {

@@ -207,7 +207,13 @@ impl App {
         let mut aimed = None;
         for command in commands {
             match command {
-                Command::ShowRack(target) => aimed = Some(*target),
+                Command::ShowRack(shown) => {
+                    aimed = self
+                        .snapshot
+                        .status
+                        .as_ref()
+                        .and_then(|status| shown.column(status));
+                }
                 Command::RackRemove { id } => {
                     let status = self.snapshot.status.as_ref();
                     let removed = self
@@ -239,11 +245,11 @@ impl App {
 impl App {
     /// Aims every Rack request at the Rack the window shows ([`aim_rack_commands`]) and takes the window's own commands out: Ctrl+M or `Mixer` opens or closes the mixer panel, Ctrl+Alt+R or `Render` opens the Render dialog.
     fn keep_window_commands(&mut self, commands: Vec<Command>) -> Vec<Command> {
-        let focus = RackFocus {
-            mixer_open: self.mixer.open,
-            shown: self.mixer.rack,
-            selected: self.snapshot.status.as_ref().and_then(selected_index),
-        };
+        let focus = RackFocus::new(
+            self.mixer.open,
+            self.mixer.rack,
+            self.snapshot.status.as_ref(),
+        );
         let (mut commands, focus) = aim_rack_commands(focus, commands);
         self.mixer.open = focus.mixer_open;
         self.mixer.rack = focus.shown;
@@ -567,7 +573,7 @@ fn central_view(
         ui.add_space(MIXER_GAP);
     }
     let shown = if mixer.open {
-        mixer.rack
+        mixer.rack.and_then(|shown| shown.column(status))
     } else {
         selected_index(status).map(MixerTarget::Track)
     };

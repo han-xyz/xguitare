@@ -8,7 +8,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::mixer_model::{MixerTarget, rack_selectors};
+use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::model::{
     Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
     ir_names, module_types, param_rows, refresh_decision, refused_remove, refused_render,
@@ -63,7 +63,7 @@ struct Client {
     projects_fetched: bool,
     tuner_answered: bool,
     /// The Rack the window last named; a Track stands for the selected one.
-    shown_rack: Option<MixerTarget>,
+    shown_rack: Option<ShownRack>,
     snapshot: Snapshot,
 }
 
@@ -184,7 +184,7 @@ impl Client {
         }
         let rack = self.rack_target();
         let rack_moved = self.follow_shown_rack(&queued);
-        let (requests, quit) = requests_until_quit(queued, rack);
+        let (requests, quit) = requests_until_quit(queued, rack, self.snapshot.status.as_ref());
         let sent = requests.len();
         for outgoing in requests {
             match outgoing {
@@ -283,10 +283,8 @@ impl Client {
     fn rack_target(&self) -> Option<MixerTarget> {
         let status = self.snapshot.status.as_ref()?;
         project_name(Some(status))?;
-        let buses = status["buses"].as_array().map_or(0, Vec::len);
-        match self.shown_rack {
-            Some(MixerTarget::Bus(index)) if index < buses => Some(MixerTarget::Bus(index)),
-            Some(MixerTarget::Master) => Some(MixerTarget::Master),
+        match self.shown_rack.and_then(|shown| shown.column(status)) {
+            Some(target @ (MixerTarget::Bus(_) | MixerTarget::Master)) => Some(target),
             _ => usize::try_from(status["selected"].as_u64()?)
                 .ok()
                 .map(MixerTarget::Track),

@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
-use xguitare_gui::mixer_model::MixerTarget;
+use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{
     Command, KeyEvent, KeyModifiers, Outgoing, RemovedUnit, TrackEdit, requests_until_quit,
     response_text, restore,
@@ -452,7 +452,7 @@ fn rack_requests_carry_the_selected_track() {
             on: true,
         },
     ];
-    let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(1)));
+    let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(1)), None);
     assert!(!quit);
     assert_eq!(
         outgoing,
@@ -479,9 +479,9 @@ fn rack_requests_carry_the_selected_track() {
 }
 
 #[test]
-fn rack_requests_follow_show_rack_to_a_bus_and_master() {
+fn rack_requests_find_the_shown_bus_by_id_and_master() {
     let queued = vec![
-        Command::ShowRack(MixerTarget::Bus(1)),
+        Command::ShowRack(ShownRack::Bus(3)),
         Command::RackAdd {
             type_name: "reverb".to_string(),
             after: None,
@@ -491,12 +491,13 @@ fn rack_requests_follow_show_rack_to_a_bus_and_master() {
             param: "reverb.mix".to_string(),
             value: 40.0,
         },
-        Command::ShowRack(MixerTarget::Master),
+        Command::ShowRack(ShownRack::Master),
         Command::RackRemove {
             id: "compressor".to_string(),
         },
     ];
-    let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(0)));
+    let status = json!({"buses": [{"id": 0, "name": "Verb"}, {"id": 3, "name": "Delay"}]});
+    let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(0)), Some(&status));
     assert!(!quit);
     assert_eq!(
         outgoing,
@@ -554,7 +555,7 @@ fn project_commands_become_their_requests() {
         Command::RestoreAutosave("Demo Song".to_string()),
         Command::RefreshProjects,
     ];
-    let (outgoing, _) = requests_until_quit(queued, None);
+    let (outgoing, _) = requests_until_quit(queued, None, None);
     let request = |req| Outgoing::Request(req);
     assert_eq!(
         outgoing,

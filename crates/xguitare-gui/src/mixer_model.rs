@@ -4,7 +4,7 @@ use serde_json::Value;
 use xguitare_core::control::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
 use crate::model::Command;
-use crate::project_model::project_name;
+use crate::project_model::{project_name, track_rows};
 
 /// The fader position of 0 dB; the top is +6 dB.
 pub const FADER_UNITY: f32 = 0.75;
@@ -241,20 +241,78 @@ pub fn rack_selectors(rack: Option<MixerTarget>) -> (Option<TrackRef>, Option<Bu
     }
 }
 
-/// What the window knows of the Rack it shows: the mixer panel's open state and the column it opened, and the selected Track (`None` with no Project open).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// The Rack the window shows, by what stays the same while Tracks and Buses come and go: the selected Track's (a Track's column selects it), a Bus by its status `id`, or Master's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShownRack {
+    Track,
+    Bus(u64),
+    Master,
+}
+
+impl ShownRack {
+    /// The Rack of a mixer column of `status`.
+    pub fn of(status: &Value, target: MixerTarget) -> Option<ShownRack> {
+        match target {
+            MixerTarget::Track(_) => Some(ShownRack::Track),
+            MixerTarget::Bus(index) => status["buses"][index]["id"].as_u64().map(ShownRack::Bus),
+            MixerTarget::Master => Some(ShownRack::Master),
+        }
+    }
+
+    /// Its column in `status` now; `None` once its Bus is gone, or with no Track selected.
+    pub fn column(self, status: &Value) -> Option<MixerTarget> {
+        match self {
+            ShownRack::Track => selected_track(status).map(MixerTarget::Track),
+            ShownRack::Bus(id) => entries(&status["buses"])
+                .iter()
+                .position(|bus| bus["id"].as_u64() == Some(id))
+                .map(MixerTarget::Bus),
+            ShownRack::Master => Some(MixerTarget::Master),
+        }
+    }
+}
+
+fn selected_track(status: &Value) -> Option<usize> {
+    track_rows(status)
+        .into_iter()
+        .find(|row| row.selected)
+        .map(|row| row.index)
+}
+
+/// What the window knows of the Rack it shows: the mixer panel's open state and the Rack it opened, the selected Track (`None` with no Project open), and the Bus ids in column order.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RackFocus {
     pub mixer_open: bool,
-    pub shown: Option<MixerTarget>,
+    pub shown: Option<ShownRack>,
     pub selected: Option<usize>,
+    pub bus_ids: Vec<u64>,
 }
 
 impl RackFocus {
-    /// The Rack that Rack requests act on: the column opened in the mixer panel while it is open, else the selected Track's.
-    pub fn target(&self) -> Option<MixerTarget> {
+    /// The focus over `status`; a shown Rack whose Bus is gone from it is closed.
+    pub fn new(mixer_open: bool, shown: Option<ShownRack>, status: Option<&Value>) -> RackFocus {
+        let Some(status) = status else {
+            return RackFocus {
+                mixer_open,
+                ..RackFocus::default()
+            };
+        };
+        RackFocus {
+            mixer_open,
+            shown: shown.filter(|shown| shown.column(status).is_some()),
+            selected: selected_track(status),
+            bus_ids: entries(&status["buses"])
+                .iter()
+                .filter_map(|bus| bus["id"].as_u64())
+                .collect(),
+        }
+    }
+
+    /// The Rack that Rack requests act on: the one opened in the mixer panel while it is open, else the selected Track's.
+    pub fn target(&self) -> Option<ShownRack> {
         self.shown
             .filter(|_| self.mixer_open)
-            .or(self.selected.map(MixerTarget::Track))
+            .or(self.selected.map(|_| ShownRack::Track))
     }
 
     fn follow(&mut self, command: &Command) {
@@ -263,24 +321,23 @@ impl RackFocus {
             Command::TrackSelect(index) => {
                 self.selected = Some(*index);
                 if self.shown.is_some() {
-                    self.shown = Some(MixerTarget::Track(*index));
+                    self.shown = Some(ShownRack::Track);
                 }
             }
             Command::BusRemove(removed) => {
-                self.shown = match self.shown {
-                    Some(MixerTarget::Bus(index)) if index == *removed => None,
-                    Some(MixerTarget::Bus(index)) if index > *removed => {
-                        Some(MixerTarget::Bus(index - 1))
+                if *removed < self.bus_ids.len() {
+                    let id = self.bus_ids.remove(*removed);
+                    if self.shown == Some(ShownRack::Bus(id)) {
+                        self.shown = None;
                     }
-                    shown => shown,
-                };
+                }
             }
             Command::ToggleMixer => {
                 self.mixer_open = !self.mixer_open;
                 self.shown = self
                     .selected
                     .filter(|_| self.mixer_open)
-                    .map(MixerTarget::Track);
+                    .map(|_| ShownRack::Track);
             }
             Command::ProjectNew(_)
             | Command::ProjectOpen(_)

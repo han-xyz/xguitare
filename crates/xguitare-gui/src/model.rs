@@ -11,7 +11,7 @@ use xguitare_core::control::{
 use xguitare_core::project::LoopRegion;
 use xguitare_core::render::{RenderBits, RenderRange};
 
-use crate::mixer_model::{MixerTarget, rack_selectors};
+use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::project_model::AutosaveOffer;
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
@@ -163,7 +163,7 @@ pub enum Command {
     MasterSet(f32),
     ClipReset(MixerTarget),
     /// Sends nothing itself: the Rack requests after it, and the client thread's `get`, act on this Rack; a Track stands for the selected one.
-    ShowRack(MixerTarget),
+    ShowRack(ShownRack),
     Render {
         range: RenderRange,
         bits: RenderBits,
@@ -1010,11 +1010,12 @@ pub enum Outgoing {
     RestoreAutosave(String),
 }
 
-/// `rack` is the Rack the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] or [`Command::ShowRack`] moves it for the commands after it.
+/// `rack` is the Rack the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] or [`Command::ShowRack`] moves it for the commands after it, a shown Bus found in `status` by its id and a shown Track's Rack left to the Daemon's selected Track.
 #[allow(clippy::too_many_lines, reason = "one match arm per queued command")]
 pub fn requests_until_quit(
     queued: Vec<Command>,
     rack: Option<MixerTarget>,
+    status: Option<&Value>,
 ) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
     let mut rack = rack;
@@ -1164,8 +1165,10 @@ pub fn requests_until_quit(
                 name,
             },
             Command::RenderCancel => Request::RenderCancel,
-            Command::ShowRack(target) => {
-                rack = Some(target);
+            Command::ShowRack(shown) => {
+                rack = status
+                    .and_then(|status| shown.column(status))
+                    .filter(|target| !matches!(target, MixerTarget::Track(_)));
                 continue;
             }
             Command::Restore(restore) => {

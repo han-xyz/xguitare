@@ -15,7 +15,7 @@ use xguitare_core::project::LoopRegion;
 use xguitare_core::render::{RenderBits, RenderRange};
 use xguitare_core::{BankKind, Config};
 use xguitare_gui::app::App;
-use xguitare_gui::mixer_model::MixerTarget;
+use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
 use xguitare_gui::project_model::AutosaveOffer;
 
@@ -548,17 +548,16 @@ fn undo_after_selecting_another_track_restores_to_the_first() {
     harness.run_steps(2);
     let sent = sent_now(&sent);
     assert_eq!(
-        sent[..4],
+        sent[..3],
         [
-            Command::ShowRack(MixerTarget::Track(0)),
+            Command::ShowRack(ShownRack::Track),
             Command::RackRemove {
                 id: "compressor".to_string(),
             },
             Command::TrackSelect(1),
-            Command::ShowRack(MixerTarget::Track(1)),
         ]
     );
-    let Command::Restore(restore) = &sent[4] else {
+    let Command::Restore(restore) = &sent[3] else {
         panic!("no Restore in {sent:?}");
     };
     assert_eq!(restore.track, Some(TrackRef::Name("Guitar".to_string())));
@@ -612,13 +611,7 @@ fn clicking_a_track_row_selects_it() {
     let (mut harness, sent, _dir) = project_harness("stopped");
     harness.get_by_label("Track Keys").click();
     harness.run_steps(2);
-    assert_eq!(
-        sent_now(&sent),
-        [
-            Command::TrackSelect(2),
-            Command::ShowRack(MixerTarget::Track(2))
-        ]
-    );
+    assert_eq!(sent_now(&sent), [Command::TrackSelect(2)]);
 }
 
 #[test]
@@ -1233,7 +1226,7 @@ fn mixer_columns_send_their_commands() {
                 solo: Some(false),
             },
             Command::BusAdd,
-            Command::ShowRack(MixerTarget::Bus(0)),
+            Command::ShowRack(ShownRack::Bus(0)),
         ]
     );
     assert!(harness.query_by_label("Verb — Rack").is_some());
@@ -1241,7 +1234,7 @@ fn mixer_columns_send_their_commands() {
     assert_eq!(sent_now(&sent), []);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
-    assert_eq!(sent_now(&sent), [Command::ShowRack(MixerTarget::Track(0))]);
+    assert_eq!(sent_now(&sent), [Command::ShowRack(ShownRack::Track)]);
     assert!(harness.query_by_label("Rack of Master").is_none());
     assert!(harness.query_by_label("Guitar — Rack").is_some());
 }

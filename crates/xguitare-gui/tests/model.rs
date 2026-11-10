@@ -180,9 +180,9 @@ fn commands_before_quit_are_sent_in_order() {
         },
     ];
     let expected = expected.into_iter().map(Outgoing::Request).collect();
-    assert_eq!(requests_until_quit(queued, None), (expected, true));
+    assert_eq!(requests_until_quit(queued, None, None), (expected, true));
     assert_eq!(
-        requests_until_quit(vec![Command::Load("Lead".to_string())], None),
+        requests_until_quit(vec![Command::Load("Lead".to_string())], None, None),
         (
             vec![Outgoing::Request(Request::Load {
                 preset: "Lead".to_string(),
@@ -1335,7 +1335,7 @@ fn undo_payload() -> serde_json::Value {
 
 /// [`requests_until_quit`] for commands that each send one request.
 fn single_requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
-    let (outgoing, quit) = requests_until_quit(queued, None);
+    let (outgoing, quit) = requests_until_quit(queued, None, None);
     let requests = outgoing
         .into_iter()
         .map(|outgoing| match outgoing {
@@ -1462,7 +1462,7 @@ fn restore_goes_out_in_queue_order() {
         Command::Quit,
     ];
     assert_eq!(
-        requests_until_quit(queued, None),
+        requests_until_quit(queued, None, None),
         (
             vec![
                 Outgoing::Request(Request::Load {
