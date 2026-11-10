@@ -63,3 +63,19 @@ _Avoid_: bypass, standby, kill switch
 **Bypass**:
 A Module's switched-off state: a bypassed Module passes its input through unchanged and keeps its Parameters. Saved in the Preset.
 _Avoid_: disabled, off, muted (for a Module)
+
+**Project**:
+A saved recording session: its Tracks, their Items, tempo and loop, kept in one folder with its audio files. With no Project open the Daemon runs one Rack as before.
+_Avoid_: session, song, document
+
+**Track**:
+One lane of a Project with its own Rack, its own input and its own Items; what you record onto and mix.
+_Avoid_: channel, lane, strip
+
+**Item**:
+A stretch of audio placed on a Track's timeline at a position; it plays one of its Takes.
+_Avoid_: clip, region, segment
+
+**Take**:
+One recording of a passage: an audio file of the dry input. An Item holds one or more Takes, one of them active.
+_Avoid_: recording, file, pass
