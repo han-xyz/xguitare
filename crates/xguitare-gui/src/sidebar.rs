@@ -1,25 +1,33 @@
 use std::time::Instant;
 
+use egui::collapsing_header::CollapsingState;
 use egui::style::ScrollStyle;
 use egui::{
-    Button, CollapsingHeader, ComboBox, Grid, Key, RichText, ScrollArea, TextEdit, Ui, Vec2, vec2,
+    Align2, Button, Color32, ComboBox, CornerRadius, FontId, Frame, Grid, Key, Margin, RichText,
+    Role, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, WidgetInfo, vec2,
 };
 use xguitare_core::BankKind;
 
 use crate::model::{
     AddPlace, BankRow, Command, Feedback, Link, ModuleType, PortSelection, SECTIONS, Section,
     SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout, filter_bank,
-    link_text, param_rows, port_choices, rack_channels, set_ports_command, set_settings_command,
-    settings_draft, tuner_toggle,
+    link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
+    set_settings_command, settings_draft, tuner_toggle,
 };
 use crate::rack::muted_text;
-use crate::widgets::{bank_row, outlined_button, primary_button};
+use crate::widgets::{bank_row, colour, outlined_button, primary_button};
 
 const NO_PRESET: &str = "no preset";
 const PRESET_NAME_SIZE: f32 = 30.0;
 const SECTION_TITLE_SIZE: f32 = 16.0;
 const SIDEBAR_SPACING: Vec2 = vec2(8.0, 4.0);
 const SIDEBAR_BUTTON_HEIGHT: f32 = 40.0;
+const SECTION_GAP: f32 = 8.0;
+const SECTION_RADIUS: u8 = 6;
+const SECTION_HEADER_HEIGHT: f32 = 34.0;
+const SECTION_PADDING: i8 = 8;
+const OPEN_ARROW: &str = "▼";
+const CLOSED_ARROW: &str = "▶";
 const UNSAVED: &str = "unsaved changes";
 const SAVE_AS_LABEL: &str = "Save as new";
 const SAVE_AS_HINT: &str = "New Preset name";
@@ -71,18 +79,81 @@ pub fn sidebar(ui: &mut Ui, snapshot: &Snapshot, view: &mut SidebarView) -> Vec<
     ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
     ui.visuals_mut().indent_has_left_vline = false;
     ui.spacing_mut().scroll = ScrollStyle::solid();
+    ui.visuals_mut().widgets.inactive.bg_stroke.width = 1.0;
     ScrollArea::vertical().show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = SECTION_GAP;
         for section in SECTIONS {
-            let title = RichText::new(section.title(view.bank_kind)).size(SECTION_TITLE_SIZE);
-            CollapsingHeader::new(title)
-                .id_salt(("section", section as u8))
-                .default_open(section.open_by_default())
-                .show(ui, |ui| {
-                    commands.extend(section_body(ui, section, snapshot, view))
-                });
+            let title = section.title(view.bank_kind);
+            section_box(ui, section, title, |ui| {
+                commands.extend(section_body(ui, section, snapshot, view))
+            });
         }
     });
     commands
+}
+
+/// A framed section: a header strip holding the title and the collapse arrow, which a click opens or closes, over the body.
+fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mut Ui)) {
+    let colours = palette();
+    let border = Stroke::new(1.0, colour(colours.edge_light));
+    let id = ui.make_persistent_id(("section", section as u8));
+    let mut state =
+        CollapsingState::load_with_default_open(ui.ctx(), id, section.open_by_default());
+    Frame::new()
+        .fill(colour(colours.unit))
+        .stroke(border)
+        .corner_radius(SECTION_RADIUS)
+        .inner_margin(Margin::same(1))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let size = vec2(ui.available_width(), SECTION_HEADER_HEIGHT);
+            let (rect, header) = ui.allocate_exact_size(size, Sense::click());
+            header.widget_info(|| WidgetInfo::labeled(Role::Button, true, title));
+            if header.clicked() {
+                state.toggle(ui);
+            }
+            let open = state.is_open();
+            let inner_radius = SECTION_RADIUS - 1;
+            let corners = if open {
+                CornerRadius {
+                    nw: inner_radius,
+                    ne: inner_radius,
+                    sw: 0,
+                    se: 0,
+                }
+            } else {
+                CornerRadius::same(inner_radius)
+            };
+            let painter = ui.painter();
+            painter.rect_filled(rect, corners, colour(colours.sidebar));
+            if open {
+                painter.hline(rect.x_range(), rect.bottom(), border);
+            }
+            let padding = f32::from(SECTION_PADDING);
+            painter.text(
+                rect.left_center() + vec2(padding, 0.0),
+                Align2::LEFT_CENTER,
+                title,
+                FontId::proportional(SECTION_TITLE_SIZE),
+                colour(colours.text),
+            );
+            painter.text(
+                rect.right_center() - vec2(padding, 0.0),
+                Align2::RIGHT_CENTER,
+                if open { OPEN_ARROW } else { CLOSED_ARROW },
+                FontId::proportional(SECTION_TITLE_SIZE),
+                colour(colours.muted),
+            );
+            state.show_body_unindented(ui, |ui| {
+                Frame::new()
+                    .inner_margin(Margin::same(SECTION_PADDING))
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
+                        ui.set_width(ui.available_width());
+                        body(ui);
+                    });
+            });
+        });
 }
 
 fn section_body(
@@ -249,7 +320,15 @@ fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Co
             commands.extend(tuner.toggle());
         }
         let on = muted.unwrap_or_default();
-        let mute_button = Button::new("Mute").selected(on).min_size(button_size);
+        let mute_button = if on {
+            let red = colour(palette().red);
+            Button::new(RichText::new("Mute").strong().color(Color32::WHITE))
+                .fill(red)
+                .stroke(Stroke::new(1.0, red))
+        } else {
+            Button::new("Mute")
+        };
+        let mute_button = mute_button.selected(on).min_size(button_size);
         if ui.add_enabled(muted.is_some(), mute_button).clicked() {
             if on {
                 *tuner.muted_by_us = false;

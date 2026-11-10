@@ -150,6 +150,34 @@ fn funk_snapshot() -> Snapshot {
     }
 }
 
+fn bypassed_snapshot(modules: &[&str]) -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    let params = snapshot.params.as_mut().unwrap()["params"]
+        .as_array_mut()
+        .unwrap();
+    for param in params {
+        let bypass = modules.contains(&param["module"].as_str().unwrap());
+        param["bypass"] = json!(bypass);
+    }
+    snapshot
+}
+
+fn muted_snapshot() -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    snapshot.status.as_mut().unwrap()["muted"] = json!(true);
+    snapshot
+}
+
+fn click_unit_switch(harness: &mut Harness<App>, unit: &str, label: &str) {
+    let unit_rect = harness.get_by_label(&format!("{unit} unit")).rect();
+    harness
+        .get_all_by_role_and_label(Role::Button, label)
+        .find(|switch| unit_rect.contains_rect(switch.rect()))
+        .unwrap_or_else(|| panic!("no {label} switch in the {unit} unit"))
+        .click();
+    harness.run_steps(2);
+}
+
 fn snapshot_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .parent()
@@ -173,13 +201,20 @@ fn harness() -> (Harness<'static, App>, Receiver<Command>, TempDir) {
 }
 
 fn harness_sized(size: Vec2) -> (Harness<'static, App>, Receiver<Command>, TempDir) {
+    harness_with(size, funk_snapshot())
+}
+
+fn harness_with(
+    size: Vec2,
+    snapshot: Snapshot,
+) -> (Harness<'static, App>, Receiver<Command>, TempDir) {
     let (config, dir) = bass_config();
     let (commands, sent) = mpsc::channel();
     let mut harness = Harness::builder()
         .with_size(size)
         .with_context_setup(|ctx| ctx.add_font_provider(Arc::new(SystemFontProvider::new())))
         .wgpu()
-        .build_eframe(move |cc| App::with_snapshot(cc, &config, funk_snapshot(), commands));
+        .build_eframe(move |cc| App::with_snapshot(cc, &config, snapshot, commands));
     harness.run_steps(2);
     (harness, sent, dir)
 }
@@ -245,6 +280,45 @@ fn gui_snapshots() {
     write_png(&mut editing, "value-editing");
 
     write_png(&mut harness_sized(MIN_WINDOW).0, "minimum-window");
+
+    let (mut bypassed, _, _dir) =
+        harness_with(WINDOW, bypassed_snapshot(&["compressor", "chorus"]));
+    open_unit(&mut bypassed, 0);
+    write_png(&mut bypassed, "units-bypassed");
+
+    write_png(&mut harness_with(WINDOW, muted_snapshot()).0, "mute-banner");
+}
+
+#[test]
+fn unit_switch_sends_bypass() {
+    let (mut harness, sent, _dir) = harness_with(WINDOW, bypassed_snapshot(&["chorus"]));
+    click_unit_switch(&mut harness, "compressor", "On");
+    click_unit_switch(&mut harness, "chorus", "Off");
+    assert_eq!(harness.query_all_by_label("▼").count(), 0);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::Bypass {
+                id: "compressor".to_string(),
+                on: true,
+            },
+            Command::Bypass {
+                id: "chorus".to_string(),
+                on: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn muted_output_shows_the_banner() {
+    let (harness, _, _dir) = harness_with(WINDOW, funk_snapshot());
+    assert!(harness.query_by_label_contains("Output muted").is_none());
+    let (mut harness, _, _dir) = harness_with(WINDOW, muted_snapshot());
+    harness.get_by_label("Output muted \u{2014} press Mute to unmute");
+    harness.get_by_role_and_label(Role::Button, "Tuner").click();
+    harness.run_steps(2);
+    harness.get_by_label("Output muted \u{2014} close the Tuner to unmute");
 }
 
 #[test]
@@ -260,8 +334,8 @@ fn units_have_fixed_heights() {
 #[test]
 fn closed_units_wrap_their_knobs_in_the_minimum_window() {
     let (harness, _, _dir) = harness_sized(MIN_WINDOW);
-    assert_eq!(unit_height(&harness, "compressor unit"), 128.0);
-    assert_eq!(unit_height(&harness, "tonestack unit"), 64.0);
+    assert_eq!(unit_height(&harness, "compressor unit"), 192.0);
+    assert_eq!(unit_height(&harness, "tonestack unit"), 128.0);
     for param in ["Threshold", "Ratio", "Attack", "Release", "Makeup"] {
         let field = harness.get_by_role_and_label(Role::TextInput, param).rect();
         let unit = harness.get_by_label("compressor unit").rect();

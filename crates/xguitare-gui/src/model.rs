@@ -82,6 +82,10 @@ pub enum Command {
         to: usize,
     },
     Mute(bool),
+    Bypass {
+        id: String,
+        on: bool,
+    },
     RackIr {
         id: String,
         ir: String,
@@ -131,6 +135,18 @@ pub fn cabinet_ir(get_payload: &Value, id: &str) -> Option<String> {
         .find(|entry| entry["module"].as_str() == Some(id))?["ir"]
         .as_str()
         .map(str::to_string)
+}
+
+/// Whether Module `id` in a `get` payload is bypassed, read from its first entry.
+pub fn bypassed(get_payload: &Value, id: &str) -> bool {
+    get_payload["params"]
+        .as_array()
+        .and_then(|params| {
+            params
+                .iter()
+                .find(|entry| entry["module"].as_str() == Some(id))
+        })
+        .is_some_and(|entry| entry["bypass"].as_bool() == Some(true))
 }
 
 pub fn module_types(modules_payload: &Value) -> Vec<ModuleType> {
@@ -700,6 +716,7 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::RackRemove { id } => Request::RackRemove { id },
             Command::RackMove { id, to } => Request::RackMove { id, to },
             Command::Mute(on) => Request::Mute { on },
+            Command::Bypass { id, on } => Request::Bypass { id, on },
             Command::RackIr { id, ir } => Request::RackIr { ir, id: Some(id) },
             Command::SetPorts {
                 input,
@@ -780,6 +797,17 @@ pub fn tuner_toggle(
         (true, _, true) => (false, Some(Command::Mute(false)), false),
         (true, _, false) => (false, None, false),
     }
+}
+
+/// The banner text while the `status` payload says Mute is on; `muted_by_tuner` when the Tuner view turned it on, so that closing the view turns it off.
+pub fn mute_banner(status: Option<&Value>, muted_by_tuner: bool) -> Option<String> {
+    let muted = status.is_some_and(|status| status["muted"].as_bool() == Some(true));
+    let how = if muted_by_tuner {
+        "close the Tuner"
+    } else {
+        "press Mute"
+    };
+    muted.then(|| format!("Output muted \u{2014} {how} to unmute"))
 }
 
 /// `held_db` is `None` while no status arrives, so the text shows no value.

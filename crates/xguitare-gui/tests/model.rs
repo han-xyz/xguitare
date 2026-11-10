@@ -28,7 +28,9 @@ use xguitare_gui::model::{
     shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
     typed_value, unit_suffix,
 };
-use xguitare_gui::model::{CLOSED_KNOB_WIDTH, closed_unit_rows, module_title};
+use xguitare_gui::model::{
+    CLOSED_KNOB_WIDTH, bypassed, closed_unit_rows, module_title, mute_banner,
+};
 
 struct TempDir(PathBuf);
 
@@ -837,6 +839,51 @@ fn mute_command_maps_to_request() {
             false
         )
     );
+}
+
+#[test]
+fn bypass_command_maps_to_request() {
+    let command = Command::Bypass {
+        id: "chorus".to_string(),
+        on: true,
+    };
+    assert_eq!(
+        requests_until_quit(vec![command]),
+        (
+            vec![Request::Bypass {
+                id: "chorus".to_string(),
+                on: true
+            }],
+            false
+        )
+    );
+}
+
+#[test]
+fn bypassed_from_get() {
+    let payload = json!({"params": [
+        {"module": "preamp", "type": "preamp", "param": "gain", "value": 40.0, "bypass": false},
+        {"module": "chorus", "type": "chorus", "param": "rate", "value": 1.0, "bypass": true},
+        {"module": "chorus", "type": "chorus", "param": "mix", "value": 0.4, "bypass": true},
+    ]});
+    assert!(bypassed(&payload, "chorus"));
+    assert!(!bypassed(&payload, "preamp"));
+    assert!(!bypassed(&payload, "delay"));
+}
+
+#[test]
+fn mute_banner_only_while_muted() {
+    let muted = json!({"muted": true});
+    assert_eq!(
+        mute_banner(Some(&muted), false).as_deref(),
+        Some("Output muted \u{2014} press Mute to unmute")
+    );
+    assert_eq!(
+        mute_banner(Some(&muted), true).as_deref(),
+        Some("Output muted \u{2014} close the Tuner to unmute")
+    );
+    assert_eq!(mute_banner(Some(&json!({"muted": false})), true), None);
+    assert_eq!(mute_banner(None, false), None);
 }
 
 #[test]

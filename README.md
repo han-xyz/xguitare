@@ -298,21 +298,23 @@ xguitare-gui
 
 The window has a left panel, the rack in the centre and a footer line at the bottom.
 
-The left panel has these sections, from the top; click a section's title to close or open it (`Audio` and `Settings` start closed):
+The left panel has these sections, from the top, each in a framed box; click a section's title strip to close or open it (`Audio` and `Settings` start closed):
 
 - `Preset`: the active Preset's name in large type, and under it `Program N` (its Bank position) and `unsaved changes` while the live Rack differs from the Preset file (`modified` in `xguitare status`). `Save` writes the live Rack to the active Preset's file, as `xguitare save` does. `Save as new` opens a name field: type a name and press Enter or the `Save` under it to write a new Preset file in the Bank directory and make it the active Preset, as `xguitare save --as <name>` does; `Cancel` closes the field. An empty or taken name shows the Daemon's error in the footer (`error: a preset named 'Funk' already exists`).
 - `Guitar Bank` or `Bass Bank`, after the Bank kind: a search field, which keeps the rows whose name contains the text, in any case, or whose program number is the text, and one row per Bank entry, `program name`, the active Preset highlighted. Click a row to load it. An invalid entry is greyed out; hover over it for the parse error.
 - `Rack`: `Add Module` and `Place` menus and an `Add` button (see Rack editing below).
-- `Tuner and Mute`: `Tuner` opens and closes the Tuner view (see Tuner below); `Mute` shows the Daemon's Mute state and turns it on or off, as `xguitare mute` does.
+- `Tuner and Mute`: `Tuner` opens and closes the Tuner view (see Tuner below); `Mute` shows the Daemon's Mute state, lit red while Mute is on, and turns it on or off, as `xguitare mute` does.
 - `Audio`: `Input`, `Output L` and `Output R` menus listing the ports the Daemon can connect to, each showing the port connected now. Opening a menu reads the port list again, so a device plugged in since shows. `Apply` connects the three chosen ports now and keeps them for the next start (the Control API's `set_ports`, stored in `state.toml`, see Config); it needs a port in each menu. An error, such as a port that has gone away, shows in the footer.
 - `Settings`: `Bank kind` `Guitar` or `Bass`, and the `IR folder` path. `Apply` sends what changed (the Control API's `set_settings`, stored in `state.toml`): another Bank kind switches the Bank and loads its Program 0 (see [Bass](#bass)); another IR folder must be an existing directory, given as an absolute path, and is listed by the cabinet's `IR` menu from then on. An error shows in the footer, e.g. `error: bank_dir is set in config.toml; edit it there`.
 - `Engine`: `Rate` (`48 kHz`), `Buffer` (`128 frames`), `Latency` (one buffer, `2.7 ms`), `Xruns`, and `Daemon` `connected` or `disconnected`.
+
+While Mute is on, a red banner above the rack reads `Output muted — press Mute to unmute`, or `Output muted — close the Tuner to unmute` when the Tuner view turned Mute on.
 
 The rack is one 19-inch unit per row between two rails; a closed unit is 64 pixels high per row of knobs (its knobs wrap to another row when the window is too narrow for them), an open unit 190, and the rack scrolls when they do not fit. The window opens at 1280×800 and cannot be made smaller than 1024×640:
 
 - The meter bridge: `Input` and `Output` LED ladders from -60 dB to 0 dB with the peak beside them. The top segment is the clip lamp; it stays lit after a peak of 0 dB or more until you click a ladder.
 - The Tuner unit (see Tuner below).
-- One unit per Module in Rack order. A closed unit has a lamp in its Module type's colour, the Module id, one small knob per Parameter with its name and value field, and `↑` `↓` at the right. Click the id or the `▶` beside it to open the unit: an open unit shows large knobs, each with its value field below, and at the right the cabinet's `IR` menu and `Remove`. Any number of units can be open; which ones is kept across restarts. Drag a unit by its silver ears to move it to the unit under the pointer; near the top or bottom of the Rack view the Rack scrolls.
+- One unit per Module in Rack order. A closed unit has a lamp in its Module type's colour, an `On`/`Off` switch, the Module id, one small knob per Parameter with its name and value field, and `↑` `↓` at the right. Click the id or the `▶` beside it to open the unit: an open unit shows large knobs, each with its value field below, and at the right the cabinet's `IR` menu and `Remove`. Any number of units can be open; which ones is kept across restarts. Click `On` to bypass the Module, as `xguitare bypass <id> on` does: the switch shows `Off`, the lamp goes dark and the unit's name and knobs are dimmed; its knobs still change its Parameters. Click `Off` to turn it back on. `Save` writes the bypass to the Preset file. Drag a unit by its silver ears to move it to the unit under the pointer; near the top or bottom of the Rack view the Rack scrolls.
 
 The footer shows `disconnected Ns` or `starting daemon Ns` while no Daemon answers, and for 3 seconds the result of a save (`saved /home/you/.config/xguitare/bank/01-clean.toml`), the error of any command (`error: ...`) or of a typed value that is no number (`error: 'loud' is not a number`).
 

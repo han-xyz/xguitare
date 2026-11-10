@@ -2,18 +2,19 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Button, Color32, ComboBox, CursorIcon, FontSelection, Frame, Id, InnerResponse, Key,
-    Label, Layout, Margin, Modifiers, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke,
-    TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo, WidgetText, pos2, vec2,
+    Align, Align2, Button, Color32, ComboBox, CursorIcon, FontId, FontSelection, Frame, Id,
+    InnerResponse, Key, Label, Layout, Margin, Modifiers, Rect, Response, RichText, Role,
+    ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo, WidgetText,
+    pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 
 use crate::model::{
     CLOSED_KNOB_WIDTH, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KnobKey, NO_SIGNAL,
-    ParamRow, PeakHold, Rgb, Snapshot, Throttle, TunerReading, autoscroll_delta, cabinet_ir,
-    cents_fraction, closed_unit_rows, drop_index, format_value, in_tune, key_step, knob_fraction,
-    knob_param_value, module_title, move_target, palette, param_label, param_rows, peak_db,
-    peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
+    ParamRow, PeakHold, Rgb, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed,
+    cabinet_ir, cents_fraction, closed_unit_rows, drop_index, format_value, in_tune, key_step,
+    knob_fraction, knob_param_value, module_title, move_target, mute_banner, palette, param_label,
+    param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
 };
 use crate::widgets::{self, KnobSize, colour};
 
@@ -32,6 +33,10 @@ const UNIT_NAME_WIDTH: f32 = 120.0;
 const UNIT_NAME_SIZE: f32 = 18.0;
 const SMALL_TEXT_SIZE: f32 = 13.0;
 const LAMP_SLOT: f32 = 18.0;
+const BYPASSED_OPACITY: f32 = 0.45;
+const BANNER_HEIGHT: f32 = 40.0;
+const BANNER_TEXT_SIZE: f32 = 18.0;
+const BANNER_RADIUS: u8 = 3;
 const METER_LABEL_WIDTH: f32 = 52.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
 const METER_ROW_GAP: f32 = 8.0;
@@ -58,9 +63,10 @@ const SMALL_KNOB_TOP: f32 = 4.0;
 const FOCUS_PENDING: &str = "focus pending";
 const CHEVRON_WIDTH: f32 = 20.0;
 const KNOB_FIELD_GAP: f32 = 8.0;
-/// The widths of a closed unit's header items other than its knobs, left to right: lamp, name, stripe, chevron, ↑/↓.
-const HEADER_FIXED_ITEMS: [f32; 5] = [
+/// The widths of a closed unit's header items other than its knobs, left to right: lamp, On/Off switch, name, stripe, chevron, ↑/↓.
+const HEADER_FIXED_ITEMS: [f32; 6] = [
     LAMP_SLOT,
+    widgets::FOOTSWITCH_SIZE.x,
     UNIT_NAME_WIDTH,
     STRIPE_WIDTH,
     CHEVRON_WIDTH,
@@ -87,6 +93,8 @@ pub struct Knobs<'a> {
 pub struct RackView<'a, 'b> {
     pub knobs: &'a mut Knobs<'b>,
     pub tuner_open: bool,
+    /// Whether the Tuner view turned Mute on, so that closing it turns Mute off.
+    pub muted_by_tuner: bool,
     pub clips: &'a mut [ClipLatch; 2],
     pub holds: &'a [PeakHold; 2],
     pub open_units: &'a mut BTreeSet<String>,
@@ -95,6 +103,9 @@ pub struct RackView<'a, 'b> {
 pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Command> {
     let mut commands = Vec::new();
     let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
+    if let Some(text) = mute_banner(snapshot.status.as_ref(), view.muted_by_tuner) {
+        mute_banner_strip(ui, &text);
+    }
     ScrollArea::vertical().show(ui, |ui| {
         let width = ui.available_width().min(RACK_MAX_WIDTH);
         let left = ui.cursor().left() + (ui.available_width() - width) / 2.0;
@@ -119,6 +130,24 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
         });
     });
     commands
+}
+
+/// Red, as wide as the rack and above it, outside its scroll area so that it stays in view.
+fn mute_banner_strip(ui: &mut Ui, text: &str) {
+    let width = ui.available_width().min(RACK_MAX_WIDTH);
+    let left = ui.cursor().left() + (ui.available_width() - width) / 2.0;
+    let rect = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, BANNER_HEIGHT));
+    let response = ui.allocate_rect(rect, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, text));
+    let painter = ui.painter();
+    painter.rect_filled(rect, BANNER_RADIUS, colour(palette().red));
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(BANNER_TEXT_SIZE),
+        Color32::WHITE,
+    );
 }
 
 /// A unit exactly `height` tall whatever its content, which is clipped to it; `label` names it in the accessibility tree.
@@ -219,6 +248,13 @@ fn fixed_width_label(ui: &mut Ui, width: f32, label: Label) {
         ui.set_min_size(slot);
         ui.add(label);
     });
+}
+
+/// A bypassed unit's name and knobs are dimmed; they still take input.
+fn dim_when_bypassed(ui: &mut Ui, bypassed: bool) {
+    if bypassed {
+        ui.multiply_opacity(BYPASSED_OPACITY);
+    }
 }
 
 fn unit_stripe(ui: &mut Ui) {
@@ -327,6 +363,10 @@ fn module_units(
         let unit = ModuleUnit {
             module,
             rows,
+            bypassed: snapshot
+                .params
+                .as_ref()
+                .is_some_and(|params| bypassed(params, module)),
             place: (index, modules.len()),
             ir_choice: snapshot
                 .params
@@ -383,6 +423,7 @@ fn module_units(
 struct ModuleUnit<'a> {
     module: &'a str,
     rows: &'a [ParamRow],
+    bypassed: bool,
     place: (usize, usize),
     ir_choice: Option<IrChoice<'a>>,
 }
@@ -415,9 +456,18 @@ fn module_unit(
         let mut commands = Vec::new();
         let header = unit_header(ui, Sense::click(), header_height, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
-            unit_lamp(ui, accent, true);
+            unit_lamp(ui, accent, !unit.bypassed);
+            if widgets::footswitch(ui, !unit.bypassed, accent).clicked() {
+                commands.push(Command::Bypass {
+                    id: module.to_string(),
+                    on: !unit.bypassed,
+                });
+            }
             let (name, type_part) = module_title(module, type_name);
-            unit_name(ui, &name, type_part);
+            ui.scope(|ui| {
+                dim_when_bypassed(ui, unit.bypassed);
+                unit_name(ui, &name, type_part);
+            });
             unit_stripe(ui);
             let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
             let chevron = Button::new(chevron).small().frame(false);
@@ -427,6 +477,7 @@ fn module_unit(
             let rows = Layout::left_to_right(Align::Min).with_main_wrap(true);
             ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
+                dim_when_bypassed(ui, unit.bypassed);
                 if !open {
                     commands.extend(param_knobs(ui, unit.rows, KnobSize::Small, accent, knobs));
                 }
@@ -439,7 +490,10 @@ fn module_unit(
         toggled |= header.response.clicked();
         if open {
             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-                commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
+                ui.scope(|ui| {
+                    dim_when_bypassed(ui, unit.bypassed);
+                    commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
+                });
                 ui.with_layout(Layout::top_down(Align::Max), |ui| {
                     if let Some(ir_choice) = &unit.ir_choice {
                         commands.extend(ir_row(ui, module, ir_choice));

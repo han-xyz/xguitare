@@ -264,6 +264,7 @@ impl eframe::App for App {
         let mut view = RackView {
             knobs: &mut knobs,
             tuner_open: self.tuner_open,
+            muted_by_tuner: self.tuner_open && self.muted_by_us,
             clips: &mut self.clips,
             holds: &self.holds,
             open_units: &mut self.open_units,
