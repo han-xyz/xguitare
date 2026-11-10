@@ -163,7 +163,11 @@ connections:
   Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare-4242:in
   xguitare-4242:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
   xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
+disk_overflows: 0
+project: -
 ```
+
+While a Project is open, `status` goes on with the transport, the playhead, tempo, loop, click and one line per Track (see Projects).
 
 `list` shows the Bank; `*` marks the active Preset:
 
@@ -285,6 +289,77 @@ preamp: bypassed
 $ xguitare bypass preamp off
 preamp: on
 ```
+
+## Projects
+
+A Project is a recording session: Tracks, each with its own Rack, input, volume, pan, mute, solo and arm, summed with a click to the stereo output. While one is open the Daemon plays it instead of the active Preset; closing it brings the Preset back. Presets, the Bank and MIDI program change work as before when no Project is open; with one open, `load`, `set`, `get`, `bypass`, `rack` and `ir set` edit the selected Track (`track select`) instead.
+
+### Folder layout
+
+Projects live under `projects_dir`, by default `~/Music/xguitare`; the Control API `set_settings` changes it (an absolute path, stored in `state.toml`). Each Project is one folder named after the Project (lowercase, letters and digits, `-` between words):
+
+```text
+~/Music/xguitare/demo-song/
+  project.toml            name, sample rate, tempo, meter, loop, Tracks with their Modules, Items and Takes
+  project.autosave.toml   the latest autosave, when there is one
+  takes/guitar-1.wav      one mono 32-bit float WAV per Take, at the Project's sample rate
+```
+
+Takes are never deleted, also not when their Track is removed.
+
+### Record a Track
+
+```console
+$ xguitare project new Live
+created Live at /home/you/Music/xguitare/live
+$ xguitare track add Guitar
+added track 0 Guitar
+$ xguitare track edit 0 --input "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO" --arm on
+track 0 Guitar: input Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO, volume 0 dB, pan 0, mute no, solo no, arm yes
+$ xguitare record
+recording
+$ xguitare stop
+stopped
+$ xguitare status
+...
+project: Live
+transport: stopped
+position: 2.3 (frame 148736)
+tempo: 120 bpm 4/4
+loop: off 0..0
+click off, count-in 0 bars
+tracks:
+  0* Guitar: armed; input Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO; 0 dB, pan 0; peak -88.8 dB
+$ xguitare project save
+saved /home/you/Music/xguitare/live/project.toml
+$ xguitare project close
+closed Live
+```
+
+- `project new|open|save|close|list`: `open <name> --restore` loads the autosave; `close` saves first. A sample rate other than the audio server's is refused.
+- `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name; `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off` and `--name`.
+- An armed Track monitors its input through its Rack, also while stopped, and records while recording; an unarmed Track plays its Items.
+- `play`, `stop` (the playhead stays), `record` (from stopped, after the count-in) and `locate <bar>.<beat>|<bar>|<seconds>s`, e.g. `locate 3.2` or `locate 12.5s`.
+- `tempo <bpm> [<beats>/<note>]`, e.g. `tempo 100 3/4`; `click on|off [--count-in 0|1|2]`. The click and count-in are not saved with the Project. The loop region is set through the Control API `loop`.
+- While recording, a Track cannot be removed and an armed Track's input cannot change; `stop` first.
+
+Each Track records the dry input; its Rack is applied on playback, so its sound can still change after recording. A recording becomes a Take on a new Item; with the loop on, each pass after a wrap becomes another Take of the same Item, the newest one playing.
+
+### Latency compensation
+
+What you play reaches the Daemon late by the input's capture latency, and you play along to what you hear late by the output's playback latency. Each Take is placed earlier by both, as JACK reports them for the Track's input port and for the port `out_l` feeds, plus the Project's `latency_offset_ms` (−1000 to 1000, edited in `project.toml`) to correct what the drivers do not report. A Take recorded from frame 0 starts at frame 0 with its first frames skipped (the Item's `offset`).
+
+### Autosave
+
+While a Project is open and changed, the Daemon writes `project.autosave.toml` every 60 seconds, and when it stops (after adding the Takes being recorded); `project.toml` changes only on `project save` and `project close`. When the autosave is newer, `project open` says `its autosave is newer; open it with --restore to load the autosave`.
+
+### Limits of this version
+
+- Takes are held in memory while the Project is open: about 11.5 MB per minute per Track at 48 kHz.
+- When the disk falls behind, the dropped frames are counted in `status` `disk_overflows` and left out of the Take, which then plays shorter and early from that point; they are not filled with silence.
+- With the loop on, a recording that starts before the loop start puts its first pass and the passes after the first wrap on separate Items.
+- A Take that cannot be written or loaded is only reported in the Daemon's log.
+- Only the active Take of an Item plays; choosing another Take, moving Items and editing are not in this version.
 
 ## GUI
 
