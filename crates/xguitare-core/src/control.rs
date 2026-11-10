@@ -252,16 +252,19 @@ pub enum Request {
     },
 }
 
-/// A Track by its zero-based index (a JSON number) or its name (a JSON string).
+/// A Track or Bus by its zero-based index (a JSON number) or its name (a JSON string).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum TrackRef {
+pub enum IndexOrName {
     Index(usize),
     Name(String),
 }
 
-/// A Bus by its zero-based index (a JSON number) or its name (a JSON string).
-pub type BusRef = TrackRef;
+/// A Track, as [`IndexOrName`].
+pub type TrackRef = IndexOrName;
+
+/// A Bus, as [`IndexOrName`].
+pub type BusRef = IndexOrName;
 
 /// A Send level on the wire: a number in dB or the string `"off"`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

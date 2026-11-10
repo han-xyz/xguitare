@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use xguitare::{CliEnv, run_cli, run_main};
 use xguitare_client::{ClientError, Transport};
-use xguitare_core::control::{Position, Request, Response, SendLevel, TrackRef, TransportAction};
+use xguitare_core::control::{
+    BusRef, Position, Request, Response, SendLevel, TrackRef, TransportAction,
+};
 
 struct Canned {
     replies: VecDeque<Result<Response, ClientError>>,
@@ -1063,7 +1065,7 @@ fn project_items_prints_one_line_per_item() {
 
 #[test]
 fn bus_commands_send_their_requests_and_print_the_answer() {
-    let bus = |name: &str| TrackRef::Name(name.to_string());
+    let bus = |name: &str| BusRef::Name(name.to_string());
     let cases: Vec<(&[&str], Request, &str, &str)> = vec![
         (
             &["bus", "add", "Verb"],
@@ -1082,7 +1084,7 @@ fn bus_commands_send_their_requests_and_print_the_answer() {
         (
             &["bus", "remove", "1"],
             Request::BusRemove {
-                bus: TrackRef::Index(1),
+                bus: BusRef::Index(1),
             },
             r#"{"ok":true,"bus":{"id":1,"index":1,"name":"Bus 1"}}"#,
             "removed bus 1 Bus 1\n",
@@ -1109,7 +1111,7 @@ fn bus_commands_send_their_requests_and_print_the_answer() {
 
 #[test]
 fn send_master_and_clip_commands_send_their_requests_and_print_the_answer() {
-    let bus = |name: &str| TrackRef::Name(name.to_string());
+    let bus = |name: &str| BusRef::Name(name.to_string());
     let cases: Vec<(&[&str], Request, &str, &str)> = vec![
         (
             &["send", "0", "Verb", "-6"],
@@ -1126,7 +1128,7 @@ fn send_master_and_clip_commands_send_their_requests_and_print_the_answer() {
             &["send", "Guitar", "1", "off", "--pre", "on"],
             Request::SendSet {
                 track: TrackRef::Name("Guitar".to_string()),
-                bus: TrackRef::Index(1),
+                bus: BusRef::Index(1),
                 level: Some(SendLevel::Off),
                 pre: Some(true),
             },
@@ -1163,7 +1165,7 @@ fn send_master_and_clip_commands_send_their_requests_and_print_the_answer() {
             &["clip", "reset", "bus", "0"],
             Request::ClipReset {
                 track: None,
-                bus: Some(TrackRef::Index(0)),
+                bus: Some(BusRef::Index(0)),
                 master: false,
             },
             r#"{"ok":true,"bus":0}"#,
@@ -1194,7 +1196,7 @@ fn assert_cases(cases: Vec<(&[&str], Request, &str, &str)>) {
 
 #[test]
 fn rack_commands_take_a_bus_or_master() {
-    let verb = Some(TrackRef::Name("Verb".to_string()));
+    let verb = Some(BusRef::Name("Verb".to_string()));
     let cases: Vec<(&[&str], Request, &str)> = vec![
         (
             &["rack", "add", "reverb", "--bus", "Verb"],
@@ -1224,7 +1226,7 @@ fn rack_commands_take_a_bus_or_master() {
                 id: "gain".to_string(),
                 to: 0,
                 track: None,
-                bus: Some(TrackRef::Index(1)),
+                bus: Some(BusRef::Index(1)),
                 master: false,
             },
             r#"{"ok":true,"id":"gain","to":0}"#,

@@ -11,7 +11,7 @@ use crate::arrangement::ArrangementCommand;
 use crate::arrangement::Transport;
 use crate::build::{ENGINE_BUSY, build_arrangement, swap_arrangement};
 use crate::control::{
-    BusRef, EngineState, MixPeaks, Position, TrackRef, TransportAction, peak_db, slug,
+    BusRef, EngineState, IndexOrName, MixPeaks, Position, TrackRef, TransportAction, peak_db, slug,
 };
 use crate::engine::{Command, MeterPoint, transport_from_code};
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
@@ -1198,15 +1198,15 @@ pub(crate) fn resolve_bus(project: &Project, bus: &BusRef) -> Result<usize, Stri
 fn resolve_ref<'a>(
     kind: &str,
     mut names: impl Iterator<Item = &'a str>,
-    wanted: &TrackRef,
+    wanted: &IndexOrName,
 ) -> Result<usize, String> {
     let found = match wanted {
-        TrackRef::Index(index) => names.nth(*index).map(|_| *index),
-        TrackRef::Name(name) => names.position(|other| other == name),
+        IndexOrName::Index(index) => names.nth(*index).map(|_| *index),
+        IndexOrName::Name(name) => names.position(|other| other == name),
     };
     found.ok_or_else(|| match wanted {
-        TrackRef::Index(index) => format!("no {kind} '{index}'"),
-        TrackRef::Name(name) => format!("no {kind} '{name}'"),
+        IndexOrName::Index(index) => format!("no {kind} '{index}'"),
+        IndexOrName::Name(name) => format!("no {kind} '{name}'"),
     })
 }
 

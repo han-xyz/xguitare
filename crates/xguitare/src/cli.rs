@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use xguitare_client::Transport;
 use xguitare_core::control::{
-    Position, Request, Response, SILENCE_DB, SendLevel, TrackRef, TransportAction, Value,
+    IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
 };
 
 use crate::{
@@ -131,14 +131,14 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
                 param,
                 value,
                 track: None,
-                bus: rack.bus.map(track_ref),
+                bus: rack.bus.map(index_or_name),
                 master: rack.master,
             }
         }
         Cmd::Get { param, rack } => Request::Get {
             param,
             track: None,
-            bus: rack.bus.map(track_ref),
+            bus: rack.bus.map(index_or_name),
             master: rack.master,
         },
         Cmd::Save { name } => Request::Save { name },
@@ -149,7 +149,7 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             ir: file,
             id,
             track: None,
-            bus: rack.bus.map(track_ref),
+            bus: rack.bus.map(index_or_name),
             master: rack.master,
         },
         Cmd::Tuner { .. } => Request::Tuner,
@@ -160,7 +160,7 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             id,
             on: matches!(state, BypassState::On),
             track: None,
-            bus: rack.bus.map(track_ref),
+            bus: rack.bus.map(index_or_name),
             master: rack.master,
         },
         Cmd::Project(cmd) => project_request(cmd),
@@ -186,8 +186,8 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             level,
             pre,
         } => Request::SendSet {
-            track: track_ref(track),
-            bus: track_ref(bus),
+            track: index_or_name(track),
+            bus: index_or_name(bus),
             level: Some(parse_level(&level)?),
             pre: pre.map(is_on),
         },
@@ -208,20 +208,20 @@ fn rack_request(cmd: RackCmd) -> Request {
             after,
             at,
             track: None,
-            bus: rack.bus.map(track_ref),
+            bus: rack.bus.map(index_or_name),
             master: rack.master,
         },
         RackCmd::Remove { id, rack } => Request::RackRemove {
             id,
             track: None,
-            bus: rack.bus.map(track_ref),
+            bus: rack.bus.map(index_or_name),
             master: rack.master,
         },
         RackCmd::Move { id, to, rack } => Request::RackMove {
             id,
             to,
             track: None,
-            bus: rack.bus.map(track_ref),
+            bus: rack.bus.map(index_or_name),
             master: rack.master,
         },
     }
@@ -231,7 +231,7 @@ fn bus_request(cmd: BusCmd) -> Request {
     match cmd {
         BusCmd::Add { name } => Request::BusAdd { name },
         BusCmd::Remove { bus } => Request::BusRemove {
-            bus: track_ref(bus),
+            bus: index_or_name(bus),
         },
         BusCmd::Edit {
             bus,
@@ -241,7 +241,7 @@ fn bus_request(cmd: BusCmd) -> Request {
             mute,
             solo,
         } => Request::BusSet {
-            bus: track_ref(bus),
+            bus: index_or_name(bus),
             name,
             volume,
             pan,
@@ -271,8 +271,8 @@ fn clip_reset_request(kind: Option<ClipKind>, name: Option<String>) -> Result<Re
         (Some(ClipKind::Master), Some(_)) => {
             return Err("clip reset master takes no name".to_string());
         }
-        (Some(ClipKind::Track), Some(name)) => (Some(track_ref(name)), None, false),
-        (Some(ClipKind::Bus), Some(name)) => (None, Some(track_ref(name)), false),
+        (Some(ClipKind::Track), Some(name)) => (Some(index_or_name(name)), None, false),
+        (Some(ClipKind::Bus), Some(name)) => (None, Some(index_or_name(name)), false),
         (Some(ClipKind::Track | ClipKind::Bus), None) => {
             return Err("clip reset track and bus need an index or a name".to_string());
         }
@@ -295,7 +295,7 @@ fn track_request(cmd: TrackCmd) -> Request {
     match cmd {
         TrackCmd::Add { name } => Request::TrackAdd { name },
         TrackCmd::Remove { track } => Request::TrackRemove {
-            track: track_ref(track),
+            track: index_or_name(track),
         },
         TrackCmd::Edit {
             track,
@@ -308,7 +308,7 @@ fn track_request(cmd: TrackCmd) -> Request {
             name,
             to_master,
         } => Request::TrackSet {
-            track: track_ref(track),
+            track: index_or_name(track),
             input,
             volume,
             pan,
@@ -319,7 +319,7 @@ fn track_request(cmd: TrackCmd) -> Request {
             to_master: to_master.map(is_on),
         },
         TrackCmd::Select { track } => Request::TrackSelect {
-            track: track_ref(track),
+            track: index_or_name(track),
         },
     }
 }
@@ -333,10 +333,10 @@ fn is_on(state: Switch) -> bool {
 }
 
 /// Digits name a Track or Bus by index, anything else by name.
-fn track_ref(track: String) -> TrackRef {
-    match track.parse() {
-        Ok(index) => TrackRef::Index(index),
-        Err(_) => TrackRef::Name(track),
+fn index_or_name(text: String) -> IndexOrName {
+    match text.parse() {
+        Ok(index) => IndexOrName::Index(index),
+        Err(_) => IndexOrName::Name(text),
     }
 }
 
