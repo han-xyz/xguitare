@@ -83,11 +83,18 @@ fn funk_params() -> Value {
         param("chorus", "rate", 0.8, (0.1, 5.0, 1.0, "Hz", false)),
         param("chorus", "depth", 40.0, (0.0, 100.0, 50.0, "%", false)),
         param("chorus", "mix", 20.0, (0.0, 100.0, 40.0, "%", false)),
+        param("delay-2", "time", 380.0, (10.0, 2000.0, 400.0, "ms", false)),
+        param("delay-2", "feedback", 30.0, (0.0, 95.0, 35.0, "%", false)),
+        param("delay-2", "mix", 20.0, (0.0, 100.0, 25.0, "%", false)),
     ];
     params
         .iter_mut()
         .filter(|param| param["module"] == "cabinet")
         .for_each(|param| param["ir"] = json!("bass-cab.wav"));
+    params
+        .iter_mut()
+        .filter(|param| param["module"] == "delay-2")
+        .for_each(|param| param["type"] = json!("delay"));
     json!({ "params": params })
 }
 
@@ -444,7 +451,7 @@ fn unit_released_below_the_rack_moves_to_the_end() {
         sent_now(&sent),
         [Command::RackMove {
             id: "compressor".to_string(),
-            to: 4,
+            to: 5,
         }]
     );
 }
@@ -527,8 +534,8 @@ fn five_knobs_fit_one_row_in_the_default_window() {
 #[test]
 fn closed_units_wrap_their_knobs_in_the_minimum_window() {
     let (harness, _, _dir) = harness_sized(MIN_WINDOW);
-    assert_eq!(unit_height(&harness, "compressor unit"), 128.0);
-    assert_eq!(unit_height(&harness, "tonestack unit"), 64.0);
+    assert_eq!(unit_height(&harness, "compressor unit"), 192.0);
+    assert_eq!(unit_height(&harness, "tonestack unit"), 128.0);
     for param in ["Threshold", "Ratio", "Attack", "Release", "Makeup"] {
         let field = harness.get_by_role_and_label(Role::TextInput, param).rect();
         let unit = harness.get_by_label("compressor unit").rect();
@@ -652,7 +659,7 @@ fn clicking_a_tile_adds_it_by_the_rack_rules() {
         sent_now(&sent),
         [Command::RackAdd {
             type_name: "delay".to_string(),
-            after: Some("chorus".to_string()),
+            after: Some("delay-2".to_string()),
             at: None,
         }]
     );
