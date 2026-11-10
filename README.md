@@ -34,9 +34,9 @@ The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first s
 2026-11-03T12:52:12.034221Z  INFO jack_sys: Loading jack from libjack.so.0.
 2026-11-03T12:52:12.036502Z  INFO xguitare::daemon: loaded 0 Clean
 2026-11-03T12:52:12.040213Z  INFO xguitare::jack_adapter: jack client active: sample_rate=48000 buffer_size=128
-2026-11-03T12:52:12.040576Z  INFO xguitare::jack_adapter: connected Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare:in
-2026-11-03T12:52:12.040808Z  INFO xguitare::jack_adapter: connected xguitare:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
-2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
+2026-11-03T12:52:12.040576Z  INFO xguitare::jack_adapter: connected Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare-4242:in
+2026-11-03T12:52:12.040808Z  INFO xguitare::jack_adapter: connected xguitare-4242:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
+2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
 - `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with five starter Presets (Clean, Crunch, Lead, High Gain, Bass) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
@@ -159,9 +159,9 @@ xruns: 0
 callback_max_us: 1228
 callback_last_us: 764
 connections:
-  Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare:in
-  xguitare:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
-  xguitare:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
+  Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare-4242:in
+  xguitare-4242:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
+  xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
 `list` shows the Bank; `*` marks the active Preset:
