@@ -6,6 +6,8 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Added
 
+- Metronome: a blip on every beat with beat 1 higher and 6 dB louder, at its own tempo (20–300 bpm), meter and volume (−40 to 0 dB) with no Project open, and as the Project's click with one open; tap tempo; Mute silences it while it keeps counting; tempo, meter and volume are kept in `state.toml`. CLI `metronome on|off|tempo|volume|tap`; Control API `metronome` and `metronome_tap`; `status` shows `metronome`.
+
 - A GitHub Actions release workflow builds `xguitare` and `xguitare-gui` for x86_64 Linux on a `v*` tag and attaches a tarball and its sha256 to the GitHub Release.
 - Render a Project to a stereo WAV in the background (`renders/<name>.wav`, never replacing a file): the whole Project with its tail, or the loop region; 24-bit, 16-bit with dither or 32-bit float. CLI `render [--loop] [--bits 16|24|32f] [--name <name>]` and `render cancel`; Control API `render` and `render_cancel`; `status` shows `render`.
 - Mixer in a Project: up to 8 Buses with stereo Racks, a Send per Track and Bus (post- or pre-fader), a Master Rack and volume, `to master` per Track, solo in place, and output peaks with a latching clip flag per Track, Bus and Master. CLI `bus add|remove|edit`, `send`, `master`, `track edit --to-master`, `clip reset`, and `--bus <bus>` / `--master` on `rack`, `set`, `get`, `bypass` and `ir set`; Control API `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `clip_reset`, `track_set` `to_master`, and `bus` / `master` on the Rack requests; `status` shows `buses`, `master` and each Track's `to_master`, `sends`, `peak_db` and `clip`.
@@ -22,6 +24,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Changed
 
+- The Project click has an accent: beat 1 is 6 dB louder than the other beats, and the click plays at the Metronome volume (default −12 dB), quieter than before.
 - Cabinet IRs are normalised to unit energy on load, so Banks created before this change sound about 12 dB quieter. Raise the cabinet `level` in your Presets (about 12, maximum 20); the starter Presets carry `level = 12`.
 - A stereo Cabinet IR is normalised over both channels, so it plays as loud in total as a mono IR; a right-only IR is no longer boosted.
 - Only the first `ir_max_ms` of a Cabinet IR is read.

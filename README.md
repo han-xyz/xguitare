@@ -177,6 +177,7 @@ connections:
   xguitare-4242:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
   xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 disk_overflows: 0
+metronome: off, 120 bpm 4/4, volume -12 dB, beat 0
 project: -
 ```
 
@@ -302,6 +303,33 @@ preamp: bypassed
 $ xguitare bypass preamp off
 preamp: on
 ```
+
+## Metronome
+
+The Metronome is a short blip on every beat, beat 1 of each bar higher and 6 dB louder, mixed into both outputs. It works with no Project open, over the Rack:
+
+```console
+$ xguitare metronome on
+metronome on, 120 bpm 4/4, volume -12 dB
+$ xguitare metronome tempo 90 3/4
+metronome on, 90 bpm 3/4, volume -12 dB
+$ xguitare metronome volume -20
+metronome on, 90 bpm 3/4, volume -20 dB
+$ xguitare metronome tap
+tap
+$ xguitare metronome tap
+tap 118.5 bpm
+$ xguitare metronome off
+metronome off, 118.5 bpm 3/4, volume -20 dB
+```
+
+- `metronome on` starts on beat 1 of a bar; `metronome tempo <bpm> [<beats>/<note>]` (20 to 300 bpm, decimals allowed, the meter as a Project's) keeps the beat count; `metronome volume <dB>` takes −40 to 0 (default −12).
+- `metronome tap` taps the tempo: from the second tap the tempo is the average interval of the last taps, up to four; a pause over 2 seconds starts a new series.
+- Mute silences it; it keeps counting, so it comes back in time.
+- Its tempo, meter and volume are kept in `state.toml` for the next start; it always starts off.
+- `status` shows it on its `metronome:` line, with the beat in the bar it last played.
+
+While a Project is open, the Metronome is the Project's click: `metronome on|off` is `click on|off`, `metronome tempo` and `metronome tap` set the Project's tempo and meter, and the volume and the accent on beat 1 apply to the click and count-in. The Metronome's own tempo and meter come back when the Project closes.
 
 ## Projects
 
@@ -556,7 +584,7 @@ output_right = "Scarlett*playback_FR"
 
 `<config dir>` is the directory holding the config file in use, also for `--config <path>`.
 
-The Daemon keeps the choices made in the GUI (or through the Control API's `set_ports` and `set_settings`) in `state.toml` beside the config file, mode 0600, and never rewrites `config.toml`, so its comments survive. `state.toml` is read after `config.toml` and overrides it: `[ports]` (`input`, `output_left`, `output_right`, exact port names), `bank_kind`, `ir_dir`, and `[banks]` (`guitar`, `bass`: each kind's Bank directory, recorded on the first switch; the one of `bank_kind` is the Bank directory). A `bank_dir` in `config.toml` is never overridden, `state.toml`'s `bank_kind` is ignored while it is set, and the GUI cannot switch the Bank kind while it is set. If `state.toml` cannot be parsed, the Daemon logs `<path>: line N:M: <error>; ignoring it` and starts with `config.toml` alone. To drop the GUI's choices, stop the Daemon and delete `state.toml`.
+The Daemon keeps the choices made in the GUI (or through the Control API's `set_ports` and `set_settings`) in `state.toml` beside the config file, mode 0600, and never rewrites `config.toml`, so its comments survive. `state.toml` is read after `config.toml` and overrides it: `[ports]` (`input`, `output_left`, `output_right`, exact port names), `bank_kind`, `ir_dir`, `[banks]` (`guitar`, `bass`: each kind's Bank directory, recorded on the first switch; the one of `bank_kind` is the Bank directory), and `[metronome]` (`bpm`, `meter`, `volume_db`, see [Metronome](#metronome)); a `[metronome]` value out of range is dropped, and the Daemon logs `<path>: metronome: <error>; ignoring it`. A `bank_dir` in `config.toml` is never overridden, `state.toml`'s `bank_kind` is ignored while it is set, and the GUI cannot switch the Bank kind while it is set. If `state.toml` cannot be parsed, the Daemon logs `<path>: line N:M: <error>; ignoring it` and starts with `config.toml` alone. To drop the GUI's choices, stop the Daemon and delete `state.toml`.
 
 If `$XDG_RUNTIME_DIR` is unset, the socket defaults to `/tmp/xguitare-<uid>/xguitare.sock` and the Daemon warns.
 
