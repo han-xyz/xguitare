@@ -438,24 +438,29 @@ fn a_set_on_a_module_added_during_a_crossfade_lands_on_the_new_rack() {
     let input = [1.0; BLOCK];
     let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
     let p = project(vec![armed("t")]);
-    let without_gain = arrangement(&p, &HashMap::new());
+    let gain_rack = || {
+        let mut rack = Rack::new(vec![(
+            "gain".to_string(),
+            Box::new(Gain::new()) as Box<dyn Module>,
+        )])
+        .expect("valid layout");
+        rack.prepare(RATE as f32, BLOCK);
+        rack
+    };
+    let old_arrangement =
+        Arrangement::new(&p, vec![gain_rack()], &HashMap::new(), RATE as f32, BLOCK)
+            .expect("loaded");
     assert!(
         control
             .commands
-            .push(Command::SwapArrangement(Box::new(without_gain)))
+            .push(Command::SwapArrangement(Box::new(old_arrangement)))
             .is_ok()
     );
     switcher.apply_commands();
     switcher.process_tracks(&input, &[&input], &mut left, &mut right);
 
-    let mut rack = Rack::new(vec![(
-        "gain".to_string(),
-        Box::new(Gain::new()) as Box<dyn Module>,
-    )])
-    .expect("valid layout");
-    rack.prepare(RATE as f32, BLOCK);
-    let with_gain =
-        Arrangement::new(&p, vec![rack], &HashMap::new(), RATE as f32, BLOCK).expect("loaded");
+    let with_gain = Arrangement::new(&p, vec![gain_rack()], &HashMap::new(), RATE as f32, BLOCK)
+        .expect("loaded");
     let rack_add = Command::SwapArrangement(Box::new(with_gain));
     let set = Command::Arrangement(ArrangementCommand::Param {
         track: 0,
@@ -472,6 +477,14 @@ fn a_set_on_a_module_added_during_a_crossfade_lands_on_the_new_rack() {
         assert!(control.commands.push(command).is_ok());
     }
     switcher.apply_commands();
+    for _ in 0..2 {
+        switcher.process_tracks(&input, &[&input], &mut left, &mut right);
+    }
+    assert!(
+        left[0] > 0.7,
+        "the outgoing Arrangement's Module changed: {}",
+        left[0]
+    );
     for _ in 0..16 {
         switcher.process_tracks(&input, &[&input], &mut left, &mut right);
     }
