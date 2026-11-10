@@ -627,6 +627,18 @@ pub fn tuner_toggle(
     }
 }
 
+/// `held_db` is `None` while no status arrives, so the text shows no value.
+pub fn peak_text(held_db: Option<f64>, clipped: bool) -> String {
+    let Some(db) = held_db else {
+        return "peak —".to_string();
+    };
+    if clipped {
+        format!("peak {db:+.1} dB, clipped")
+    } else {
+        format!("peak {db:+.1} dB")
+    }
+}
+
 pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {
     last_seen != Some(revision)
 }

@@ -20,8 +20,8 @@ use xguitare_gui::model::{
     failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_to_command,
     knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
     ladder_segments, latency_ms, meter_fraction, module_types, move_target, open_units_from_string,
-    open_units_to_string, palette, param_rows, peak_fraction, quit_commands, rack_channels,
-    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line,
+    open_units_to_string, palette, param_rows, peak_fraction, peak_text, quit_commands,
+    rack_channels, refresh_decision, requests_until_quit, response_text, spawn_policy, status_line,
     tuner_header_text, tuner_reading, tuner_toggle, unit_suffix,
 };
 
@@ -1218,4 +1218,11 @@ fn tuner_header_shows_note_and_cents_or_no_signal() {
     };
     assert_eq!(tuner_header_text(Some(&reading)), "E1  -3 ct");
     assert_eq!(tuner_header_text(None), NO_SIGNAL);
+}
+
+#[test]
+fn peak_text_without_a_status_shows_no_value() {
+    assert_eq!(peak_text(Some(-4.2), false), "peak -4.2 dB");
+    assert_eq!(peak_text(Some(0.3), true), "peak +0.3 dB, clipped");
+    assert_eq!(peak_text(None, false), "peak —");
 }

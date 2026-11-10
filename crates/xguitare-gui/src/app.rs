@@ -22,7 +22,8 @@ use xguitare_gui::model::{
     add_command, bank_rows, cabinet_ir, cents_fraction, drop_index, engine_readout, filter_bank,
     forget_removed_units, in_tune, key_to_command, knob_fraction, knob_param_value, link_text,
     move_target, open_units_from_string, open_units_to_string, palette, param_rows, peak_db,
-    quit_commands, rack_channels, tuner_header_text, tuner_reading, tuner_toggle, unit_suffix,
+    peak_text, quit_commands, rack_channels, tuner_header_text, tuner_reading, tuner_toggle,
+    unit_suffix,
 };
 use xguitare_gui::widgets::{self, KnobSize, colour};
 
@@ -559,20 +560,13 @@ fn meter_bridge(
                     .interact(Sense::click())
                     .on_hover_text(CLEAR_CLIP_HINT);
                 cleared |= ladder.clicked();
-                ui.label(muted_text(peak_text(hold.held_db(), clip.is_clipped())));
+                let held_db = snapshot.status.as_ref().map(|_| hold.held_db());
+                ui.label(muted_text(peak_text(held_db, clip.is_clipped())));
             });
         }
     });
     if cleared {
         clips.iter_mut().for_each(ClipLatch::reset);
-    }
-}
-
-fn peak_text(db: f64, clipped: bool) -> String {
-    if clipped {
-        format!("peak {db:+.1} dB, clipped")
-    } else {
-        format!("peak {db:+.1} dB")
     }
 }
 
