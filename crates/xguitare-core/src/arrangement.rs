@@ -7,6 +7,7 @@ use std::sync::Arc;
 use xguitare_dsp::Rack;
 use xguitare_dsp::smooth::Smoother;
 
+use crate::engine::{set_module_bypass, set_module_param};
 use crate::project::{LoopRegion, METER_BEATS, METER_NOTES, Project, TEMPO_BPM, Track};
 use crate::take_capture::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
 
@@ -259,7 +260,7 @@ impl Arrangement {
         self.blip = previous.blip;
     }
 
-    /// Applies `command`; a Track index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored.
+    /// Applies `command`; a Track, Module or Parameter index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored.
     pub fn apply(&mut self, command: ArrangementCommand) {
         match command {
             ArrangementCommand::Volume { track, db } if db.is_finite() => {
@@ -284,10 +285,10 @@ impl Arrangement {
                 param,
                 value,
             } => self.with_track(track, |t| {
-                t.rack.module_mut(module).set_param(param, value);
+                set_module_param(&mut t.rack, module, param, value);
             }),
             ArrangementCommand::Bypass { track, module, on } => {
-                self.with_track(track, |t| t.rack.set_bypass(module, on));
+                self.with_track(track, |t| set_module_bypass(&mut t.rack, module, on));
             }
             ArrangementCommand::Play => {
                 self.end_takes(false);

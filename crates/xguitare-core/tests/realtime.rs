@@ -408,6 +408,66 @@ fn switcher_arrangement_swap_commands_and_close_do_not_allocate() {
 }
 
 #[test]
+fn a_set_on_a_module_added_during_a_crossfade_does_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::default());
+    let (project, takes) = playing_project(16);
+    let two_gains = (0..16)
+        .map(|_| {
+            let gains = (0..2)
+                .map(|idx| {
+                    (
+                        format!("gain{idx}"),
+                        Box::new(Gain::new()) as Box<dyn Module>,
+                    )
+                })
+                .collect();
+            let mut rack = Rack::new(gains).expect("valid layout");
+            rack.prepare(48_000.0, BLOCK);
+            rack
+        })
+        .collect();
+    let added =
+        Box::new(Arrangement::new(&project, two_gains, &takes, 48_000.0, BLOCK).expect("loaded"));
+    let arrangements = [sixteen_track_arrangement(), added];
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for arrangement in arrangements {
+            assert!(
+                control
+                    .commands
+                    .push(Command::SwapArrangement(arrangement))
+                    .is_ok()
+            );
+        }
+        for on in [true, false] {
+            let set = ArrangementCommand::Param {
+                track: 3,
+                module: 1,
+                param: 0,
+                value: -6.0,
+            };
+            let bypass = ArrangementCommand::Bypass {
+                track: 3,
+                module: 1,
+                on,
+            };
+            for command in [set, bypass] {
+                assert!(control.commands.push(Command::Arrangement(command)).is_ok());
+            }
+        }
+        switcher.apply_commands();
+        for _ in 0..20 {
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+    });
+    drop(switcher);
+}
+
+#[test]
 fn take_capture_and_loop_wraps_do_not_allocate() {
     let mut arrangement = sixteen_track_arrangement();
     let input = [0.25; BLOCK];

@@ -70,7 +70,7 @@ pub enum Command {
     SwapArrangement(Box<Arrangement>),
     /// Goes back to the Rack.
     CloseArrangement,
-    /// Applies to every Arrangement the switcher holds; ignored while none runs.
+    /// A Rack change (`Param`, `Bypass`) applies to the newest Arrangement the switcher holds, as its Module indices are; any other to every one it holds; ignored while none runs.
     Arrangement(ArrangementCommand),
 }
 
@@ -135,6 +135,24 @@ pub fn raise_peak(peak: &AtomicU32, value: f32) {
 /// Reads the peak stored in `peak` and resets it to 0.
 pub fn take_peak(peak: &AtomicU32) -> f32 {
     f32::from_bits(peak.swap(0, Ordering::Relaxed))
+}
+
+/// Sets a Parameter of the Module at `module`; an index out of range is ignored.
+pub(crate) fn set_module_param(rack: &mut Rack, module: usize, param: usize, value: f32) {
+    let has_param = rack
+        .modules()
+        .get(module)
+        .is_some_and(|(_, found)| param < found.spec().params.len());
+    if has_param {
+        rack.module_mut(module).set_param(param, value);
+    }
+}
+
+/// [`Rack::set_bypass`]; a Module index out of range is ignored.
+pub(crate) fn set_module_bypass(rack: &mut Rack, module: usize, on: bool) {
+    if module < rack.modules().len() {
+        rack.set_bypass(module, on);
+    }
 }
 
 /// The control side, the audio side, and the control thread's end of the input tap.
@@ -250,7 +268,7 @@ impl RackSwitcher {
                         .as_mut()
                         .or(self.incoming.as_mut())
                         .unwrap_or(&mut self.current);
-                    newest.module_mut(module).set_param(param, value);
+                    set_module_param(newest, module, param, value);
                 }
                 Command::SetBypass { module, on } => {
                     let newest = self
@@ -258,7 +276,7 @@ impl RackSwitcher {
                         .as_mut()
                         .or(self.incoming.as_mut())
                         .unwrap_or(&mut self.current);
-                    newest.set_bypass(module, on);
+                    set_module_bypass(newest, module, on);
                 }
                 Command::SwapRack(new) => {
                     if self.incoming.is_none() && self.pending.is_none() {
@@ -291,6 +309,19 @@ impl RackSwitcher {
                         .store(transport_code(Transport::Stopped), Ordering::Relaxed);
                     self.shared.playhead.store(0, Ordering::Relaxed);
                     self.shared.count_in_remaining.store(0, Ordering::Relaxed);
+                }
+                Command::Arrangement(
+                    command
+                    @ (ArrangementCommand::Param { .. } | ArrangementCommand::Bypass { .. }),
+                ) => {
+                    let newest = self
+                        .pending_arrangement
+                        .as_mut()
+                        .or(self.incoming_arrangement.as_mut())
+                        .or(self.arrangement.as_mut());
+                    if let Some(newest) = newest {
+                        newest.apply(command);
+                    }
                 }
                 Command::Arrangement(command) => {
                     for arrangement in [

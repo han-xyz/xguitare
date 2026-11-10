@@ -8,7 +8,7 @@ use xguitare_core::engine::{
 };
 use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
 use xguitare_core::take_capture::{ReadStop, TakeReader, TakeSpan};
-use xguitare_dsp::Rack;
+use xguitare_dsp::{Gain, Module, Rack};
 
 const RATE: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -428,6 +428,90 @@ fn switcher_runs_a_swapped_in_arrangement_until_it_is_closed() {
     assert_eq!(closed.transport(), Transport::Playing);
     assert_eq!(closed.playhead(), swapped_at as u64);
     assert!(close(left[0], 0.5) && close(right[0], 0.5));
+}
+
+#[test]
+fn a_set_on_a_module_added_during_a_crossfade_lands_on_the_new_rack() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::default());
+    let input = [1.0; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let p = project(vec![armed("t")]);
+    let without_gain = arrangement(&p, &HashMap::new());
+    assert!(
+        control
+            .commands
+            .push(Command::SwapArrangement(Box::new(without_gain)))
+            .is_ok()
+    );
+    switcher.apply_commands();
+    switcher.process_tracks(&input, &[&input], &mut left, &mut right);
+
+    let mut rack = Rack::new(vec![(
+        "gain".to_string(),
+        Box::new(Gain::new()) as Box<dyn Module>,
+    )])
+    .expect("valid layout");
+    rack.prepare(RATE as f32, BLOCK);
+    let with_gain =
+        Arrangement::new(&p, vec![rack], &HashMap::new(), RATE as f32, BLOCK).expect("loaded");
+    let rack_add = Command::SwapArrangement(Box::new(with_gain));
+    let set = Command::Arrangement(ArrangementCommand::Param {
+        track: 0,
+        module: 0,
+        param: 0,
+        value: -20.0,
+    });
+    let bypass = Command::Arrangement(ArrangementCommand::Bypass {
+        track: 0,
+        module: 0,
+        on: false,
+    });
+    for command in [rack_add, set, bypass] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
+    for _ in 0..16 {
+        switcher.process_tracks(&input, &[&input], &mut left, &mut right);
+    }
+    assert!(
+        (left[BLOCK - 1] - db(-20.0)).abs() < 1e-3,
+        "left {} is not -20 dB",
+        left[BLOCK - 1]
+    );
+}
+
+#[test]
+fn module_and_parameter_indices_out_of_range_are_ignored() {
+    let mut arrangement = arrangement(&project(vec![track("t")]), &HashMap::new());
+    arrangement.apply(ArrangementCommand::Param {
+        track: 0,
+        module: 3,
+        param: 0,
+        value: 1.0,
+    });
+    arrangement.apply(ArrangementCommand::Bypass {
+        track: 0,
+        module: 3,
+        on: true,
+    });
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::default());
+    let set = Command::SetParam {
+        module: 3,
+        param: 0,
+        value: 1.0,
+    };
+    let bypass = Command::SetBypass {
+        module: 3,
+        on: true,
+    };
+    for command in [set, bypass] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
 }
 
 fn armed(name: &str) -> Track {
