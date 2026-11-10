@@ -918,8 +918,8 @@ fn ladder_lights_bands_from_the_bottom() {
     assert_eq!(ladder_segments(0.0, false).len(), LADDER_SEGMENTS);
     assert_eq!(ladder_counts(-120.0, false), (0, 0, 0));
     assert_eq!(ladder_counts(-60.0, false), (0, 0, 0));
-    assert_eq!(ladder_counts(-12.0, false), (19, 0, 0));
-    assert_eq!(ladder_counts(-3.0, false), (19, 3, 0));
+    assert_eq!(ladder_counts(-12.0, false), (19, 1, 0));
+    assert_eq!(ladder_counts(-3.0, false), (19, 3, 1));
     assert_eq!(ladder_counts(0.0, false), (19, 3, 2));
     assert_eq!(ladder_counts(6.0, false), (19, 3, 2));
     let segments = ladder_segments(-12.0, false);

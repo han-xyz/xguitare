@@ -280,11 +280,11 @@ pub struct Segment {
     pub band: Band,
 }
 
-/// Bottom segment first; each covers an equal dB step of [`METER_FLOOR_DB`]..0 and takes its band from its top edge. `clipped` lights the top segment whatever `db` is.
+/// Bottom segment first; each covers an equal dB step of [`METER_FLOOR_DB`]..0, lights once `db` is above its bottom edge and takes its band from its top edge. `clipped` lights the top segment whatever `db` is.
 pub fn ladder_segments(db: f64, clipped: bool) -> [Segment; LADDER_SEGMENTS] {
     let step_db = -METER_FLOOR_DB / LADDER_SEGMENTS as f64;
     let lit_count = ((db - METER_FLOOR_DB) / step_db)
-        .floor()
+        .ceil()
         .clamp(0.0, LADDER_SEGMENTS as f64) as usize;
     std::array::from_fn(|index| {
         let top_db = METER_FLOOR_DB + (index + 1) as f64 * step_db;
