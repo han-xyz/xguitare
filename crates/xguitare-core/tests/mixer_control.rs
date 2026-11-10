@@ -590,12 +590,23 @@ fn removing_a_track_or_bus_clears_the_clip_flags_that_move() {
     let mut s = mixer("clip-shift");
     ok(&mut s, r#"{"cmd":"bus_add","name":"Delay"}"#);
     let meters = Arc::clone(&s.state.shared);
-    meters.mix_meters.raise(MeterPoint::Track(1), [1.0, 1.0]);
-    meters.mix_meters.raise(MeterPoint::Bus(1), [1.0, 1.0]);
+    let moved = [
+        MeterPoint::Track(0),
+        MeterPoint::Track(1),
+        MeterPoint::Bus(0),
+        MeterPoint::Bus(1),
+    ];
+    for point in moved {
+        meters.mix_meters.raise(point, [1.0, 1.0]);
+    }
     ok(&mut s, r#"{"cmd":"track_remove","track":0}"#);
     ok(&mut s, r#"{"cmd":"bus_remove","bus":0}"#);
-    assert!(!meters.mix_meters.clip(MeterPoint::Track(0)));
-    assert!(!meters.mix_meters.clip(MeterPoint::Bus(0)));
+    for point in moved {
+        assert!(
+            !meters.mix_meters.clip(point),
+            "{point:?} kept its clip flag"
+        );
+    }
 }
 
 #[test]
