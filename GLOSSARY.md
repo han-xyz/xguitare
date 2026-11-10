@@ -79,3 +79,19 @@ _Avoid_: clip, region, segment
 **Take**:
 One recording of a passage: an audio file of the dry input. An Item holds one or more Takes, one of them active.
 _Avoid_: recording, file, pass
+
+**Bus**:
+A mixing lane of a Project with its own Rack but no input and no Items; it carries what Tracks send to it, such as a shared reverb.
+_Avoid_: return, aux, group, FX track
+
+**Send**:
+How much of one Track's sound goes to one Bus, taken after the Track's volume (post-fader) or before it (pre-fader).
+_Avoid_: aux send, route, feed
+
+**Master**:
+The last stage of a Project: every Track and Bus sums into it, it has its own Rack and volume, and its output is what you hear and what a Render writes.
+_Avoid_: main, output bus, mix bus
+
+**Render**:
+An offline pass that plays a Project, or its loop region, through Master into an audio file.
+_Avoid_: export, bounce, mixdown
