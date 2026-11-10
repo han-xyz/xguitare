@@ -302,3 +302,14 @@ fn an_arrangement_switches_the_practice_metronome_off() {
     assert!(out.iter().all(|&sample| sample == 0.0));
     assert_eq!(rig.beat(), 0);
 }
+
+#[test]
+fn beats_played_counts_every_beat_of_a_one_beat_meter() {
+    let mut rig = rig();
+    rig.send(settings(120.0, (1, 4), -12.0));
+    let played = |rig: &Rig| rig.shared.metronome_beats_played.load(Ordering::Relaxed);
+    rig.run(BLOCK);
+    assert_eq!((rig.beat(), played(&rig)), (1, 1));
+    rig.run(24_000);
+    assert_eq!((rig.beat(), played(&rig)), (1, 2));
+}

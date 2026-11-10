@@ -156,6 +156,7 @@ pub(crate) struct PracticeMetronome {
     next_onset: u64,
     /// The 1-based beat in the bar last started; 0 while off.
     beat: u32,
+    beats_played: u64,
 }
 
 impl PracticeMetronome {
@@ -176,6 +177,7 @@ impl PracticeMetronome {
             next_beat: 0,
             next_onset: 0,
             beat: 0,
+            beats_played: 0,
         }
     }
 
@@ -221,6 +223,7 @@ impl PracticeMetronome {
                 let in_bar = self.next_beat % beats_per_bar;
                 self.blip.start(in_bar == 0);
                 self.beat = in_bar as u32 + 1;
+                self.beats_played = self.beats_played.wrapping_add(1);
                 self.next_beat += 1;
                 self.next_onset = self.onset(self.next_beat);
             }
@@ -233,6 +236,11 @@ impl PracticeMetronome {
 
     pub(crate) fn beat(&self) -> u32 {
         self.beat
+    }
+
+    /// The beats started so far, wrapping.
+    pub(crate) fn beats_played(&self) -> u64 {
+        self.beats_played
     }
 
     fn onset(&self, beat: u64) -> u64 {

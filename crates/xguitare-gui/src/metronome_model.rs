@@ -20,6 +20,8 @@ pub struct MetronomeView {
     pub volume_db: f64,
     /// The 1-based beat in the bar the audio thread last played; 0 while off.
     pub beat: u32,
+    /// The beats played so far, wrapping; a change is a new beat even when `beat` stays the same.
+    pub beats_played: u64,
 }
 
 pub fn metronome_view(status: &Value) -> Option<MetronomeView> {
@@ -34,6 +36,7 @@ pub fn metronome_view(status: &Value) -> Option<MetronomeView> {
         ),
         volume_db: metronome["volume_db"].as_f64()?,
         beat: u32::try_from(metronome["beat"].as_u64()?).ok()?,
+        beats_played: metronome["beats_played"].as_u64()?,
     })
 }
 
@@ -51,19 +54,18 @@ pub enum BeatLight {
 
 /// The beat light for `current`, given the status received before it.
 pub fn beat_light(previous: Option<&Value>, current: Option<&Value>) -> BeatLight {
-    let playing_beat = |status: Option<&Value>| {
+    let playing = |status: Option<&Value>| {
         status
             .and_then(metronome_view)
             .filter(|view| view.on && view.beat > 0)
-            .map(|view| view.beat)
     };
-    let Some(beat) = playing_beat(current) else {
+    let Some(view) = playing(current) else {
         return BeatLight::Dark;
     };
     BeatLight::Beat {
-        beat,
-        accent: beat == 1,
-        flash: playing_beat(previous) != Some(beat),
+        beat: view.beat,
+        accent: view.beat == 1,
+        flash: playing(previous).map(|previous| previous.beats_played) != Some(view.beats_played),
     }
 }
 

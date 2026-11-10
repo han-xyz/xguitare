@@ -522,7 +522,7 @@ fn gui_snapshots() {
 fn metronome_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
     snapshot.status.as_mut().unwrap()["metronome"] = json!({
-        "on": true, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": 1,
+        "on": true, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": 1, "beats_played": 1,
     });
     snapshot
 }

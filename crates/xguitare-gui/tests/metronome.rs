@@ -9,7 +9,7 @@ use xguitare_gui::project_model::{key_active, project_key_to_command};
 fn status(on: bool, beat: u32) -> Value {
     json!({
         "project": null,
-        "metronome": {"on": on, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": beat},
+        "metronome": {"on": on, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": beat, "beats_played": u64::from(beat)},
     })
 }
 
@@ -39,6 +39,7 @@ fn status_gives_the_metronome_view() {
             meter: (3, 4),
             volume_db: -12.0,
             beat: 2,
+            beats_played: 2,
         })
     );
     assert_eq!(metronome_view(&json!({"preset": "Funk"})), None);
@@ -61,6 +62,29 @@ fn a_new_beat_flashes_and_the_same_beat_does_not() {
             accent: false,
             flash: false,
         }
+    );
+}
+
+#[test]
+fn a_one_beat_meter_flashes_on_every_beat() {
+    let one_four = |beats_played: u64| {
+        let mut status = status(true, 1);
+        status["metronome"]["meter"] = json!([1, 4]);
+        status["metronome"]["beats_played"] = json!(beats_played);
+        status
+    };
+    let light = |flash| BeatLight::Beat {
+        beat: 1,
+        accent: true,
+        flash,
+    };
+    assert_eq!(
+        beat_light(Some(&one_four(7)), Some(&one_four(8))),
+        light(true)
+    );
+    assert_eq!(
+        beat_light(Some(&one_four(8)), Some(&one_four(8))),
+        light(false)
     );
 }
 

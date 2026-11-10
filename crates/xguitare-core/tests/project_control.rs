@@ -1436,7 +1436,7 @@ fn metronome_starts_off_at_the_defaults() {
     let (mut state, _audio, _dir) = state("metronome-defaults");
     assert_eq!(
         status(&mut state)["metronome"],
-        json!({"on": false, "bpm": 120.0, "meter": [4, 4], "volume_db": -12.0, "beat": 0})
+        json!({"on": false, "bpm": 120.0, "meter": [4, 4], "volume_db": -12.0, "beat": 0, "beats_played": 0})
     );
 }
 
@@ -1450,7 +1450,7 @@ fn metronome_request_plays_and_returns_the_new_state() {
     ));
     assert_eq!(
         payload,
-        json!({"on": true, "bpm": 97.5, "meter": [3, 4], "volume_db": -6.0, "beat": 0})
+        json!({"on": true, "bpm": 97.5, "meter": [3, 4], "volume_db": -6.0, "beat": 0, "beats_played": 0})
     );
     assert!(state.revision > revision);
     assert_eq!(
@@ -1557,7 +1557,7 @@ fn with_a_project_open_the_metronome_is_the_project_click() {
     let payload = ok(handle(&mut state, metronome(Some(true), None, None, None)));
     assert_eq!(
         payload,
-        json!({"on": true, "bpm": 120.0, "meter": [4, 4], "volume_db": -20.0, "beat": 0})
+        json!({"on": true, "bpm": 120.0, "meter": [4, 4], "volume_db": -20.0, "beat": 0, "beats_played": 0})
     );
     let status_now = status(&mut state);
     assert_eq!(status_now["click"]["on"], true);
@@ -1610,7 +1610,7 @@ fn with_a_project_open_the_metronome_is_the_project_click() {
     close(&mut state);
     assert_eq!(
         status(&mut state)["metronome"],
-        json!({"on": false, "bpm": 90.0, "meter": [3, 4], "volume_db": -30.0, "beat": 0})
+        json!({"on": false, "bpm": 90.0, "meter": [3, 4], "volume_db": -30.0, "beat": 0, "beats_played": 0})
     );
 }
 

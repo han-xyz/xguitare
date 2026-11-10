@@ -169,6 +169,7 @@ pub struct Arrangement {
     blip: Blip,
     /// The 1-based beat in the bar of the last click.
     click_beat: u32,
+    beats_played: u64,
     /// The first Track and Bus index whose clip flags another Track or Bus held before this Arrangement; `MAX_TRACKS` and `MAX_BUSES` when none moved.
     moved_from: (usize, usize),
 }
@@ -329,6 +330,7 @@ impl Arrangement {
             count_in: CountIn::default(),
             blip: Blip::new(sample_rate, DEFAULT_VOLUME_DB as f32),
             click_beat: 0,
+            beats_played: 0,
             moved_from: (MAX_TRACKS, MAX_BUSES),
         };
         arrangement.update_audible();
@@ -386,6 +388,11 @@ impl Arrangement {
         if sounding { self.click_beat } else { 0 }
     }
 
+    /// The clicks started so far, count-in included, wrapping.
+    pub fn beats_played(&self) -> u64 {
+        self.beats_played
+    }
+
     /// Takes over the transport, playhead, count-in, click and open Takes of the Arrangement this one replaces, so a rebuild neither stops playback nor splits a Take; `previous` records nothing more.
     pub fn continue_from(&mut self, previous: &mut Arrangement) {
         for (track, old) in self.tracks.iter_mut().zip(previous.tracks.iter_mut()) {
@@ -398,6 +405,7 @@ impl Arrangement {
         self.count_in = previous.count_in;
         self.blip.continue_from(&previous.blip);
         self.click_beat = previous.click_beat;
+        self.beats_played = previous.beats_played;
     }
 
     /// Applies `command`; a Track, Module or Parameter index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored.
@@ -731,6 +739,7 @@ impl Arrangement {
                 let in_bar = beat % self.beats_per_bar;
                 self.blip.start(in_bar == 0);
                 self.click_beat = in_bar as u32 + 1;
+                self.beats_played = self.beats_played.wrapping_add(1);
                 next_beat = Some(beat + 1);
             }
             *sample = self.blip.next_sample();

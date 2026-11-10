@@ -82,7 +82,7 @@ Response:
 | `callback_max_us` | Longest audio callback so far, in µs. |
 | `callback_last_us` | Most recent audio callback, in µs. |
 | `connections` | Port connections the Daemon made at start, each `{"from": <port>, "to": <port>}`. |
-| `metronome` | The Metronome (see `metronome`): whether it is `on`, `bpm`, `meter` `[<beats per bar>, <note value>]`, `volume_db`, and `beat`, the beat in the bar it last played, counted from 1 (`0` whenever `on` is `false`; it counts on under Mute). While a Project is open, `on`, `bpm` and `meter` are the Project's click, tempo and meter, and `beat` counts the click; a count-in with the click off still sounds, but `beat` stays `0`. |
+| `metronome` | The Metronome (see `metronome`): whether it is `on`, `bpm`, `meter` `[<beats per bar>, <note value>]`, `volume_db`, and `beat`, the beat in the bar it last played, counted from 1 (`0` whenever `on` is `false`; it counts on under Mute). `beats_played` counts the beats started so far (a u64 that wraps), so a client sees a new beat even when `beat` repeats, as with a one-beat meter. While a Project is open, `on`, `bpm` and `meter` are the Project's click, tempo and meter, and `beat` counts the click; a count-in with the click off still sounds, but `beat` stays `0`. |
 | `disk_overflows` | Times since the Daemon started that a Track's recording ring was full and frames were dropped because the disk fell behind. |
 | `count_in_remaining` | Beats left in the count-in before recording starts, rounded up; `0` when no count-in is under way or no Project is open. |
 | `loaded_audio_bytes` | Bytes of Take audio the open Project holds in memory (4 per frame); `0` when no Project is open. |

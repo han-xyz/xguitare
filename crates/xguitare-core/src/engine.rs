@@ -40,6 +40,8 @@ pub struct EngineShared {
     pub mix_meters: MixMeters,
     /// The 1-based beat in the bar the Metronome (the Project's click while an Arrangement runs) last played; 0 while it is off.
     pub metronome_beat: AtomicU32,
+    /// The beats the Metronome (or the Project's click) has started, wrapping; it tells two equal `metronome_beat`s apart.
+    pub metronome_beats_played: AtomicU64,
 }
 
 /// One meter of [`MixMeters`].
@@ -474,6 +476,9 @@ impl RackSwitcher {
             self.shared
                 .metronome_beat
                 .store(self.metronome.beat(), Ordering::Relaxed);
+            self.shared
+                .metronome_beats_played
+                .store(self.metronome.beats_played(), Ordering::Relaxed);
             fits
         };
         self.apply_mute(out_l, out_r);
@@ -562,6 +567,9 @@ impl RackSwitcher {
             self.shared
                 .metronome_beat
                 .store(running.click_beat(), Ordering::Relaxed);
+            self.shared
+                .metronome_beats_played
+                .store(running.beats_played(), Ordering::Relaxed);
             running.raise_meters(&self.shared.mix_meters);
         }
         true

@@ -948,6 +948,7 @@ fn switcher_publishes_the_click_beat() {
         switcher.process_tracks(&input, &[], &mut left, &mut right);
     }
     assert_eq!(beat(), 2);
+    assert_eq!(shared.metronome_beats_played.load(Ordering::Relaxed), 2);
     assert!(
         control
             .commands

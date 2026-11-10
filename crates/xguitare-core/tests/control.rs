@@ -160,7 +160,7 @@ fn status_reports_fields() {
             "callback_max_us": 250,
             "callback_last_us": 90,
             "connections": [{"from": "system:capture_1", "to": "xguitare:in"}],
-            "metronome": {"on": false, "bpm": 120.0, "meter": [4, 4], "volume_db": -12.0, "beat": 0},
+            "metronome": {"on": false, "bpm": 120.0, "meter": [4, 4], "volume_db": -12.0, "beat": 0, "beats_played": 0},
             "project": null,
             "project_warning": null,
             "render": null,

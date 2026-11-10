@@ -98,6 +98,7 @@ pub(crate) fn metronome_status(state: &EngineState) -> Value {
         "bpm": bpm,
         "meter": [meter.0, meter.1],
         "volume_db": saved_volume_db(saved),
+        "beats_played": state.shared.metronome_beats_played.load(Ordering::Relaxed),
         "beat": if on { state.shared.metronome_beat.load(Ordering::Relaxed) } else { 0 },
     })
 }
