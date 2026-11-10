@@ -1304,6 +1304,7 @@ fn drive_restore() -> Restore {
     Restore {
         type_name: "drive".to_string(),
         after: Some("drive".to_string()),
+        at: 1,
         values: vec![("gain".to_string(), 80.0), ("tone".to_string(), 60.0)],
         bypass: true,
         ir: None,
@@ -1340,7 +1341,7 @@ fn restore_of_a_cabinet_keeps_its_ir() {
 }
 
 #[test]
-fn restore_adds_after_the_module_that_was_above_while_it_is_there() {
+fn restore_adds_after_the_module_above_or_at_its_old_index() {
     let present = ["drive", "drive-2", "cabinet"].map(String::from);
     assert_eq!(
         drive_restore().add_request(&present),
@@ -1355,7 +1356,7 @@ fn restore_adds_after_the_module_that_was_above_while_it_is_there() {
         Request::RackAdd {
             r#type: "drive".to_string(),
             after: None,
-            at: Some(0),
+            at: Some(1),
         }
     );
 }

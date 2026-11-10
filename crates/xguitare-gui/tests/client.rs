@@ -279,6 +279,7 @@ fn drive_restore() -> Restore {
     Restore {
         type_name: "drive".to_string(),
         after: Some("drive".to_string()),
+        at: 1,
         values: vec![("gain".to_string(), 80.0)],
         bypass: true,
         ir: None,

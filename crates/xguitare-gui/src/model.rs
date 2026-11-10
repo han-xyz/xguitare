@@ -379,11 +379,12 @@ pub fn drag_outcome(
     }
 }
 
-/// What Undo puts back of a removed Module, from the `get` payload shown before its Remove: its type, the Module above it (`None` at the front), its Parameter values, its bypass and its Cabinet IR.
+/// What Undo puts back of a removed Module, from the `get` payload shown before its Remove: its type, the Module above it (`None` at the front), its position `at`, its Parameter values, its bypass and its Cabinet IR.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Restore {
     pub type_name: String,
     pub after: Option<String>,
+    pub at: usize,
     pub values: Vec<(String, f64)>,
     pub bypass: bool,
     pub ir: Option<String>,
@@ -400,6 +401,7 @@ pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
             .map_or("", |row| row.module_type.as_str())
             .to_string(),
         after: index.checked_sub(1).map(|above| modules[above].0.clone()),
+        at: index,
         values: rows
             .iter()
             .map(|row| (row.param.clone(), row.value))
@@ -410,10 +412,10 @@ pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
 }
 
 impl Restore {
-    /// The `rack_add` that puts the Module back after the Module that was above it, or at the front when that one is not among the `present` Module ids.
+    /// The `rack_add` that puts the Module back after the Module that was above it, or at its old position `at` when that one is not among the `present` Module ids.
     pub fn add_request(&self, present: &[String]) -> Request {
         let after = self.after.clone().filter(|after| present.contains(after));
-        let at = after.is_none().then_some(0);
+        let at = after.is_none().then_some(self.at);
         Request::RackAdd {
             r#type: self.type_name.clone(),
             after,

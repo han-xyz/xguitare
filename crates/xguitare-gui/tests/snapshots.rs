@@ -423,6 +423,7 @@ fn unit_dropped_outside_the_rack_is_removed_and_undo_restores_it() {
         [Command::Restore(Restore {
             type_name: "chorus".to_string(),
             after: Some("cabinet".to_string()),
+            at: 4,
             values,
             bypass: false,
             ir: None,
