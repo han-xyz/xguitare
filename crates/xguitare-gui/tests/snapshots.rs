@@ -1192,14 +1192,12 @@ fn mixer_snapshots() {
     write_png(&mut mixer, "mixer");
 
     let (mut bus_rack, _, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
-    bus_rack.key_press_modifiers(Modifiers::COMMAND, Key::M);
-    bus_rack.run_steps(2);
+    click_button(&mut bus_rack, "Mixer");
     click_button(&mut bus_rack, "Rack of Verb");
     write_png(&mut bus_rack, "mixer-bus-rack");
 
     let (mut eight_buses, _, _dir) = harness_with(DEFAULT_WINDOW, eight_buses_snapshot());
-    eight_buses.key_press_modifiers(Modifiers::COMMAND, Key::M);
-    eight_buses.run_steps(2);
+    click_button(&mut eight_buses, "Mixer");
     write_png(&mut eight_buses, "mixer-eight-buses");
     eight_buses.event(Event::PointerMoved(pos2(700.0, 420.0)));
     eight_buses.event(Event::MouseWheel {

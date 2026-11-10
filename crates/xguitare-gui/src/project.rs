@@ -81,7 +81,7 @@ pub fn transport_bar(
     };
     let colours = palette();
     ui.set_min_height(TRANSPORT_HEIGHT);
-    ui.horizontal_centered(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let buttons = [
             (
                 "▶ Play",
@@ -110,6 +110,17 @@ pub fn transport_bar(
             ui.label(RichText::new(count_in).color(colour(colours.red)).strong());
         }
         ui.separator();
+        let mixer = lit_button("Mixer", mixer_open, colour(colours.text)).min_size(PANEL_BUTTON);
+        if ui.add(mixer).clicked() {
+            commands.push(Command::ToggleMixer);
+        }
+        if ui
+            .add(outlined_button("Render").min_size(PANEL_BUTTON))
+            .clicked()
+        {
+            commands.push(Command::OpenRenderDialog);
+        }
+        ui.separator();
         let loop_on = transport.loop_region.on;
         if ui
             .add(lit_button("Loop", loop_on, colour(colours.yellow)))
@@ -131,17 +142,6 @@ pub fn transport_bar(
         commands.extend(tempo_fields(ui, tempo, (feedback, now)));
         ui.separator();
         position_readout(ui, &transport, sample_rate(status), tempo);
-        ui.separator();
-        let mixer = lit_button("Mixer", mixer_open, colour(colours.text)).min_size(PANEL_BUTTON);
-        if ui.add(mixer).clicked() {
-            commands.push(Command::ToggleMixer);
-        }
-        if ui
-            .add(outlined_button("Render").min_size(PANEL_BUTTON))
-            .clicked()
-        {
-            commands.push(Command::OpenRenderDialog);
-        }
         if let Some(warning) = transport.disk_warning() {
             ui.label(RichText::new(warning).color(colour(colours.red)).strong());
         }
