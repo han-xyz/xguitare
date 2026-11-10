@@ -318,6 +318,7 @@ Projects live under `projects_dir`, by default `~/Music/xguitare`; the GUI's `Se
   project.toml            name, sample rate, tempo, meter, loop, click, count-in, Master, Buses, Tracks with their Modules, Sends, Items and Takes
   project.autosave.toml   the latest autosave, when there is one
   takes/guitar-1.wav      one mono 32-bit float WAV per Take, at the Project's sample rate
+  renders/demo-song.wav   each Render, a stereo WAV (see Render)
 ```
 
 Takes are never deleted, also not when their Track is removed. `project.toml` names each Take file `takes/<name>.wav`; any other path is an error when the Project is opened or saved.
@@ -394,6 +395,31 @@ master: -3 dB; out -120.0/-120.0 dB
 - `rack add|remove|move`, `set`, `get`, `bypass` and `ir set` take `--bus <bus>` or `--master` to edit that Rack instead of the selected Track's; a Bus or Master Rack takes every Module type but the cabinet (`a cabinet is not allowed on a Bus or Master`), in any order, and `load` puts a Preset only into a Track.
 - Solo is solo in place: while anything is soloed, the soloed Tracks and Buses sound, with the Buses a soloed Track sends to and the Tracks that send to a soloed Bus. Mute always wins.
 - `status` shows each Track's, Bus's and Master's output peaks (left/right, after the volume) since the last `status`, and `clip` once a side has reached 0 dBFS. The clip flag stays until `clip reset` (all), `clip reset track <track>`, `clip reset bus <bus>` or `clip reset master`. Removing a Track or Bus clears the clip flags of the Tracks or Buses after it.
+
+### Render
+
+A Render plays the Project through its Tracks, Buses and Master into a stereo WAV at the Project's sample rate, faster than real time, while the Daemon goes on playing and recording. It renders the Project as it is now, unsaved changes included; the click and the live inputs are left out, and an armed Track renders its Items.
+
+```console
+$ xguitare render
+rendering /home/you/Music/xguitare/live/renders/live.wav
+10%
+40%
+70%
+90%
+100%
+rendered /home/you/Music/xguitare/live/renders/live.wav
+$ xguitare render --bits 16
+rendering /home/you/Music/xguitare/live/renders/live-2.wav
+...
+rendered /home/you/Music/xguitare/live/renders/live-2.wav
+```
+
+- `render` waits until the Render ends, printing a line at each tenth of the way, and ends with `rendered <file>`; a Render that fails or is cancelled ends with `error: render failed: <reason>` or `error: render cancelled` and exit 1. `render cancel`, from another shell, stops it; so do closing the Project and stopping the Daemon.
+- The whole Project renders from the start to the end of its last Item, then on until Master has stayed below −90 dBFS for half a second (a reverb or delay tail), 10 seconds at most. `--loop` renders the loop region exactly instead.
+- `--bits 24` (default), `16` (with dither) or `32f` (32-bit float).
+- The file is `renders/<name>.wav` in the Project folder, `<name>` being `--name` or the Project folder's name. An existing file is never replaced: `-2`, `-3`, … is added. A name must not be empty, start with `.` or contain `/` or `..`. While it runs the Render writes `<file>.part`, removed when it is cancelled or fails.
+- One Render runs at a time; `status` shows the running one, or the last, on its `render:` line.
 
 ### Latency compensation
 
