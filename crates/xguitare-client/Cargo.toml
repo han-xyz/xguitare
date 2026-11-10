@@ -7,3 +7,6 @@ version.workspace = true
 
 [dependencies]
 xguitare-core = { path = "../xguitare-core" }
+
+[lints]
+workspace = true
