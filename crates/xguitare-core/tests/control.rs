@@ -1594,6 +1594,10 @@ fn save_as_rejects_empty_and_duplicate() {
         error(handle(&mut state, save_as("CLEAN"))),
         "a preset named 'CLEAN' already exists"
     );
+    assert_eq!(
+        error(handle(&mut state, save_as(" Loud "))),
+        "a preset named 'Loud' already exists"
+    );
     assert_eq!(bank_files(&state.config.bank_dir), before);
     assert!(!is_modified(&mut state));
 }
@@ -1620,5 +1624,48 @@ fn save_as_name_cannot_escape_bank() {
             "05-a-b.toml"
         ]
     );
-    assert_eq!(fs::read_dir(&bank).unwrap().count(), 6);
+    assert!(!bank.join("a").exists());
+    let outside = bank.parent().unwrap();
+    assert!(!outside.join("x").exists());
+    assert!(!outside.join("x.toml").exists());
+}
+
+#[test]
+fn save_as_never_replaces_a_file() {
+    let (mut state, _audio, dir) = state("save-as-no-replace");
+    let bank = state.config.bank_dir.clone();
+    let victim = dir.0.join("victim.txt");
+    fs::write(&victim, "keep").unwrap();
+    fs::write(bank.join("04-x.toml"), "unindexed").unwrap();
+    std::os::unix::fs::symlink(&victim, bank.join("04-y.toml")).unwrap();
+    for name in ["x", "y"] {
+        let file = bank.join(format!("04-{name}.toml"));
+        assert_eq!(
+            error(handle(&mut state, save_as(name))),
+            format!("cannot save {}: file exists", file.display())
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(bank.join("04-x.toml")).unwrap(),
+        "unindexed"
+    );
+    assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+    assert!(tmp_files(&bank).is_empty());
+    assert_eq!(ok(handle(&mut state, Request::Status))["preset"], "Clean");
+}
+
+#[test]
+fn save_as_numbers_past_99() {
+    let (mut state, _audio, _dir) = state("save-as-past-99");
+    let bank = state.config.bank_dir.clone();
+    fs::write(
+        bank.join("99-x.toml"),
+        "name = \"X\"\n[[module]]\ntype = \"gain\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&bank).unwrap();
+    for (name, file) in [("A", "100-a.toml"), ("B", "101-b.toml")] {
+        let payload = ok(handle(&mut state, save_as(name)));
+        assert_eq!(payload["path"], bank.join(file).display().to_string());
+    }
 }

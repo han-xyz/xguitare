@@ -490,27 +490,33 @@ fn save(state: &mut EngineState) -> Result<Value, String> {
 /// Writes the live Preset, renamed `name`, to a new `<NN>-<slug>.toml` in the Bank dir and makes it the active Preset; the name reaches the path only through the slug.
 fn save_as(state: &mut EngineState, name: &str) -> Result<Value, String> {
     let (_, live) = state.active.as_ref().ok_or(NO_PRESET)?;
+    let name = name.trim();
     let slug = slug(name);
     if slug.is_empty() {
         return Err(EMPTY_PRESET_NAME.to_string());
     }
-    let dir = state.bank.dir.clone();
-    let cannot_save = |err: io::Error| format!("cannot save {}: {err}", dir.display());
-    let bank = Bank::load_dir(&dir).map_err(cannot_save)?;
     let wanted = name.to_lowercase();
-    if bank.entries.iter().any(
+    if state.bank.entries.iter().any(
         |entry| matches!(entry, BankEntry::Valid { preset, .. } if preset.name.to_lowercase() == wanted),
     ) {
         return Err(format!("a preset named '{name}' already exists"));
     }
-    let file = dir.join(format!("{:02}-{slug}.toml", next_prefix(&bank)));
+    let dir = state.bank.dir.clone();
+    let file = dir.join(format!("{:02}-{slug}.toml", next_prefix(&state.bank)));
     let text = Preset {
         name: name.to_string(),
         modules: live.modules.clone(),
     }
     .to_toml();
-    write_through(&file, &text).map_err(|err| format!("cannot save {}: {err}", file.display()))?;
-    state.bank = Bank::load_dir(&dir).map_err(cannot_save)?;
+    write_new(&file, &text).map_err(|err| {
+        let reason = match err.kind() {
+            ErrorKind::AlreadyExists => "file exists".to_string(),
+            _ => err.to_string(),
+        };
+        format!("cannot save {}: {reason}", file.display())
+    })?;
+    state.bank =
+        Bank::load_dir(&dir).map_err(|err| format!("cannot save {}: {err}", dir.display()))?;
     let saved = Preset::parse(&text).expect("a saved Preset parses back");
     state.active = Some((file.clone(), saved));
     state.revision += 1;
@@ -531,14 +537,14 @@ fn slug(name: &str) -> String {
     slug.trim_end_matches('-').to_string()
 }
 
-/// One more than the highest two-digit prefix among the Bank's file names.
-fn next_prefix(bank: &Bank) -> u32 {
+/// One more than the highest number before the first `-` among the Bank's file names.
+fn next_prefix(bank: &Bank) -> u64 {
     bank.entries
         .iter()
         .filter_map(|entry| {
             let name = entry.file().file_name()?.to_str()?;
-            let prefix = name.get(..2)?;
-            if !prefix.bytes().all(|b| b.is_ascii_digit()) {
+            let (prefix, _) = name.split_once('-')?;
+            if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
                 return None;
             }
             prefix.parse().ok()
@@ -577,6 +583,17 @@ fn write_through(path: &Path, text: &str) -> io::Result<()> {
     if written.is_err() {
         let _ = fs::remove_file(&tmp);
     }
+    written
+}
+
+/// Creates the file `path` names by hard-linking a temp file beside it, so a file or symlink already there fails with `AlreadyExists` and is left as it is.
+fn write_new(path: &Path, text: &str) -> io::Result<()> {
+    let tmp = temp_path(path);
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let written = file
+        .write_all(text.as_bytes())
+        .and_then(|()| fs::hard_link(&tmp, path));
+    let _ = fs::remove_file(&tmp);
     written
 }
 

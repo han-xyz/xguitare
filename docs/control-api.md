@@ -47,7 +47,7 @@ Response:
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack within a second when `buffer_size` differs. |
 | `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
-| `modified` | Whether the live Rack differs from the active Preset's file: `true` after a successful `set`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
+| `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
 | `output_peak_db` | As `input_peak_db`, over both outputs. |
@@ -203,7 +203,7 @@ Response:
 | --- | --- |
 | `path` | The file written. |
 
-With `as`, writes the active Preset, with its current Parameter values and the given name, to a new file in the Bank directory instead, and makes that the active Preset; the Bank is read again. The file is `<NN>-<slug>.toml`: `NN` is one more than the highest two-digit prefix of a file in the Bank directory, zero-padded to two digits; `slug` is the name lowercased with ASCII letters and digits kept and every other run of characters replaced by one `-`, without a `-` at either end. The name reaches the file name only through the slug, so the file is always directly in the Bank directory.
+With `as`, writes the active Preset, with its current Parameter values and the given name (leading and trailing whitespace removed), to a new file in the Bank directory instead, and makes that the active Preset; the Bank is read again. An existing file is never replaced. The file is `<NN>-<slug>.toml`: `NN` is one more than the highest number before the first `-` in a Bank file name, at least two digits; `slug` is the name lowercased with ASCII letters and digits kept and every other run of characters replaced by one `-`, without a `-` at either end. The name reaches the file name only through the slug, so the file is always directly in the Bank directory.
 
 Request:
 
@@ -230,7 +230,8 @@ Errors:
 | `active preset file was removed; load a preset first` | Without `as`: the active Preset's file is no longer in the Bank. |
 | `preset name must not be empty` | With `as`: the name is empty or has no ASCII letter or digit. |
 | `a preset named '<name>' already exists` | With `as`: a Preset in the Bank has this name, compared case-insensitively. |
-| `cannot save <path>: <reason>` | Reading the Bank directory, or writing or renaming the file, failed. |
+| `cannot save <path>: file exists` | With `as`: a file appeared at the new file's name since the Bank was last read. |
+| `cannot save <path>: <reason>` | Writing or renaming the file, or with `as` reading the Bank directory again, failed. |
 
 ## modules
 
