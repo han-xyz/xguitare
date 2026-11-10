@@ -328,6 +328,23 @@ fn closing_the_project_or_stopping_cancels_the_render() {
 }
 
 #[test]
+fn a_new_or_opened_project_shows_no_render() {
+    let mut s = song("render-cleared", true);
+    ok(&mut s, r#"{"cmd":"render"}"#);
+    run_task(&mut s);
+    assert_eq!(render_status(&mut s)["state"], "done");
+    ok(&mut s, r#"{"cmd":"project_close"}"#);
+    ok(&mut s, r#"{"cmd":"project_open","name":"Song"}"#);
+    assert_eq!(render_status(&mut s), Value::Null);
+
+    ok(&mut s, r#"{"cmd":"render"}"#);
+    run_task(&mut s);
+    ok(&mut s, r#"{"cmd":"project_close"}"#);
+    ok(&mut s, r#"{"cmd":"project_new","name":"Other"}"#);
+    assert_eq!(render_status(&mut s), Value::Null);
+}
+
+#[test]
 fn a_part_file_already_there_is_left_alone_and_the_next_name_is_used() {
     let mut s = song("part-exists", true);
     let started = ok(&mut s, r#"{"cmd":"render"}"#);

@@ -93,7 +93,7 @@ pub fn finished_render(state: &mut EngineState) -> Option<RenderFinished> {
     Some(finished)
 }
 
-/// The status `render` field: `null` before the first Render, then the running one or the last finished.
+/// The status `render` field: `null` until a Render starts after `project_new` or `project_open`, then the running one or the last finished.
 pub(crate) fn render_status(state: &EngineState) -> Value {
     let Some(job) = &state.projects.render else {
         return Value::Null;

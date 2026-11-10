@@ -991,6 +991,7 @@ fn open(
     });
     events.push(ProjectEvent::Readers(readers));
     events.push(ProjectEvent::Inputs(track_inputs(&project)));
+    state.projects.render = None;
     let next_bus_id = project
         .buses
         .iter()
