@@ -9,9 +9,11 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
+use xguitare_core::control::TransportAction;
+use xguitare_core::project::LoopRegion;
 use xguitare_core::{BankKind, Config};
 use xguitare_gui::app::App;
-use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot};
+use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
@@ -149,12 +151,18 @@ fn funk_snapshot() -> Snapshot {
             "bank_kind": "bass",
             "bank_dir": "/home/you/.config/xguitare/bank-bass",
             "ir_dir": "/home/you/.config/xguitare/bank-bass",
+            "projects_dir": "/home/you/Music/xguitare",
         })),
+        projects: Some(json!({"projects": [
+            {"folder": "demo-song", "name": "Demo Song", "valid": true},
+            {"folder": "live", "name": "Live", "valid": true},
+        ]})),
         module_types,
         irs: vec!["bass-cab.wav".to_string(), "guitar-cab.wav".to_string()],
         last_message: None,
         failed_set: None,
         refused_remove: None,
+        autosave_offer: None,
     }
 }
 
@@ -174,6 +182,39 @@ fn muted_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
     snapshot.status.as_mut().unwrap()["muted"] = json!(true);
     snapshot
+}
+
+/// Three Tracks at 120 bpm in 4/4: Guitar armed with two Takes on one Item, Bass muted with one Item, Keys empty; the playhead in bar 3, the loop on over bars 2 to 4.
+fn project_snapshot(transport: &str) -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    let status = snapshot.status.as_mut().unwrap();
+    let project = json!({
+        "project": "Demo Song", "transport": transport, "selected": 0, "disk_overflows": 0,
+        "position": {"frames": 230_400, "bars_beats": "3.2"},
+        "tempo": {"bpm": 120.0, "meter": [4, 4]},
+        "loop": {"start": 96_000, "end": 384_000, "on": true},
+        "click": {"on": true, "count_in": 1},
+        "tracks": [
+            {"name": "Guitar", "input": CAPTURE, "volume_db": -3.0, "pan": -0.25,
+             "mute": false, "solo": false, "armed": true, "input_peak_db": -14.0,
+             "items": [{"position": 96_000, "length": 288_000, "take": 1,
+                        "takes": ["guitar-1.wav", "guitar-2.wav"]}]},
+            {"name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0,
+             "mute": true, "solo": false, "armed": false, "input_peak_db": -120.0,
+             "items": [{"position": 0, "length": 480_000, "take": 0, "takes": ["bass-1.wav"]}]},
+            {"name": "Keys", "input": null, "volume_db": -6.0, "pan": 0.5,
+             "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0,
+             "items": []},
+        ],
+    });
+    for (key, value) in project.as_object().unwrap() {
+        status[key] = value.clone();
+    }
+    snapshot
+}
+
+fn project_harness(transport: &str) -> (Harness<'static, App>, Receiver<Command>, TempDir) {
+    harness_with(WINDOW, project_snapshot(transport))
 }
 
 fn click_unit_switch(harness: &mut Harness<App>, unit: &str, label: &str) {
@@ -370,6 +411,206 @@ fn gui_snapshots() {
 }
 
 #[test]
+fn project_snapshots() {
+    write_png(&mut project_harness("playing").0, "project");
+
+    let (mut recording, _, _dir) = project_harness("recording");
+    write_png(&mut recording, "project-recording");
+
+    let (mut section, _, _dir) = harness();
+    section.get_by_label("Open a Project").click();
+    section.run_steps(2);
+    write_png(&mut section, "project-section");
+
+    let mut offered = project_snapshot("stopped");
+    offered.autosave_offer = Some(("Demo Song".to_string(), std::time::Instant::now()));
+    write_png(&mut harness_with(WINDOW, offered).0, "restore-prompt");
+}
+
+#[test]
+fn project_window_has_transport_tracks_and_the_rack() {
+    let (harness, _, _dir) = project_harness("stopped");
+    for label in [
+        "▶ Play",
+        "■ Stop",
+        "● Record",
+        "Loop",
+        "Click",
+        "+ Add Track",
+    ] {
+        harness.get_by_role_and_label(Role::Button, label);
+    }
+    for track in ["Guitar", "Bass", "Keys"] {
+        harness.get_by_label(&format!("Track {track}"));
+    }
+    harness.get_by_label("compressor unit");
+}
+
+#[test]
+fn no_project_shows_no_transport() {
+    let (harness, _, _dir) = harness();
+    assert!(harness.query_by_label("▶ Play").is_none());
+    assert!(harness.query_by_label("Timeline ruler").is_none());
+}
+
+#[test]
+fn track_switches_send_track_set() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    for label in ["Arm Guitar", "Mute Bass", "Solo Keys"] {
+        harness.get_by_label(label).click();
+        harness.run_steps(2);
+    }
+    let edit = |track, edit| Command::TrackSet { track, edit };
+    assert_eq!(
+        sent_now(&sent),
+        [
+            edit(
+                0,
+                TrackEdit {
+                    arm: Some(false),
+                    ..TrackEdit::default()
+                }
+            ),
+            edit(
+                1,
+                TrackEdit {
+                    mute: Some(false),
+                    ..TrackEdit::default()
+                }
+            ),
+            edit(
+                2,
+                TrackEdit {
+                    solo: Some(true),
+                    ..TrackEdit::default()
+                }
+            ),
+        ]
+    );
+}
+
+#[test]
+fn clicking_a_track_row_selects_it() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness.get_by_label("Track Keys").click();
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), [Command::TrackSelect(2)]);
+}
+
+#[test]
+fn transport_buttons_and_keys_send_transport() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness
+        .get_by_role_and_label(Role::Button, "● Record")
+        .click();
+    harness.run_steps(2);
+    harness.key_press(Key::Space);
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::R);
+    harness.run_steps(1);
+    harness.key_press(Key::Home);
+    harness.run_steps(1);
+    harness.key_press(Key::Num1);
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::S);
+    harness.run_steps(1);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::Transport(TransportAction::Record),
+            Command::Transport(TransportAction::Play),
+            Command::Transport(TransportAction::Record),
+            Command::Locate(0),
+            Command::ProjectSave,
+        ]
+    );
+}
+
+#[test]
+fn loop_key_turns_the_loop_off() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness.key_press(Key::R);
+    harness.run_steps(1);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Loop(LoopRegion {
+            start: 96_000,
+            end: 384_000,
+            on: false,
+        })]
+    );
+}
+
+#[test]
+fn clicking_the_ruler_locates() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let ruler = harness.get_by_label("Timeline ruler").rect();
+    let at = pos2(ruler.left() + 48.0, ruler.center().y);
+    harness.event(Event::PointerMoved(at));
+    harness.run_steps(1);
+    pointer_button(&mut harness, at, true);
+    pointer_button(&mut harness, at, false);
+    harness.run_steps(1);
+    assert_eq!(sent_now(&sent), [Command::Locate(23_040)]);
+}
+
+#[test]
+fn dragging_the_loop_start_sends_the_snapped_region() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let start = harness.get_by_label("Loop start").rect().center();
+    drag_and_release(&mut harness, start, start - Vec2::new(52.0, 0.0));
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Loop(LoopRegion {
+            start: 72_000,
+            end: 384_000,
+            on: true,
+        })]
+    );
+}
+
+#[test]
+fn restore_prompt_restores_the_autosave() {
+    let mut offered = project_snapshot("stopped");
+    offered.autosave_offer = Some(("Demo Song".to_string(), std::time::Instant::now()));
+    let (mut harness, sent, _dir) = harness_with(WINDOW, offered);
+    harness.get_by_label("Restore").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RestoreAutosave("Demo Song".to_string())]
+    );
+    assert!(harness.query_by_label("Open saved").is_none());
+}
+
+#[test]
+fn new_and_open_project_from_the_left_panel() {
+    let (mut harness, sent, _dir) = harness();
+    harness
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .focus();
+    harness.run_steps(2);
+    harness
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .type_text("Live");
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "New").click();
+    harness.run_steps(2);
+    harness.get_by_label("Open a Project").click();
+    harness.run_steps(2);
+    harness.get_by_label("Demo Song").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::ProjectNew("Live".to_string()),
+            Command::RefreshProjects,
+            Command::ProjectOpen("demo-song".to_string()),
+        ]
+    );
+}
+
+#[test]
 fn unit_dragged_by_its_header_moves_to_the_gap() {
     let (mut harness, sent, _dir) = harness();
     let from = unit_header_point(&harness, "chorus");
@@ -479,10 +720,12 @@ fn only_a_bank_kind_change_in_settings_drops_the_undo() {
             Command::SetSettings {
                 bank_kind: None,
                 ir_dir: Some(PathBuf::from("/home/you/irs")),
+                projects_dir: None,
             },
             Command::SetSettings {
                 bank_kind: Some(BankKind::Guitar),
                 ir_dir: None,
+                projects_dir: None,
             },
         ]
     );
@@ -714,7 +957,14 @@ fn clicking_a_tile_adds_it_by_the_rack_rules() {
 #[test]
 fn audio_and_settings_apply() {
     let (mut harness, sent, _dir) = harness();
-    for title in ["Preset", "Bass Bank", "Audio", "Settings"] {
+    for title in [
+        "Project",
+        "Preset",
+        "Bass Bank",
+        "Rack",
+        "Audio",
+        "Settings",
+    ] {
         harness.get_by_label(title).click();
         harness.run_steps(2);
     }
@@ -735,6 +985,7 @@ fn audio_and_settings_apply() {
             Command::SetSettings {
                 bank_kind: Some(BankKind::Guitar),
                 ir_dir: None,
+                projects_dir: None,
             },
         ]
     );
@@ -743,6 +994,8 @@ fn audio_and_settings_apply() {
 #[test]
 fn a_tile_click_adds_at_the_chosen_place() {
     let (mut harness, sent, _dir) = harness();
+    harness.get_by_label("Project").click();
+    harness.run_steps(2);
     harness.get_by_label("Place").click();
     harness.run_steps(2);
     harness.get_by_label("at the front").click();

@@ -15,8 +15,12 @@ use crate::client::{self, TICK};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
-    forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, palette,
-    param_rows, peak_db, quit_commands, remember_removes, shortcuts_active,
+    forget_removed_units, key_active, key_to_command, open_units_from_string, open_units_to_string,
+    palette, param_rows, peak_db, project_key_to_command, project_name, quit_commands,
+    remember_removes,
+};
+use crate::project::{
+    ARRANGEMENT_HEIGHT, ProjectView, arrangement, autosave_prompt, transport_bar,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
@@ -61,6 +65,9 @@ pub struct App {
     ports_draft: Option<PortSelection>,
     settings_draft: Option<SettingsDraft>,
     configured_bank_kind: BankKind,
+    new_project: String,
+    project_view: ProjectView,
+    autosave_prompt: Option<String>,
 }
 
 impl App {
@@ -126,11 +133,13 @@ impl App {
                 tuner: None,
                 ports: None,
                 settings: None,
+                projects: None,
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
                 failed_set: None,
                 refused_remove: None,
+                autosave_offer: None,
             },
             stop,
             throttle: Throttle::default(),
@@ -150,6 +159,9 @@ impl App {
             ports_draft: None,
             settings_draft: None,
             configured_bank_kind: config.bank_kind,
+            new_project: String::new(),
+            project_view: ProjectView::default(),
+            autosave_prompt: None,
         }
     }
 }
@@ -248,6 +260,11 @@ impl eframe::App for App {
                     self.removed = None;
                 }
             }
+            if snapshot.autosave_offer != self.snapshot.autosave_offer
+                && let Some((name, _)) = &snapshot.autosave_offer
+            {
+                self.autosave_prompt = Some(name.clone());
+            }
             if snapshot.params != self.snapshot.params
                 && let Some(params) = &snapshot.params
             {
@@ -265,9 +282,16 @@ impl eframe::App for App {
             .as_ref()
             .map(|list| bank_rows(list).0)
             .unwrap_or_default();
+        let project_status = snapshot
+            .status
+            .as_ref()
+            .filter(|status| project_name(Some(status)).is_some());
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
-            .filter_map(|key| key_to_command(key, &rows))
+            .filter_map(|key| match project_status {
+                Some(status) => project_key_to_command(key, status),
+                None => key_to_command(key, &rows),
+            })
             .collect();
         commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| {
@@ -287,6 +311,7 @@ impl eframe::App for App {
             tuner: &mut tuner,
             ports: &mut self.ports_draft,
             settings: &mut self.settings_draft,
+            new_project: &mut self.new_project,
         };
         let sidebar_frame = Frame::side_top_panel(ui.style())
             .fill(widgets::colour(palette().sidebar))
@@ -295,6 +320,28 @@ impl eframe::App for App {
             .exact_size(SIDEBAR_WIDTH)
             .frame(sidebar_frame)
             .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut panel)));
+        if project_status.is_some() {
+            Panel::top("transport")
+                .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
+                .show(ui, |ui| commands.extend(transport_bar(ui, snapshot)));
+            Panel::top("arrangement")
+                .resizable(true)
+                .default_size(ARRANGEMENT_HEIGHT)
+                .frame(Frame::new().fill(widgets::colour(palette().rail)))
+                .show(ui, |ui| {
+                    commands.extend(arrangement(ui, snapshot, &mut self.project_view));
+                });
+        } else {
+            self.project_view = ProjectView::default();
+        }
+        if let Some(name) = self.autosave_prompt.clone()
+            && let Some(restore) = autosave_prompt(ui.ctx(), &name)
+        {
+            if restore {
+                commands.push(Command::RestoreAutosave(name));
+            }
+            self.autosave_prompt = None;
+        }
         let mut knobs = Knobs {
             throttle: &mut self.throttle,
             locals: &mut self.locals,
@@ -344,12 +391,11 @@ impl eframe::App for App {
     }
 }
 
-/// No shortcut while a text field takes typing. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
+/// The keys [`key_active`] lets through. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
-    if !shortcuts_active(ui.ctx().text_edit_focused()) {
-        return Vec::new();
-    }
-    ui.input_mut(|input| {
+    let text_edit_focused = ui.ctx().text_edit_focused();
+    let widget_focused = ui.ctx().memory(|memory| memory.focused().is_some());
+    let keys = ui.input_mut(|input| {
         let mut keys: Vec<KeyEvent> = input
             .events
             .iter()
@@ -359,26 +405,47 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
                     pressed: true,
                     modifiers,
                     ..
-                } => (1..)
-                    .zip(DIGIT_KEYS)
-                    .find(|(_, digit_key)| digit_key == key)
-                    .map(|(digit, _)| {
-                        KeyEvent::Digit(
-                            digit,
-                            KeyModifiers {
-                                ctrl: modifiers.ctrl,
-                                alt: modifiers.alt,
-                            },
-                        )
-                    }),
+                } => key_event(*key, *modifiers),
                 _ => None,
             })
             .collect();
         if input.consume_key(Modifiers::COMMAND, Key::S) {
             keys.push(KeyEvent::CtrlS);
         }
+        if input.consume_key(Modifiers::COMMAND, Key::R) {
+            keys.push(KeyEvent::CtrlR);
+        }
         keys
-    })
+    });
+    keys.into_iter()
+        .filter(|&key| key_active(key, text_edit_focused, widget_focused))
+        .collect()
+}
+
+/// Digits with their modifiers; Space, R, Home and End only without one.
+fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
+    if let Some((digit, _)) = (1..)
+        .zip(DIGIT_KEYS)
+        .find(|(_, digit_key)| *digit_key == key)
+    {
+        return Some(KeyEvent::Digit(
+            digit,
+            KeyModifiers {
+                ctrl: modifiers.ctrl,
+                alt: modifiers.alt,
+            },
+        ));
+    }
+    if !modifiers.is_none() {
+        return None;
+    }
+    match key {
+        Key::Space => Some(KeyEvent::Space),
+        Key::R => Some(KeyEvent::R),
+        Key::Home => Some(KeyEvent::Home),
+        Key::End => Some(KeyEvent::End),
+        _ => None,
+    }
 }
 
 fn revision(snapshot: &Snapshot) -> u64 {

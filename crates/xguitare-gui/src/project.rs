@@ -1,0 +1,681 @@
+use egui::{
+    Align2, Button, Color32, ComboBox, CursorIcon, DragValue, FontId, Frame, Id, Key, Margin,
+    Modal, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui,
+    UiBuilder, WidgetInfo, pos2, vec2,
+};
+use xguitare_core::control::TransportAction;
+use xguitare_core::project::LoopRegion;
+
+use crate::model::{
+    Command, GridLine, ItemBlock, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, LoopEdge,
+    METER_FLOOR_DB, Snapshot, Tempo, TimelineView, TrackEdit, TrackRow, TransportView,
+    bars_beats_text, dragged_loop, grid_lines, item_blocks, palette, parse_meter, port_choices,
+    project_key_to_command, project_tempo, sample_rate, snap_to_beat, time_text, track_colour,
+    track_rows, transport_view,
+};
+use crate::rack::muted_text;
+use crate::widgets::{self, KnobSize, colour, outlined_button, primary_button};
+
+pub const TRACK_LIST_WIDTH: f32 = 400.0;
+pub const ARRANGEMENT_HEIGHT: f32 = 360.0;
+const TRACK_ROW_HEIGHT: f32 = 72.0;
+const RULER_HEIGHT: f32 = 26.0;
+const TRANSPORT_HEIGHT: f32 = 44.0;
+const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(84.0, 32.0);
+const POSITION_SIZE: f32 = 22.0;
+const NAME_WIDTH: f32 = 140.0;
+const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(28.0, 24.0);
+const KNOB_COLUMN_WIDTH: f32 = 64.0;
+const METER_SIZE: egui::Vec2 = egui::Vec2::new(96.0, 6.0);
+const SWATCH_WIDTH: f32 = 5.0;
+const ITEM_INSET: f32 = 6.0;
+const ITEM_RADIUS: u8 = 3;
+const ITEM_FILL_ALPHA: u8 = 150;
+const LOOP_ALPHA: u8 = 25;
+const EDGE_GRAB_PX: f32 = 6.0;
+const PLAYHEAD_WIDTH: f32 = 2.0;
+const LABEL_SIZE: f32 = 12.0;
+const VOLUME_DB: (f64, f64) = (-60.0, 6.0);
+const PAN: (f64, f64) = (-1.0, 1.0);
+const NO_INPUT: &str = "no input";
+const NO_TRACKS: &str = "No Tracks yet: Add Track";
+const COUNT_IN_BARS: [u32; 3] = [0, 1, 2];
+const AUTOSAVE_PROMPT: &str = "A newer autosave exists";
+
+/// An edge of the loop region being dragged: the region when the drag began and as it is now.
+#[derive(Debug, Clone, Copy)]
+pub struct LoopDrag {
+    edge: LoopEdge,
+    from: LoopRegion,
+    now: LoopRegion,
+}
+
+/// The arrangement's own state: the visible stretch of the timeline and a loop edge being dragged.
+#[derive(Debug, Default)]
+pub struct ProjectView {
+    pub timeline: Option<TimelineView>,
+    pub loop_drag: Option<LoopDrag>,
+}
+
+/// Play, Stop, Record, Loop, Click with its count-in, tempo, meter and the position, left to right.
+pub fn transport_bar(ui: &mut Ui, snapshot: &Snapshot) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let Some(status) = snapshot.status.as_ref() else {
+        return commands;
+    };
+    let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
+        return commands;
+    };
+    let colours = palette();
+    ui.set_min_height(TRANSPORT_HEIGHT);
+    ui.horizontal_centered(|ui| {
+        let buttons = [
+            (
+                "▶ Play",
+                transport.play_lit(),
+                colours.green,
+                TransportAction::Play,
+            ),
+            ("■ Stop", false, colours.text, TransportAction::Stop),
+            (
+                "● Record",
+                transport.record_lit(),
+                colours.red,
+                TransportAction::Record,
+            ),
+        ];
+        for (text, lit, lit_colour, action) in buttons {
+            if ui.add(lit_button(text, lit, colour(lit_colour))).clicked() {
+                commands.push(Command::Transport(action));
+            }
+        }
+        ui.separator();
+        let loop_on = transport.loop_region.on;
+        if ui
+            .add(lit_button("Loop", loop_on, colour(colours.yellow)))
+            .clicked()
+        {
+            commands.extend(project_key_to_command(KeyEvent::R, status));
+        }
+        if ui
+            .add(lit_button("Click", transport.click, colour(colours.yellow)))
+            .clicked()
+        {
+            commands.push(Command::Click {
+                on: Some(!transport.click),
+                count_in: None,
+            });
+        }
+        commands.extend(count_in_picker(ui, transport.count_in));
+        ui.separator();
+        commands.extend(tempo_fields(ui, tempo));
+        ui.separator();
+        position_readout(ui, &transport, sample_rate(status), tempo);
+        if let Some(warning) = transport.disk_warning() {
+            ui.label(RichText::new(warning).color(colour(colours.red)).strong());
+        }
+    });
+    commands
+}
+
+fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'static> {
+    let button = if lit {
+        Button::new(RichText::new(text).strong().color(colour(palette().ground)))
+            .fill(lit_colour)
+            .stroke(Stroke::new(1.0, lit_colour))
+    } else {
+        outlined_button(text)
+    };
+    button.selected(lit).min_size(TRANSPORT_BUTTON)
+}
+
+fn count_in_text(bars: u32) -> String {
+    match bars {
+        0 => "no count-in".to_string(),
+        1 => "count-in 1 bar".to_string(),
+        bars => format!("count-in {bars} bars"),
+    }
+}
+
+fn count_in_picker(ui: &mut Ui, count_in: u32) -> Option<Command> {
+    let mut chosen = None;
+    let combo = ComboBox::from_id_salt("count_in")
+        .selected_text(count_in_text(count_in))
+        .show_ui(ui, |ui| {
+            for bars in COUNT_IN_BARS {
+                if ui
+                    .selectable_label(bars == count_in, count_in_text(bars))
+                    .clicked()
+                {
+                    chosen = Some(bars);
+                }
+            }
+        });
+    combo
+        .response
+        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Count-in"));
+    chosen.map(|bars| Command::Click {
+        on: None,
+        count_in: Some(bars),
+    })
+}
+
+/// The tempo is sent while dragged or typed; the meter, typed as `3/4`, on Enter.
+fn tempo_fields(ui: &mut Ui, tempo: Tempo) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let label = ui.label("Tempo");
+    let mut bpm = tempo.bpm;
+    let field = DragValue::new(&mut bpm)
+        .range(20.0..=300.0)
+        .speed(0.5)
+        .fixed_decimals(1)
+        .suffix(" bpm");
+    if ui.add(field).labelled_by(label.id).changed() {
+        commands.push(Command::Tempo {
+            bpm: Some(bpm),
+            meter: None,
+        });
+    }
+    let label = ui.label("Meter");
+    let shown = format!("{}/{}", tempo.beats_per_bar, tempo.note);
+    if let Some(text) = edited_text(ui, Id::unique("meter"), &shown, 44.0, label.id) {
+        commands.extend(parse_meter(&text).map(|meter| Command::Tempo {
+            bpm: None,
+            meter: Some(meter),
+        }));
+    }
+    commands
+}
+
+/// A text field that holds its edit while focused and returns it on Enter.
+fn edited_text(ui: &mut Ui, id: Id, shown: &str, width: f32, label: Id) -> Option<String> {
+    let draft = ui.data_mut(|data| data.remove_temp::<String>(id));
+    let mut text = draft.unwrap_or_else(|| shown.to_string());
+    let edit = ui
+        .add(TextEdit::singleline(&mut text).id(id).desired_width(width))
+        .labelled_by(label);
+    if edit.has_focus() {
+        ui.data_mut(|data| data.insert_temp(id, text));
+        return None;
+    }
+    let entered = edit.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+    (entered && text.trim() != shown).then(|| text.trim().to_string())
+}
+
+fn position_readout(ui: &mut Ui, transport: &TransportView, rate: f64, tempo: Tempo) {
+    let bars = bars_beats_text(transport.frames, rate, tempo);
+    let time = time_text(transport.frames, rate);
+    ui.label(RichText::new(bars).monospace().size(POSITION_SIZE).strong());
+    ui.label(muted_text(time).monospace().size(POSITION_SIZE * 0.7));
+}
+
+/// The ruler with the loop region, then one row per Track: its controls on the left, its lane of Items on the right.
+pub fn arrangement(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let Some(status) = snapshot.status.as_ref() else {
+        return commands;
+    };
+    let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
+        return commands;
+    };
+    let rate = sample_rate(status);
+    let full = ui.available_rect_before_wrap();
+    let ruler = Rect::from_min_max(
+        pos2(full.left() + TRACK_LIST_WIDTH, full.top()),
+        pos2(full.right(), full.top() + RULER_HEIGHT),
+    );
+    let timeline = *view.timeline.get_or_insert_with(|| TimelineView::new(rate));
+    let lanes = Rect::from_min_max(pos2(ruler.left(), ruler.bottom()), full.right_bottom());
+    let timeline = navigated(ui, timeline, lanes.union(ruler));
+    view.timeline = Some(timeline);
+    let scene = Scene {
+        timeline,
+        grid: grid_lines(timeline, ruler.width(), rate, tempo),
+        loop_region: view
+            .loop_drag
+            .map_or(transport.loop_region, |drag| drag.now),
+        playhead: transport.frames,
+    };
+    let add = Rect::from_min_size(full.min, vec2(TRACK_LIST_WIDTH - 8.0, RULER_HEIGHT));
+    if ui.put(add, primary_button("+ Add Track")).clicked() {
+        commands.push(Command::TrackAdd);
+    }
+    commands.extend(ruler_strip(
+        ui,
+        ruler,
+        &scene,
+        rate,
+        tempo,
+        view,
+        transport.loop_region,
+    ));
+    let rows = track_rows(status);
+    let items = item_blocks(status);
+    let ports = snapshot
+        .ports
+        .as_ref()
+        .map(|ports| port_choices(ports).capture)
+        .unwrap_or_default();
+    let body = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.right_bottom());
+    ui.scope_builder(UiBuilder::new().max_rect(body), |ui| {
+        if rows.is_empty() {
+            ui.label(muted_text(NO_TRACKS));
+        }
+        ScrollArea::vertical().id_salt("tracks").show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for row in &rows {
+                commands.extend(track(ui, row, &items, &ports, &scene));
+            }
+        });
+    });
+    ui.allocate_rect(full, Sense::hover());
+    commands
+}
+
+/// Ctrl+wheel zooms about the pointer, a sideways wheel (or Shift+wheel) scrolls, while the pointer is over the timeline.
+fn navigated(ui: &Ui, timeline: TimelineView, area: Rect) -> TimelineView {
+    if !ui.rect_contains_pointer(area) {
+        return timeline;
+    }
+    let (zoom, scroll_x, pointer) = ui.input(|input| {
+        (
+            input.zoom_delta(),
+            input.smooth_scroll_delta.x,
+            input.pointer.hover_pos(),
+        )
+    });
+    let mut timeline = timeline;
+    if (zoom - 1.0).abs() > f32::EPSILON
+        && let Some(pointer) = pointer
+    {
+        timeline = timeline.zoomed(f64::from(zoom), pointer.x - area.left());
+    }
+    if scroll_x.abs() > f32::EPSILON {
+        timeline = timeline.scrolled(-scroll_x);
+    }
+    timeline
+}
+
+struct Scene {
+    timeline: TimelineView,
+    grid: Vec<GridLine>,
+    loop_region: LoopRegion,
+    playhead: u64,
+}
+
+impl Scene {
+    fn x(&self, rect: Rect, frame: u64) -> f32 {
+        rect.left() + self.timeline.x_of(frame as f64)
+    }
+
+    fn paint_grid(&self, painter: &Painter, rect: Rect) {
+        let colours = palette();
+        for line in &self.grid {
+            let x = rect.left() + self.timeline.x_of(line.frame);
+            let shade = if line.beat == 1 {
+                colours.button_border
+            } else {
+                colours.outline
+            };
+            painter.vline(x, rect.y_range(), Stroke::new(1.0, colour(shade)));
+        }
+    }
+
+    fn paint_loop(&self, painter: &Painter, rect: Rect) {
+        if self.loop_region.start >= self.loop_region.end {
+            return;
+        }
+        let colours = palette();
+        let alpha = if self.loop_region.on {
+            LOOP_ALPHA * 2
+        } else {
+            LOOP_ALPHA
+        };
+        let (r, g, b) = colours.yellow;
+        let span = Rect::from_x_y_ranges(
+            self.x(rect, self.loop_region.start)..=self.x(rect, self.loop_region.end),
+            rect.y_range(),
+        );
+        painter.rect_filled(span, 0, Color32::from_rgba_unmultiplied(r, g, b, alpha));
+    }
+
+    fn paint_playhead(&self, painter: &Painter, rect: Rect) {
+        let x = self.x(rect, self.playhead);
+        painter.vline(
+            x,
+            rect.y_range(),
+            Stroke::new(PLAYHEAD_WIDTH, colour(palette().red)),
+        );
+    }
+}
+
+/// Click to locate; drag a loop edge to move it, snapped to the beat, sent as `loop` on release.
+fn ruler_strip(
+    ui: &mut Ui,
+    ruler: Rect,
+    scene: &Scene,
+    rate: f64,
+    tempo: Tempo,
+    view: &mut ProjectView,
+    loop_region: LoopRegion,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let response = ui.interact(ruler, Id::unique("ruler"), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Slider, true, "Timeline ruler"));
+    if response.clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let frame = scene.timeline.frame_at(pointer.x - ruler.left());
+        commands.push(Command::Locate(frame.round() as u64));
+    }
+    let painter = ui.painter_at(ruler);
+    let colours = palette();
+    painter.rect_filled(ruler, 0, colour(colours.section_header));
+    scene.paint_loop(&painter, ruler);
+    scene.paint_grid(&painter, ruler);
+    for line in scene.grid.iter().filter(|line| line.beat == 1) {
+        painter.text(
+            pos2(
+                ruler.left() + scene.timeline.x_of(line.frame) + 3.0,
+                ruler.top() + 2.0,
+            ),
+            Align2::LEFT_TOP,
+            line.bar.to_string(),
+            FontId::proportional(LABEL_SIZE),
+            colour(colours.muted),
+        );
+    }
+    scene.paint_playhead(&painter, ruler);
+    if scene.loop_region.start >= scene.loop_region.end {
+        return commands;
+    }
+    for (edge, frame, name) in [
+        (LoopEdge::Start, scene.loop_region.start, "Loop start"),
+        (LoopEdge::End, scene.loop_region.end, "Loop end"),
+    ] {
+        let x = scene.x(ruler, frame);
+        let grab = Rect::from_x_y_ranges(x - EDGE_GRAB_PX..=x + EDGE_GRAB_PX, ruler.y_range());
+        let handle = ui
+            .interact(grab, Id::unique(("loop_edge", name)), Sense::drag())
+            .on_hover_cursor(CursorIcon::ResizeHorizontal);
+        handle.widget_info(|| WidgetInfo::labeled(Role::Slider, true, name));
+        painter.vline(x, ruler.y_range(), Stroke::new(2.0, colour(colours.yellow)));
+        commands.extend(loop_edge_drag(
+            &handle,
+            edge,
+            ruler,
+            scene,
+            (rate, tempo),
+            view,
+            loop_region,
+        ));
+    }
+    commands
+}
+
+fn loop_edge_drag(
+    handle: &Response,
+    edge: LoopEdge,
+    ruler: Rect,
+    scene: &Scene,
+    (rate, tempo): (f64, Tempo),
+    view: &mut ProjectView,
+    loop_region: LoopRegion,
+) -> Option<Command> {
+    if handle.drag_started() {
+        view.loop_drag = Some(LoopDrag {
+            edge,
+            from: loop_region,
+            now: loop_region,
+        });
+    }
+    let drag = view.loop_drag.as_mut().filter(|drag| drag.edge == edge)?;
+    if handle.dragged()
+        && let Some(pointer) = handle.interact_pointer_pos()
+    {
+        let frame = snap_to_beat(
+            scene.timeline.frame_at(pointer.x - ruler.left()),
+            rate,
+            tempo,
+        );
+        drag.now = dragged_loop(drag.from, edge, frame);
+    }
+    if !handle.drag_stopped() {
+        return None;
+    }
+    let region = drag.now;
+    view.loop_drag = None;
+    (region != loop_region).then_some(Command::Loop(region))
+}
+
+/// A click anywhere on the row or its lane that no control takes selects the Track.
+fn track(
+    ui: &mut Ui,
+    row: &TrackRow,
+    items: &[ItemBlock],
+    ports: &[String],
+    scene: &Scene,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let width = ui.available_width();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, TRACK_ROW_HEIGHT), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Row, true, format!("Track {}", row.name)));
+    if response.clicked() && !row.selected {
+        commands.push(Command::TrackSelect(row.index));
+    }
+    let colours = palette();
+    let list = Rect::from_min_size(rect.min, vec2(TRACK_LIST_WIDTH, rect.height()));
+    let lane = Rect::from_min_max(pos2(list.right(), rect.top()), rect.max);
+    let fill = if row.selected {
+        colours.row_active
+    } else {
+        colours.unit
+    };
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(list, 0, colour(fill));
+    let swatch = Rect::from_min_size(list.min, vec2(SWATCH_WIDTH, list.height()));
+    painter.rect_filled(swatch, 0, colour(track_colour(row.index)));
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, colour(colours.edge_dark)),
+    );
+    paint_lane(&ui.painter_at(lane), lane, row, items, scene);
+    let controls = list
+        .shrink2(vec2(SWATCH_WIDTH + 6.0, 6.0))
+        .translate(vec2(SWATCH_WIDTH, 0.0));
+    ui.scope_builder(UiBuilder::new().max_rect(controls), |ui| {
+        commands.extend(track_controls(ui, row, ports));
+    });
+    commands
+}
+
+fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock], scene: &Scene) {
+    let colours = palette();
+    let ground = if row.selected {
+        colours.meter_bridge
+    } else {
+        colours.ground
+    };
+    painter.rect_filled(lane, 0, colour(ground));
+    scene.paint_loop(painter, lane);
+    scene.paint_grid(painter, lane);
+    let (r, g, b) = track_colour(row.index);
+    for item in items.iter().filter(|item| item.track == row.index) {
+        let span = Rect::from_x_y_ranges(
+            scene.x(lane, item.position)..=scene.x(lane, item.end()),
+            lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET,
+        );
+        painter.rect(
+            span,
+            ITEM_RADIUS,
+            Color32::from_rgba_unmultiplied(r, g, b, ITEM_FILL_ALPHA),
+            Stroke::new(1.0, Color32::from_rgb(r, g, b)),
+            egui::StrokeKind::Inside,
+        );
+        painter.with_clip_rect(span.intersect(lane)).text(
+            span.left_top() + vec2(6.0, 4.0),
+            Align2::LEFT_TOP,
+            item.label(),
+            FontId::proportional(LABEL_SIZE),
+            colour(colours.text),
+        );
+    }
+    scene.paint_playhead(painter, lane);
+}
+
+/// Name and input on the left, Arm, Mute and Solo over the input meter, then volume and pan.
+fn track_controls(ui: &mut Ui, row: &TrackRow, ports: &[String]) -> Vec<Command> {
+    let mut edit = TrackEdit::default();
+    let mut refresh_ports = false;
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(NAME_WIDTH);
+            let name_id = Id::unique(("track_name", row.index));
+            let label = ui.label(muted_text(format!("Track {}", row.index + 1)).size(LABEL_SIZE));
+            edit.name = edited_text(ui, name_id, &row.name, NAME_WIDTH, label.id);
+            refresh_ports = input_picker(ui, row, ports, &mut edit.input);
+        });
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let colours = palette();
+                let switches = [
+                    ("R", "Arm", row.armed, colours.red, &mut edit.arm),
+                    ("M", "Mute", row.mute, colours.yellow, &mut edit.mute),
+                    ("S", "Solo", row.solo, colours.green, &mut edit.solo),
+                ];
+                for (text, name, on, lit, change) in switches {
+                    let button = lit_button(text, on, colour(lit)).min_size(SWITCH_SIZE);
+                    let response = ui.add(button);
+                    response.widget_info(|| {
+                        WidgetInfo::labeled(Role::Button, true, format!("{name} {}", row.name))
+                    });
+                    if response.clicked() {
+                        *change = Some(!on);
+                    }
+                }
+            });
+            input_meter(ui, row.input_peak_db);
+        });
+        let volume = track_knob(ui, ("Volume", &row.name), row.volume_db, VOLUME_DB, " dB");
+        edit.volume = volume.map(|db| db as f32);
+        let pan = track_knob(ui, ("Pan", &row.name), row.pan, PAN, "");
+        edit.pan = pan.map(|pan| pan as f32);
+    });
+    let mut commands = Vec::new();
+    if refresh_ports {
+        commands.push(Command::RefreshPorts);
+    }
+    if edit != TrackEdit::default() {
+        commands.push(Command::TrackSet {
+            track: row.index,
+            edit,
+        });
+    }
+    commands
+}
+
+/// `true` when the menu was opened, so that the port list is read again.
+fn input_picker(
+    ui: &mut Ui,
+    row: &TrackRow,
+    ports: &[String],
+    change: &mut Option<String>,
+) -> bool {
+    let combo = ComboBox::from_id_salt(("track_input", row.index))
+        .width(NAME_WIDTH)
+        .truncate()
+        .selected_text(row.input.as_deref().unwrap_or(NO_INPUT))
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(row.input.is_none(), NO_INPUT).clicked() {
+                *change = Some(String::new());
+            }
+            for port in ports {
+                let selected = row.input.as_ref() == Some(port);
+                if ui.selectable_label(selected, port).clicked() && !selected {
+                    *change = Some(port.clone());
+                }
+            }
+        });
+    combo
+        .response
+        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, format!("Input {}", row.name)));
+    combo.response.clicked()
+}
+
+fn input_meter(ui: &mut Ui, db: f64) {
+    let colours = palette();
+    let (rect, response) = ui.allocate_exact_size(METER_SIZE, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Meter, true, format!("{db:.1} dB")));
+    let painter = ui.painter();
+    painter.rect_filled(rect, 1, colour(colours.led_off));
+    let fraction = ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0) as f32;
+    let lit = if db >= LADDER_RED_DB {
+        colours.red
+    } else if db >= LADDER_YELLOW_DB {
+        colours.yellow
+    } else {
+        colours.green
+    };
+    let level = Rect::from_min_size(rect.min, vec2(rect.width() * fraction, rect.height()));
+    painter.rect_filled(level, 1, colour(lit));
+}
+
+/// A small knob over a number field; either sends the new value at once, a double-click on the knob the middle (0 dB, centre).
+fn track_knob(
+    ui: &mut Ui,
+    (what, track): (&str, &str),
+    value: f64,
+    (min, max): (f64, f64),
+    suffix: &str,
+) -> Option<f64> {
+    ui.vertical_centered(|ui| {
+        ui.set_width(KNOB_COLUMN_WIDTH);
+        let fraction = ((value - min) / (max - min)) as f32;
+        let knob = widgets::rack_knob(ui, KnobSize::Small, fraction, colour(palette().text));
+        knob.response
+            .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("{what} {track}")));
+        let mut typed = value;
+        let field = DragValue::new(&mut typed)
+            .range(min..=max)
+            .speed((max - min) / 200.0)
+            .fixed_decimals(if suffix.is_empty() { 2 } else { 1 })
+            .suffix(suffix.to_string());
+        let field = ui.add(field);
+        field.widget_info(|| {
+            WidgetInfo::labeled(Role::SpinButton, true, format!("{what} {track} value"))
+        });
+        if knob.reset {
+            return Some(0.0);
+        }
+        if knob.response.dragged() {
+            let dragged = min + f64::from(knob.fraction) * (max - min);
+            return ((dragged - value).abs() > f64::EPSILON).then_some(dragged);
+        }
+        field.changed().then_some(typed)
+    })
+    .inner
+}
+
+/// The prompt after `project_open` found a newer autosave; `None` while open, else whether to restore.
+pub fn autosave_prompt(ctx: &egui::Context, name: &str) -> Option<bool> {
+    let mut choice = None;
+    Modal::new(Id::unique("autosave_prompt")).show(ctx, |ui| {
+        Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
+            ui.label(RichText::new(format!("{AUTOSAVE_PROMPT} — {name}")).strong());
+            ui.label(muted_text(
+                "It holds the changes since the Project was last saved.",
+            ));
+            ui.horizontal(|ui| {
+                if ui.add(primary_button("Restore")).clicked() {
+                    choice = Some(true);
+                }
+                if ui.add(outlined_button("Open saved")).clicked() {
+                    choice = Some(false);
+                }
+            });
+        });
+    });
+    choice
+}

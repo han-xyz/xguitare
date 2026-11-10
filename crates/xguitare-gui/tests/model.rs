@@ -170,9 +170,9 @@ fn commands_before_quit_are_sent_in_order() {
         },
     ];
     let expected = expected.into_iter().map(Outgoing::Request).collect();
-    assert_eq!(requests_until_quit(queued), (expected, true));
+    assert_eq!(requests_until_quit(queued, None), (expected, true));
     assert_eq!(
-        requests_until_quit(vec![Command::Load("Lead".to_string())]),
+        requests_until_quit(vec![Command::Load("Lead".to_string())], None),
         (
             vec![Outgoing::Request(Request::Load {
                 preset: "Lead".to_string(),
@@ -1313,12 +1313,14 @@ fn undo_payload() -> serde_json::Value {
 
 /// [`requests_until_quit`] for commands that each send one request.
 fn single_requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
-    let (outgoing, quit) = requests_until_quit(queued);
+    let (outgoing, quit) = requests_until_quit(queued, None);
     let requests = outgoing
         .into_iter()
         .map(|outgoing| match outgoing {
             Outgoing::Request(req) => req,
-            Outgoing::Restore(restore) => panic!("unexpected {restore:?}"),
+            other @ (Outgoing::Restore(_) | Outgoing::RestoreAutosave(_)) => {
+                panic!("unexpected {other:?}")
+            }
         })
         .collect();
     (requests, quit)
@@ -1421,7 +1423,7 @@ fn restore_goes_out_in_queue_order() {
         Command::Quit,
     ];
     assert_eq!(
-        requests_until_quit(queued),
+        requests_until_quit(queued, None),
         (
             vec![
                 Outgoing::Request(Request::Load {
@@ -1905,6 +1907,7 @@ fn sections_in_panel_order() {
     assert_eq!(
         SECTIONS,
         [
+            Section::Project,
             Section::Preset,
             Section::Bank,
             Section::Rack,
@@ -1921,6 +1924,7 @@ fn sections_in_panel_order() {
     assert_eq!(
         titles,
         [
+            "Project",
             "Preset",
             "Bass Bank",
             "Rack",
@@ -1994,14 +1998,15 @@ fn set_ports_needs_all_three_ports() {
 
 #[test]
 fn set_settings_sends_only_what_changed() {
-    let payload =
-        json!({"ok": true, "bank_kind": "guitar", "bank_dir": "/c/bank", "ir_dir": "/c/bank"});
+    let payload = json!({"ok": true, "bank_kind": "guitar", "bank_dir": "/c/bank", "ir_dir": "/c/bank",
+            "projects_dir": "/c/music"});
     let current = settings_draft(&payload).unwrap();
     assert_eq!(
         current,
         SettingsDraft {
             bank_kind: BankKind::Guitar,
             ir_dir: "/c/bank".to_string(),
+            projects_dir: "/c/music".to_string(),
         }
     );
     assert_eq!(settings_draft(&json!({})), None);
@@ -2015,6 +2020,7 @@ fn set_settings_sends_only_what_changed() {
         Some(Command::SetSettings {
             bank_kind: Some(BankKind::Bass),
             ir_dir: None,
+            projects_dir: None,
         })
     );
     let irs = SettingsDraft {
@@ -2026,6 +2032,19 @@ fn set_settings_sends_only_what_changed() {
         Some(Command::SetSettings {
             bank_kind: None,
             ir_dir: Some(PathBuf::from("/c/irs")),
+            projects_dir: None,
+        })
+    );
+    let music = SettingsDraft {
+        projects_dir: "/c/songs".to_string(),
+        ..current.clone()
+    };
+    assert_eq!(
+        set_settings_command(&current, &music),
+        Some(Command::SetSettings {
+            bank_kind: None,
+            ir_dir: None,
+            projects_dir: Some(PathBuf::from("/c/songs")),
         })
     );
 }
@@ -2042,6 +2061,7 @@ fn ports_and_settings_commands_become_requests() {
         Command::SetSettings {
             bank_kind: Some(BankKind::Bass),
             ir_dir: Some(PathBuf::from("/c/irs")),
+            projects_dir: None,
         },
     ];
     assert_eq!(

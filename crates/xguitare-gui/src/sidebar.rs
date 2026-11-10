@@ -12,8 +12,9 @@ use xguitare_core::BankKind;
 use crate::model::{
     AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
     SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
-    filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
-    set_settings_command, settings_draft, shown_undo, tuner_toggle,
+    filter_bank, link_text, palette, param_rows, port_choices, project_name, project_rows,
+    rack_channels, set_ports_command, set_settings_command, settings_draft, shown_undo,
+    tuner_toggle,
 };
 use crate::rack::muted_text;
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
@@ -42,6 +43,10 @@ const TILE_TEXT_INSET: f32 = 14.0;
 const TILE_TEXT_SIZE: f32 = 14.0;
 const NO_PORTS: &str = "no port list from the Daemon";
 const NO_SETTINGS: &str = "no settings from the Daemon";
+const NO_PROJECT: &str = "No Project open";
+const NEW_PROJECT_HINT: &str = "New Project name";
+const OPEN_PROJECT: &str = "Open a Project";
+const NO_PROJECTS: &str = "no Projects yet";
 const BANK_KINDS: [(BankKind, &str); 2] = [(BankKind::Guitar, "Guitar"), (BankKind::Bass, "Bass")];
 
 pub struct Tuner<'a> {
@@ -76,6 +81,7 @@ pub struct SidebarView<'a, 'b> {
     pub tuner: &'a mut Tuner<'b>,
     pub ports: &'a mut Option<PortSelection>,
     pub settings: &'a mut Option<SettingsDraft>,
+    pub new_project: &'a mut String,
 }
 
 /// One collapsible section per [`SECTIONS`] entry, top to bottom.
@@ -181,6 +187,7 @@ fn section_body(
     view: &mut SidebarView,
 ) -> Vec<Command> {
     match section {
+        Section::Project => project_section(ui, snapshot, view.new_project),
         Section::Preset => {
             preset_heading(ui, snapshot);
             save_buttons(ui, view.save_as_name).into_iter().collect()
@@ -200,6 +207,76 @@ fn section_body(
             Vec::new()
         }
     }
+}
+
+/// While a Project is open: its name, `Save` and `Close`; else a name field with `New`, and `Open` listing the Daemon's Projects, read again when the menu opens.
+fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> Vec<Command> {
+    let button_size = vec2(
+        (ui.available_width() - ui.spacing().item_spacing.x) / 2.0,
+        SIDEBAR_BUTTON_HEIGHT,
+    );
+    let mut commands = Vec::new();
+    if let Some(name) = project_name(snapshot.status.as_ref()) {
+        ui.label(RichText::new(name).size(SECTION_TITLE_SIZE * 1.5).strong());
+        ui.horizontal(|ui| {
+            if ui
+                .add(primary_button("Save").min_size(button_size))
+                .clicked()
+            {
+                commands.push(Command::ProjectSave);
+            }
+            if ui
+                .add(outlined_button("Close").min_size(button_size))
+                .clicked()
+            {
+                commands.push(Command::ProjectClose);
+            }
+        });
+        return commands;
+    }
+    ui.label(muted_text(NO_PROJECT));
+    let (field, new) = ui
+        .horizontal(|ui| {
+            let label = ui.label("Name");
+            let width = ui.available_width() - button_size.x / 2.0 - ui.spacing().item_spacing.x;
+            let field = TextEdit::singleline(new_name)
+                .hint_text(NEW_PROJECT_HINT)
+                .desired_width(width);
+            let field = ui.add(field).labelled_by(label.id);
+            (field, ui.add(outlined_button("New")).clicked())
+        })
+        .inner;
+    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+    if (entered || new) && !new_name.trim().is_empty() {
+        commands.push(Command::ProjectNew(new_name.trim().to_string()));
+        new_name.clear();
+    }
+    let rows = snapshot
+        .projects
+        .as_ref()
+        .map(project_rows)
+        .unwrap_or_default();
+    let combo = ComboBox::from_id_salt("open_project")
+        .width(ui.available_width())
+        .selected_text(OPEN_PROJECT)
+        .show_ui(ui, |ui| {
+            if rows.is_empty() {
+                ui.label(muted_text(NO_PROJECTS));
+            }
+            for row in &rows {
+                let item = ui.add_enabled(row.valid, Button::selectable(false, &row.name));
+                if item.clicked() {
+                    commands.push(Command::ProjectOpen(row.folder.clone()));
+                }
+            }
+        });
+    combo
+        .response
+        .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, OPEN_PROJECT));
+    if combo.response.clicked() {
+        commands.push(Command::RefreshProjects);
+    }
+    commands
 }
 
 fn preset_heading(ui: &mut Ui, snapshot: &Snapshot) {
@@ -478,6 +555,12 @@ fn settings(
     ui.horizontal(|ui| {
         let label = ui.label("IR folder");
         let field = TextEdit::singleline(&mut edited.ir_dir).desired_width(ui.available_width());
+        ui.add(field).labelled_by(label.id);
+    });
+    ui.horizontal(|ui| {
+        let label = ui.label("Projects folder");
+        let field =
+            TextEdit::singleline(&mut edited.projects_dir).desired_width(ui.available_width());
         ui.add(field).labelled_by(label.id);
     });
     let apply = set_settings_command(&current, &edited);

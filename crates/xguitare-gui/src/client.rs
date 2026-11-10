@@ -9,9 +9,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::model::{
-    Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
-    ir_names, module_types, param_rows, refresh_decision, refused_remove, requests_until_quit,
-    response_text, spawn_policy,
+    Command, Link, Outgoing, Restore, Snapshot, autosave_offer, bank_rows, counts_toward_spawn,
+    failed_set, ir_names, module_types, param_rows, project_name, refresh_decision, refused_remove,
+    requests_until_quit, response_text, spawn_policy, still_closing,
 };
 use serde_json::Value;
 use tracing::{info, warn};
@@ -22,6 +22,7 @@ use xguitare_core::control::{Request, Response};
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const DAEMON_EXECUTABLE: &str = "xguitare";
+const REOPEN_TRIES: u32 = 40;
 
 pub fn spawn(
     config: Config,
@@ -56,6 +57,7 @@ struct Client {
     irs_fetched: bool,
     ports_fetched: bool,
     settings_fetched: bool,
+    projects_fetched: bool,
     tuner_answered: bool,
     snapshot: Snapshot,
 }
@@ -77,6 +79,7 @@ impl Client {
             irs_fetched: false,
             ports_fetched: false,
             settings_fetched: false,
+            projects_fetched: false,
             tuner_answered: false,
             snapshot: Snapshot {
                 link: Link::Disconnected {
@@ -88,11 +91,13 @@ impl Client {
                 tuner: None,
                 ports: None,
                 settings: None,
+                projects: None,
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
                 failed_set: None,
                 refused_remove: None,
+                autosave_offer: None,
             },
         }
     }
@@ -166,7 +171,10 @@ impl Client {
         if queued.contains(&Command::RefreshPorts) {
             self.ports_fetched = false;
         }
-        let (requests, quit) = requests_until_quit(queued);
+        if queued.contains(&Command::RefreshProjects) {
+            self.projects_fetched = false;
+        }
+        let (requests, quit) = requests_until_quit(queued, self.selected_track());
         let sent = requests.len();
         for outgoing in requests {
             match outgoing {
@@ -174,6 +182,7 @@ impl Client {
                     self.send(&req);
                 }
                 Outgoing::Restore(restore) => self.restore(&restore),
+                Outgoing::RestoreAutosave(name) => self.restore_autosave(name),
             }
         }
         if quit {
@@ -196,11 +205,19 @@ impl Client {
             Request::SetSettings { .. } => {
                 self.settings_fetched = false;
                 self.irs_fetched = false;
+                self.projects_fetched = false;
             }
+            Request::ProjectNew { .. }
+            | Request::ProjectOpen { .. }
+            | Request::ProjectSave
+            | Request::ProjectClose => self.projects_fetched = false,
             _ => {}
         }
         if let Some(param) = failed_set(req, &response) {
             self.snapshot.failed_set = Some((param, Instant::now()));
+        }
+        if let Some(name) = autosave_offer(req, &response) {
+            self.snapshot.autosave_offer = Some((name, Instant::now()));
         }
         if let Some(id) = refused_remove(req, &response) {
             self.snapshot.refused_remove = Some((id, Instant::now()));
@@ -235,6 +252,33 @@ impl Client {
         for req in restore.follow_up_requests(id) {
             self.send(&req);
         }
+    }
+
+    /// The Track that Rack requests act on: the selected one while a Project is open.
+    fn selected_track(&self) -> Option<usize> {
+        let status = self.snapshot.status.as_ref()?;
+        project_name(Some(status))?;
+        usize::try_from(status["selected"].as_u64()?).ok()
+    }
+
+    /// `project_open` waits for the closed Project's last Takes: it is sent again every tick while the Daemon answers that the Project is still closing.
+    fn restore_autosave(&mut self, name: String) {
+        self.send(&Request::ProjectClose);
+        let open = Request::ProjectOpen {
+            name,
+            restore: true,
+        };
+        for _ in 0..REOPEN_TRIES {
+            let response = self.request(&open);
+            if !still_closing(&response) {
+                if let Some(text) = response_text(&open, response) {
+                    self.snapshot.last_message = Some((text, Instant::now()));
+                }
+                return;
+            }
+            thread::sleep(TICK);
+        }
+        warn!("project_open: still closing after {REOPEN_TRIES} tries");
     }
 
     fn poll(&mut self, now: Instant) {
@@ -325,6 +369,10 @@ impl Client {
         if !self.settings_fetched {
             self.snapshot.settings = self.fetch_once(&Request::Settings);
             self.settings_fetched = true;
+        }
+        if !self.projects_fetched {
+            self.snapshot.projects = self.fetch_once(&Request::ProjectList);
+            self.projects_fetched = true;
         }
         if self.connection.is_none() {
             return;
@@ -432,6 +480,7 @@ impl Client {
         self.irs_fetched = false;
         self.ports_fetched = false;
         self.settings_fetched = false;
+        self.projects_fetched = false;
         self.snapshot.status = None;
         self.snapshot.tuner = None;
         self.snapshot.link = Link::Disconnected {
