@@ -505,10 +505,9 @@ fn write_sample(
     sample: f32,
     dither: &mut Dither,
 ) -> Result<(), hound::Error> {
-    let sample = sample.clamp(-1.0, 1.0);
     match bits {
         RenderBits::Pcm16 => {
-            let scaled = sample * f32::from(i16::MAX) + dither.next_tpdf();
+            let scaled = sample.clamp(-1.0, 1.0) * f32::from(i16::MAX) + dither.next_tpdf();
             writer.write_sample(
                 scaled
                     .round()
@@ -517,7 +516,7 @@ fn write_sample(
         }
         RenderBits::Pcm24 => {
             const MAX_24: f32 = 8_388_607.0;
-            writer.write_sample((sample * MAX_24).round() as i32)
+            writer.write_sample((sample.clamp(-1.0, 1.0) * MAX_24).round() as i32)
         }
         RenderBits::Float32 => writer.write_sample(sample),
     }

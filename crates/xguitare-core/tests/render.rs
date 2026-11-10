@@ -412,6 +412,34 @@ fn a_failed_write_reports_the_error_and_leaves_no_part_file() {
 }
 
 #[test]
+fn thirty_two_bit_float_keeps_peaks_above_full_scale() {
+    let dir = temp_dir("float-peaks");
+    let takes = takes(&[("takes/a-1.wav", tone(4_800, 1.5))]);
+    let mut song = project(vec![track("a", vec![item(0, "takes/a-1.wav", 4_800)])]);
+    song.loop_region = LoopRegion {
+        start: 0,
+        end: 4_800,
+        on: false,
+    };
+    let render = Render::new(
+        &config(&dir.0),
+        &song,
+        &takes,
+        RenderRange::Loop,
+        RenderBits::Float32,
+    )
+    .unwrap();
+    let (job, file) = job(&dir.0, "loud");
+    run_render(render, &job, |part, file| fs::hard_link(part, file));
+    let peak = WavReader::open(file)
+        .unwrap()
+        .into_samples::<f32>()
+        .map(|sample| sample.unwrap().abs())
+        .fold(0.0, f32::max);
+    assert!(peak > 1.4, "peak {peak}");
+}
+
+#[test]
 fn without_hard_links_the_part_file_is_renamed_to_a_new_name() {
     let dir = temp_dir("no-hard-links");
     let (song, takes) = loop_song();
