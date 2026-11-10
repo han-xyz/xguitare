@@ -1125,7 +1125,10 @@ fn rate_mismatch(project_rate: u32, engine_rate: f32) -> Option<String> {
     })
 }
 
-fn click_commands(state: &EngineState, project: &Project) -> [ArrangementCommand; 3] {
+/// How many commands `click` sends.
+pub(crate) const CLICK_COMMANDS: usize = 3;
+
+fn click_commands(state: &EngineState, project: &Project) -> [ArrangementCommand; CLICK_COMMANDS] {
     [
         ArrangementCommand::Click(project.click),
         ArrangementCommand::CountIn(project.count_in),

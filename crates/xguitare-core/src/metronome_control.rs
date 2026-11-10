@@ -12,7 +12,7 @@ use crate::metronome::{
     VOLUME_DB,
 };
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
-use crate::project_control::{click, open_project_state, send, tempo};
+use crate::project_control::{CLICK_COMMANDS, click, open_project_state, send, tempo};
 use crate::state::SavedMetronome;
 
 /// Changes the Metronome and returns its state. With no Project open it plays its own tempo and meter, saved in `state.toml` with the volume; with one open `on` is the Project's click and `bpm` and `meter` its tempo and meter.
@@ -33,6 +33,16 @@ pub(crate) fn metronome(
         return Err(BAD_VOLUME.to_string());
     }
     let project_open = open_project_state(state).is_some();
+    let needed = if project_open {
+        usize::from(bpm.is_some() || meter.is_some())
+            + if on.is_some() { CLICK_COMMANDS } else { 0 }
+            + usize::from(volume.is_some())
+    } else {
+        1
+    };
+    if state.queues.commands.slots() < needed {
+        return Err(ENGINE_BUSY.to_string());
+    }
     let mut saved = state.config.state.clone();
     saved.metronome.volume_db = volume.or(saved.metronome.volume_db);
     if !project_open {

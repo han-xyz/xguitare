@@ -1616,3 +1616,66 @@ fn opening_a_project_switches_the_practice_metronome_off() {
     close(&mut state);
     assert_eq!(status(&mut state)["metronome"]["on"], false);
 }
+
+fn fill_commands_to(state: &mut EngineState, free: usize) {
+    let filler = || {
+        Command::Metronome(MetronomeSettings {
+            on: false,
+            bpm: 120.0,
+            meter: (4, 4),
+            volume_db: -12.0,
+            sample_rate: 48_000.0,
+        })
+    };
+    while state.queues.commands.slots() > free {
+        assert!(state.queues.commands.push(filler()).is_ok());
+    }
+}
+
+#[test]
+fn a_busy_engine_leaves_the_metronome_unchanged() {
+    let (mut state, mut audio, _dir) = state("metronome-busy");
+    let saved = |state: &EngineState| fs::read_to_string(&state.config.state_file).ok();
+    fill_commands_to(&mut state, 0);
+    let (before, file, revision) = (
+        status(&mut state)["metronome"].clone(),
+        saved(&state),
+        state.revision,
+    );
+    assert_eq!(
+        error(handle(
+            &mut state,
+            metronome(Some(true), Some(90.0), None, Some(-20.0))
+        )),
+        "engine busy"
+    );
+    assert_eq!(status(&mut state)["metronome"], before);
+    assert_eq!(saved(&state), file);
+    assert_eq!(state.revision, revision);
+
+    drain_commands(&mut audio);
+    new_project(&mut state, "Song");
+    drain_commands(&mut audio);
+    fill_commands_to(&mut state, 3);
+    let (before, file, revision) = (
+        status(&mut state)["metronome"].clone(),
+        saved(&state),
+        state.revision,
+    );
+    assert_eq!(
+        error(handle(
+            &mut state,
+            metronome(Some(true), None, None, Some(-20.0))
+        )),
+        "engine busy",
+        "on/off takes three commands and the volume one"
+    );
+    assert_eq!(status(&mut state)["metronome"], before);
+    assert_eq!(saved(&state), file);
+    assert_eq!(state.revision, revision);
+    ok(handle(
+        &mut state,
+        metronome(None, Some(100.0), None, Some(-20.0)),
+    ));
+    assert_eq!(status(&mut state)["metronome"]["volume_db"], -20.0);
+}
