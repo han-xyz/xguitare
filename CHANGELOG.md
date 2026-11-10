@@ -7,7 +7,9 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 ### Added
 
 - Projects: record and play back up to 16 Tracks, each with its own Rack, input, volume, pan, mute, solo and arm, with tempo, meter, loop, click and count-in. CLI `project new|open|save|close|list`, `track add|remove|edit|select`, `play`, `stop`, `record`, `locate`, `tempo`, `click`; Control API `project_*`, `track_*`, `transport`, `loop`, `tempo`, `click`, and an optional `track` on the Rack requests. Takes are placed latency-compensated; an open Project is autosaved every 60 seconds while changed and when the Daemon stops.
-- `status` shows `disk_overflows` and, while a Project is open, its transport, position, tempo, loop, click and Tracks; `settings` and `set_settings` take `projects_dir`.
+- `status` shows `disk_overflows`, `count_in_remaining`, `loaded_audio_bytes`, `project_warning` and, while a Project is open, its transport, position, tempo, loop, click and Tracks; `settings` and `set_settings` take `projects_dir`.
+- The Control API `items` request and CLI `project items` list each Track's Items; `track_select` selects a Track.
+- The GUI turns into a Project view while a Project is open: transport bar, Track rows, a timeline with the Items, loop region and playhead, and the selected Track's Rack.
 - First run creates 8 guitar and 6 bass starter Presets (Rock, Blues, Funk; bass Rock); existing Banks are not touched.
 - `get` and `get <module>` end each Module's lines with `<id>.bypass = yes|no`.
 - The Daemon follows a sample-rate change of the audio server: it rebuilds the Rack (Cabinet IRs resampled) and the Tuner at the new rate, logs `sample rate changed: 48000 -> 96000`, and `status` shows the new `sample_rate`.

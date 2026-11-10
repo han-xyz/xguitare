@@ -62,7 +62,7 @@ Response:
 | `sample_rate` | JACK sample rate in Hz; follows a rate change while the Daemon runs, and the Rack and the Tuner are rebuilt at the new rate. An open Project stops playing while the rate differs from its own (see `project_warning`) and plays again once they match. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack, and an open Project's Tracks, within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare. A client refreshes when it changes. `mute` does not change it. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare; with Projects also on `project_new`, `project_open`, `project_close`, `track_add`, `track_remove`, `track_set`, `track_select`, `loop`, `tempo`, `click`, a Rack request on a Track, and each Take added to the open Project. A client refreshes when it changes. `mute` does not change it. |
 | `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `bypass`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
@@ -77,7 +77,7 @@ Response:
 | `project_warning` | Why the open Project does not play, e.g. `project rate 48000 Hz differs from the engine rate 44100 Hz` after a sample-rate change: the transport stops, Takes still open are finished, and `play` and `record` are refused until the rates match; `null` otherwise. |
 | `project` | Name of the open Project; `null` when none is open. The keys below are `null` (`tracks` empty) while no Project is open. |
 | `transport` | `stopped`, `playing` or `recording` (also during the count-in), as the audio thread runs it. |
-| `position` | The playhead: `frames` from the Project start and `bars_beats` as `<bar>.<beat>`, both counted from 1 at the Project's tempo and meter. |
+| `position` | The playhead: `frames` from the Project start, counted from 0, and `bars_beats` as `<bar>.<beat>`, counted from 1 at the Project's tempo and meter. |
 | `tempo` | `bpm` and `meter` `[<beats per bar>, <note value>]`. |
 | `loop` | The loop region: `start` and `end` in frames, and whether it is `on`. |
 | `click` | Whether the click is `on`, and `count_in` bars before recording. |
