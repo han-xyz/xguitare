@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use crate::render::{
 
 const RENDER_RUNNING: &str = "a render is already running";
 const NO_RENDER_RUNNING: &str = "no render running";
-const WAV_EXTENSION: &str = "wav";
+const NOT_A_DIRECTORY: &str = "renders is not a directory";
 
 /// How a Render ended, for the Daemon to log.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,8 +47,12 @@ pub(crate) fn render(
         bits.unwrap_or(RenderBits::Pcm24),
     )
     .map_err(|err| err.to_string())?;
-    let file = free_render_file(dir, &name)?;
-    let job = Arc::new(RenderJob::new(name, range, file.clone()));
+    let renders = renders_dir(dir)?;
+    let job = Arc::new(RenderJob::new(name, range, renders.clone()));
+    let file = job.file();
+    if file.parent() != Some(renders.as_path()) {
+        return Err(format!("invalid render name '{}'", job.name));
+    }
     let projects = &mut state.projects;
     projects.render = Some(Arc::clone(&job));
     projects.render_reported = false;
@@ -81,7 +86,7 @@ pub fn finished_render(state: &mut EngineState) -> Option<RenderFinished> {
     }
     let finished = match job.state() {
         RenderState::Running => return None,
-        RenderState::Done => RenderFinished::Rendered(job.file.clone()),
+        RenderState::Done => RenderFinished::Rendered(job.file()),
         RenderState::Cancelled => RenderFinished::Cancelled,
         RenderState::Failed => RenderFinished::Failed(job.error().unwrap_or_default()),
     };
@@ -100,7 +105,7 @@ pub(crate) fn render_status(state: &EngineState) -> Value {
         "range": job.range,
         "progress": job.progress(),
         "state": job.state(),
-        "file": job.file.display().to_string(),
+        "file": job.file().display().to_string(),
     });
     if let Some(error) = job.error() {
         status["error"] = json!(error);
@@ -135,25 +140,15 @@ fn folder_name(dir: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// The first of `renders/<name>.wav`, `renders/<name>-2.wav`, … under `dir` that does not exist; creates `renders/`.
-fn free_render_file(dir: &Path, name: &str) -> Result<PathBuf, String> {
+/// `<dir>/renders`, created when missing; a symlink or anything but a directory there is refused.
+fn renders_dir(dir: &Path) -> Result<PathBuf, String> {
     let renders = dir.join(RENDERS_DIR);
-    fs::create_dir_all(&renders)
-        .map_err(|err| format!("cannot create {}: {err}", renders.display()))?;
-    let mut n = 1u64;
-    loop {
-        let stem = if n == 1 {
-            name.to_string()
-        } else {
-            format!("{name}-{n}")
-        };
-        let file = renders.join(format!("{stem}.{WAV_EXTENSION}"));
-        if file.parent() != Some(renders.as_path()) {
-            return Err(format!("invalid render name '{name}'"));
-        }
-        if fs::symlink_metadata(&file).is_err() {
-            return Ok(file);
-        }
-        n += 1;
+    match fs::symlink_metadata(&renders) {
+        Ok(metadata) if metadata.is_dir() => Ok(renders),
+        Ok(_) => Err(NOT_A_DIRECTORY.to_string()),
+        Err(err) if err.kind() == ErrorKind::NotFound => fs::create_dir(&renders)
+            .map(|()| renders.clone())
+            .map_err(|err| format!("cannot create {}: {err}", renders.display())),
+        Err(err) => Err(format!("cannot read {}: {err}", renders.display())),
     }
 }

@@ -326,3 +326,67 @@ fn closing_the_project_or_stopping_cancels_the_render() {
     tasks.remove(0).run();
     assert_eq!(render_status(&mut s)["state"], "cancelled");
 }
+
+#[test]
+fn a_part_file_already_there_is_left_alone_and_the_next_name_is_used() {
+    let mut s = song("part-exists", true);
+    let started = ok(&mut s, r#"{"cmd":"render"}"#);
+    let renders = song_dir(&s).join("renders");
+    assert_eq!(started["file"], path_text(&renders.join("song.wav")));
+    let outside = s.dir.0.join("outside.txt");
+    fs::write(&outside, "keep").unwrap();
+    std::os::unix::fs::symlink(&outside, renders.join("song.wav.part")).unwrap();
+    run_task(&mut s);
+    let second = renders.join("song-2.wav");
+    assert!(
+        matches!(finished_render(&mut s.state), Some(RenderFinished::Rendered(file)) if file == second)
+    );
+    assert_eq!(render_status(&mut s)["file"], path_text(&second));
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "keep");
+    assert!(
+        fs::symlink_metadata(renders.join("song.wav.part"))
+            .unwrap()
+            .is_symlink()
+    );
+    assert!(!renders.join("song.wav").exists());
+    assert!(WavReader::open(&second).is_ok());
+}
+
+#[test]
+fn a_file_created_while_rendering_is_never_replaced() {
+    let mut s = song("final-exists", true);
+    ok(&mut s, r#"{"cmd":"render"}"#);
+    let renders = song_dir(&s).join("renders");
+    fs::write(renders.join("song.wav"), "keep").unwrap();
+    run_task(&mut s);
+    let second = renders.join("song-2.wav");
+    assert!(
+        matches!(finished_render(&mut s.state), Some(RenderFinished::Rendered(file)) if file == second)
+    );
+    assert_eq!(
+        fs::read_to_string(renders.join("song.wav")).unwrap(),
+        "keep"
+    );
+    assert!(WavReader::open(&second).is_ok());
+    assert!(!renders.join("song.wav.part").exists());
+    assert!(!renders.join("song-2.wav.part").exists());
+}
+
+#[test]
+fn renders_must_be_a_real_directory() {
+    let mut s = song("renders-symlink", true);
+    let outside = s.dir.0.join("elsewhere");
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, song_dir(&s).join("renders")).unwrap();
+    assert_eq!(
+        error(&mut s, r#"{"cmd":"render"}"#),
+        "renders is not a directory"
+    );
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    let mut s = song("renders-file", true);
+    fs::write(song_dir(&s).join("renders"), "").unwrap();
+    assert_eq!(
+        error(&mut s, r#"{"cmd":"render"}"#),
+        "renders is not a directory"
+    );
+}

@@ -281,7 +281,7 @@ fn rendered_audio_equals_the_arrangement_played_offline_without_input_or_click()
 fn job(dir: &Path, name: &str) -> (RenderJob, PathBuf) {
     let file = dir.join(format!("{name}.wav"));
     (
-        RenderJob::new(name.to_string(), RenderRange::Loop, file.clone()),
+        RenderJob::new(name.to_string(), RenderRange::Loop, dir.to_path_buf()),
         file,
     )
 }

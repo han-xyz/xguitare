@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::{self, File};
-use std::io::BufWriter;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufWriter, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -18,6 +18,7 @@ pub const RENDER_BLOCK: usize = 1024;
 /// The folder under the Project folder that Renders are written to.
 pub const RENDERS_DIR: &str = "renders";
 pub const PART_EXTENSION: &str = "part";
+const WAV_EXTENSION: &str = "wav";
 /// Master output below this level counts as quiet for the tail rule (−90 dBFS).
 const TAIL_QUIET_LEVEL: f32 = 3.162_277_7e-5;
 const TAIL_QUIET_SECONDS: f32 = 0.5;
@@ -74,6 +75,8 @@ pub struct Render {
     rendered: u64,
     phase: Phase,
 }
+
+type WavFile = WavWriter<BufWriter<File>>;
 
 #[derive(Clone, Copy)]
 enum Phase {
@@ -248,12 +251,15 @@ pub enum RenderState {
 pub struct RenderJob {
     pub name: String,
     pub range: RenderRange,
-    pub file: PathBuf,
+    renders: PathBuf,
     status: Mutex<JobStatus>,
 }
 
 #[derive(Clone)]
 struct JobStatus {
+    /// The file it writes; moves on to the next free `-N` name when a file or part file appears on the way.
+    file: PathBuf,
+    number: u64,
     state: RenderState,
     progress: f32,
     error: Option<String>,
@@ -261,18 +267,35 @@ struct JobStatus {
 }
 
 impl RenderJob {
-    pub fn new(name: String, range: RenderRange, file: PathBuf) -> RenderJob {
+    /// The job of a Render named `name` into the folder `renders`, writing the first of `<name>.wav`, `<name>-2.wav`, … that exists neither as a file nor as a part file.
+    pub fn new(name: String, range: RenderRange, renders: PathBuf) -> RenderJob {
+        let number = first_free(&renders, &name, 1);
         RenderJob {
-            name,
-            range,
-            file,
             status: Mutex::new(JobStatus {
+                file: numbered_file(&renders, &name, number),
+                number,
                 state: RenderState::Running,
                 progress: 0.0,
                 error: None,
                 cancel: false,
             }),
+            name,
+            range,
+            renders,
         }
+    }
+
+    pub fn file(&self) -> PathBuf {
+        self.status().file.clone()
+    }
+
+    /// Moves on to the next free `-N` file and returns it.
+    fn next_file(&self) -> PathBuf {
+        let mut status = self.status();
+        let number = first_free(&self.renders, &self.name, status.number + 1);
+        status.number = number;
+        status.file = numbered_file(&self.renders, &self.name, number);
+        status.file.clone()
     }
 
     /// Asks a running Render to stop; it removes its part file.
@@ -317,7 +340,7 @@ impl RenderTask {
     }
 }
 
-/// `file` with `.part` appended, which a Render writes before renaming it to `file`.
+/// `file` with `.part` appended, which a Render writes before linking it to `file`.
 pub fn part_file(file: &Path) -> PathBuf {
     let mut part = file.as_os_str().to_owned();
     part.push(".");
@@ -325,19 +348,41 @@ pub fn part_file(file: &Path) -> PathBuf {
     PathBuf::from(part)
 }
 
-/// Writes `render` to the job's file through its part file, renamed on success and removed on cancel or error, and records the outcome in `job`.
-pub fn run_render(mut render: Render, job: &RenderJob) {
-    let part = part_file(&job.file);
-    let outcome = write_wav(&mut render, &part, job).and_then(|finished| {
-        if finished {
-            fs::rename(&part, &job.file)
-                .map_err(|err| format!("cannot rename {}: {err}", part.display()))?;
-        }
-        Ok(finished)
-    });
-    if !matches!(outcome, Ok(true)) {
-        let _ = fs::remove_file(&part);
+/// `renders/<name>.wav` for `number` 1, `renders/<name>-<number>.wav` after.
+fn numbered_file(renders: &Path, name: &str, number: u64) -> PathBuf {
+    if number == 1 {
+        renders.join(format!("{name}.{WAV_EXTENSION}"))
+    } else {
+        renders.join(format!("{name}-{number}.{WAV_EXTENSION}"))
     }
+}
+
+/// The first number from `number` whose file is free.
+fn first_free(renders: &Path, name: &str, mut number: u64) -> u64 {
+    while !is_free(&numbered_file(renders, name, number)) {
+        number += 1;
+    }
+    number
+}
+
+/// Whether neither `file` nor its part file exists, also as a symlink.
+fn is_free(file: &Path) -> bool {
+    fs::symlink_metadata(file).is_err() && fs::symlink_metadata(part_file(file)).is_err()
+}
+
+/// Writes `render` to a new part file, links it to the job's file without replacing anything there and removes it, also on cancel or error, and records the outcome in `job`.
+pub fn run_render(mut render: Render, job: &RenderJob) {
+    let outcome =
+        open_part(job, render.bits().spec(render.sample_rate())).and_then(|(part, writer)| {
+            let written = write_wav(&mut render, writer, &part, job).and_then(|finished| {
+                if finished {
+                    link_final(&part, job)?;
+                }
+                Ok(finished)
+            });
+            let _ = fs::remove_file(&part);
+            written
+        });
     let mut status = job.status();
     match outcome {
         Ok(true) => {
@@ -352,11 +397,56 @@ pub fn run_render(mut render: Render, job: &RenderJob) {
     }
 }
 
+/// Creates the part file of the job's file, which must not exist (a symlink counts), moving on to the next `-N` file while one does.
+fn open_part(job: &RenderJob, spec: WavSpec) -> Result<(PathBuf, WavFile), String> {
+    let mut part = part_file(&job.file());
+    loop {
+        let cannot_write =
+            |err: &dyn fmt::Display| format!("cannot write {}: {err}", part.display());
+        match OpenOptions::new().write(true).create_new(true).open(&part) {
+            Ok(file) => {
+                return match WavWriter::new(BufWriter::new(file), spec) {
+                    Ok(writer) => Ok((part, writer)),
+                    Err(err) => {
+                        let _ = fs::remove_file(&part);
+                        Err(cannot_write(&err))
+                    }
+                };
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                part = part_file(&job.next_file());
+            }
+            Err(err) => return Err(cannot_write(&err)),
+        }
+    }
+}
+
+/// Hard-links `part` to the job's file, which fails rather than replace a file there, moving on to the next `-N` file while one does.
+fn link_final(part: &Path, job: &RenderJob) -> Result<(), String> {
+    let mut file = job.file();
+    loop {
+        match fs::hard_link(part, &file) {
+            Ok(()) => return Ok(()),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => file = job.next_file(),
+            Err(err) => {
+                return Err(format!(
+                    "cannot link {} to {}: {err}",
+                    part.display(),
+                    file.display()
+                ));
+            }
+        }
+    }
+}
+
 /// Returns `false` when the job was cancelled before the last frame.
-fn write_wav(render: &mut Render, part: &Path, job: &RenderJob) -> Result<bool, String> {
+fn write_wav(
+    render: &mut Render,
+    mut writer: WavFile,
+    part: &Path,
+    job: &RenderJob,
+) -> Result<bool, String> {
     let cannot_write = |err: hound::Error| format!("cannot write {}: {err}", part.display());
-    let spec = render.bits().spec(render.sample_rate());
-    let mut writer = WavWriter::create(part, spec).map_err(cannot_write)?;
     let mut dither = Dither::default();
     loop {
         if job.status().cancel {
@@ -378,7 +468,7 @@ fn write_wav(render: &mut Render, part: &Path, job: &RenderJob) -> Result<bool, 
 }
 
 fn write_sample(
-    writer: &mut WavWriter<BufWriter<File>>,
+    writer: &mut WavFile,
     bits: RenderBits,
     sample: f32,
     dither: &mut Dither,

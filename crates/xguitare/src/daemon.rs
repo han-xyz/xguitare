@@ -223,7 +223,7 @@ impl ProjectDisk {
 
     fn start_render(&mut self, task: RenderTask) {
         let job = Arc::clone(&task.job);
-        info!("rendering {}", job.file.display());
+        info!("rendering {}", job.file().display());
         if let Some(previous) = self.render.take()
             && previous.join().is_err()
         {
