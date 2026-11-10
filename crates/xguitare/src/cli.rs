@@ -225,6 +225,7 @@ fn render_status(payload: &Value) -> String {
     let mut lines: String = [
         "preset",
         "program",
+        "modified",
         "sample_rate",
         "buffer_size",
         "prepared_frames",
@@ -251,8 +252,9 @@ fn render_status(payload: &Value) -> String {
 }
 
 fn status_text(key: &str, value: &Value) -> String {
-    match value.as_f64() {
-        Some(db) if key.ends_with("_db") => format!("{db:.1}"),
+    match (key, value.as_bool(), value.as_f64()) {
+        ("modified", Some(modified), _) => if modified { "yes" } else { "no" }.to_string(),
+        (_, _, Some(db)) if key.ends_with("_db") => format!("{db:.1}"),
         _ => text(value),
     }
 }
