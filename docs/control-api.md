@@ -952,7 +952,7 @@ Errors: `no project open`; `tempo must be between 20 and 300 bpm`; `meter must b
 
 ## click
 
-Turns the click (a short blip on every beat, higher on beat 1) on or off and sets the count-in: 0, 1 or 2 bars of click before `record` starts from stopped. A key left out keeps its value. Both are saved with the Project (`click`, `count_in` in `project.toml`).
+Turns the click (a short blip on every beat, higher and 6 dB louder on beat 1, at the Metronome volume; see `metronome`) on or off and sets the count-in: 0, 1 or 2 bars of click before `record` starts from stopped. A key left out keeps its value. Both are saved with the Project (`click`, `count_in` in `project.toml`).
 
 Request:
 
