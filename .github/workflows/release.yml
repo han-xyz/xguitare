@@ -98,7 +98,7 @@ jobs:
           name="xguitare-$version"
           tar -xzf "$name-x86_64-linux.tar.gz" "$name/CHANGELOG.md"
           awk -v v="$version" '
-            /^## / { if (found) exit; found = index($0, v) > 0; next }
+            /^## / { if (found) exit; t = $2; gsub(/[\[\]]/, "", t); found = (t == v); next }
             found { print }
           ' "$name/CHANGELOG.md" > notes.md
           if [ -s notes.md ] && grep -q '[^[:space:]]' notes.md; then
