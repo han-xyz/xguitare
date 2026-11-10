@@ -212,7 +212,7 @@ fn tempo_fields(
     commands
 }
 
-/// A number field that shows its own value while dragged and returns the value once the drag ends or a typed value is entered.
+/// A number field that shows its own value while dragged and returns the value once the drag ends or a typed value is entered with Enter or focus loss.
 fn released_value(
     ui: &mut Ui,
     id: Id,
@@ -220,7 +220,7 @@ fn released_value(
     field: impl FnOnce(&mut f64) -> DragValue<'_>,
 ) -> (Option<f64>, Response) {
     let mut shown = ui.data(|data| data.get_temp::<f64>(id)).unwrap_or(value);
-    let response = ui.add(field(&mut shown));
+    let response = ui.add(field(&mut shown).update_while_editing(false));
     if response.dragged() {
         ui.data_mut(|data| data.insert_temp(id, shown));
         return (None, response);

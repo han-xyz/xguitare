@@ -1074,3 +1074,23 @@ fn a_tile_click_adds_at_the_chosen_place() {
         }]
     );
 }
+
+#[test]
+fn typed_tempo_is_sent_on_enter_only() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness.get_by_label("Tempo").focus();
+    harness.run_steps(2);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.event(Event::Text("95".to_string()));
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Tempo {
+            bpm: Some(95.0),
+            meter: None,
+        }]
+    );
+}
