@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
-    Audibility, MixerColumn, MixerTarget, RackFocus, RenderView, SendView, StereoPeakHold,
-    aim_rack_commands, default_render_name, fader_db, fader_position, mixer_columns,
-    rack_selectors, render_view, send_fraction, send_level, send_text,
+    Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, SendView,
+    StereoPeakHold, aim_rack_commands, default_render_name, fader_db, fader_position,
+    mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text,
 };
 use xguitare_gui::model::{Command, KeyEvent, key_to_command};
 use xguitare_gui::project_model::project_key_to_command;
@@ -279,22 +279,25 @@ fn ctrl_m_and_ctrl_alt_r_work_only_in_a_project() {
 #[test]
 fn render_dialog_follows_status_render() {
     let mut status = status(&[], &[]);
-    assert_eq!(render_view(&status), RenderView::Idle);
+    assert_eq!(render_view(&status, None, None), RenderView::Idle);
     let file = "/home/you/Music/xguitare/demo-song/renders/demo-song.wav";
     let render = |state: &str| {
         json!({"name": "demo-song", "range": "project", "progress": 0.4, "state": state,
             "file": file})
     };
     status["render"] = render("running");
-    assert_eq!(render_view(&status), RenderView::Running(0.4));
+    assert_eq!(render_view(&status, None, None), RenderView::Running(0.4));
     status["render"] = render("done");
-    assert_eq!(render_view(&status), RenderView::Done(file.to_string()));
+    assert_eq!(
+        render_view(&status, None, None),
+        RenderView::Done(file.to_string())
+    );
     status["render"] = render("cancelled");
-    assert_eq!(render_view(&status), RenderView::Cancelled);
+    assert_eq!(render_view(&status, None, None), RenderView::Cancelled);
     status["render"] = render("failed");
     status["render"]["error"] = json!("No space left on device (os error 28)");
     assert_eq!(
-        render_view(&status),
+        render_view(&status, None, None),
         RenderView::Failed("No space left on device (os error 28)".to_string())
     );
 }
@@ -405,4 +408,37 @@ fn closing_the_mixer_shows_the_selected_track_again() {
 fn rack_requests_without_a_project_name_no_rack() {
     let (commands, _) = aim_rack_commands(RackFocus::default(), vec![rack_add()]);
     assert_eq!(commands, [rack_add()]);
+}
+
+#[test]
+fn a_refused_render_shows_its_error_in_place_of_the_last_render() {
+    let mut status = status(&[], &[]);
+    status["render"] = json!({"name": "demo-song", "range": "project", "progress": 1.0,
+        "state": "done", "file": "/x/renders/demo-song.wav"});
+    let start = Instant::now();
+    let clicked = start + Duration::from_secs(1);
+    let sent = RenderSent {
+        at: clicked,
+        previous: status["render"].clone(),
+    };
+    assert_eq!(render_view(&status, None, Some(&sent)), RenderView::Idle);
+    let earlier = ("no loop region".to_string(), start);
+    assert_eq!(
+        render_view(&status, Some(&earlier), Some(&sent)),
+        RenderView::Idle
+    );
+    let refused = (
+        "invalid render name '../x'".to_string(),
+        clicked + Duration::from_millis(5),
+    );
+    assert_eq!(
+        render_view(&status, Some(&refused), Some(&sent)),
+        RenderView::Failed("invalid render name '../x'".to_string())
+    );
+    status["render"]["state"] = json!("running");
+    status["render"]["progress"] = json!(0.1);
+    assert_eq!(
+        render_view(&status, None, Some(&sent)),
+        RenderView::Running(0.1)
+    );
 }

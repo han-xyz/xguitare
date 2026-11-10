@@ -149,6 +149,7 @@ impl App {
                 last_message: None,
                 failed_set: None,
                 refused_remove: None,
+                refused_render: None,
                 autosave_offer: None,
             },
             stop,

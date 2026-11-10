@@ -66,6 +66,8 @@ pub struct Snapshot {
     pub last_message: Option<(String, Instant)>,
     pub failed_set: Option<(String, Instant)>,
     pub refused_remove: Option<(String, Instant)>,
+    /// The error of the last `render` the Daemon refused.
+    pub refused_render: Option<(String, Instant)>,
     pub autosave_offer: Option<(AutosaveOffer, Instant)>,
 }
 
@@ -1711,6 +1713,15 @@ pub fn refused_remove(req: &Request, response: &Result<Response, ClientError>) -
     match (req, response) {
         (_, Ok(Response::Ok(_))) => None,
         (Request::RackRemove { id, .. }, _) => Some(id.clone()),
+        _ => None,
+    }
+}
+
+/// The error of a `render` that the Daemon refused or that never reached it, verbatim.
+pub fn refused_render(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {
+    match (req, response) {
+        (Request::Render { .. }, Ok(Response::Err { error })) => Some(error.clone()),
+        (Request::Render { .. }, Err(err)) => Some(err.to_string()),
         _ => None,
     }
 }

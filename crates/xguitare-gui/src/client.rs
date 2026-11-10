@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 use crate::mixer_model::{MixerTarget, rack_selectors};
 use crate::model::{
     Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
-    ir_names, module_types, param_rows, refresh_decision, refused_remove, requests_until_quit,
-    response_text, spawn_policy,
+    ir_names, module_types, param_rows, refresh_decision, refused_remove, refused_render,
+    requests_until_quit, response_text, spawn_policy,
 };
 use crate::project_model::{autosave_offer, project_name, still_closing};
 use serde_json::Value;
@@ -104,6 +104,7 @@ impl Client {
                 last_message: None,
                 failed_set: None,
                 refused_remove: None,
+                refused_render: None,
                 autosave_offer: None,
             },
         }
@@ -233,6 +234,9 @@ impl Client {
         }
         if let Some(id) = refused_remove(req, &response) {
             self.snapshot.refused_remove = Some((id, Instant::now()));
+        }
+        if let Some(error) = refused_render(req, &response) {
+            self.snapshot.refused_render = Some((error, Instant::now()));
         }
         let payload = match &response {
             Ok(Response::Ok(payload)) => Some(payload.clone()),

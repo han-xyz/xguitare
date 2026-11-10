@@ -342,8 +342,30 @@ pub enum RenderView {
     Cancelled,
 }
 
-pub fn render_view(status: &Value) -> RenderView {
+/// A Render the dialog sent: when, and the status `render` it is to replace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderSent {
+    pub at: Instant,
+    pub previous: Value,
+}
+
+/// `refused` is the last `render` request the Daemon refused, which never reaches status; after `sent` it is shown, and the Render from before `sent` is not.
+pub fn render_view(
+    status: &Value,
+    refused: Option<&(String, Instant)>,
+    sent: Option<&RenderSent>,
+) -> RenderView {
     let render = &status["render"];
+    if let Some(sent) = sent {
+        if let Some((error, at)) = refused
+            && *at >= sent.at
+        {
+            return RenderView::Failed(error.clone());
+        }
+        if *render == sent.previous {
+            return RenderView::Idle;
+        }
+    }
     let text = |key: &str| render[key].as_str().unwrap_or_default().to_string();
     match render["state"].as_str() {
         Some("running") => RenderView::Running(render["progress"].as_f64().unwrap_or_default()),

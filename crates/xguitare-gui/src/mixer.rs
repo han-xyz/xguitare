@@ -10,9 +10,9 @@ use xguitare_core::control::SendLevel;
 use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{
-    Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderView, SendView,
-    StereoPeakHold, default_render_name, fader_db, fader_position, mixer_columns, render_view,
-    send_fraction, send_level, send_text,
+    Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
+    SendView, StereoPeakHold, default_render_name, fader_db, fader_position, mixer_columns,
+    render_view, send_fraction, send_level, send_text,
 };
 use crate::model::{Command, LADDER_RED_DB, LADDER_YELLOW_DB, Snapshot, TrackEdit, palette};
 use crate::project::{PAN, lit_button, released_value, track_knob};
@@ -75,12 +75,13 @@ impl MixerView {
     }
 }
 
-/// The Render dialog's fields: `name` empty sends none, so that the Daemon names the file after the Project folder.
+/// The Render dialog's fields: `name` empty sends none, so that the Daemon names the file after the Project folder; `sent` is the Render it last sent.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderDraft {
     pub range: RenderRange,
     pub bits: RenderBits,
     pub name: String,
+    pub sent: Option<RenderSent>,
 }
 
 impl RenderDraft {
@@ -93,6 +94,7 @@ impl RenderDraft {
             range: RenderRange::Project,
             bits: RenderBits::Pcm24,
             name: name.unwrap_or_default(),
+            sent: None,
         }
     }
 }
@@ -604,7 +606,11 @@ pub fn render_dialog(
     if !has_loop {
         draft.range = RenderRange::Project;
     }
-    let state = render_view(status);
+    let state = render_view(
+        status,
+        snapshot.refused_render.as_ref(),
+        draft.sent.as_ref(),
+    );
     let running = matches!(state, RenderView::Running(_));
     let modal = Modal::new(Id::unique("render_dialog")).show(ctx, |ui| {
         Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
@@ -643,6 +649,10 @@ pub fn render_dialog(
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.add_enabled(!running, primary_button("Render")).clicked() {
+                    draft.sent = Some(RenderSent {
+                        at: Instant::now(),
+                        previous: status["render"].clone(),
+                    });
                     let name = draft.name.trim();
                     commands.push(Command::Render {
                         range: draft.range,

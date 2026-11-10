@@ -166,6 +166,7 @@ fn funk_snapshot() -> Snapshot {
         last_message: None,
         failed_set: None,
         refused_remove: None,
+        refused_render: None,
         items: None,
         autosave_offer: None,
     }
