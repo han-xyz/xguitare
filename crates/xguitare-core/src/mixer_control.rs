@@ -4,11 +4,11 @@ use crate::arrangement::ArrangementCommand;
 use crate::control::{BusRef, EngineState, MixPeaks, SendLevel, TrackRef, peak_db};
 use crate::engine::{MeterPoint, MixMeters};
 use crate::project::{
-    Bus, MAX_BUSES, Project, ProjectError, Send, Track, check_project, checked_bus_name,
+    Bus, MAX_BUSES, MAX_TRACKS, Project, ProjectError, Send, Track, check_project, checked_bus_name,
 };
 use crate::project_control::{
-    check_one_target, clear_moved_clips, commit, current_project, resolve_bus, resolve_track, send,
-    swap_project,
+    check_one_target, commit, current_project, resolve_bus, resolve_track, send, swap_project,
+    swap_project_moving,
 };
 
 const DEFAULT_BUS_NAME: &str = "Bus";
@@ -54,8 +54,7 @@ pub(crate) fn bus_remove(state: &mut EngineState, bus: &BusRef) -> Result<Value,
     for track in &mut project.tracks {
         track.sends.retain(|send| send.bus != removed.id);
     }
-    swap_project(state, project, &mut Vec::new())?;
-    clear_moved_clips(state, MeterPoint::Bus, index, MAX_BUSES);
+    swap_project_moving(state, project, (MAX_TRACKS, index), &mut Vec::new())?;
     Ok(payload)
 }
 

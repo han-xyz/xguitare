@@ -8,9 +8,11 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use xguitare_core::control::{
     BusRef, ConnectionId, EngineState, PeakMeters, Request, SendLevel, TrackRef, handle_line,
-    open_connection,
+    open_connection, passthrough_rack,
 };
-use xguitare_core::engine::{AudioQueues, Command, EngineShared, MeterPoint, engine_queues};
+use xguitare_core::engine::{
+    AudioQueues, Command, EngineShared, FadeLengths, MeterPoint, RackSwitcher, engine_queues,
+};
 use xguitare_core::project::{PROJECT_FILE, Project};
 use xguitare_core::project_control::{Projects, autosave_if_due};
 use xguitare_core::tuner::Tuner;
@@ -18,6 +20,9 @@ use xguitare_core::{Bank, BankEntry, Config};
 
 const ONE_TARGET: &str = "give track, bus or master, not more than one";
 const CABINET: &str = "a cabinet is not allowed on a Bus or Master";
+const BLOCK: usize = 128;
+/// Blocks of `BLOCK` frames that cover a 20 ms crossfade at 48 kHz.
+const FADE_BLOCKS: usize = 8;
 
 struct TempDir(PathBuf);
 
@@ -585,27 +590,52 @@ fn clip_reset_clears_one_meter_point_or_all() {
     ok(&mut closed, r#"{"cmd":"clip_reset"}"#);
 }
 
+/// The Engine's audio side on `s`'s queues; `s` drains nothing after this.
+fn audio_switcher(s: &mut Session) -> RackSwitcher {
+    let (_, unused, _) = engine_queues(4);
+    let audio = std::mem::replace(&mut s.audio, unused);
+    let rack = Box::new(passthrough_rack(48_000.0, BLOCK));
+    let fades = FadeLengths::at(48_000.0, 20.0);
+    RackSwitcher::new(rack, BLOCK, fades, audio, Arc::clone(&s.state.shared))
+}
+
+fn run_blocks(switcher: &mut RackSwitcher, inputs: &[&[f32]], blocks: usize) {
+    let silence = [0.0; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    for _ in 0..blocks {
+        switcher.apply_commands();
+        switcher.process_tracks(&silence, inputs, &mut left, &mut right);
+    }
+}
+
 #[test]
-fn removing_a_track_or_bus_clears_the_clip_flags_that_move() {
-    let mut s = mixer("clip-shift");
+fn a_clip_of_the_fading_out_arrangement_does_not_stay_on_a_moved_index() {
+    let mut s = mixer("clip-fade");
     ok(&mut s, r#"{"cmd":"bus_add","name":"Delay"}"#);
-    let meters = Arc::clone(&s.state.shared);
-    let moved = [
+    ok(&mut s, r#"{"cmd":"track_set","track":"Keys","arm":true}"#);
+    ok(
+        &mut s,
+        r#"{"cmd":"send_set","track":"Keys","bus":"Delay","level":0}"#,
+    );
+    let mut switcher = audio_switcher(&mut s);
+    let (silence, loud) = ([0.0; BLOCK], [1.5; BLOCK]);
+    let inputs: [&[f32]; 2] = [&silence, &loud];
+    run_blocks(&mut switcher, &inputs, FADE_BLOCKS);
+    let meters = &s.state.shared.mix_meters;
+    assert!(meters.clip(MeterPoint::Track(1)) && meters.clip(MeterPoint::Bus(1)));
+    meters.raise(MeterPoint::Track(0), [1.0, 1.0]);
+    meters.raise(MeterPoint::Bus(0), [1.0, 1.0]);
+    ok(&mut s, r#"{"cmd":"track_remove","track":"Guitar"}"#);
+    ok(&mut s, r#"{"cmd":"bus_remove","bus":"Verb"}"#);
+    run_blocks(&mut switcher, &inputs, 3 * FADE_BLOCKS);
+    let meters = &s.state.shared.mix_meters;
+    for point in [
         MeterPoint::Track(0),
         MeterPoint::Track(1),
         MeterPoint::Bus(0),
         MeterPoint::Bus(1),
-    ];
-    for point in moved {
-        meters.mix_meters.raise(point, [1.0, 1.0]);
-    }
-    ok(&mut s, r#"{"cmd":"track_remove","track":0}"#);
-    ok(&mut s, r#"{"cmd":"bus_remove","bus":0}"#);
-    for point in moved {
-        assert!(
-            !meters.mix_meters.clip(point),
-            "{point:?} kept its clip flag"
-        );
+    ] {
+        assert!(!meters.clip(point), "{point:?} kept the old layout's clip");
     }
 }
 

@@ -381,6 +381,7 @@ impl RackSwitcher {
                     } else if let Some(mut replaced) = self.pending_arrangement.replace(new) {
                         if let Some(newest) = self.pending_arrangement.as_mut() {
                             newest.continue_from(&mut replaced);
+                            newest.keep_moved_clips(&replaced);
                         }
                         self.retire_arrangement(replaced);
                     }
@@ -474,6 +475,7 @@ impl RackSwitcher {
     }
 
     fn finish_arrangement_fade(&mut self, new: Box<Arrangement>) {
+        new.clear_moved_clips(&self.shared.mix_meters);
         if let Some(old) = self.arrangement.replace(new) {
             self.retire_arrangement(old);
         }

@@ -17,7 +17,7 @@ use crate::engine::{Command, MeterPoint, transport_from_code};
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
-    LoopRegion, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due, autosave_newer,
+    LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due, autosave_newer,
     check_project, check_track, checked_name,
 };
 use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
@@ -36,6 +36,8 @@ pub const STILL_CLOSING: &str = "a project is still closing; try again";
 const LOCATE_SECONDS_PAST_END: f64 = 3600.0;
 const DEFAULT_TRACK_NAME: &str = "Track";
 const MASTER_NAME: &str = "Master";
+/// `moved_from` when no Track or Bus moved.
+const NOTHING_MOVED: (usize, usize) = (MAX_TRACKS, MAX_BUSES);
 const ONE_TARGET: &str = "give track, bus or master, not more than one";
 const SECONDS_SUFFIX: char = 's';
 
@@ -591,7 +593,7 @@ pub(crate) fn track_add(state: &mut EngineState, name: Option<&str>) -> Result<V
     let index = project.tracks.len() - 1;
     let mut track_ids = open.track_ids.clone();
     track_ids.push(open.next_track_id);
-    swap_project_with_ids(state, project, track_ids, &mut Vec::new())?;
+    swap_project_with_ids(state, project, track_ids, NOTHING_MOVED, &mut Vec::new())?;
     let open = open_project_mut(state);
     open.next_track_id += 1;
     open.selected = index;
@@ -608,8 +610,8 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     let removed = project.tracks.remove(index);
     let mut track_ids = open.track_ids.clone();
     track_ids.remove(index);
-    swap_project_with_ids(state, project, track_ids, &mut Vec::new())?;
-    clear_moved_clips(state, MeterPoint::Track, index, MAX_TRACKS);
+    let moved_from = (index, MAX_BUSES);
+    swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())?;
     let open = open_project_mut(state);
     if index < open.selected {
         open.selected -= 1;
@@ -620,18 +622,6 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     let inputs = track_inputs(&open.project);
     state.projects.events.push(ProjectEvent::Inputs(inputs));
     Ok(json!({"index": index, "name": removed.name}))
-}
-
-/// Clears the clip flags from `first` to `count`, whose Tracks or Buses moved or went after a removal.
-pub(crate) fn clear_moved_clips(
-    state: &EngineState,
-    point: impl Fn(usize) -> MeterPoint,
-    first: usize,
-    count: usize,
-) {
-    for index in first..count {
-        state.shared.mix_meters.clip_reset(Some(point(index)));
-    }
 }
 
 /// The values of a `track_set` request; `None` leaves that value as it is.
@@ -970,9 +960,12 @@ fn open(
         &mut state.queues,
         state.sample_rate,
         state.max_frames,
-        &project,
-        &takes,
-        &track_ids,
+        &Layout {
+            project: &project,
+            takes: &takes,
+            track_ids: &track_ids,
+            moved_from: NOTHING_MOVED,
+        },
     )?;
     // The swap is queued, so the commands after it reach the new Arrangement; a full queue leaves the click off until the next `click`.
     let _ = send(state, &click_commands(&project));
@@ -1006,6 +999,16 @@ pub(crate) fn swap_project(
     project: Project,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
+    swap_project_moving(state, project, NOTHING_MOVED, warnings)
+}
+
+/// [`swap_project`] after a removal: the clip flags from Track `moved_from.0` and Bus `moved_from.1` on are cleared once the new Arrangement runs alone.
+pub(crate) fn swap_project_moving(
+    state: &mut EngineState,
+    project: Project,
+    moved_from: (usize, usize),
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<(), String> {
     let track_ids = state
         .projects
         .open
@@ -1013,14 +1016,15 @@ pub(crate) fn swap_project(
         .ok_or(NO_PROJECT)?
         .track_ids
         .clone();
-    swap_project_with_ids(state, project, track_ids, warnings)
+    swap_project_with_ids(state, project, track_ids, moved_from, warnings)
 }
 
-/// [`swap_project`] for a `project` whose Tracks have the ids `track_ids`.
+/// [`swap_project_moving`] for a `project` whose Tracks have the ids `track_ids`.
 fn swap_project_with_ids(
     state: &mut EngineState,
     project: Project,
     track_ids: Vec<u64>,
+    moved_from: (usize, usize),
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
@@ -1030,9 +1034,12 @@ fn swap_project_with_ids(
             &mut state.queues,
             state.sample_rate,
             state.max_frames,
-            &project,
-            &open.takes,
-            &track_ids,
+            &Layout {
+                project: &project,
+                takes: &open.takes,
+                track_ids: &track_ids,
+                moved_from,
+            },
         )?;
         warnings.extend(build_warnings);
         state.projects.events.push(ProjectEvent::Readers(readers));
@@ -1067,9 +1074,12 @@ pub(crate) fn rebuild_arrangement(state: &mut EngineState) -> Result<Vec<BuildWa
         &mut state.queues,
         state.sample_rate,
         state.max_frames,
-        &open.project,
-        &open.takes,
-        &open.track_ids,
+        &Layout {
+            project: &open.project,
+            takes: &open.takes,
+            track_ids: &open.track_ids,
+            moved_from: NOTHING_MOVED,
+        },
     )?;
     let clicks = click_commands(&open.project);
     state.projects.events.push(ProjectEvent::Readers(readers));
@@ -1104,18 +1114,32 @@ pub(crate) fn commit(state: &mut EngineState, project: Project) {
     state.revision += 1;
 }
 
+/// What [`start_arrangement`] builds an Arrangement from.
+struct Layout<'a> {
+    project: &'a Project,
+    takes: &'a HashMap<String, Arc<[f32]>>,
+    track_ids: &'a [u64],
+    /// The first Track and Bus index that moved or went since the running Arrangement, as [`Arrangement::clear_clips_from`] takes them.
+    moved_from: (usize, usize),
+}
+
 fn start_arrangement(
     config: &Config,
     queues: &mut crate::engine::EngineQueues,
     sample_rate: f32,
     max_frames: usize,
-    project: &Project,
-    takes: &HashMap<String, Arc<[f32]>>,
-    track_ids: &[u64],
+    layout: &Layout,
 ) -> Result<(TrackReaders, Vec<BuildWarning>), String> {
+    let Layout {
+        project,
+        takes,
+        track_ids,
+        moved_from,
+    } = *layout;
     let (mut arrangement, warnings) =
         build_arrangement(config, project, takes, sample_rate, max_frames)
             .map_err(|err| err.to_string())?;
+    arrangement.clear_clips_from(moved_from.0, moved_from.1);
     let readers = project
         .tracks
         .iter()

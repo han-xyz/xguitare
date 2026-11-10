@@ -9,7 +9,8 @@ use xguitare_dsp::{Rack, StereoRack};
 
 use crate::engine::{MeterPoint, MixMeters, set_module_bypass, set_module_param};
 use crate::project::{
-    Bus, LoopRegion, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM, Track,
+    Bus, LoopRegion, MAX_BUSES, MAX_TRACKS, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM,
+    Track,
 };
 use crate::take_capture::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
 
@@ -169,6 +170,8 @@ pub struct Arrangement {
     count_in_bars: u32,
     count_in: CountIn,
     blip: Blip,
+    /// The first Track and Bus index whose clip flags another Track or Bus held before this Arrangement; `MAX_TRACKS` and `MAX_BUSES` when none moved.
+    moved_from: (usize, usize),
 }
 
 #[allow(
@@ -338,6 +341,7 @@ impl Arrangement {
             count_in_bars: 0,
             count_in: CountIn::default(),
             blip: Blip::new(sample_rate),
+            moved_from: (MAX_TRACKS, MAX_BUSES),
         };
         arrangement.update_audible();
         for track in &mut arrangement.tracks {
@@ -552,6 +556,26 @@ impl Arrangement {
                 .zip(&self.buses)
                 .any(|(send, bus)| bus.solo && send.is_on());
             track.audible = !track.mute && (!any_solo || track.solo || sends_to_solo);
+        }
+    }
+
+    /// Marks the Tracks from `track` and the Buses from `bus` as moved or gone, so their clip flags are cleared once this Arrangement has replaced the running one.
+    pub fn clear_clips_from(&mut self, track: usize, bus: usize) {
+        self.moved_from = (self.moved_from.0.min(track), self.moved_from.1.min(bus));
+    }
+
+    /// Takes over the moved Tracks and Buses of `replaced`, an Arrangement that never ran.
+    pub(crate) fn keep_moved_clips(&mut self, replaced: &Arrangement) {
+        self.clear_clips_from(replaced.moved_from.0, replaced.moved_from.1);
+    }
+
+    /// Clears the clip flags of the moved Tracks and Buses; called once the Arrangement it replaced no longer raises them.
+    pub(crate) fn clear_moved_clips(&self, meters: &MixMeters) {
+        let (first_track, first_bus) = self.moved_from;
+        let tracks = (first_track..MAX_TRACKS).map(MeterPoint::Track);
+        let buses = (first_bus..MAX_BUSES).map(MeterPoint::Bus);
+        for point in tracks.chain(buses) {
+            meters.clip_reset(Some(point));
         }
     }
 
