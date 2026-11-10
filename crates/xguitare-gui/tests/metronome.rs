@@ -1,5 +1,15 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use serde_json::{Value, json};
-use xguitare_core::control::Request;
+use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
+use xguitare_core::engine::{EngineShared, engine_queues};
+use xguitare_core::metronome::Metronome;
+use xguitare_core::project_control::Projects;
+use xguitare_core::tuner::Tuner;
+use xguitare_core::{Bank, Config};
 use xguitare_gui::metronome_model::{
     BeatLight, MetronomeView, beat_light, metronome_key_to_command, metronome_view,
 };
@@ -200,5 +210,73 @@ fn metronome_commands_send_their_requests() {
             }),
             Outgoing::Request(Request::MetronomeTap),
         ]
+    );
+}
+
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn ok(request: Request, state: &mut EngineState) -> Value {
+    match handle(state, request).0 {
+        Response::Ok(payload) => payload,
+        Response::Err { error } => panic!("expected ok, got error {error}"),
+    }
+}
+
+#[test]
+fn the_daemon_status_gives_the_metronome_view() {
+    let dir = TempDir(
+        std::env::temp_dir().join(format!("xguitare-gui-metronome-{}", std::process::id())),
+    );
+    let _ = fs::remove_dir_all(&dir.0);
+    let bank_dir = dir.0.join("bank");
+    fs::create_dir_all(&bank_dir).unwrap();
+    let config_path = dir.0.join("config.toml");
+    fs::write(&config_path, "").unwrap();
+    let mut config = Config::load(Some(&config_path)).unwrap();
+    config.bank_dir.clone_from(&bank_dir);
+    let (queues, _audio, tap) = engine_queues(16);
+    let mut state = EngineState {
+        bank: Bank::load_dir(&bank_dir).unwrap(),
+        active: None,
+        shared: Arc::new(EngineShared::default()),
+        queues,
+        tuner: Tuner::new(tap, 48_000.0, config.tuner_reference_hz),
+        config,
+        connections: Vec::new(),
+        sample_rate: 48_000.0,
+        max_frames: 128,
+        revision: 1,
+        modified: false,
+        peaks: PeakMeters::default(),
+        saved: HashMap::new(),
+        projects: Projects::default(),
+        metronome: Metronome::default(),
+    };
+    ok(
+        Request::Metronome {
+            on: Some(true),
+            bpm: Some(90.0),
+            meter: Some((3, 4)),
+            volume: None,
+        },
+        &mut state,
+    );
+    let status = ok(Request::Status, &mut state);
+    assert_eq!(
+        metronome_view(&status),
+        Some(MetronomeView {
+            on: true,
+            bpm: 90.0,
+            meter: (3, 4),
+            volume_db: -12.0,
+            beat: 0,
+            beats_played: 0,
+        })
     );
 }
