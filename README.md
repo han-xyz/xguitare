@@ -194,7 +194,7 @@ $ xguitare set preamp.gain 150
 preamp.gain = 100 (clamped)
 ```
 
-`get` shows Parameters: all of them, one Module's, or one. With `get` and `get <cabinet>` a cabinet's lines end with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none); `get cabinet.level` prints only that Parameter:
+`get` shows Parameters: all of them, one Module's, or one. With `get` and `get <cabinet>` a cabinet's lines end with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none); then every Module's lines end with `<id>.bypass = yes|no`. `get preamp.gain` prints only that Parameter:
 
 ```console
 $ xguitare get preamp
@@ -202,6 +202,7 @@ preamp.gain = 100 %
 preamp.bias = 0.2
 preamp.master = -14 dB
 preamp.stages = 3
+preamp.bypass = no
 $ xguitare get preamp.gain
 preamp.gain = 100 %
 ```

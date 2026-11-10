@@ -641,6 +641,27 @@ fn get_cabinet_prints_ir() {
 }
 
 #[test]
+fn get_prints_bypass_after_each_module() {
+    let out = cli(
+        &["get"],
+        reply(
+            r#"{"ok":true,"params":[{"module":"gain","param":"level","value":-3.5,"unit":"dB","bypass":false},{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","bypass":true,"ir":null}]}"#,
+        ),
+    );
+    assert_eq!(
+        out.stdout,
+        "gain.level = -3.5 dB\ngain.bypass = no\ncabinet.level = 0 dB\ncabinet.ir = none\ncabinet.bypass = yes\n"
+    );
+    let out = cli(
+        &["get", "gain.level"],
+        reply(
+            r#"{"ok":true,"params":[{"module":"gain","param":"level","value":-3.5,"unit":"dB","bypass":false}]}"#,
+        ),
+    );
+    assert_eq!(out.stdout, "gain.level = -3.5 dB\n");
+}
+
+#[test]
 fn get_cabinet_param_prints_no_ir() {
     let out = cli(
         &["get", "cabinet.level"],

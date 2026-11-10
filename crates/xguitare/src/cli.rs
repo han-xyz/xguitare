@@ -205,7 +205,7 @@ fn render(req: &Request, payload: &Value) -> String {
     }
 }
 
-/// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR; a `key` naming one Parameter gets no such line.
+/// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR; then `<id>.bypass = yes|no`; a `key` naming one Parameter gets neither line.
 fn render_get(payload: &Value, key: Option<&str>) -> String {
     let names_one_param = key.is_some_and(|key| key.contains('.'));
     let params: Vec<&Value> = items(&payload["params"]).collect();
@@ -232,6 +232,13 @@ fn render_get(payload: &Value, key: Option<&str>) -> String {
                 text(ir)
             };
             lines.push_str(&format!("{module}.ir = {name}\n"));
+        }
+        if let Some(bypass) = param
+            .get("bypass")
+            .filter(|_| is_last_of_module && !names_one_param)
+        {
+            let answer = if bypass == true { "yes" } else { "no" };
+            lines.push_str(&format!("{module}.bypass = {answer}\n"));
         }
     }
     lines
