@@ -8,6 +8,8 @@ pub const METER_CHOICES: [(u32, u32); 7] =
     [(2, 4), (3, 4), (4, 4), (5, 4), (6, 8), (7, 8), (12, 8)];
 pub const BPM_RANGE: (f64, f64) = (20.0, 300.0);
 pub const VOLUME_DB_RANGE: (f64, f64) = (-40.0, 0.0);
+/// The Daemon's Metronome volume before any is chosen.
+pub const DEFAULT_VOLUME_DB: f64 = -12.0;
 
 /// The `status.metronome` object; with a Project open it mirrors the Project's tempo, meter and click.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -10,7 +10,7 @@ use egui::{
 use xguitare_core::BankKind;
 
 use crate::metronome_model::{
-    BPM_RANGE, BeatLight, METER_CHOICES, VOLUME_DB_RANGE, metronome_view,
+    BPM_RANGE, BeatLight, DEFAULT_VOLUME_DB, METER_CHOICES, VOLUME_DB_RANGE, metronome_view,
 };
 use crate::model::{
     AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
@@ -18,7 +18,7 @@ use crate::model::{
     filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
     set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
-use crate::project::{lit_button, released_value, track_knob};
+use crate::project::{knob_with_reset, lit_button, released_value};
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
@@ -579,15 +579,19 @@ fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<
             .response
             .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Metronome meter"));
     });
-    if let Some(volume) = track_knob(
-        ui,
-        ("Metronome", "volume"),
-        view.volume_db,
-        VOLUME_DB_RANGE,
-        " dB",
-    ) {
-        commands.push(change(None, None, None, Some(volume)));
-    }
+    ui.horizontal(|ui| {
+        ui.label("Volume");
+        if let Some(volume) = knob_with_reset(
+            ui,
+            ("Metronome", "volume"),
+            view.volume_db,
+            VOLUME_DB_RANGE,
+            " dB",
+            DEFAULT_VOLUME_DB,
+        ) {
+            commands.push(change(None, None, None, Some(volume)));
+        }
+    });
     if project_name(status).is_some() {
         ui.label(muted_text(FOLLOWS_PROJECT));
     }

@@ -539,6 +539,41 @@ fn metronome_section_snapshot() {
 }
 
 #[test]
+fn double_click_on_the_metronome_volume_knob_resets_it_to_its_default() {
+    let (mut harness, sent, _dir) = harness_with(WINDOW, metronome_snapshot());
+    for title in ["Bass Bank", "Rack"] {
+        harness.get_by_label(title).click();
+        harness.run_steps(2);
+    }
+    harness.get_by_label("Volume");
+    let knob = harness
+        .get_by_role_and_label(Role::Slider, "Metronome volume")
+        .rect()
+        .center();
+    harness.event(Event::PointerMoved(knob));
+    harness.run_steps(1);
+    // Queued events get a 0.25 s frame each, too far apart for egui's 0.3 s double click.
+    for pressed in [true, false, true, false] {
+        harness.input_mut().events.push(Event::PointerButton {
+            pos: knob,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+    }
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Metronome {
+            on: None,
+            bpm: None,
+            meter: None,
+            volume: Some(-12.0),
+        }]
+    );
+}
+
+#[test]
 fn project_snapshots() {
     write_png(&mut project_harness("playing").0, "project");
 

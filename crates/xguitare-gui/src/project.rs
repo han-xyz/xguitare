@@ -693,10 +693,22 @@ fn input_meter(ui: &mut Ui, db: f64) {
 /// A small knob over a number field; either returns its value when a drag ends or a value is typed, a double-click on the knob the middle (0 dB, centre).
 pub(crate) fn track_knob(
     ui: &mut Ui,
+    label: (&str, &str),
+    value: f64,
+    range: (f64, f64),
+    suffix: &str,
+) -> Option<f64> {
+    knob_with_reset(ui, label, value, range, suffix, 0.0)
+}
+
+/// [`track_knob`] whose double-click returns `reset`.
+pub(crate) fn knob_with_reset(
+    ui: &mut Ui,
     (what, track): (&str, &str),
     value: f64,
     (min, max): (f64, f64),
     suffix: &str,
+    reset: f64,
 ) -> Option<f64> {
     ui.vertical_centered(|ui| {
         ui.set_width(KNOB_COLUMN_WIDTH);
@@ -716,7 +728,7 @@ pub(crate) fn track_knob(
             WidgetInfo::labeled(Role::SpinButton, true, format!("{what} {track} value"))
         });
         if knob.reset {
-            return Some(0.0);
+            return Some(reset);
         }
         let dragged_id = knob.response.id.with("dragged");
         if knob.response.dragged() {
