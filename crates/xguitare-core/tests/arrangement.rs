@@ -1,0 +1,387 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use xguitare_core::arrangement::{Arrangement, ArrangementCommand, TakeNotLoaded, Transport};
+use xguitare_core::engine::{Command, FadeLengths, FromAudio, RackSwitcher, engine_queues};
+use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
+use xguitare_dsp::Rack;
+
+const RATE: u32 = 48_000;
+const BLOCK: usize = 256;
+const TOLERANCE: f32 = 1e-5;
+
+fn track(name: &str) -> Track {
+    Track {
+        name: name.to_string(),
+        input: None,
+        volume_db: 0.0,
+        pan: 0.0,
+        mute: false,
+        solo: false,
+        arm: false,
+        modules: Vec::new(),
+        items: Vec::new(),
+    }
+}
+
+fn project(tracks: Vec<Track>) -> Project {
+    Project {
+        name: "test".to_string(),
+        sample_rate: RATE,
+        tempo_bpm: 120.0,
+        meter: (4, 4),
+        loop_region: LoopRegion::default(),
+        latency_offset_ms: 0.0,
+        tracks,
+    }
+}
+
+fn item(position: u64, file: &str, frames: u64) -> Item {
+    Item {
+        position,
+        take: 0,
+        takes: vec![Take {
+            file: file.to_string(),
+            frames,
+        }],
+    }
+}
+
+fn arrangement(project: &Project, takes: &HashMap<String, Arc<[f32]>>) -> Arrangement {
+    let racks = project
+        .tracks
+        .iter()
+        .map(|_| {
+            let mut rack = Rack::new(Vec::new()).expect("valid layout");
+            rack.prepare(RATE as f32, BLOCK);
+            rack
+        })
+        .collect();
+    Arrangement::new(project, racks, takes, RATE as f32, BLOCK).expect("takes loaded")
+}
+
+fn run(arrangement: &mut Arrangement, inputs: &[&[f32]], frames: usize) -> (Vec<f32>, Vec<f32>) {
+    let (mut left, mut right) = (Vec::new(), Vec::new());
+    let mut done = 0;
+    while done < frames {
+        let len = BLOCK.min(frames - done);
+        let block_inputs: Vec<&[f32]> = inputs.iter().map(|input| &input[..len]).collect();
+        let (mut l, mut r) = ([0.0; BLOCK], [0.0; BLOCK]);
+        arrangement.process(&block_inputs, &mut l[..len], &mut r[..len]);
+        left.extend_from_slice(&l[..len]);
+        right.extend_from_slice(&r[..len]);
+        done += len;
+    }
+    (left, right)
+}
+
+fn db(level_db: f32) -> f32 {
+    10f32.powf(level_db / 20.0)
+}
+
+fn close(actual: f32, expected: f32) -> bool {
+    (actual - expected).abs() < TOLERANCE
+}
+
+#[test]
+fn two_tracks_sum_with_volume_and_pan() {
+    let mut a = track("a");
+    a.arm = true;
+    a.volume_db = -6.0;
+    a.pan = -1.0;
+    let mut b = track("b");
+    b.arm = true;
+    b.pan = 0.5;
+    let mut arrangement = arrangement(&project(vec![a, b]), &HashMap::new());
+    let (left, right) = run(&mut arrangement, &[&[0.5; BLOCK], &[0.25; BLOCK]], BLOCK);
+    let angle = 0.75 * std::f32::consts::FRAC_PI_2;
+    let sqrt2 = std::f32::consts::SQRT_2;
+    let expected_l = 0.5 * db(-6.0) * sqrt2 + 0.25 * angle.cos() * sqrt2;
+    let expected_r = 0.25 * angle.sin() * sqrt2;
+    assert!(close(left[BLOCK - 1], expected_l), "{}", left[BLOCK - 1]);
+    assert!(close(right[BLOCK - 1], expected_r), "{}", right[BLOCK - 1]);
+}
+
+#[test]
+fn centred_track_at_zero_db_is_unity() {
+    let mut a = track("a");
+    a.arm = true;
+    let mut arrangement = arrangement(&project(vec![a]), &HashMap::new());
+    let (left, right) = run(&mut arrangement, &[&[0.5; BLOCK]], BLOCK);
+    assert!(close(left[0], 0.5) && close(right[0], 0.5));
+}
+
+#[test]
+fn volume_command_ramps_to_the_new_level() {
+    let mut a = track("a");
+    a.arm = true;
+    let mut arrangement = arrangement(&project(vec![a]), &HashMap::new());
+    arrangement.apply(ArrangementCommand::Volume {
+        track: 0,
+        db: -12.0,
+    });
+    let input = vec![1.0; 4800];
+    let (left, _) = run(&mut arrangement, &[&input], 4800);
+    assert!(left[0] > db(-12.0) + 0.1, "no jump: {}", left[0]);
+    assert!(close(left[4799], db(-12.0)), "{}", left[4799]);
+}
+
+#[test]
+fn mute_silences_and_solo_leaves_only_soloed_tracks() {
+    let tracks = (0..3)
+        .map(|idx| {
+            let mut t = track(&format!("t{idx}"));
+            t.arm = true;
+            t
+        })
+        .collect();
+    let mut arrangement = arrangement(&project(tracks), &HashMap::new());
+    let levels = [0.1, 0.2, 0.4].map(|level| vec![level; 4800]);
+    let inputs = levels.each_ref().map(Vec::as_slice);
+    arrangement.apply(ArrangementCommand::Mute { track: 2, on: true });
+    let (left, _) = run(&mut arrangement, &inputs, 4800);
+    assert!(close(left[4799], 0.3), "{}", left[4799]);
+    arrangement.apply(ArrangementCommand::Solo { track: 1, on: true });
+    let (left, _) = run(&mut arrangement, &inputs, 4800);
+    assert!(close(left[4799], 0.2), "{}", left[4799]);
+    arrangement.apply(ArrangementCommand::Solo { track: 2, on: true });
+    let (left, _) = run(&mut arrangement, &inputs, 4800);
+    assert!(
+        close(left[4799], 0.2),
+        "a muted soloed Track stays silent: {}",
+        left[4799]
+    );
+}
+
+#[test]
+fn armed_track_monitors_its_input_while_stopped() {
+    let mut armed = track("armed");
+    armed.arm = true;
+    armed.pan = -1.0;
+    let mut unarmed = track("unarmed");
+    unarmed.pan = 1.0;
+    let mut arrangement = arrangement(&project(vec![armed, unarmed]), &HashMap::new());
+    assert_eq!(arrangement.transport(), Transport::Stopped);
+    let (left, right) = run(&mut arrangement, &[&[0.5; BLOCK], &[0.5; BLOCK]], BLOCK);
+    assert!(close(left[10], 0.5 * std::f32::consts::SQRT_2));
+    assert!(right.iter().all(|&sample| sample == 0.0));
+}
+
+#[test]
+fn item_plays_at_its_position_and_stops_at_its_end() {
+    let mut t = track("t");
+    t.items.push(item(100, "takes/t-1.wav", 50));
+    let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(vec![1.0; 50]))]);
+    let mut arrangement = arrangement(&project(vec![t]), &takes);
+    let (stopped, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
+    assert!(stopped.iter().all(|&sample| sample == 0.0));
+    arrangement.apply(ArrangementCommand::Play);
+    let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
+    for (frame, &sample) in left.iter().enumerate() {
+        let expected = if (100..150).contains(&frame) {
+            1.0
+        } else {
+            0.0
+        };
+        assert!(close(sample, expected), "frame {frame}: {sample}");
+    }
+    assert_eq!(arrangement.playhead(), BLOCK as u64);
+}
+
+#[test]
+fn locate_moves_the_playhead() {
+    let mut t = track("t");
+    t.items.push(item(0, "takes/t-1.wav", 1000));
+    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32 / 1000.0).collect();
+    let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(ramp))]);
+    let mut arrangement = arrangement(&project(vec![t]), &takes);
+    arrangement.apply(ArrangementCommand::Locate(500));
+    arrangement.apply(ArrangementCommand::Play);
+    let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], 10);
+    assert!(close(left[3], 0.503), "{}", left[3]);
+}
+
+#[test]
+fn armed_track_does_not_play_its_items() {
+    let mut t = track("t");
+    t.arm = true;
+    t.items.push(item(0, "takes/t-1.wav", 50));
+    let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(vec![1.0; 50]))]);
+    let mut arrangement = arrangement(&project(vec![t]), &takes);
+    arrangement.apply(ArrangementCommand::Play);
+    let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
+    assert!(left.iter().all(|&sample| sample == 0.0));
+}
+
+#[test]
+fn loop_wraps_inside_a_block_on_the_exact_frame() {
+    let mut t = track("t");
+    t.items.push(item(0, "takes/t-1.wav", 1000));
+    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32).collect();
+    let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(ramp))]);
+    let mut p = project(vec![t]);
+    p.loop_region = LoopRegion {
+        start: 10,
+        end: 110,
+        on: true,
+    };
+    let mut arrangement = arrangement(&p, &takes);
+    arrangement.apply(ArrangementCommand::Play);
+    let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
+    for (frame, &sample) in left.iter().enumerate() {
+        let expected = if frame < 110 {
+            frame
+        } else {
+            10 + (frame - 110) % 100
+        };
+        assert!(close(sample, expected as f32), "frame {frame}: {sample}");
+    }
+    assert_eq!(arrangement.playhead(), 10 + (BLOCK as u64 - 110) % 100);
+}
+
+fn zero_crossings(samples: &[f32]) -> usize {
+    samples
+        .windows(2)
+        .filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0) && pair[1] != 0.0)
+        .count()
+}
+
+#[test]
+fn click_lands_on_beats_with_an_accent_on_one() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::Click(true));
+    arrangement.apply(ArrangementCommand::Play);
+    let beat = 24_000;
+    let (left, right) = run(&mut arrangement, &[], 6 * beat);
+    assert_eq!(left, right);
+    let blip = 240;
+    for idx in 0..6 {
+        let start = idx * beat;
+        if idx > 0 {
+            assert!(left[start - 1] == 0.0, "silent before beat {idx}");
+        }
+        assert!(left[start + 1] != 0.0, "click on beat {idx}");
+        let crossings = zero_crossings(&left[start..start + blip]);
+        let expected = if idx % 4 == 0 { 15 } else { 10 };
+        assert!(
+            crossings.abs_diff(expected) <= 1,
+            "beat {idx}: {crossings} crossings"
+        );
+        assert!(
+            left[start + 2 * blip..start + beat]
+                .iter()
+                .all(|&s| s == 0.0)
+        );
+    }
+}
+
+#[test]
+fn click_off_is_silent() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::Play);
+    let (left, _) = run(&mut arrangement, &[], 30_000);
+    assert!(left.iter().all(|&sample| sample == 0.0));
+}
+
+#[test]
+fn count_in_holds_the_playhead_then_records() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::CountIn(1));
+    arrangement.apply(ArrangementCommand::Record);
+    assert_eq!(arrangement.transport(), Transport::Recording);
+    let bar = 4 * 24_000;
+    let (left, _) = run(&mut arrangement, &[], bar - 100);
+    assert!(arrangement.is_counting_in());
+    assert_eq!(arrangement.playhead(), 0);
+    assert!(left[1] != 0.0, "count-in clicks even with the click off");
+    run(&mut arrangement, &[], 300);
+    assert!(!arrangement.is_counting_in());
+    assert_eq!(arrangement.playhead(), 200);
+}
+
+#[test]
+fn stop_holds_the_playhead_and_silences_items() {
+    let mut t = track("t");
+    t.items.push(item(0, "takes/t-1.wav", 10_000));
+    let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(vec![1.0; 10_000]))]);
+    let mut arrangement = arrangement(&project(vec![t]), &takes);
+    arrangement.apply(ArrangementCommand::Play);
+    run(&mut arrangement, &[&[0.0; BLOCK]], 1000);
+    arrangement.apply(ArrangementCommand::Stop);
+    let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
+    assert_eq!(arrangement.transport(), Transport::Stopped);
+    assert_eq!(arrangement.playhead(), 1000);
+    assert!(left.iter().all(|&sample| sample == 0.0));
+}
+
+#[test]
+fn swapped_arrangement_continues_the_transport() {
+    let mut old = arrangement(&project(Vec::new()), &HashMap::new());
+    old.apply(ArrangementCommand::Play);
+    run(&mut old, &[], 1000);
+    let mut new = arrangement(&project(vec![track("t")]), &HashMap::new());
+    new.continue_from(&old);
+    assert_eq!(new.transport(), Transport::Playing);
+    assert_eq!(new.playhead(), 1000);
+}
+
+#[test]
+fn an_active_take_that_is_not_loaded_is_an_error() {
+    let mut t = track("t");
+    t.items.push(item(0, "takes/t-1.wav", 10));
+    let p = project(vec![t]);
+    let mut rack = Rack::new(Vec::new()).expect("valid layout");
+    rack.prepare(RATE as f32, BLOCK);
+    let error = Arrangement::new(&p, vec![rack], &HashMap::new(), RATE as f32, BLOCK)
+        .err()
+        .expect("missing Take");
+    assert_eq!(error, TakeNotLoaded("takes/t-1.wav".to_string()));
+    assert_eq!(error.to_string(), "take 'takes/t-1.wav' is not loaded");
+}
+
+fn empty_rack() -> Box<Rack> {
+    let mut rack = Rack::new(Vec::new()).expect("valid layout");
+    rack.prepare(RATE as f32, BLOCK);
+    Box::new(rack)
+}
+
+#[test]
+fn switcher_runs_a_swapped_in_arrangement_until_it_is_closed() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::default());
+    let input = [0.5; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let mut t = track("t");
+    t.arm = true;
+    t.pan = -1.0;
+    let first = arrangement(&project(vec![t.clone()]), &HashMap::new());
+    let swap = Command::SwapArrangement(Box::new(first));
+    assert!(control.commands.push(swap).is_ok());
+    let play = Command::Arrangement(ArrangementCommand::Play);
+    assert!(control.commands.push(play).is_ok());
+    switcher.apply_commands();
+    assert!(switcher.process_tracks(&input, &[&[0.25; BLOCK]], &mut left, &mut right));
+    assert!(close(left[0], 0.25 * std::f32::consts::SQRT_2));
+    assert!(right.iter().all(|&sample| sample == 0.0));
+
+    let second = arrangement(&project(vec![t]), &HashMap::new());
+    let swap = Command::SwapArrangement(Box::new(second));
+    assert!(control.commands.push(swap).is_ok());
+    switcher.apply_commands();
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    let Ok(FromAudio::RetiredArrangement(retired)) = control.from_audio.pop() else {
+        panic!("expected the replaced Arrangement");
+    };
+    assert_eq!(retired.playhead(), BLOCK as u64);
+
+    assert!(control.commands.push(Command::CloseArrangement).is_ok());
+    switcher.apply_commands();
+    switcher.process(&input, &mut left, &mut right);
+    let Ok(FromAudio::RetiredArrangement(closed)) = control.from_audio.pop() else {
+        panic!("expected the closed Arrangement");
+    };
+    assert_eq!(closed.transport(), Transport::Playing);
+    assert_eq!(closed.playhead(), 2 * BLOCK as u64);
+    assert!(close(left[0], 0.5) && close(right[0], 0.5));
+}

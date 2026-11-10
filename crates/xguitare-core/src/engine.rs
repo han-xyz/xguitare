@@ -1,10 +1,12 @@
-use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::{mem, slice};
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use xguitare_dsp::Rack;
 use xguitare_dsp::crossfade::Crossfader;
+
+use crate::arrangement::{Arrangement, ArrangementCommand};
 
 #[derive(Debug, Default)]
 pub struct EngineShared {
@@ -37,10 +39,17 @@ pub enum Command {
         module: usize,
         on: bool,
     },
+    /// Runs this Arrangement instead of the Rack, cut in with no fade; it carries on the transport of the Arrangement it replaces.
+    SwapArrangement(Box<Arrangement>),
+    /// Goes back to the Rack.
+    CloseArrangement,
+    /// Ignored while no Arrangement runs.
+    Arrangement(ArrangementCommand),
 }
 
 pub enum FromAudio {
     Retired(Box<Rack>),
+    RetiredArrangement(Box<Arrangement>),
     ProgramChange(u8),
 }
 
@@ -104,7 +113,7 @@ pub fn take_peak(peak: &AtomicU32) -> f32 {
 /// The control side, the audio side, and the control thread's end of the input tap.
 pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues, Consumer<f32>) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);
-    // At most every queued SwapRack plus the current, the fading-in and the pending Rack, minus the one left current, can be retired between two drains, and `control::handle` drains before each SwapRack push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
+    // At most every queued SwapRack, SwapArrangement or CloseArrangement plus the current, the fading-in and the pending Rack, minus the one left current, can be retired between two drains, and the control side drains before each such push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
     let (from_audio_tx, from_audio_rx) = RingBuffer::new(capacity + 2 + PROGRAM_CHANGE_SLOTS);
     let (tap_tx, tap_rx) = RingBuffer::new(TAP_CAPACITY);
     (
@@ -132,11 +141,12 @@ pub fn tap_block(tap: &mut Producer<f32>, input: &[f32]) {
 }
 
 impl EngineQueues {
-    /// Empties `from_audio`: drops every retired Rack and keeps program changes for `take_program_changes`.
+    /// Empties `from_audio`: drops every retired Rack and Arrangement and keeps program changes for `take_program_changes`.
     pub fn drain_from_audio(&mut self) {
         while let Ok(message) = self.from_audio.pop() {
             match message {
                 FromAudio::Retired(rack) => drop(rack),
+                FromAudio::RetiredArrangement(arrangement) => drop(arrangement),
                 FromAudio::ProgramChange(program) => self.program_changes.push(program),
             }
         }
@@ -153,6 +163,7 @@ pub struct RackSwitcher {
     current: Box<Rack>,
     incoming: Option<Box<Rack>>,
     pending: Option<Box<Rack>>,
+    arrangement: Option<Box<Arrangement>>,
     crossfader: Crossfader,
     max_frames: usize,
     fades: FadeLengths,
@@ -180,6 +191,7 @@ impl RackSwitcher {
             current: rack,
             incoming: None,
             pending: None,
+            arrangement: None,
             crossfader,
             max_frames,
             fades,
@@ -221,6 +233,23 @@ impl RackSwitcher {
                     }
                 }
                 Command::SetFadeLengths(fades) => self.fades = fades,
+                Command::SwapArrangement(mut new) => {
+                    if let Some(old) = self.arrangement.take() {
+                        new.continue_from(&old);
+                        self.retire_arrangement(old);
+                    }
+                    self.arrangement = Some(new);
+                }
+                Command::CloseArrangement => {
+                    if let Some(old) = self.arrangement.take() {
+                        self.retire_arrangement(old);
+                    }
+                }
+                Command::Arrangement(command) => {
+                    if let Some(arrangement) = self.arrangement.as_mut() {
+                        arrangement.apply(command);
+                    }
+                }
             }
         }
     }
@@ -230,10 +259,32 @@ impl RackSwitcher {
         self.crossfader.start(self.fades.crossfade_frames);
     }
 
-    /// Taps the input, runs one block through the current Rack, or through both while a fade runs, then applies the Mute gain; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for.
+    /// Taps the input, runs one block through the current Rack, or through both while a fade runs, then applies the Mute gain; writes silence and returns false when the block is longer than the switcher's `max_frames` or than a live Rack was prepared for. While an Arrangement runs, `input` is its first Track's input.
     pub fn process(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {
+        self.process_tracks(input, slice::from_ref(&input), out_l, out_r)
+    }
+
+    /// [`RackSwitcher::process`], with `track_inputs` (one per Track) feeding the Arrangement while one runs; the Rack and the tap take `input`.
+    pub fn process_tracks(
+        &mut self,
+        input: &[f32],
+        track_inputs: &[&[f32]],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+    ) -> bool {
         tap_block(&mut self.queues.tap, input);
-        let fits = self.run_racks(input, out_l, out_r);
+        let fits = match self.arrangement.as_mut() {
+            Some(arrangement) if input.len() <= arrangement.max_frames() => {
+                arrangement.process(track_inputs, out_l, out_r);
+                true
+            }
+            Some(_) => {
+                out_l.fill(0.0);
+                out_r.fill(0.0);
+                false
+            }
+            None => self.run_racks(input, out_l, out_r),
+        };
         self.apply_mute(out_l, out_r);
         fits
     }
@@ -340,6 +391,17 @@ impl RackSwitcher {
             .running_frames
             .store(rack.max_frames(), Ordering::Relaxed);
         mem::replace(&mut self.current, rack)
+    }
+
+    fn retire_arrangement(&mut self, arrangement: Box<Arrangement>) {
+        let pushed = self
+            .queues
+            .from_audio
+            .push(FromAudio::RetiredArrangement(arrangement));
+        debug_assert!(pushed.is_ok(), "from_audio queue full");
+        if let Err(unretired) = pushed {
+            mem::forget(unretired);
+        }
     }
 
     fn retire(&mut self, rack: Box<Rack>) {

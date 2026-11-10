@@ -1,4 +1,5 @@
 mod address;
+pub mod arrangement;
 mod bank;
 pub mod build;
 mod config;

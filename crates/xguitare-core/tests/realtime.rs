@@ -1,11 +1,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use std::collections::HashMap;
+
 use assert_no_alloc::*;
+use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
 use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak,
     engine_queues, raise_peak, tap_block,
 };
+use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
 use xguitare_dsp::{Gain, Module, Rack};
 
 #[cfg(debug_assertions)]
@@ -240,5 +244,162 @@ fn pending_swap_and_new_fade_lengths_do_not_allocate() {
         retired += 1;
     }
     assert_eq!(retired, 3);
+    drop(switcher);
+}
+
+fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
+    let mut takes = HashMap::new();
+    let tracks = (0..tracks)
+        .map(|idx| {
+            let file = format!("takes/t{idx}-1.wav");
+            takes.insert(file.clone(), Arc::from(vec![0.1; 1000]));
+            Track {
+                name: format!("t{idx}"),
+                input: None,
+                volume_db: -3.0,
+                pan: 0.25,
+                mute: false,
+                solo: idx == 1,
+                arm: idx % 4 == 0,
+                modules: Vec::new(),
+                items: vec![Item {
+                    position: 50 * idx as u64,
+                    take: 0,
+                    takes: vec![Take { file, frames: 1000 }],
+                }],
+            }
+        })
+        .collect();
+    let project = Project {
+        name: "rt".to_string(),
+        sample_rate: 48_000,
+        tempo_bpm: 240.0,
+        meter: (3, 4),
+        loop_region: LoopRegion {
+            start: 100,
+            end: 900,
+            on: true,
+        },
+        latency_offset_ms: 0.0,
+        tracks,
+    };
+    (project, takes)
+}
+
+fn sixteen_track_arrangement() -> Box<Arrangement> {
+    let (project, takes) = playing_project(16);
+    let racks = (0..16).map(|_| *gain_rack()).collect();
+    Box::new(Arrangement::new(&project, racks, &takes, 48_000.0, BLOCK).expect("takes loaded"))
+}
+
+fn every_arrangement_command() -> [ArrangementCommand; 16] {
+    [
+        ArrangementCommand::Volume { track: 3, db: -9.0 },
+        ArrangementCommand::Pan {
+            track: 3,
+            pan: -0.5,
+        },
+        ArrangementCommand::Mute { track: 2, on: true },
+        ArrangementCommand::Solo { track: 5, on: true },
+        ArrangementCommand::Arm { track: 6, on: true },
+        ArrangementCommand::Param {
+            track: 7,
+            module: 0,
+            param: 0,
+            value: -6.0,
+        },
+        ArrangementCommand::Bypass {
+            track: 7,
+            module: 0,
+            on: true,
+        },
+        ArrangementCommand::Tempo {
+            bpm: 90.0,
+            meter: (4, 4),
+        },
+        ArrangementCommand::Click(true),
+        ArrangementCommand::CountIn(1),
+        ArrangementCommand::Loop(LoopRegion {
+            start: 0,
+            end: 300,
+            on: true,
+        }),
+        ArrangementCommand::Locate(250),
+        ArrangementCommand::Play,
+        ArrangementCommand::Stop,
+        ArrangementCommand::Record,
+        ArrangementCommand::Volume { track: 99, db: 0.0 },
+    ]
+}
+
+#[test]
+fn arrangement_with_sixteen_tracks_playing_does_not_allocate() {
+    let mut arrangement = sixteen_track_arrangement();
+    arrangement.apply(ArrangementCommand::Click(true));
+    arrangement.apply(ArrangementCommand::Play);
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for _ in 0..200 {
+            arrangement.process(&inputs, &mut left, &mut right);
+        }
+    });
+}
+
+#[test]
+fn every_arrangement_command_does_not_allocate() {
+    let mut arrangement = sixteen_track_arrangement();
+    let commands = every_arrangement_command();
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for command in commands {
+            arrangement.apply(command);
+            for _ in 0..20 {
+                arrangement.process(&inputs, &mut left, &mut right);
+            }
+        }
+    });
+}
+
+#[test]
+fn switcher_arrangement_swap_commands_and_close_do_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::default());
+    let arrangements = [sixteen_track_arrangement(), sixteen_track_arrangement()];
+    let commands = every_arrangement_command();
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for arrangement in arrangements {
+            assert!(
+                control
+                    .commands
+                    .push(Command::SwapArrangement(arrangement))
+                    .is_ok()
+            );
+            switcher.apply_commands();
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+        for command in commands {
+            assert!(control.commands.push(Command::Arrangement(command)).is_ok());
+            switcher.apply_commands();
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+        assert!(control.commands.push(Command::CloseArrangement).is_ok());
+        switcher.apply_commands();
+        switcher.process(&input, &mut left, &mut right);
+    });
+    let mut retired = 0;
+    while let Ok(FromAudio::RetiredArrangement(_)) = control.from_audio.pop() {
+        retired += 1;
+    }
+    assert_eq!(retired, 2);
     drop(switcher);
 }
