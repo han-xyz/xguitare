@@ -14,7 +14,7 @@ use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, SET_INTERVAL, Snapshot,
     Throttle, bank_rows, forget_removed_units, key_to_command, open_units_from_string,
-    open_units_to_string, param_rows, peak_db, quit_commands, remember_removes,
+    open_units_to_string, param_rows, peak_db, quit_commands, remember_removes, shortcuts_active,
 };
 use xguitare_gui::widgets;
 
@@ -258,9 +258,9 @@ impl eframe::App for App {
     }
 }
 
-/// No shortcut while a widget takes typing. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
+/// No shortcut while a text field takes typing. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
-    if ui.ctx().egui_wants_keyboard_input() {
+    if !shortcuts_active(ui.ctx().text_edit_focused()) {
         return Vec::new();
     }
     ui.input_mut(|input| {

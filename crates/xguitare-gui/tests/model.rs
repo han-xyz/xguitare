@@ -22,8 +22,8 @@ use xguitare_gui::model::{
     knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
     open_units_from_string, open_units_to_string, palette, param_rows, parse_typed_value, peak_db,
     peak_text, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
-    requests_until_quit, response_text, spawn_policy, tuner_header_text, tuner_reading,
-    tuner_toggle, unit_suffix,
+    requests_until_quit, response_text, shortcuts_active, spawn_policy, tuner_header_text,
+    tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -1254,6 +1254,12 @@ fn open_units_keep_a_module_another_preset_lacks() {
     remember_removes(&mut removing, &[Command::Load("lead".into())]);
     forget_removed_units(&mut open, &mut removing, &get_with_modules(&["gate"]));
     assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+}
+
+#[test]
+fn shortcuts_work_unless_a_text_field_is_being_typed_in() {
+    assert!(shortcuts_active(false));
+    assert!(!shortcuts_active(true));
 }
 
 #[test]

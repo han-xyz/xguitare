@@ -545,6 +545,11 @@ pub enum KeyEvent {
     CtrlS,
 }
 
+/// Digits and Ctrl+S act unless a text field has focus; a focused knob consumes only its own arrow, page and Home/End keys.
+pub fn shortcuts_active(text_edit_focused: bool) -> bool {
+    !text_edit_focused
+}
+
 /// The Bank rows of a `list` payload, and how many entries were skipped for lacking an integer `program`.
 pub fn bank_rows(list_payload: &Value) -> (Vec<BankRow>, usize) {
     let active = list_payload["active"].as_u64();
