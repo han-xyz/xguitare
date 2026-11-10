@@ -33,6 +33,8 @@ use crate::project_control::{
     set_loop, set_rack_modules, status_fields, target_rack, tempo, track_add, track_remove,
     track_select, track_set, transport,
 };
+use crate::render::{RenderBits, RenderRange};
+use crate::render_control::{render, render_cancel};
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
 use crate::tuner::Tuner;
 use crate::{
@@ -241,6 +243,16 @@ pub enum Request {
     MasterSet {
         volume: f32,
     },
+    /// Starts a Render of the open Project.
+    Render {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        range: Option<RenderRange>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bits: Option<RenderBits>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    RenderCancel,
     /// Clears the clip flag of the Track, Bus or Master given, or of all when none is.
     ClipReset {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -634,6 +646,8 @@ fn handle_from(
         Request::ClipReset { track, bus, master } => {
             clip_reset(state, track.as_ref(), bus.as_ref(), master)
         }
+        Request::Render { range, bits, name } => render(state, range, bits, name.as_deref()),
+        Request::RenderCancel => render_cancel(state),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),

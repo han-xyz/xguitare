@@ -27,6 +27,8 @@ use xguitare_core::project_control::{
     ClosedProject, LastTakes, ProjectEvent, Projects, add_finished_takes, autosave_if_due,
     close_for_stop, finish_closed, finish_stopped, project_rate_warning, take_project_events,
 };
+use xguitare_core::render::RenderTask;
+use xguitare_core::render_control::{RenderFinished, cancel_render, finished_render};
 use xguitare_core::take_capture::Latency;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
@@ -145,6 +147,8 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
 struct ProjectDisk {
     open: Option<DiskThread>,
     closing: Vec<(DiskThread, ClosedProject)>,
+    /// The thread of the running Render, or of the last one.
+    render: Option<thread::JoinHandle<()>>,
 }
 
 impl ProjectDisk {
@@ -175,6 +179,7 @@ impl ProjectDisk {
                 warn!("{failure}");
             }
         }
+        log_finished_render(state);
         match autosave_if_due(state, Instant::now()) {
             Some(Ok(file)) => info!("autosaved {}", file.display()),
             Some(Err(err)) => warn!("cannot autosave: {err}"),
@@ -203,6 +208,7 @@ impl ProjectDisk {
                 }
                 session.connect_track_inputs(&inputs);
             }
+            ProjectEvent::Render(task) => self.start_render(task),
             ProjectEvent::Closed(closed) => {
                 info!("closed project {}", closed.dir.display());
                 match self.open.take() {
@@ -215,13 +221,42 @@ impl ProjectDisk {
         }
     }
 
+    fn start_render(&mut self, task: RenderTask) {
+        let job = Arc::clone(&task.job);
+        info!("rendering {}", job.file.display());
+        if let Some(previous) = self.render.take()
+            && previous.join().is_err()
+        {
+            error!("render thread panicked");
+        }
+        match thread::Builder::new()
+            .name("render".to_string())
+            .spawn(move || task.run())
+        {
+            Ok(handle) => self.render = Some(handle),
+            Err(err) => job.fail(format!("cannot start the render thread: {err}")),
+        }
+    }
+
+    /// Cancels a running Render and waits for its thread, which removes the part file.
+    fn stop_render(&mut self, state: &mut EngineState) {
+        cancel_render(state);
+        if let Some(handle) = self.render.take()
+            && handle.join().is_err()
+        {
+            error!("render thread panicked");
+        }
+        log_finished_render(state);
+    }
+
     /// After the JACK client stopped, which ended every open Take: adds the last Takes to the Projects closing, which are saved, and to the one still open, which is autosaved when it changed.
     fn finish_at_stop(
-        self,
+        mut self,
         state: &mut EngineState,
         open: Option<ClosedProject>,
         latencies: &[Latency],
     ) {
+        self.stop_render(state);
         let latency = |track: usize| latencies.get(track).copied().unwrap_or_default();
         for (thread, closed) in self.closing {
             log_last_takes(&finish_closed(state, closed, &thread.stop(), latency));
@@ -231,6 +266,15 @@ impl ProjectDisk {
         };
         let finished = self.open.map(DiskThread::stop).unwrap_or_default();
         log_last_takes(&finish_stopped(open, &finished, latency));
+    }
+}
+
+fn log_finished_render(state: &mut EngineState) {
+    match finished_render(state) {
+        Some(RenderFinished::Rendered(file)) => info!("rendered {}", file.display()),
+        Some(RenderFinished::Cancelled) => info!("render cancelled"),
+        Some(RenderFinished::Failed(error)) => error!("render failed: {error}"),
+        None => {}
     }
 }
 

@@ -10,9 +10,11 @@ use xguitare_core::control::{
     IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
 };
 
+use xguitare_core::render::{RenderBits, RenderRange};
+
 use crate::{
-    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, MuteState, ProjectCmd, RackCmd, Switch,
-    TrackCmd, parse,
+    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, MuteState, ProjectCmd, RackCmd, RenderArgs,
+    RenderBitsArg, RenderCmd, Switch, TrackCmd, parse,
 };
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
@@ -42,7 +44,10 @@ pub fn run_cli(
     };
     let result = match cli.cmd {
         Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
-        cmd => request_for(cmd).and_then(|req| render(&req, &request(transport, &req)?)),
+        cmd => request_for(cmd).and_then(|req| match req {
+            Request::Render { .. } => render_and_wait(transport, out, &req),
+            req => render(&req, &request(transport, &req)?),
+        }),
     };
     let written = match result {
         Ok(text) => write!(out, "{text}").map(|()| 0),
@@ -95,6 +100,37 @@ fn print_tuner_readings(
         writeln!(out).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// Starts the Render, prints its file, a line at each further tenth of progress, and `rendered <file>` once it is done.
+fn render_and_wait(
+    transport: &mut dyn Transport,
+    out: &mut dyn Write,
+    req: &Request,
+) -> Result<String, String> {
+    let started = request(transport, req)?;
+    write!(out, "{}", render(req, &started)?)
+        .and_then(|()| out.flush())
+        .map_err(|e| e.to_string())?;
+    let mut tenths = 0;
+    loop {
+        thread::sleep(WATCH_INTERVAL);
+        let job = request(transport, &Request::Status)?["render"].clone();
+        match job["state"].as_str() {
+            Some("running") => {
+                let now = (job["progress"].as_f64().unwrap_or_default() * 10.0).floor() as u32;
+                if now > tenths {
+                    tenths = now;
+                    writeln!(out, "{}%", now * 10)
+                        .and_then(|()| out.flush())
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            Some("done") => return Ok(format!("rendered {}\n", text(&job["file"]))),
+            Some("cancelled") => return Err("render cancelled".to_string()),
+            _ => return Err(format!("render failed: {}", text(&job["error"]))),
+        }
+    }
 }
 
 fn tuner_line(payload: &Value) -> String {
@@ -193,6 +229,7 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         },
         Cmd::Master { volume } => Request::MasterSet { volume },
         Cmd::Clip(ClipCmd::Reset { kind, name }) => clip_reset_request(kind, name)?,
+        Cmd::Render(args) => render_request(args),
     })
 }
 
@@ -278,6 +315,21 @@ fn clip_reset_request(kind: Option<ClipKind>, name: Option<String>) -> Result<Re
         }
     };
     Ok(Request::ClipReset { track, bus, master })
+}
+
+fn render_request(args: RenderArgs) -> Request {
+    if let Some(RenderCmd::Cancel) = args.action {
+        return Request::RenderCancel;
+    }
+    Request::Render {
+        range: args.loop_region.then_some(RenderRange::Loop),
+        bits: args.bits.map(|bits| match bits {
+            RenderBitsArg::Pcm16 => RenderBits::Pcm16,
+            RenderBitsArg::Pcm24 => RenderBits::Pcm24,
+            RenderBitsArg::Float32 => RenderBits::Float32,
+        }),
+        name: args.name,
+    }
 }
 
 fn project_request(cmd: ProjectCmd) -> Request {
@@ -439,6 +491,8 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         ),
         Request::MasterSet { .. } => format!("master {} dB\n", text(&payload["volume_db"])),
         Request::ClipReset { .. } => "clip reset\n".to_string(),
+        Request::Render { .. } => format!("rendering {}\n", text(&payload["file"])),
+        Request::RenderCancel => "render cancelling\n".to_string(),
         Request::Ports
         | Request::SetPorts { .. }
         | Request::Settings
@@ -622,6 +676,22 @@ fn render_status(payload: &Value) -> String {
         text(&payload["disk_overflows"])
     );
     let _ = writeln!(lines, "project: {}", text(&payload["project"]));
+    let job = &payload["render"];
+    if job.is_object() {
+        let percent = (job["progress"].as_f64().unwrap_or_default() * 100.0).round();
+        let _ = write!(
+            lines,
+            "render: {} ({}) {} {percent}% {}",
+            text(&job["name"]),
+            text(&job["range"]),
+            text(&job["state"]),
+            text(&job["file"])
+        );
+        if job["error"].is_string() {
+            let _ = write!(lines, ": {}", text(&job["error"]));
+        }
+        lines.push('\n');
+    }
     if !payload["project"].is_string() {
         return lines;
     }

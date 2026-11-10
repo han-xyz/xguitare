@@ -129,6 +129,40 @@ enum Cmd {
     /// Reset clip indicators: of one Track, Bus or Master, or all
     #[command(subcommand, arg_required_else_help = false)]
     Clip(ClipCmd),
+    /// Render the open Project through Master to renders/<name>.wav in its folder; waits and prints the progress. `render cancel` stops a running Render
+    Render(RenderArgs),
+}
+
+#[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
+struct RenderArgs {
+    #[command(subcommand)]
+    action: Option<RenderCmd>,
+    /// Render the loop region instead of the whole Project
+    #[arg(long = "loop")]
+    loop_region: bool,
+    /// The WAV sample format; 24 when not given
+    #[arg(long)]
+    bits: Option<RenderBitsArg>,
+    /// The file name without .wav; the Project folder's name when not given
+    #[arg(long)]
+    name: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum RenderCmd {
+    /// Stop the running Render; its part file is removed
+    Cancel,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum RenderBitsArg {
+    #[value(name = "16")]
+    Pcm16,
+    #[value(name = "24")]
+    Pcm24,
+    #[value(name = "32f")]
+    Float32,
 }
 
 /// The Bus (`--bus`, index or name) or Master Rack a Rack command edits instead of the selected Track's.

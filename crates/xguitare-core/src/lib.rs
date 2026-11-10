@@ -14,6 +14,8 @@ mod preset;
 pub mod project;
 pub mod project_control;
 mod registry;
+pub mod render;
+pub mod render_control;
 mod state;
 pub mod take_capture;
 pub mod tuner;

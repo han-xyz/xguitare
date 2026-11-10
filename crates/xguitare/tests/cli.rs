@@ -8,6 +8,7 @@ use xguitare_client::{ClientError, Transport};
 use xguitare_core::control::{
     BusRef, Position, Request, Response, SendLevel, TrackRef, TransportAction,
 };
+use xguitare_core::render::{RenderBits, RenderRange};
 
 struct Canned {
     replies: VecDeque<Result<Response, ClientError>>,
@@ -1314,4 +1315,122 @@ fn mixer_usage_errors_print_one_line() {
         assert_eq!(out.code, 1, "{argv:?}");
         assert!(out.requests.is_empty(), "{argv:?}");
     }
+}
+
+fn render_reply(state: &str, progress: f64, extra: &str) -> Result<Response, ClientError> {
+    reply(&format!(
+        r#"{{"ok":true,"render":{{"name":"song","range":"project","progress":{progress},"state":"{state}","file":"/p/song/renders/song.wav"{extra}}}}}"#
+    ))
+}
+
+fn quiet_env() -> CliEnv {
+    CliEnv {
+        tuner_mute: false,
+        is_tty: false,
+        stop: Arc::new(AtomicBool::new(false)),
+    }
+}
+
+#[test]
+fn render_waits_prints_each_ten_percent_and_the_file() {
+    let out = cli_with(
+        &["render", "--loop", "--bits", "32f", "--name", "song"],
+        vec![
+            reply(r#"{"ok":true,"file":"/p/song/renders/song.wav"}"#),
+            render_reply("running", 0.05, ""),
+            render_reply("running", 0.25, ""),
+            render_reply("running", 0.29, ""),
+            render_reply("done", 1.0, ""),
+        ],
+        &quiet_env(),
+        None,
+    );
+    assert_eq!(
+        out.requests[0],
+        Request::Render {
+            range: Some(RenderRange::Loop),
+            bits: Some(RenderBits::Float32),
+            name: Some("song".to_string()),
+        }
+    );
+    assert!(out.requests[1..].iter().all(|req| *req == Request::Status));
+    assert_eq!(
+        out.stdout,
+        "rendering /p/song/renders/song.wav\n20%\nrendered /p/song/renders/song.wav\n"
+    );
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn render_failure_and_cancel_end_with_an_error_line() {
+    for (state, extra, message) in [
+        (
+            "failed",
+            r#","error":"cannot write x: disk full""#,
+            "error: render failed: cannot write x: disk full\n",
+        ),
+        ("cancelled", "", "error: render cancelled\n"),
+    ] {
+        let out = cli_with(
+            &["render"],
+            vec![
+                reply(r#"{"ok":true,"file":"/p/song/renders/song.wav"}"#),
+                render_reply(state, 0.5, extra),
+            ],
+            &quiet_env(),
+            None,
+        );
+        assert_eq!(
+            out.requests[0],
+            Request::Render {
+                range: None,
+                bits: None,
+                name: None
+            }
+        );
+        assert_eq!(out.stderr, message);
+        assert_eq!(out.code, 1);
+    }
+    let refused = cli(
+        &["render", "--bits", "16"],
+        reply(r#"{"ok":false,"error":"nothing to render"}"#),
+    );
+    assert_eq!(
+        refused.requests,
+        [Request::Render {
+            range: None,
+            bits: Some(RenderBits::Pcm16),
+            name: None
+        }]
+    );
+    assert_eq!(refused.stderr, "error: nothing to render\n");
+    assert_eq!(refused.code, 1);
+    let cancel = cli(&["render", "cancel"], reply(r#"{"ok":true}"#));
+    assert_eq!(cancel.requests, [Request::RenderCancel]);
+    assert_eq!(cancel.stdout, "render cancelling\n");
+    let usage = cli(&["render", "--bits", "8"], reply(r#"{"ok":true}"#));
+    assert_eq!(usage.code, 1);
+    assert!(
+        usage
+            .stderr
+            .starts_with("error: invalid value '8' for '--bits <BITS>'"),
+        "{}",
+        usage.stderr
+    );
+}
+
+#[test]
+fn status_prints_the_last_render() {
+    let out = cli(
+        &["status"],
+        reply(
+            r#"{"ok":true,"project":null,"render":{"name":"song","range":"loop","progress":0.4,"state":"running","file":"/p/song/renders/song.wav"}}"#,
+        ),
+    );
+    assert!(
+        out.stdout
+            .ends_with("project: -\nrender: song (loop) running 40% /p/song/renders/song.wav\n"),
+        "{}",
+        out.stdout
+    );
 }

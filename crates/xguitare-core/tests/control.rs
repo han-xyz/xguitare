@@ -160,6 +160,7 @@ fn status_reports_fields() {
             "connections": [{"from": "system:capture_1", "to": "xguitare:in"}],
             "project": null,
             "project_warning": null,
+            "render": null,
             "transport": null,
             "position": null,
             "tempo": null,

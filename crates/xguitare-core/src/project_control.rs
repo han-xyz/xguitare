@@ -20,6 +20,8 @@ use crate::project::{
     LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due, autosave_newer,
     check_project, check_track, checked_name,
 };
+use crate::render::{RenderJob, RenderTask};
+use crate::render_control::{cancel_render, render_status};
 use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
 use crate::{BuildWarning, Config, Preset, PresetModule};
 
@@ -45,9 +47,13 @@ const SECONDS_SUFFIX: char = 's';
 #[derive(Default)]
 pub struct Projects {
     open: Option<OpenProject>,
-    events: Vec<ProjectEvent>,
+    pub(crate) events: Vec<ProjectEvent>,
     /// Closed Projects that recorded and whose last Takes the Daemon has not yet added and saved.
     closing: usize,
+    /// The running Render, or the last one until the next starts.
+    pub(crate) render: Option<Arc<RenderJob>>,
+    /// Whether [`crate::render_control::finished_render`] has reported the end of `render`.
+    pub(crate) render_reported: bool,
 }
 
 struct OpenProject {
@@ -69,6 +75,9 @@ struct OpenProject {
     unplaced: Vec<FinishedTake>,
 }
 
+/// The open Project's Take audio, keyed by Take file.
+pub(crate) type LoadedTakes = HashMap<String, Arc<[f32]>>;
+
 /// Take readers, one per Track in Track order.
 pub type TrackReaders = Vec<TrackReader>;
 
@@ -86,6 +95,8 @@ pub enum ProjectEvent {
     Inputs(Vec<Option<String>>),
     /// Stop the disk thread and hand the Takes it still finishes to [`finish_closed`].
     Closed(ClosedProject),
+    /// Run this Render on a thread of its own.
+    Render(RenderTask),
 }
 
 pub struct ClosedProject {
@@ -536,6 +547,7 @@ pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
     let Some(open) = state.projects.open.take() else {
         return Err(NO_PROJECT.to_string());
     };
+    cancel_render(state);
     let payload = json!({"name": open.project.name, "path": open.dir.display().to_string()});
     state
         .projects
@@ -874,6 +886,7 @@ pub(crate) fn status_fields(
         "project_warning".to_string(),
         json!(project_rate_warning(state)),
     );
+    fields.insert("render".to_string(), render_status(state));
     let Some(open) = state.projects.open.as_ref() else {
         for key in [
             "project",
@@ -1286,6 +1299,12 @@ fn bars_beats(project: &Project, frames: u64) -> String {
     let beat = (frames as f64 / frames_per_beat(project)).floor() as u64;
     let beats_per_bar = u64::from(project.meter.0);
     format!("{}.{}", beat / beats_per_bar + 1, beat % beats_per_bar + 1)
+}
+
+/// The open Project's folder, its current state and its loaded Take audio.
+pub(crate) fn open_project_state(state: &EngineState) -> Option<(&Path, &Project, &LoadedTakes)> {
+    let open = state.projects.open.as_ref()?;
+    Some((&open.dir, &open.project, &open.takes))
 }
 
 fn open_project(state: &EngineState) -> &OpenProject {
