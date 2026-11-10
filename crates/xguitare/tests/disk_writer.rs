@@ -1,11 +1,17 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavReader};
 use xguitare::disk_writer::{DiskThread, TakeWriter};
+use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
+use xguitare_core::engine::{Command, FadeLengths, RackSwitcher, engine_queues};
+use xguitare_core::project::{LoopRegion, Project, Track};
 use xguitare_core::take_capture::{FinishedTake, TakeSpan, TrackReader, take_ring};
+use xguitare_dsp::Rack;
 
 struct TempDir(PathBuf);
 
@@ -183,4 +189,110 @@ fn disk_thread_reports_each_finished_take() {
             ("takes/b-1.wav", 16, false),
         ]
     );
+}
+
+const BLOCK: usize = 256;
+
+fn empty_rack() -> Rack {
+    let mut rack = Rack::new(Vec::new()).expect("valid layout");
+    rack.prepare(48_000.0, BLOCK);
+    rack
+}
+
+fn armed_arrangement() -> Box<Arrangement> {
+    let project = Project {
+        name: "p".to_string(),
+        sample_rate: 48_000,
+        tempo_bpm: 120.0,
+        meter: (4, 4),
+        loop_region: LoopRegion::default(),
+        latency_offset_ms: 0.0,
+        click: false,
+        count_in: 0,
+        tracks: vec![Track {
+            name: "t".to_string(),
+            input: None,
+            volume_db: 0.0,
+            pan: 0.0,
+            mute: false,
+            solo: false,
+            arm: true,
+            modules: Vec::new(),
+            items: Vec::new(),
+        }],
+    };
+    let arrangement = Arrangement::new(
+        &project,
+        vec![empty_rack()],
+        &HashMap::new(),
+        48_000.0,
+        BLOCK,
+    )
+    .expect("no Takes");
+    Box::new(arrangement)
+}
+
+#[test]
+fn a_take_recorded_while_a_pending_arrangement_is_replaced_stays_one_file() {
+    let dir = temp_dir("replaced");
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(48_000.0, 20.0);
+    let mut switcher =
+        RackSwitcher::new(Box::new(empty_rack()), BLOCK, fades, audio, Arc::default());
+    let mut arrangements = [(); 4].map(|()| armed_arrangement());
+    for arrangement in &mut arrangements {
+        writer.add_readers(
+            arrangement
+                .take_readers()
+                .into_iter()
+                .map(|reader| TrackReader {
+                    track_id: 0,
+                    name: "t".to_string(),
+                    reader,
+                })
+                .collect(),
+        );
+    }
+    let input = ramp(BLOCK * 16);
+    let mut blocks = input.chunks(BLOCK);
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let [running, incoming, replaced, newest] = arrangements;
+    let swaps = [running, incoming, replaced, newest].map(Command::SwapArrangement);
+    let [running, incoming, replaced, newest] = swaps;
+    for command in [running, Command::Arrangement(ArrangementCommand::Record)] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
+    let block = blocks.next().unwrap();
+    switcher.process_tracks(block, &[block], &mut left, &mut right);
+    for command in [incoming, replaced, newest] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
+    control.drain_from_audio();
+    for block in blocks.by_ref().take(14) {
+        switcher.process_tracks(block, &[block], &mut left, &mut right);
+        control.drain_from_audio();
+        assert_eq!(writer.drain(), []);
+    }
+    let stop = Command::Arrangement(ArrangementCommand::Stop);
+    assert!(control.commands.push(stop).is_ok());
+    switcher.apply_commands();
+    let block = blocks.next().unwrap();
+    switcher.process_tracks(block, &[block], &mut left, &mut right);
+    let recorded = BLOCK * 15;
+    assert_eq!(
+        writer.drain(),
+        [FinishedTake {
+            track_id: 0,
+            file: "takes/t-1.wav".to_string(),
+            span: TakeSpan {
+                start: 0,
+                frames: recorded as u64,
+                loop_take: false,
+            },
+        }]
+    );
+    assert_eq!(wav_samples(&dir.0, "takes/t-1.wav"), input[..recorded]);
 }

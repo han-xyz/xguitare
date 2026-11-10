@@ -291,7 +291,10 @@ impl RackSwitcher {
                         self.arrangement = Some(new);
                     } else if self.incoming_arrangement.is_none() {
                         self.start_arrangement_fade(new);
-                    } else if let Some(replaced) = self.pending_arrangement.replace(new) {
+                    } else if let Some(mut replaced) = self.pending_arrangement.replace(new) {
+                        if let Some(newest) = self.pending_arrangement.as_mut() {
+                            newest.continue_from(&mut replaced);
+                        }
                         self.retire_arrangement(replaced);
                     }
                 }
