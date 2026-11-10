@@ -187,29 +187,28 @@ fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
     widgets::lamp(ui.painter(), rect.center(), lit_colour, lit);
 }
 
-/// The unit's name, truncated so that its `(type)` after it always shows.
+/// The unit's name, its `(type)` after it in small text; the name is truncated first so that the type stays.
 fn unit_name(ui: &mut Ui, name: &str, type_name: Option<&str>) {
-    let text = |text: &str| RichText::new(text).strong().size(UNIT_NAME_SIZE);
+    let name = Label::new(RichText::new(name).strong().size(UNIT_NAME_SIZE)).truncate();
     let Some(type_name) = type_name else {
-        fixed_width_label(ui, UNIT_NAME_WIDTH, Label::new(text(name)).truncate());
+        fixed_width_label(ui, UNIT_NAME_WIDTH, name);
         return;
     };
-    let suffix = WidgetText::from(text(&format!(" ({type_name})"))).into_galley(
+    let type_part = WidgetText::from(muted_text(format!(" ({type_name})"))).into_galley(
         ui,
-        Some(TextWrapMode::Extend),
-        f32::INFINITY,
+        Some(TextWrapMode::Truncate),
+        UNIT_NAME_WIDTH,
         FontSelection::Default,
     );
     let slot = vec2(UNIT_NAME_WIDTH, ui.available_height());
     ui.allocate_ui_with_layout(slot, Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_size(slot);
         ui.spacing_mut().item_spacing.x = 0.0;
-        let name_width = (UNIT_NAME_WIDTH - suffix.size().x).max(0.0);
         ui.scope(|ui| {
-            ui.set_max_width(name_width);
-            ui.add(Label::new(text(name)).truncate());
+            ui.set_max_width(UNIT_NAME_WIDTH - type_part.size().x);
+            ui.add(name);
         });
-        ui.add(Label::new(suffix));
+        ui.add(Label::new(type_part));
     });
 }
 
