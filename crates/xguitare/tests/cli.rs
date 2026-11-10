@@ -1488,3 +1488,101 @@ fn status_prints_the_last_render() {
         out.stdout
     );
 }
+
+fn metronome_request(
+    on: Option<bool>,
+    bpm: Option<f64>,
+    meter: Option<(u32, u32)>,
+    volume: Option<f64>,
+) -> Request {
+    Request::Metronome {
+        on,
+        bpm,
+        meter,
+        volume,
+    }
+}
+
+#[test]
+fn metronome_commands() {
+    let state = r#"{"ok":true,"on":true,"bpm":90,"meter":[3,4],"volume_db":-12.0,"beat":0}"#;
+    let cases: [(&[&str], Request, &str, &str); 6] = [
+        (
+            &["metronome", "on"],
+            metronome_request(Some(true), None, None, None),
+            state,
+            "metronome on, 90 bpm 3/4, volume -12 dB\n",
+        ),
+        (
+            &["metronome", "off"],
+            metronome_request(Some(false), None, None, None),
+            r#"{"ok":true,"on":false,"bpm":120.0,"meter":[4,4],"volume_db":-12.0,"beat":0}"#,
+            "metronome off, 120 bpm 4/4, volume -12 dB\n",
+        ),
+        (
+            &["metronome", "tempo", "90", "3/4"],
+            metronome_request(None, Some(90.0), Some((3, 4)), None),
+            state,
+            "metronome on, 90 bpm 3/4, volume -12 dB\n",
+        ),
+        (
+            &["metronome", "tempo", "97.5"],
+            metronome_request(None, Some(97.5), None, None),
+            r#"{"ok":true,"on":true,"bpm":97.5,"meter":[3,4],"volume_db":-12.0,"beat":2}"#,
+            "metronome on, 97.5 bpm 3/4, volume -12 dB\n",
+        ),
+        (
+            &["metronome", "volume", "-12"],
+            metronome_request(None, None, None, Some(-12.0)),
+            state,
+            "metronome on, 90 bpm 3/4, volume -12 dB\n",
+        ),
+        (
+            &["metronome", "tap"],
+            Request::MetronomeTap,
+            r#"{"ok":true,"bpm":null}"#,
+            "tap\n",
+        ),
+    ];
+    for (argv, request, line, expected) in cases {
+        let out = cli(argv, reply(line));
+        assert_eq!(out.requests, [request], "{argv:?}");
+        assert_eq!(out.stdout, expected, "{argv:?}");
+        assert_eq!(out.code, 0);
+    }
+    let out = cli(&["metronome", "tap"], reply(r#"{"ok":true,"bpm":120.0}"#));
+    assert_eq!(out.stdout, "tap 120 bpm\n");
+}
+
+#[test]
+fn metronome_errors_print_one_line() {
+    let out = cli(
+        &["metronome", "tempo", "500"],
+        reply(r#"{"ok":false,"error":"bpm must be between 20 and 300"}"#),
+    );
+    assert_eq!(out.stderr, "error: bpm must be between 20 and 300\n");
+    assert_eq!(out.code, 1);
+    let out = cli(
+        &["metronome", "tempo", "90", "3-4"],
+        reply(r#"{"ok":true}"#),
+    );
+    assert_eq!(out.stderr, "error: meter must be <beats>/<note>\n");
+    assert_eq!(out.requests, []);
+    assert_eq!(out.code, 1);
+}
+
+#[test]
+fn status_prints_the_metronome() {
+    let out = cli(
+        &["status"],
+        reply(
+            r#"{"ok":true,"preset":null,"program":null,"modified":false,"connections":[],"project":null,"metronome":{"on":true,"bpm":90,"meter":[3,4],"volume_db":-12.0,"beat":2}}"#,
+        ),
+    );
+    assert!(
+        out.stdout
+            .ends_with("metronome: on, 90 bpm 3/4, volume -12 dB, beat 2\nproject: -\n"),
+        "{}",
+        out.stdout
+    );
+}

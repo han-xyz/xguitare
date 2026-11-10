@@ -109,6 +109,9 @@ enum Cmd {
         #[arg(long)]
         count_in: Option<u32>,
     },
+    /// The Metronome: on or off, its tempo and meter, its volume, tap the tempo; with a Project open it is the Project's click and tempo
+    #[command(subcommand, arg_required_else_help = false)]
+    Metronome(MetronomeCmd),
     /// Add, remove or edit a Bus of the open Project
     #[command(subcommand, arg_required_else_help = false)]
     Bus(BusCmd),
@@ -199,6 +202,25 @@ enum BusCmd {
         #[arg(long)]
         solo: Option<Switch>,
     },
+}
+
+#[derive(Subcommand)]
+enum MetronomeCmd {
+    /// Start it on beat 1
+    On,
+    Off,
+    /// Set the tempo in bpm (20 to 300) and, optionally, the meter as <beats>/<note>
+    Tempo {
+        bpm: f64,
+        meter: Option<String>,
+    },
+    /// Set the volume in dB (-40 to 0)
+    Volume {
+        #[arg(allow_hyphen_values = true)]
+        db: f64,
+    },
+    /// Tap the tempo; from the second tap of a series prints the bpm
+    Tap,
 }
 
 #[derive(Subcommand)]

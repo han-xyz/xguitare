@@ -13,8 +13,8 @@ use xguitare_core::control::{
 use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::{
-    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, MuteState, ProjectCmd, RackCmd, RenderArgs,
-    RenderBitsArg, RenderCmd, Switch, TrackCmd, parse,
+    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, MetronomeCmd, MuteState, ProjectCmd,
+    RackCmd, RenderArgs, RenderBitsArg, RenderCmd, Switch, TrackCmd, parse,
 };
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
@@ -215,6 +215,7 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             on: Some(is_on(state)),
             count_in,
         },
+        Cmd::Metronome(cmd) => metronome_request(cmd)?,
         Cmd::Bus(cmd) => bus_request(cmd),
         Cmd::Send {
             track,
@@ -232,6 +233,27 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         },
         Cmd::Clip(ClipCmd::Reset { kind, name }) => clip_reset_request(kind, name)?,
         Cmd::Render(args) => render_request(args),
+    })
+}
+
+fn metronome_request(cmd: MetronomeCmd) -> Result<Request, String> {
+    let change = |on, bpm, meter, volume| Request::Metronome {
+        on,
+        bpm,
+        meter,
+        volume,
+    };
+    Ok(match cmd {
+        MetronomeCmd::On => change(Some(true), None, None, None),
+        MetronomeCmd::Off => change(Some(false), None, None, None),
+        MetronomeCmd::Tempo { bpm, meter } => change(
+            None,
+            Some(bpm),
+            meter.as_deref().map(parse_meter).transpose()?,
+            None,
+        ),
+        MetronomeCmd::Volume { db } => change(None, None, None, Some(db)),
+        MetronomeCmd::Tap => Request::MetronomeTap,
     })
 }
 
@@ -414,6 +436,7 @@ fn parse_meter(meter: &str) -> Result<(u32, u32), String> {
         .ok_or_else(|| "meter must be <beats>/<note>".to_string())
 }
 
+#[allow(clippy::too_many_lines, reason = "one match arm per request")]
 fn render(req: &Request, payload: &Value) -> Result<String, String> {
     let rendered = match req {
         Request::Status => render_status(payload),
@@ -494,6 +517,11 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
             meter_text(&payload["meter"])
         ),
         Request::Click { .. } => format!("{}\n", click_text(payload)),
+        Request::Metronome { .. } => format!("metronome {}\n", metronome_text(payload)),
+        Request::MetronomeTap => match &payload["bpm"] {
+            Value::Null => "tap\n".to_string(),
+            bpm => format!("tap {} bpm\n", text(bpm)),
+        },
         Request::BusAdd { .. } => format!("added bus {}\n", track_label(&payload["bus"])),
         Request::BusRemove { .. } => format!("removed bus {}\n", track_label(&payload["bus"])),
         Request::BusSet { .. } => render_bus(&payload["bus"]),
@@ -613,6 +641,16 @@ fn meter_text(meter: &Value) -> String {
     format!("{}/{}", text(&meter[0]), text(&meter[1]))
 }
 
+fn metronome_text(metronome: &Value) -> String {
+    let on = if metronome["on"] == true { "on" } else { "off" };
+    format!(
+        "{on}, {} bpm {}, volume {} dB",
+        text(&metronome["bpm"]),
+        meter_text(&metronome["meter"]),
+        text(&metronome["volume_db"])
+    )
+}
+
 fn click_text(click: &Value) -> String {
     let on = if click["on"] == true { "on" } else { "off" };
     format!("click {on}, count-in {} bars", text(&click["count_in"]))
@@ -690,6 +728,15 @@ fn render_status(payload: &Value) -> String {
         "disk_overflows: {}",
         text(&payload["disk_overflows"])
     );
+    if payload["metronome"].is_object() {
+        let metronome = &payload["metronome"];
+        let _ = writeln!(
+            lines,
+            "metronome: {}, beat {}",
+            metronome_text(metronome),
+            text(&metronome["beat"])
+        );
+    }
     let _ = writeln!(lines, "project: {}", text(&payload["project"]));
     let job = &payload["render"];
     if job.is_object() {
