@@ -60,6 +60,8 @@ struct OpenProject {
     /// Whether the Project changed since it was opened, saved or autosaved.
     changed: bool,
     last_autosave: Instant,
+    /// Finished Takes not yet in `project` because the Engine was busy; [`add_finished_takes`] retries them.
+    unplaced: Vec<FinishedTake>,
 }
 
 /// Take readers, one per Track in Track order.
@@ -85,6 +87,8 @@ pub struct ClosedProject {
     track_ids: Vec<u64>,
     /// Whether it counts in [`Projects`]' `closing` until [`finish_closed`] adds its last Takes.
     takes_pending: bool,
+    /// Finished Takes the Engine was too busy to take before the close; added with the last Takes.
+    unplaced: Vec<FinishedTake>,
 }
 
 /// What [`finish_closed`] and [`finish_stopped`] did, for the Daemon to log.
@@ -102,7 +106,7 @@ pub fn take_project_events(state: &mut EngineState) -> Vec<ProjectEvent> {
     std::mem::take(&mut state.projects.events)
 }
 
-/// Adds the Takes the disk thread finished to the open Project, each on the Track its id names at the latency `latency` gives for that Track's index, and swaps in an Arrangement that plays them; returns one message per Take that could not be added.
+/// Adds the Takes the disk thread finished, and those an earlier call found the Engine too busy for, to the open Project, each on the Track its id names at the latency `latency` gives for that Track's index, and swaps in an Arrangement that plays them; returns one message per Take that could not be added. While the Engine is busy the Takes wait for the next call.
 pub fn add_finished_takes(
     state: &mut EngineState,
     finished: &[FinishedTake],
@@ -111,18 +115,28 @@ pub fn add_finished_takes(
     let Some(open) = state.projects.open.as_mut() else {
         return Vec::new();
     };
+    let mut takes = std::mem::take(&mut open.unplaced);
+    takes.extend_from_slice(finished);
+    if takes.is_empty() {
+        return Vec::new();
+    }
     let mut project = open.project.clone();
-    let (_, mut failures) = add_takes(
+    let (added, mut failures) = add_takes(
         &mut project,
         &open.dir,
         &mut open.takes,
         &open.track_ids,
-        finished,
+        &takes,
         latency,
     );
     let mut warnings = Vec::new();
-    if let Err(err) = swap_project(state, project, &mut warnings) {
-        failures.push(format!("cannot play the new takes: {err}"));
+    match swap_project(state, project, &mut warnings) {
+        Ok(()) => {}
+        Err(err) if err == ENGINE_BUSY => {
+            takes.retain(|take| added.contains(&take.file));
+            open_project_mut(state).unplaced = takes;
+        }
+        Err(err) => failures.push(format!("cannot play the new takes: {err}")),
     }
     failures.extend(warnings.iter().map(ToString::to_string));
     failures
@@ -153,6 +167,7 @@ pub fn close_for_stop(state: &mut EngineState) -> Option<ClosedProject> {
         changed: open.changed,
         track_ids: open.track_ids,
         takes_pending: false,
+        unplaced: open.unplaced,
     })
 }
 
@@ -201,12 +216,14 @@ fn last_takes(
     finished: &[FinishedTake],
     latency: impl FnMut(usize) -> Latency,
 ) -> LastTakes {
+    let mut takes = std::mem::take(&mut closed.unplaced);
+    takes.extend_from_slice(finished);
     let (added, failures) = add_takes(
         &mut closed.project,
         &closed.dir,
         &mut HashMap::new(),
         &closed.track_ids,
-        finished,
+        &takes,
         latency,
     );
     LastTakes {
@@ -402,6 +419,7 @@ pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
             changed: false,
             track_ids: open.track_ids,
             takes_pending: open.recorded,
+            unplaced: open.unplaced,
         }));
     if open.recorded {
         state.projects.closing += 1;
@@ -805,6 +823,7 @@ fn open(
         track_ids,
         changed: false,
         last_autosave: Instant::now(),
+        unplaced: Vec::new(),
     });
     state.revision += 1;
     Ok(())

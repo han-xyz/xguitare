@@ -168,12 +168,10 @@ impl ProjectDisk {
                     take.file, take.span.frames, take.span.start
                 );
             }
-            if !finished.is_empty() {
-                let failures =
-                    add_finished_takes(state, &finished, |track| session.track_latency(track));
-                for failure in failures {
-                    warn!("{failure}");
-                }
+            let failures =
+                add_finished_takes(state, &finished, |track| session.track_latency(track));
+            for failure in failures {
+                warn!("{failure}");
             }
         }
         match autosave_if_due(state, Instant::now()) {

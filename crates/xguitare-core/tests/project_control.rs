@@ -996,6 +996,70 @@ fn finished_takes_become_items_and_close_hands_the_project_over() {
     )));
 }
 
+fn item_counts(state: &mut EngineState) -> Vec<usize> {
+    let items = ok(handle(state, Request::Items));
+    items["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["items"].as_array().unwrap().len())
+        .collect()
+}
+
+#[test]
+fn takes_finished_while_the_engine_is_busy_are_added_on_a_later_tick() {
+    let (mut state, mut audio, _dir) = state("busy");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let folder = state.config.projects_dir.join("song");
+    write_take(&folder.join("takes/guitar-1.wav"), &[0.25; 100]);
+    let track_id = reader_ids(&mut state)[0].1;
+    let finished = take(track_id, "takes/guitar-1.wav", 1000, 100);
+    while state
+        .queues
+        .commands
+        .push(Command::CloseArrangement)
+        .is_ok()
+    {}
+    assert_eq!(
+        add_finished_takes(&mut state, &[finished], |_| Latency::default()),
+        Vec::<String>::new()
+    );
+    assert_eq!(item_counts(&mut state), [0]);
+    drain_commands(&mut audio);
+    assert_eq!(
+        add_finished_takes(&mut state, &[], |_| Latency::default()),
+        Vec::<String>::new()
+    );
+    assert_eq!(item_counts(&mut state), [1]);
+    assert!(
+        take_project_events(&mut state)
+            .iter()
+            .any(|event| matches!(event, ProjectEvent::Readers(_)))
+    );
+}
+
+#[test]
+fn takes_still_waiting_for_the_engine_are_saved_on_close() {
+    let (mut state, mut audio, _dir) = state("busy-close");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let folder = state.config.projects_dir.join("song");
+    write_take(&folder.join("takes/guitar-1.wav"), &[0.25; 100]);
+    let track_id = reader_ids(&mut state)[0].1;
+    let finished = take(track_id, "takes/guitar-1.wav", 1000, 100);
+    while state
+        .queues
+        .commands
+        .push(Command::CloseArrangement)
+        .is_ok()
+    {}
+    add_finished_takes(&mut state, &[finished], |_| Latency::default());
+    drain_commands(&mut audio);
+    close(&mut state);
+    assert_eq!(saved(&state, "song").tracks[0].items.len(), 1);
+}
+
 #[test]
 fn projects_dir_from_settings_must_be_absolute() {
     let (mut state, _audio, dir) = state("projects-dir");
