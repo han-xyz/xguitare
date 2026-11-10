@@ -307,7 +307,7 @@ Projects live under `projects_dir`, by default `~/Music/xguitare`; the GUI's `Se
   takes/guitar-1.wav      one mono 32-bit float WAV per Take, at the Project's sample rate
 ```
 
-Takes are never deleted, also not when their Track is removed.
+Takes are never deleted, also not when their Track is removed. `project.toml` names each Take file `takes/<name>.wav`; any other path is an error when the Project is opened or saved.
 
 ### Record a Track
 
@@ -338,7 +338,7 @@ $ xguitare project close
 closed Live
 ```
 
-- `project new|open|save|close|list|items`: `open <name> --restore` loads the autosave; `close` saves, and saves again once the Takes still being written are added (a `project new` or `open` meanwhile answers `a project is still closing; try again`). A sample rate other than the audio server's is refused.
+- `project new|open|save|close|list|items`: `open <name> --restore` loads the autosave; `close` saves, and saves again once the Takes still being written are added (after a recording, a `project new` or `open` meanwhile answers `a project is still closing; try again`). A sample rate other than the audio server's is refused.
 - `project items` prints one line per Item: its Track, where it starts as `<bar>.<beat>`, its length in seconds and which Take plays, e.g. `Guitar 2.1 4.00s take 2/2`.
 - `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name (a name cannot be only digits); `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off` and `--name`.
 - An armed Track monitors its input through its Rack, also while stopped, and records while recording; an unarmed Track plays its Items.

@@ -636,7 +636,7 @@ Errors:
 | `error` | When |
 | --- | --- |
 | `a project is open; close it first` | A Project is open. |
-| `a project is still closing; try again` | A Project closed less than about 200 ms ago is still getting its last Takes added and saved. |
+| `a project is still closing; try again` | A Project that recorded and closed less than about 200 ms ago is still getting its last Takes added and saved. |
 | `project name must not be empty` | The name has no ASCII letter or digit. |
 | `a project named '<name>' already exists` | The folder is already there. |
 | `<path>: <reason>` | A folder or file cannot be written. |
@@ -672,7 +672,7 @@ Errors:
 | `no project '<name>'` | The folder has no `project.toml`, e.g. `no project '../etc'`. |
 | `project rate <rate> Hz differs from the engine rate <rate> Hz` | The Project was recorded at another sample rate. |
 | `cannot load take <file>: <reason>` | A Take file cannot be read or is not mono. |
-| the `project.toml` error | The file cannot be read or a value is out of range, e.g. `<path>: line 1:8: ...`, `tempo must be between 20 and 300 bpm`, `<path>/project.autosave.toml: No such file or directory (os error 2)` with `restore` and no autosave. |
+| the `project.toml` error | The file cannot be read or a value is out of range, e.g. `<path>: line 1:8: ...`, `tempo must be between 20 and 300 bpm`, `take file '../x.wav' must be takes/<name>.wav`, `<path>/project.autosave.toml: No such file or directory (os error 2)` with `restore` and no autosave. |
 | `engine busy` | The audio thread's command queue is full; retry. |
 
 ## project_save
@@ -695,7 +695,7 @@ Errors: `no project open`; `<path>: <reason>` when the file cannot be written.
 
 ## project_close
 
-Saves the open Project to `project.toml`, stops playing it and goes back to the active Preset's Rack. The Daemon then adds the Takes still being written once they are finished and saves `project.toml` again; until then `project_new` and `project_open` answer `a project is still closing; try again`.
+Saves the open Project to `project.toml`, stops playing it and goes back to the active Preset's Rack. The Daemon then adds the Takes still being written once they are finished and saves `project.toml` again; when the Project was recorded since it was opened, `project_new` and `project_open` answer `a project is still closing; try again` until then.
 
 Request:
 
