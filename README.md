@@ -331,6 +331,8 @@ metronome off, 118.5 bpm 3/4, volume -20 dB
 
 While a Project is open, the Metronome is the Project's click: `metronome on|off` is `click on|off`, `metronome tempo` and `metronome tap` set the Project's tempo and meter, and the volume and the accent on beat 1 apply to the click and count-in. Opening a Project switches the Metronome off, and it stays off after the Project closes; its own tempo and meter come back then.
 
+In the GUI, the left panel's `Metronome` section holds the same: an `On`/`Off` switch, lit yellow while on; the beat light, which shows the beat in the bar and flashes on each new beat, yellow on beat 1 and white on the others, and stays dark while the Metronome is off; `Tap`; the tempo field (`90.0 bpm`, sent on Enter, when the field loses focus or when a drag ends); the meter menu (2/4, 3/4, 4/4, 5/4, 6/8, 7/8, 12/8); and the volume knob with its value field (−40 to 0 dB). With no Project open, `M` switches the Metronome on or off and `T` taps the tempo; neither acts while a text field has the text cursor. While a Project is open, the section shows the Project's tempo and meter, `On`/`Off` is the Project's click, a line under it reads `follows the Project`, and `M` and `T` do nothing.
+
 ## Projects
 
 The GUI's Project view (see [Project view](#project-view)) does all of this from the window.
@@ -484,6 +486,7 @@ The left panel has these sections, from the top, each in a framed box; click a s
 - `Guitar Bank` or `Bass Bank`, after the Bank kind: a search field, which keeps the rows whose name contains the text, in any case, or whose program number is the text, and one row per Bank entry, `program name`, the active Preset highlighted. Click a row to load it. An invalid entry is greyed out; hover over it for the parse error.
 - `Rack`: `Add Module`, one tile per Module type in its type's colour, and a `Place` menu (see Rack editing below).
 - `Tuner and Mute`: `Tuner` opens and closes the Tuner view (see Tuner below); `Mute` shows the Daemon's Mute state, lit red while Mute is on, and turns it on or off, as `xguitare mute` does.
+- `Metronome`: `On`/`Off`, the beat light, `Tap`, the tempo, the meter and the volume (see [Metronome](#metronome)).
 - `Audio`: `Input`, `Output L` and `Output R` menus listing the ports the Daemon can connect to, each showing the port connected now. Opening a menu reads the port list again, so a device plugged in since shows. `Apply` connects the three chosen ports now and keeps them for the next start (the Control API's `set_ports`, stored in `state.toml`, see Config); it needs a port in each menu. An error, such as a port that has gone away, shows in the footer.
 - `Settings`: `Bank kind` `Guitar` or `Bass`, the `IR folder` path and the `Projects folder` (`projects_dir`, an absolute path). `Apply` sends what changed (the Control API's `set_settings`, stored in `state.toml`): another Bank kind switches the Bank and loads its Program 0 (see [Bass](#bass)); another IR folder must be an existing directory, given as an absolute path, and is listed by the cabinet's `IR` menu from then on. An error shows in the footer, e.g. `error: bank_dir is set in config.toml; edit it there`.
 - `Engine`: `Rate` (`48 kHz`), `Buffer` (`128 frames`), `Latency` (one buffer, `2.7 ms`), `Xruns`, and `Daemon` `connected` or `disconnected`.
@@ -514,7 +517,7 @@ Tuner: the Tuner unit's header shows the note and cents (`E1  -3 ct`), or `no si
 
 Changes made elsewhere (the CLI, MIDI program change, an edited Preset file) show up at the next `status` poll, every 50 ms.
 
-Keys: `1` to `9` load programs 0 to 8 (a key for a missing or invalid entry does nothing); `Ctrl+S` saves, like the `Save` button. Keys do nothing while a text field (search, Preset name, value, IR folder) has the text cursor. While a Project is open the keys are those of the Project view below.
+Keys: `1` to `9` load programs 0 to 8 (a key for a missing or invalid entry does nothing); `Ctrl+S` saves, like the `Save` button; `M` switches the Metronome on or off and `T` taps its tempo. Keys do nothing while a text field (search, Preset name, value, IR folder) has the text cursor. While a Project is open the keys are those of the Project view below.
 
 When no Daemon answers on the socket, the GUI starts `xguitare run` itself, taken from the directory `xguitare-gui` is in, else from `PATH`, and shows `starting daemon` until it answers. The Daemon's log goes to the GUI's stderr. A Daemon the GUI started is stopped when the window closes; one you started yourself keeps running. If the GUI crashes or is killed, the Daemon it started keeps running and the sound does not stop; the next `xguitare-gui` connects to it. To stop that Daemon, send it SIGTERM: `kill <pid>`, with the pid from the GUI's `starting daemon ... (pid N)` log line or from `pgrep -x xguitare`. If the Daemon goes away, the left panel's `Engine` section shows `Daemon` `disconnected`, the footer `disconnected Ns`, and the GUI keeps reconnecting.
 

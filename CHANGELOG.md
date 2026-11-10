@@ -6,7 +6,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Added
 
-- Metronome: a blip on every beat with beat 1 higher and 6 dB louder, at its own tempo (20–300 bpm), meter and volume (−40 to 0 dB) with no Project open, and as the Project's click with one open; tap tempo; Mute silences it while it keeps counting; tempo, meter and volume are kept in `state.toml`. CLI `metronome on|off|tempo|volume|tap`; Control API `metronome` and `metronome_tap`; `status` shows `metronome`.
+- Metronome: a blip on every beat with beat 1 higher and 6 dB louder, at its own tempo (20–300 bpm), meter and volume (−40 to 0 dB) with no Project open, and as the Project's click with one open; tap tempo; Mute silences it while it keeps counting; tempo, meter and volume are kept in `state.toml`. CLI `metronome on|off|tempo|volume|tap`; Control API `metronome` and `metronome_tap`; `status` shows `metronome`. The GUI's `Metronome` section, with a beat light, and the `M` (on/off) and `T` (tap) keys.
 
 - A GitHub Actions release workflow builds `xguitare` and `xguitare-gui` for x86_64 Linux on a `v*` tag and attaches a tarball and its sha256 to the GitHub Release.
 - Render a Project to a stereo WAV in the background (`renders/<name>.wav`, never replacing a file): the whole Project with its tail, or the loop region; 24-bit, 16-bit with dither or 32-bit float. CLI `render [--loop] [--bits 16|24|32f] [--name <name>]` and `render cancel`; Control API `render` and `render_cancel`; `status` shows `render`.
