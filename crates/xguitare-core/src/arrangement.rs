@@ -7,11 +7,12 @@ use std::sync::Arc;
 use xguitare_dsp::Rack;
 use xguitare_dsp::smooth::Smoother;
 
-use crate::project::{LoopRegion, Project, Track};
+use crate::project::{LoopRegion, METER_BEATS, METER_NOTES, Project, TEMPO_BPM, Track};
 use crate::recording::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
 
 const MIN_VOLUME_DB: f32 = -60.0;
 const MAX_VOLUME_DB: f32 = 6.0;
+const MAX_COUNT_IN_BARS: u32 = 2;
 const CLICK_SECONDS: f32 = 0.005;
 const CLICK_HZ: f32 = 1000.0;
 const ACCENT_HZ: f32 = 1500.0;
@@ -251,15 +252,15 @@ impl Arrangement {
         self.blip = previous.blip;
     }
 
-    /// Applies `command`; a Track index out of range is ignored.
+    /// Applies `command`; a Track index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored.
     pub fn apply(&mut self, command: ArrangementCommand) {
         match command {
-            ArrangementCommand::Volume { track, db } => {
+            ArrangementCommand::Volume { track, db } if db.is_finite() => {
                 self.with_track(track, |t| {
                     t.volume_db = db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB);
                 });
             }
-            ArrangementCommand::Pan { track, pan } => {
+            ArrangementCommand::Pan { track, pan } if pan.is_finite() => {
                 self.with_track(track, |t| t.pan = pan.clamp(-1.0, 1.0));
             }
             ArrangementCommand::Mute { track, on } => self.with_track(track, |t| t.mute = on),
@@ -297,12 +298,21 @@ impl Arrangement {
                 self.playhead = frame;
             }
             ArrangementCommand::Loop(region) => self.loop_region = region,
-            ArrangementCommand::Tempo { bpm, meter } => {
-                self.frames_per_beat = frames_per_beat(self.sample_rate, bpm);
-                self.beats_per_bar = u64::from(meter.0.max(1));
+            ArrangementCommand::Tempo { bpm, meter }
+                if TEMPO_BPM.contains(&bpm)
+                    && METER_BEATS.contains(&meter.0)
+                    && METER_NOTES.contains(&meter.1) =>
+            {
+                self.change_tempo(bpm, meter.0);
             }
             ArrangementCommand::Click(on) => self.click_on = on,
-            ArrangementCommand::CountIn(bars) => self.count_in_bars = bars,
+            ArrangementCommand::CountIn(bars) if bars <= MAX_COUNT_IN_BARS => {
+                self.count_in_bars = bars;
+            }
+            ArrangementCommand::Volume { .. }
+            | ArrangementCommand::Pan { .. }
+            | ArrangementCommand::Tempo { .. }
+            | ArrangementCommand::CountIn(_) => {}
         }
     }
 
@@ -316,6 +326,19 @@ impl Arrangement {
         for track in &mut self.tracks {
             track.recorder.end_pass(wrapped);
         }
+    }
+
+    /// A count-in under way keeps its length in bars at the new tempo.
+    fn change_tempo(&mut self, bpm: f64, beats_per_bar: u32) {
+        let new = frames_per_beat(self.sample_rate, bpm);
+        let scale = new / self.frames_per_beat;
+        let rescale = |frames: u64| (frames as f64 * scale).round() as u64;
+        self.count_in = CountIn {
+            total: rescale(self.count_in.total),
+            left: rescale(self.count_in.left),
+        };
+        self.frames_per_beat = new;
+        self.beats_per_bar = u64::from(beats_per_bar);
     }
 
     fn record(&mut self) {

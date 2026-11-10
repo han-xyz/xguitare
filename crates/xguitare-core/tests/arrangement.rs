@@ -264,6 +264,10 @@ fn click_lands_on_beats_with_an_accent_on_one() {
         if idx > 0 {
             assert!(left[start - 1] == 0.0, "silent before beat {idx}");
         }
+        assert!(
+            left[start] == 0.0,
+            "the blip starts with sin(0) on beat {idx}"
+        );
         assert!(left[start + 1] != 0.0, "click on beat {idx}");
         let crossings = zero_crossings(&left[start..start + blip]);
         let expected = if idx % 4 == 0 { 15 } else { 10 };
@@ -594,4 +598,72 @@ fn a_full_recording_ring_counts_disk_overflows() {
         switcher.process_tracks(&input, &[&input], &mut left, &mut right);
     }
     assert_eq!(shared.disk_overflows.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn tempo_outside_the_project_range_keeps_the_old_beats() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::Click(true));
+    arrangement.apply(ArrangementCommand::Play);
+    run(&mut arrangement, &[], 1000);
+    for bpm in [f64::NAN, 0.0, -120.0, f64::INFINITY, 19.0, 301.0] {
+        arrangement.apply(ArrangementCommand::Tempo { bpm, meter: (4, 4) });
+    }
+    for meter in [(0, 4), (4, 0), (4, 3), (17, 4)] {
+        arrangement.apply(ArrangementCommand::Tempo { bpm: 60.0, meter });
+    }
+    let (left, _) = run(&mut arrangement, &[], 48_000);
+    let beat = 24_000 - 1000;
+    assert!(left[beat - 1] == 0.0 && left[beat] == 0.0);
+    assert!(left[beat + 1] != 0.0, "the click keeps its 120 bpm beat");
+    let crossings = zero_crossings(&left[beat..beat + 240]);
+    assert!(
+        crossings.abs_diff(10) <= 1,
+        "{crossings} crossings: still 4/4"
+    );
+}
+
+#[test]
+fn non_finite_volume_and_pan_are_ignored() {
+    let mut t = track("t");
+    t.arm = true;
+    let mut arrangement = arrangement(&project(vec![t]), &HashMap::new());
+    for db in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        arrangement.apply(ArrangementCommand::Volume { track: 0, db });
+    }
+    arrangement.apply(ArrangementCommand::Pan {
+        track: 0,
+        pan: f32::NAN,
+    });
+    let (left, right) = run(&mut arrangement, &[&[0.5; BLOCK]], BLOCK);
+    assert!(close(left[BLOCK - 1], 0.5) && close(right[BLOCK - 1], 0.5));
+    arrangement.apply(ArrangementCommand::Volume { track: 0, db: -6.0 });
+    let input = vec![0.5; 4800];
+    let (left, _) = run(&mut arrangement, &[&input], 4800);
+    assert!(close(left[4799], 0.5 * db(-6.0)), "{}", left[4799]);
+}
+
+#[test]
+fn count_in_above_two_bars_is_ignored() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::CountIn(1));
+    arrangement.apply(ArrangementCommand::CountIn(1000));
+    arrangement.apply(ArrangementCommand::Record);
+    run(&mut arrangement, &[], 4 * 24_000 + 200);
+    assert_eq!(arrangement.playhead(), 200);
+}
+
+#[test]
+fn tempo_change_during_count_in_keeps_it_one_bar() {
+    let mut arrangement = arrangement(&project(Vec::new()), &HashMap::new());
+    arrangement.apply(ArrangementCommand::CountIn(1));
+    arrangement.apply(ArrangementCommand::Record);
+    run(&mut arrangement, &[], 24_000);
+    arrangement.apply(ArrangementCommand::Tempo {
+        bpm: 60.0,
+        meter: (4, 4),
+    });
+    run(&mut arrangement, &[], 3 * 48_000 + 200);
+    assert!(!arrangement.is_counting_in());
+    assert_eq!(arrangement.playhead(), 200);
 }
