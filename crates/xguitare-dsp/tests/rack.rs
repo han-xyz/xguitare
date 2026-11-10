@@ -309,3 +309,20 @@ fn started_bypassed_module_passes_input_from_the_first_frame() {
     assert_eq!(left, input);
     assert_eq!(counts.processed.load(Ordering::Relaxed), 0);
 }
+
+#[test]
+fn bypass_fade_length_follows_the_sample_rate() {
+    let fade_frames = |sample_rate: f32| {
+        let (mut rack, _) = counting_rack();
+        rack.prepare(sample_rate, BLOCK);
+        rack.set_bypass(0, true);
+        let input = [1.0; 20 * BLOCK];
+        let (left, _) = run(&mut rack, &input);
+        1 + left
+            .iter()
+            .position(|&s| s > 1.0 - 1e-5)
+            .expect("fade finished")
+    };
+    assert_eq!(fade_frames(48_000.0), BYPASS_FADE_FRAMES);
+    assert_eq!(fade_frames(96_000.0), 2 * BYPASS_FADE_FRAMES);
+}
