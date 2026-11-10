@@ -107,6 +107,11 @@ fn tuner_line(payload: &Value) -> String {
 fn request_for(cmd: Cmd) -> Result<Request, String> {
     Ok(match cmd {
         Cmd::Run => return Err("'run' starts the daemon; it is not a client command".to_string()),
+        Cmd::RecordCheck { .. } => {
+            return Err(
+                "'record-check' runs its own JACK client; it is not a client command".to_string(),
+            );
+        }
         Cmd::Status => Request::Status,
         Cmd::List => Request::List,
         Cmd::Load { preset } => Request::Load { preset },

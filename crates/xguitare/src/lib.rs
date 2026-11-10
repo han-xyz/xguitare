@@ -1,7 +1,9 @@
 mod cli;
 mod daemon;
+pub mod disk_writer;
 mod jack_adapter;
 mod logging;
+mod record_check;
 pub mod socket_server;
 
 use std::ffi::OsString;
@@ -75,6 +77,16 @@ enum Cmd {
     Mute { state: MuteState },
     /// Bypass a Module (on) or switch it back in (off)
     Bypass { id: String, state: BypassState },
+    /// Record a Project's armed Tracks for a few seconds and print the Takes; for live checks only
+    #[command(hide = true)]
+    RecordCheck {
+        project: PathBuf,
+        #[arg(long, default_value_t = 3.0)]
+        seconds: f64,
+        /// The playhead frame recording starts from
+        #[arg(long, default_value_t = 0)]
+        at: u64,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -135,6 +147,14 @@ where
             daemon::run(cli.config.as_deref())
                 .map(|()| 0)
                 .map_err(|err| err.to_string())
+        }
+        Cmd::RecordCheck {
+            project,
+            seconds,
+            at,
+        } => {
+            logging::init();
+            record_check::run(cli.config.as_deref(), &project, seconds, at).map(|()| 0)
         }
         Cmd::Tuner { watch: true } => run_client(&argv, cli.config.as_deref(), true),
         _ => run_client(&argv, cli.config.as_deref(), false),
