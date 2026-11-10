@@ -86,6 +86,23 @@ impl Compressor {
         compressor
     }
 
+    /// Steps the smoothers and the envelope one frame on `detector` and returns the linear gain for that frame.
+    fn next_gain(&mut self, detector: f32) -> f32 {
+        let threshold = self.threshold.next_value();
+        let ratio = self.ratio.next_value();
+        let makeup = self.makeup.next_value();
+        self.envelope = detector.max(self.envelope * self.release_coeff);
+        let level = 20.0 * self.envelope.log10();
+        let target = -gain_reduction_db(level - threshold, ratio);
+        let coeff = if target < self.gain_db {
+            self.attack_coeff
+        } else {
+            self.release_coeff
+        };
+        self.gain_db = target + coeff * (self.gain_db - target);
+        db_to_linear(self.gain_db + makeup)
+    }
+
     fn update_coefficients(&mut self) {
         self.attack_coeff = one_pole_coeff(self.values[ATTACK] / 1000.0, self.sample_rate);
         self.release_coeff = one_pole_coeff(self.values[RELEASE] / 1000.0, self.sample_rate);
@@ -150,19 +167,16 @@ impl Module for Compressor {
 
     fn process(&mut self, io: &mut AudioBuffers) {
         for sample in &mut io.mono[..io.frames] {
-            let threshold = self.threshold.next_value();
-            let ratio = self.ratio.next_value();
-            let makeup = self.makeup.next_value();
-            self.envelope = sample.abs().max(self.envelope * self.release_coeff);
-            let level = 20.0 * self.envelope.log10();
-            let target = -gain_reduction_db(level - threshold, ratio);
-            let coeff = if target < self.gain_db {
-                self.attack_coeff
-            } else {
-                self.release_coeff
-            };
-            self.gain_db = target + coeff * (self.gain_db - target);
-            *sample *= db_to_linear(self.gain_db + makeup);
+            *sample *= self.next_gain(sample.abs());
         }
+    }
+
+    fn process_linked(&mut self, left: &mut [f32], right: &mut [f32]) -> bool {
+        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+            let gain = self.next_gain(l.abs().max(r.abs()));
+            *l *= gain;
+            *r *= gain;
+        }
+        true
     }
 }

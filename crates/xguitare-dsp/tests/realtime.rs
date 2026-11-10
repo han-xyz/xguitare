@@ -4,7 +4,7 @@ use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{
     Chorus, Compressor, Delay, Drive, Flanger, Fuzz, Gain, Gate, Module, Preamp, Rack, Reverb,
-    Tonestack,
+    StereoRack, StereoSlot, Tonestack,
 };
 
 #[cfg(debug_assertions)]
@@ -261,6 +261,48 @@ fn bypass_toggling_does_not_allocate() {
                 rack.set_bypass(idx, on);
             }
             rack.process(&input, &mut left, &mut right);
+        }
+    });
+}
+
+#[test]
+fn stereo_rack_does_not_allocate() {
+    let mut rack = StereoRack::new(vec![
+        (
+            "gate".to_string(),
+            StereoSlot::Doubled(Box::new(Gate::new()), Box::new(Gate::new())),
+        ),
+        (
+            "compressor".to_string(),
+            StereoSlot::Linked(Box::new(Compressor::new())),
+        ),
+        (
+            "reverb".to_string(),
+            StereoSlot::Stereo(Box::new(Reverb::new())),
+        ),
+    ])
+    .expect("valid layout");
+    rack.prepare(48_000.0, BLOCK);
+    let in_l = [0.25; BLOCK];
+    let in_r = [0.1; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    let param_counts: Vec<usize> = rack
+        .modules()
+        .map(|(_, module)| module.spec().params.len())
+        .collect();
+    assert_no_alloc(|| {
+        for (idx, &count) in param_counts.iter().enumerate() {
+            for param in 0..count {
+                rack.set_param(idx, param, 0.5);
+            }
+        }
+        for round in 0..100 {
+            let on = round % 10 < 5;
+            for idx in 0..3 {
+                rack.set_bypass(idx, on);
+            }
+            rack.process(&in_l, &in_r, &mut left, &mut right);
         }
     });
 }

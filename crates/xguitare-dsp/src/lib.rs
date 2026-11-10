@@ -6,6 +6,7 @@ pub mod oversample;
 mod rack;
 pub mod resample;
 pub mod smooth;
+mod stereo_rack;
 pub mod synth_ir;
 pub mod tuner;
 
@@ -21,6 +22,7 @@ pub use modules::preamp::Preamp;
 pub use modules::reverb::Reverb;
 pub use modules::tonestack::Tonestack;
 pub use rack::{Rack, RackError};
+pub use stereo_rack::{StereoRack, StereoRackError, StereoSlot};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Channels {
@@ -70,4 +72,8 @@ pub trait Module: Send {
     fn set_param(&mut self, idx: usize, value: f32);
     fn param(&self, idx: usize) -> f32;
     fn process(&mut self, io: &mut AudioBuffers);
+    /// Processes `left` and `right` as one linked pair (one gain for both sides); returns false when the Module does not support it and has left both untouched.
+    fn process_linked(&mut self, _left: &mut [f32], _right: &mut [f32]) -> bool {
+        false
+    }
 }

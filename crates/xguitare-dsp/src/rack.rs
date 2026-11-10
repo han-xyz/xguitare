@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::{AudioBuffers, Channels, Module};
 
-const BYPASS_FADE_MS: f32 = 10.0;
+pub(crate) const BYPASS_FADE_MS: f32 = 10.0;
 
 pub struct Rack {
     modules: Vec<(String, Box<dyn Module>)>,
@@ -20,9 +20,9 @@ pub struct Rack {
 
 /// One slot's Bypass: `mix` is the share of the Module's output, ramping towards 0 while bypassed and towards 1 while not.
 #[derive(Clone, Copy)]
-struct Bypass {
-    bypassed: bool,
-    mix: f32,
+pub(crate) struct Bypass {
+    pub(crate) bypassed: bool,
+    pub(crate) mix: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +159,7 @@ impl Rack {
 
 impl Bypass {
     /// Steps `mix` towards its target once per frame and writes each frame's value to `gains`.
-    fn ramp(&mut self, step: f32, gains: &mut [f32]) {
+    pub(crate) fn ramp(&mut self, step: f32, gains: &mut [f32]) {
         for gain in gains {
             self.mix = if self.bypassed {
                 (self.mix - step).max(0.0)
@@ -214,7 +214,7 @@ fn mix_input(
     }
 }
 
-fn mix(wet: &mut [f32], dry: &[f32], gains: &[f32]) {
+pub(crate) fn mix(wet: &mut [f32], dry: &[f32], gains: &[f32]) {
     for ((wet, dry), gain) in wet.iter_mut().zip(dry).zip(gains) {
         *wet = dry + gain * (*wet - dry);
     }
