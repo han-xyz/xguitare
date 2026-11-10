@@ -122,6 +122,8 @@ enum ProjectCmd {
     Close,
     /// List the Projects in the projects folder
     List,
+    /// List the open Project's Items: Track, bar.beat, length, active Take
+    Items,
 }
 
 /// A Track is named by its zero-based index or its name.

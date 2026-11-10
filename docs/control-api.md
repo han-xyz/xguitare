@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -52,7 +52,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"disk_overflows":0,"input_peak_db":-96.1,"loop":{"end":172800,"on":true,"start":0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"solo":false,"volume_db":-3.0},{"armed":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"solo":false,"volume_db":0.0}],"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"solo":false,"volume_db":-3.0},{"armed":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"solo":false,"volume_db":0.0}],"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
@@ -72,6 +72,8 @@ Response:
 | `callback_last_us` | Most recent audio callback, in µs. |
 | `connections` | Port connections the Daemon made at start, each `{"from": <port>, "to": <port>}`. |
 | `disk_overflows` | Times since the Daemon started that a Track's recording ring was full and frames were dropped because the disk fell behind. |
+| `count_in_remaining` | Beats left in the count-in before recording starts, rounded up; `0` when no count-in is under way or no Project is open. |
+| `loaded_audio_bytes` | Bytes of Take audio the open Project holds in memory (4 per frame); `0` when no Project is open. |
 | `project` | Name of the open Project; `null` when none is open. The keys below are `null` (`tracks` empty) while no Project is open. |
 | `transport` | `stopped`, `playing` or `recording` (also during the count-in), as the audio thread runs it. |
 | `position` | The playhead: `frames` from the Project start and `bars_beats` as `<bar>.<beat>`, both counted from 1 at the Project's tempo and meter. |
@@ -732,6 +734,34 @@ Response:
 | `valid`, `error` | Whether `project.toml` loads, and why not. |
 
 Errors: `<path>: <reason>` when `projects_dir` exists but cannot be read.
+
+## items
+
+Lists the open Project's Items, Track by Track. A client fetches it again when the `status` Revision changes: a new Take, a loop Take and `project_close` all change it.
+
+Request:
+
+```json
+{"cmd":"items"}
+```
+
+Response:
+
+```json
+{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"position":96000,"bars_beats":"2.1","offset":0,"length":192000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]},{"id":1,"name":"Bass","items":[]}]}
+```
+
+| Key | Value |
+| --- | --- |
+| `sample_rate` | The Project's sample rate, to turn frames into seconds. |
+| `tracks` | One entry per Track in order: `id`, which stays the Track's while other Tracks are added or removed, `name` and its `items`. |
+| `position` | Frames from the Project start where the Item begins; `bars_beats` is the same as `<bar>.<beat>`, as in `status`. |
+| `offset` | Frames of the active Take skipped before `position`. |
+| `length` | Frames the Item plays: the active Take's frames less `offset`. |
+| `take` | Index in `takes` of the active Take, the one that plays. |
+| `takes` | The Take files, relative to the Project folder, oldest first. |
+
+Errors: `no project open`.
 
 ## track_add
 

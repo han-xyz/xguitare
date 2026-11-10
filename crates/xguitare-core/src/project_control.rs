@@ -641,6 +641,37 @@ pub(crate) fn click(
     Ok(json!({"on": on, "count_in": count_in}))
 }
 
+/// Each Track's id, name and Items, with each Item's `length` the frames of its active Take it plays.
+pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
+    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+    let project = &open.project;
+    let tracks: Vec<Value> = project
+        .tracks
+        .iter()
+        .zip(&open.track_ids)
+        .map(|(track, id)| {
+            let items: Vec<Value> = track
+                .items
+                .iter()
+                .map(|item| {
+                    let files: Vec<&str> =
+                        item.takes.iter().map(|take| take.file.as_str()).collect();
+                    json!({
+                        "position": item.position,
+                        "bars_beats": bars_beats(project, item.position),
+                        "offset": item.offset,
+                        "length": item.takes[item.take].frames.saturating_sub(item.offset),
+                        "take": item.take,
+                        "takes": files,
+                    })
+                })
+                .collect();
+            json!({"id": id, "name": track.name, "items": items})
+        })
+        .collect();
+    Ok(json!({"sample_rate": project.sample_rate, "tracks": tracks}))
+}
+
 /// The Project fields of `status`, with `track_peaks` the input peaks of each Track since this connection's last `status`.
 pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<String, Value> {
     let shared = &state.shared;
@@ -649,6 +680,17 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
         "disk_overflows".to_string(),
         json!(shared.disk_overflows.load(Ordering::Relaxed)),
     );
+    fields.insert(
+        "count_in_remaining".to_string(),
+        json!(shared.count_in_remaining.load(Ordering::Relaxed)),
+    );
+    let loaded_audio_bytes: usize = state.projects.open.as_ref().map_or(0, |open| {
+        open.takes
+            .values()
+            .map(|samples| size_of_val(&**samples))
+            .sum()
+    });
+    fields.insert("loaded_audio_bytes".to_string(), json!(loaded_audio_bytes));
     let Some(open) = state.projects.open.as_ref() else {
         for key in [
             "project",

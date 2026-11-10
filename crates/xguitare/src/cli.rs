@@ -188,6 +188,7 @@ fn project_request(cmd: ProjectCmd) -> Request {
         ProjectCmd::Save => Request::ProjectSave,
         ProjectCmd::Close => Request::ProjectClose,
         ProjectCmd::List => Request::ProjectList,
+        ProjectCmd::Items => Request::Items,
     }
 }
 
@@ -308,6 +309,7 @@ fn render(req: &Request, payload: &Value) -> String {
         Request::ProjectOpen { .. } => render_open(payload),
         Request::ProjectClose => format!("closed {}\n", text(&payload["name"])),
         Request::ProjectList => render_projects(payload),
+        Request::Items => render_items(payload),
         Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
         Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),
         Request::TrackSet { .. } => render_track(payload),
@@ -358,6 +360,25 @@ fn render_projects(payload: &Value) -> String {
             }
         })
         .collect()
+}
+
+fn render_items(payload: &Value) -> String {
+    let sample_rate = payload["sample_rate"].as_f64().unwrap_or(1.0);
+    let mut lines = String::new();
+    for track in items(&payload["tracks"]) {
+        for item in items(&track["items"]) {
+            let seconds = item["length"].as_f64().unwrap_or(0.0) / sample_rate;
+            let take = item["take"].as_u64().unwrap_or(0) + 1;
+            let _ = writeln!(
+                lines,
+                "{} {} {seconds:.2}s take {take}/{}",
+                text(&track["name"]),
+                text(&item["bars_beats"]),
+                items(&item["takes"]).count()
+            );
+        }
+    }
+    lines
 }
 
 fn track_label(payload: &Value) -> String {

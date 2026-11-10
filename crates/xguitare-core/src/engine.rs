@@ -31,6 +31,8 @@ pub struct EngineShared {
     pub transport: AtomicU8,
     /// The running Arrangement's playhead in frames.
     pub playhead: AtomicU64,
+    /// Beats left in the running Arrangement's count-in, rounded up; 0 when none runs.
+    pub count_in_remaining: AtomicU32,
     /// f32 bits of the largest |sample| on each Track input since the last `take_peak`, written while an Arrangement runs.
     pub track_input_peak_bits: [AtomicU32; MAX_TRACKS],
 }
@@ -288,6 +290,7 @@ impl RackSwitcher {
                         .transport
                         .store(transport_code(Transport::Stopped), Ordering::Relaxed);
                     self.shared.playhead.store(0, Ordering::Relaxed);
+                    self.shared.count_in_remaining.store(0, Ordering::Relaxed);
                 }
                 Command::Arrangement(command) => {
                     for arrangement in [
@@ -411,6 +414,9 @@ impl RackSwitcher {
             self.shared
                 .playhead
                 .store(running.playhead(), Ordering::Relaxed);
+            self.shared
+                .count_in_remaining
+                .store(running.count_in_remaining(), Ordering::Relaxed);
         }
         true
     }

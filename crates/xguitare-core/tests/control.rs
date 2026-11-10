@@ -163,6 +163,8 @@ fn status_reports_fields() {
             "selected": null,
             "tracks": [],
             "disk_overflows": 0,
+            "count_in_remaining": 0,
+            "loaded_audio_bytes": 0,
         })
     );
 }

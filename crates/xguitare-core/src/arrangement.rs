@@ -228,6 +228,11 @@ impl Arrangement {
         self.count_in.left > 0
     }
 
+    /// The beats left in the count-in, rounded up; 0 when none is under way.
+    pub fn count_in_remaining(&self) -> u32 {
+        (self.count_in.left as f64 / self.frames_per_beat).ceil() as u32
+    }
+
     /// The disk thread's ends of the Take rings, one per Track in Track order; empty after the first call.
     pub fn take_readers(&mut self) -> Vec<TakeReader> {
         std::mem::take(&mut self.readers)

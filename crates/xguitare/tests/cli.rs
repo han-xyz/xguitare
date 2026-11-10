@@ -999,3 +999,19 @@ fn project_errors_print_one_line() {
 fn record_check_is_gone() {
     assert_eq!(run_main(["xguitare", "record-check", "/tmp/x"]), 1);
 }
+
+#[test]
+fn project_items_prints_one_line_per_item() {
+    let out = cli(
+        &["project", "items"],
+        reply(
+            r#"{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"position":0,"bars_beats":"1.1","offset":50,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]},{"position":192000,"bars_beats":"3.1","offset":0,"length":24000,"take":1,"takes":["takes/guitar-2.wav","takes/guitar-3.wav"]}]},{"id":2,"name":"Bass","items":[]}]}"#,
+        ),
+    );
+    assert_eq!(out.requests, [Request::Items]);
+    assert_eq!(
+        out.stdout,
+        "Guitar 1.1 2.00s take 1/1\nGuitar 3.1 0.50s take 2/2\n"
+    );
+    assert_eq!(out.code, 0);
+}

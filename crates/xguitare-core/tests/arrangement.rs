@@ -670,3 +670,37 @@ fn tempo_change_during_count_in_keeps_it_one_bar() {
     assert!(!arrangement.is_counting_in());
     assert_eq!(arrangement.playhead(), 200);
 }
+
+#[test]
+fn switcher_publishes_the_count_in_beats_left() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::clone(&shared));
+    let input = [0.0; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let first = arrangement(&project(vec![armed("t")]), &HashMap::new());
+    for command in [
+        Command::SwapArrangement(Box::new(first)),
+        Command::Arrangement(ArrangementCommand::CountIn(1)),
+        Command::Arrangement(ArrangementCommand::Record),
+    ] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
+    let beats_left = || shared.count_in_remaining.load(Ordering::Relaxed);
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    assert_eq!(beats_left(), 4);
+    let beat_blocks = 24_000 / BLOCK;
+    for _ in 0..beat_blocks {
+        switcher.process_tracks(&input, &[], &mut left, &mut right);
+    }
+    assert_eq!(beats_left(), 3);
+    for _ in 0..3 * beat_blocks + 4 {
+        switcher.process_tracks(&input, &[], &mut left, &mut right);
+    }
+    assert_eq!(beats_left(), 0);
+    assert!(control.commands.push(Command::CloseArrangement).is_ok());
+    switcher.apply_commands();
+    assert_eq!(beats_left(), 0);
+}

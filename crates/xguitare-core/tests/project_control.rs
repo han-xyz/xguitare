@@ -1189,3 +1189,50 @@ fn a_refused_set_settings_creates_no_projects_dir() {
     assert_eq!(error, "ir_dir 'relative' is not a directory");
     assert!(!wanted.exists());
 }
+
+#[test]
+fn items_list_each_tracks_items_and_status_counts_loaded_audio() {
+    let (mut state, _audio, _dir) = state("items");
+    assert_eq!(error(handle(&mut state, Request::Items)), "no project open");
+    let idle = status(&mut state);
+    assert_eq!(
+        (&idle["count_in_remaining"], &idle["loaded_audio_bytes"]),
+        (&json!(0), &json!(0))
+    );
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    add_track(&mut state, "Bass");
+    let folder = state.config.projects_dir.join("song");
+    let ids = reader_ids(&mut state);
+    write_take(&folder.join("takes/guitar-1.wav"), &[0.25; 100]);
+    let revision = status(&mut state)["revision"].clone();
+    let latency = Latency {
+        capture: 100,
+        playback: 50,
+    };
+    let finished = take(ids[0].1, "takes/guitar-1.wav", 100, 100);
+    assert_eq!(
+        add_finished_takes(&mut state, &[finished], |_| latency),
+        Vec::<String>::new()
+    );
+    state.shared.count_in_remaining.store(3, Ordering::Relaxed);
+    let recorded = status(&mut state);
+    assert_ne!(recorded["revision"], revision);
+    assert_eq!(recorded["count_in_remaining"], 3);
+    assert_eq!(recorded["loaded_audio_bytes"], 400);
+    assert_eq!(
+        ok(handle(&mut state, Request::Items)),
+        json!({
+            "sample_rate": 48_000,
+            "tracks": [
+                {"id": ids[0].1, "name": "Guitar", "items": [
+                    {"position": 0, "bars_beats": "1.1", "offset": 50, "length": 50, "take": 0, "takes": ["takes/guitar-1.wav"]}
+                ]},
+                {"id": ids[1].1, "name": "Bass", "items": []}
+            ]
+        })
+    );
+    close(&mut state);
+    assert_ne!(status(&mut state)["revision"], recorded["revision"]);
+    assert_eq!(error(handle(&mut state, Request::Items)), "no project open");
+}

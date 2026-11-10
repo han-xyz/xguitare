@@ -24,7 +24,7 @@ use crate::ports::{AudioPorts, AvailablePort, connect_plan};
 use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
 use crate::project::{LoopRegion, MAX_TRACKS};
 use crate::project_control::{
-    Projects, TrackChange, change_track_module, click, create_projects_dir, project_close,
+    Projects, TrackChange, change_track_module, click, create_projects_dir, items, project_close,
     project_list, project_new, project_open, project_save, set_loop, set_track_modules,
     status_fields, target_track, tempo, track_add, track_preset, track_remove, track_select,
     track_set, transport,
@@ -140,6 +140,7 @@ pub enum Request {
     ProjectSave,
     ProjectClose,
     ProjectList,
+    Items,
     TrackAdd {
         name: Option<String>,
     },
@@ -383,6 +384,7 @@ fn handle_from(
         Request::ProjectSave => project_save(state),
         Request::ProjectClose => project_close(state),
         Request::ProjectList => project_list(state),
+        Request::Items => items(state),
         Request::TrackAdd { name } => track_add(state, name.as_deref()),
         Request::TrackRemove { track } => track_remove(state, &track),
         Request::TrackSet {
