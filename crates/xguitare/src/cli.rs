@@ -186,6 +186,10 @@ fn render(req: &Request, payload: &Value) -> String {
         Request::RackIr { .. } => {
             format!("ir {} {}\n", text(&payload["id"]), text(&payload["ir"]))
         }
+        Request::Ports
+        | Request::SetPorts { .. }
+        | Request::Settings
+        | Request::SetSettings { .. } => format!("{payload}\n"),
     }
 }
 

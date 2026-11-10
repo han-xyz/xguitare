@@ -6,7 +6,7 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread;
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ use xguitare_core::{Bank, BankEntry, BankKind, Config, ConfigError, Preset, Sock
 use xguitare_dsp::Rack;
 
 use crate::jack_adapter::{self, JackError};
-use crate::socket_server::{self, SocketError};
+use crate::socket_server::{self, SharedPorts, SocketError};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const POLLS_PER_REPORT: u32 = 10;
@@ -46,6 +46,9 @@ pub enum DaemonError {
 
 pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let config = Config::load(config_path).map_err(DaemonError::Config)?;
+    if let Some(warning) = &config.state_warning {
+        warn!("{warning}; ignoring it");
+    }
     if config.socket_is_fallback {
         warn!("XDG_RUNTIME_DIR unset, using {}", config.socket.display());
         socket_server::secure_fallback_dir(&config.socket).map_err(DaemonError::SocketDir)?;
@@ -98,14 +101,23 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
         saved: HashMap::new(),
     }));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);
+    let session = Arc::new(session);
+    let ports: SharedPorts = Arc::downgrade(&session) as Weak<_>;
     let control = socket
-        .spawn(Arc::clone(&state), Arc::clone(&stop))
+        .spawn(Arc::clone(&state), ports, Arc::clone(&stop))
         .map_err(DaemonError::Socket)?;
     watch_until_stopped(&stop, &shared, &state, &mut bank_watch);
     if control.join().is_err() {
         error!("control thread panicked");
     }
-    session.stop().map_err(DaemonError::Jack)?;
+    let session = {
+        let _requests = state_guard(&state);
+        Arc::try_unwrap(session)
+    };
+    match session {
+        Ok(session) => session.stop().map_err(DaemonError::Jack)?,
+        Err(_) => error!("jack session still borrowed at stop"),
+    }
     info!("stopped");
     Ok(())
 }
@@ -192,6 +204,7 @@ fn register_stop_signals() -> Result<Arc<AtomicBool>, DaemonError> {
 
 /// Watches the Bank dir; holds the debouncer, which stops watching when dropped.
 struct BankWatch {
+    dir: PathBuf,
     _debouncer: Option<Debouncer<RecommendedWatcher>>,
     events: Receiver<DebounceEventResult>,
     stamps: HashMap<PathBuf, FileStamp>,
@@ -208,6 +221,7 @@ impl BankWatch {
             .map(|entry| entry.path())
             .collect();
         BankWatch {
+            dir: dir.to_path_buf(),
             _debouncer: debounced_watcher(dir, sender),
             events,
             stamps: snapshot(&paths),
@@ -348,6 +362,14 @@ fn watch_until_stopped(
         thread::sleep(POLL_INTERVAL);
         {
             let mut state = state_guard(state);
+            if state.bank.dir != bank_watch.dir {
+                info!(
+                    "bank switched to {}: {} presets",
+                    state.bank.dir.display(),
+                    state.bank.entries.len()
+                );
+                *bank_watch = BankWatch::start(&state.bank.dir);
+            }
             follow_sample_rate_change(&mut state);
             state.tuner.tick();
             apply_bank_changes(&mut state, bank_watch);

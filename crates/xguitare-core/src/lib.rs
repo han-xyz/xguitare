@@ -10,6 +10,7 @@ mod irdir;
 pub mod ports;
 mod preset;
 mod registry;
+mod state;
 pub mod tuner;
 pub mod watch;
 
@@ -23,6 +24,7 @@ pub use ir::{IrError, load_ir};
 pub use irdir::list_irs;
 pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
+pub use state::SavedState;
 
 fn line_col(text: &str, offset: usize) -> (usize, usize) {
     let before = &text[..offset.min(text.len())];

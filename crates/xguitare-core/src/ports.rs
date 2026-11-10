@@ -14,7 +14,44 @@ pub struct PortChoice {
     pub warnings: Vec<String>,
 }
 
+/// The Daemon's JACK ports as `ports` and `set_ports` reach them: the binary lists and links, core decides what to link.
+pub trait AudioPorts {
+    /// Every audio port of other clients: the capture ports, then the playback ports.
+    fn audio_ports(&self) -> (Vec<AvailablePort>, Vec<AvailablePort>);
+    /// The Daemon's own `in`, `out_l` and `out_r` as full port names.
+    fn own_ports(&self) -> Ports;
+    fn connect(&self, from: &str, to: &str) -> Result<(), String>;
+    fn disconnect(&self, from: &str, to: &str) -> Result<(), String>;
+}
+
+/// The `(from, to)` links to drop and to make so that the Daemon's ports are linked to exactly the wanted ports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectPlan {
+    pub disconnect: Vec<(String, String)>,
+    pub connect: Vec<(String, String)>,
+}
+
 const WILDCARD: char = '*';
+
+/// Plans the links from the Daemon's `current` ones to the capture port `wanted.input` into `own.input`, and `own.output_left`/`own.output_right` out to the playback ports `wanted` names; links already in place stay.
+pub fn connect_plan(current: &[(String, String)], own: &Ports, wanted: &Ports) -> ConnectPlan {
+    let links = [
+        (wanted.input.clone(), own.input.clone()),
+        (own.output_left.clone(), wanted.output_left.clone()),
+        (own.output_right.clone(), wanted.output_right.clone()),
+    ];
+    ConnectPlan {
+        disconnect: current
+            .iter()
+            .filter(|link| !links.contains(link))
+            .cloned()
+            .collect(),
+        connect: links
+            .into_iter()
+            .filter(|link| !current.contains(link))
+            .collect(),
+    }
+}
 
 /// The ports in `names` that do not belong to the client `client_name`, each marked physical when it is in `physical`.
 pub fn foreign_ports(

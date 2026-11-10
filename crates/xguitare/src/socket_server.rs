@@ -5,7 +5,7 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt}
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use tracing::warn;
 use xguitare_core::control::{
     ConnectionId, EngineState, close_connection, handle_line, open_connection,
 };
+use xguitare_core::ports::AudioPorts;
 use xguitare_core::{SOCKET_DIR_MODE, SocketDirError, secure_socket_dir};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -27,6 +28,9 @@ const LOCK_FILE_MODE: u32 = 0o600;
 pub const MAX_CONNECTIONS: usize = 32;
 /// How long the Daemon keeps a control connection that sends nothing.
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The Daemon's JACK ports for `ports` and `set_ports`; upgraded only while the state lock is held, so the Daemon can take them back under that lock.
+pub type SharedPorts = Weak<dyn AudioPorts + Send + Sync>;
 
 #[derive(Debug)]
 pub enum SocketError {
@@ -145,15 +149,21 @@ impl ControlSocket {
     pub fn spawn(
         self,
         state: Arc<Mutex<EngineState>>,
+        ports: SharedPorts,
         stop: Arc<AtomicBool>,
     ) -> Result<JoinHandle<()>, SocketError> {
         thread::Builder::new()
             .name("control".to_string())
-            .spawn(move || self.accept_until_stopped(&state, &stop))
+            .spawn(move || self.accept_until_stopped(&state, &ports, &stop))
             .map_err(SocketError::Spawn)
     }
 
-    fn accept_until_stopped(self, state: &Arc<Mutex<EngineState>>, stop: &Arc<AtomicBool>) {
+    fn accept_until_stopped(
+        self,
+        state: &Arc<Mutex<EngineState>>,
+        ports: &SharedPorts,
+        stop: &Arc<AtomicBool>,
+    ) {
         let mut accepted: u64 = 0;
         let open = Arc::new(AtomicUsize::new(0));
         while !stop.load(Ordering::Relaxed) {
@@ -166,6 +176,7 @@ impl ControlSocket {
                     accepted += 1;
                     let slot = ConnectionSlot::take(&open);
                     let state = Arc::clone(state);
+                    let ports = Weak::clone(ports);
                     let stop = Arc::clone(stop);
                     let idle_timeout = self.idle_timeout;
                     // Connection threads are never joined: each sees `stop` within READ_TICK, and process exit ends any still writing.
@@ -173,7 +184,7 @@ impl ControlSocket {
                         .name(format!("control-{accepted}"))
                         .spawn(move || {
                             let _slot = slot;
-                            serve_connection(&stream, &state, &stop, idle_timeout);
+                            serve_connection(&stream, &state, &ports, &stop, idle_timeout);
                         });
                     if let Err(err) = spawned {
                         warn!("cannot start control connection thread: {err}");
@@ -231,11 +242,12 @@ fn create_socket_dir(dir: &Path) -> io::Result<()> {
 fn serve_connection(
     stream: &UnixStream,
     state: &Mutex<EngineState>,
+    ports: &SharedPorts,
     stop: &AtomicBool,
     idle_timeout: Duration,
 ) {
     let connection = OpenConnection::open(state);
-    match answer_lines(stream, state, connection.id, stop, idle_timeout) {
+    match answer_lines(stream, state, ports, connection.id, stop, idle_timeout) {
         Err(err) if !matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
             warn!("control connection: {err}");
         }
@@ -269,6 +281,7 @@ fn lock(state: &Mutex<EngineState>) -> MutexGuard<'_, EngineState> {
 fn answer_lines(
     stream: &UnixStream,
     state: &Mutex<EngineState>,
+    ports: &SharedPorts,
     connection: ConnectionId,
     stop: &AtomicBool,
     idle_timeout: Duration,
@@ -302,7 +315,12 @@ fn answer_lines(
         }
         if !line.is_empty() {
             let request = String::from_utf8_lossy(&line);
-            let (reply, warnings) = handle_line(&mut lock(state), connection, request.trim_end());
+            let (reply, warnings) = {
+                let mut state = lock(state);
+                let ports = ports.upgrade();
+                let ports = ports.as_deref().map(|ports| ports as &dyn AudioPorts);
+                handle_line(&mut state, ports, connection, request.trim_end())
+            };
             for warning in warnings {
                 warn!("{warning}");
             }

@@ -5,12 +5,16 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::engine::SWITCHER_MAX_FRAMES;
+use crate::state::{SavedState, read_state};
 
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
+const STATE_FILE: &str = "state.toml";
+const GUITAR_BANK_DIR: &str = "bank";
+const BASS_BANK_DIR: &str = "bank-bass";
 pub const SOCKET_DIR_MODE: u32 = 0o700;
 const TUNER_REFERENCE_HZ: std::ops::RangeInclusive<f32> = 400.0..=480.0;
 const CROSSFADE_MS_MAX: f32 = 1000.0;
@@ -34,21 +38,32 @@ pub struct Config {
     pub tuner_reference_hz: f32,
     /// Whether a client's tuner mode turns on Mute while it is open.
     pub tuner_mute: bool,
+    /// The Daemon-owned `state.toml` beside the config file.
+    pub state_file: PathBuf,
+    /// What `state_file` held when loaded, already applied to the fields above; empty when it was missing or ignored.
+    pub state: SavedState,
+    /// Why `state_file` was ignored: its path and the read or parse error.
+    pub state_warning: Option<String>,
+    /// Whether the config file names `bank_dir`, which then wins over `bank_kind`'s directory.
+    pub bank_dir_in_config: bool,
+    /// Whether the config file names `ir_dir`; without it and without a saved one, `ir_dir` is the Bank directory.
+    pub ir_dir_in_config: bool,
 }
 
 /// JACK ports the Daemon connects to `in`, `out_l` and `out_r`. Each value is one of:
 /// `"auto"`: among physical ports only, the only device's first port in JACK's channel order (`output_right`: its second); several devices connect nothing and warn with their port names.
 /// `""`: do not connect.
 /// A pattern: an exact port name, or a glob where `*` matches any run of characters and the rest must match the whole name (e.g. `"Scarlett*capture_FL"`; a leading or trailing `*` for a suffix or prefix), matched against every audio port of that direction, physical or not (PipeWire split nodes, other apps), except the Daemon's own; the first match in sorted order wins.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Ports {
     pub input: String,
     pub output_left: String,
     pub output_right: String,
 }
 
-/// Which starter Bank the first run seeds into a missing `bank_dir`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+/// Which starter Bank the first run seeds into a missing `bank_dir`, and without a `bank_dir` in the config file which directory is the Bank: `<config dir>/bank` or `<config dir>/bank-bass`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BankKind {
     #[default]
@@ -87,7 +102,7 @@ pub enum ConfigError {
     },
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
     bank_dir: Option<PathBuf>,
@@ -125,7 +140,8 @@ impl Config {
         let default_path = dirs.config_dir().join(CONFIG_FILE);
         let explicit = path.is_some();
         let path = path.unwrap_or(&default_path);
-        let defaults = Config::default_for(&dirs)?;
+        let config_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        let defaults = Config::default_for(&dirs, &config_dir)?;
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
             Err(error) if error.kind() == ErrorKind::NotFound && explicit => {
@@ -133,7 +149,7 @@ impl Config {
                     path: path.to_path_buf(),
                 });
             }
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(defaults),
+            Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
             Err(source) => {
                 return Err(ConfigError::Io {
                     path: path.to_path_buf(),
@@ -182,15 +198,28 @@ impl Config {
                 path: path.to_path_buf(),
             });
         }
-        Ok(defaults.overridden_by(file))
+        let (state, state_warning) = read_state(&defaults.state_file);
+        Ok(Config {
+            state_warning,
+            ..defaults.overridden_by(file, state)
+        })
     }
 
-    fn default_for(dirs: &ProjectDirs) -> Result<Config, ConfigError> {
+    /// The Bank directory of `kind` when the config file names no `bank_dir`.
+    pub(crate) fn kind_bank_dir(&self, kind: BankKind) -> PathBuf {
+        let config_dir = self.state_file.parent().unwrap_or(Path::new(""));
+        config_dir.join(match kind {
+            BankKind::Guitar => GUITAR_BANK_DIR,
+            BankKind::Bass => BASS_BANK_DIR,
+        })
+    }
+
+    fn default_for(dirs: &ProjectDirs, config_dir: &Path) -> Result<Config, ConfigError> {
         let (socket_dir, socket_is_fallback) = match dirs.runtime_dir() {
             Some(dir) => (dir.to_path_buf(), false),
             None => (fallback_runtime_dir()?, true),
         };
-        let bank_dir = dirs.config_dir().join("bank");
+        let bank_dir = config_dir.join(GUITAR_BANK_DIR);
         Ok(Config {
             ir_dir: bank_dir.clone(),
             bank_dir,
@@ -207,10 +236,21 @@ impl Config {
             },
             tuner_reference_hz: 440.0,
             tuner_mute: true,
+            state_file: config_dir.join(STATE_FILE),
+            state: SavedState::default(),
+            state_warning: None,
+            bank_dir_in_config: false,
+            ir_dir_in_config: false,
         })
     }
 
-    fn overridden_by(self, file: ConfigFile) -> Config {
+    fn overridden_by(self, file: ConfigFile, state: SavedState) -> Config {
+        let bank_kind = state.bank_kind.or(file.bank_kind).unwrap_or(self.bank_kind);
+        let bank_dir_in_config = file.bank_dir.is_some();
+        let ir_dir_in_config = file.ir_dir.is_some();
+        let bank_dir = file
+            .bank_dir
+            .unwrap_or_else(|| self.kind_bank_dir(bank_kind));
         let ports = match file.ports {
             Some(ports) => Ports {
                 input: ports.input.unwrap_or(self.ports.input),
@@ -219,11 +259,15 @@ impl Config {
             },
             None => self.ports,
         };
-        let bank_dir = file.bank_dir.unwrap_or(self.bank_dir);
+        let ports = state.ports.clone().unwrap_or(ports);
         Config {
-            ir_dir: file.ir_dir.unwrap_or_else(|| bank_dir.clone()),
+            ir_dir: state
+                .ir_dir
+                .clone()
+                .or(file.ir_dir)
+                .unwrap_or_else(|| bank_dir.clone()),
             bank_dir,
-            bank_kind: file.bank_kind.unwrap_or(self.bank_kind),
+            bank_kind,
             buffer_size: file.buffer_size.unwrap_or(self.buffer_size),
             crossfade_ms: file.crossfade_ms.unwrap_or(self.crossfade_ms),
             ir_max_ms: file.ir_max_ms.unwrap_or(self.ir_max_ms),
@@ -232,6 +276,11 @@ impl Config {
             ports,
             tuner_reference_hz: file.tuner_reference_hz.unwrap_or(self.tuner_reference_hz),
             tuner_mute: file.tuner_mute.unwrap_or(self.tuner_mute),
+            state_file: self.state_file,
+            state,
+            state_warning: None,
+            bank_dir_in_config,
+            ir_dir_in_config,
         }
     }
 }

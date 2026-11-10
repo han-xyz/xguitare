@@ -18,12 +18,14 @@ use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
 use crate::engine::{
     Command, EngineQueues, EngineShared, FadeLengths, SWITCHER_MAX_FRAMES, take_peak,
 };
-use crate::firstrun::{BASS_IR, DEFAULT_IR};
+use crate::firstrun::{BASS_IR, DEFAULT_IR, ensure_bank};
+use crate::ports::{AudioPorts, AvailablePort, connect_plan};
 use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
+use crate::state::{SavedState, write_state};
 use crate::tuner::Tuner;
 use crate::{
-    Bank, BankEntry, BuildWarning, Config, ModuleRegistry, ParamAddress, Preset, PresetModule,
-    list_irs,
+    Bank, BankEntry, BankKind, BuildWarning, Config, ModuleRegistry, ParamAddress, Ports, Preset,
+    PresetModule, list_irs,
 };
 use crate::{ResolveError, resolve};
 
@@ -37,6 +39,9 @@ const AFTER_OR_AT: &str = "give either after or at";
 const NO_CABINET: &str = "no cabinet module";
 const EMPTY_PRESET_NAME: &str = "preset name must not be empty";
 const SAVE_AS_TRIES: u64 = 8;
+const NO_AUDIO_PORTS: &str = "audio ports are not available";
+const BANK_DIR_IN_CONFIG: &str = "bank_dir is set in config.toml; edit it there";
+const FIRST_PROGRAM: &str = "0";
 /// Linux `EPERM`, which `hard_link` returns on a filesystem without hard links; `EACCES` shares its `ErrorKind`.
 const EPERM: i32 = 1;
 
@@ -81,6 +86,17 @@ pub enum Request {
     RackIr {
         ir: String,
         id: Option<String>,
+    },
+    Ports,
+    SetPorts {
+        input: String,
+        output_left: String,
+        output_right: String,
+    },
+    Settings,
+    SetSettings {
+        bank_kind: Option<BankKind>,
+        ir_dir: Option<PathBuf>,
     },
 }
 
@@ -170,13 +186,23 @@ fn take_peaks(state: &mut EngineState, connection: ConnectionId) -> Peaks {
         .unwrap_or_default()
 }
 
-/// Handles one request; the build warnings of a `load` or a Rack edit come back beside the Response for the caller to log.
+/// Handles one request; the build warnings of a `load` or a Rack edit come back beside the Response for the caller to log. `ports` and `set_ports` fail here with `audio ports are not available`; `handle_with_ports` serves them.
 pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarning>) {
-    handle_from(state, IN_PROCESS, req)
+    handle_from(state, None, IN_PROCESS, req)
+}
+
+/// Handles one request as `handle` does, with `ports` serving `ports` and `set_ports`.
+pub fn handle_with_ports(
+    state: &mut EngineState,
+    ports: &dyn AudioPorts,
+    req: Request,
+) -> (Response, Vec<BuildWarning>) {
+    handle_from(state, Some(ports), IN_PROCESS, req)
 }
 
 fn handle_from(
     state: &mut EngineState,
+    ports: Option<&dyn AudioPorts>,
     connection: ConnectionId,
     req: Request,
 ) -> (Response, Vec<BuildWarning>) {
@@ -199,6 +225,26 @@ fn handle_from(
         Request::Mute { on } => Ok(mute(state, on)),
         Request::IrList => ir_list(state),
         Request::RackIr { ir, id } => rack_ir(state, &ir, id.as_deref(), &mut warnings),
+        Request::Ports => ports.ok_or(NO_AUDIO_PORTS.to_string()).map(|ports| {
+            let (capture, playback) = port_names(ports);
+            json!({"capture": capture, "playback": playback, "connected": connected(state, ports)})
+        }),
+        Request::SetPorts {
+            input,
+            output_left,
+            output_right,
+        } => ports.ok_or(NO_AUDIO_PORTS.to_string()).and_then(|ports| {
+            let wanted = Ports {
+                input,
+                output_left,
+                output_right,
+            };
+            set_ports(state, ports, wanted)
+        }),
+        Request::Settings => Ok(settings(state)),
+        Request::SetSettings { bank_kind, ir_dir } => {
+            set_settings(state, bank_kind, ir_dir, &mut warnings)
+        }
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
@@ -207,14 +253,15 @@ fn handle_from(
     (response, warnings)
 }
 
-/// Handles one request line from `connection` and returns the response line, without its newline, and the build warnings as `handle` does.
+/// Handles one request line from `connection` and returns the response line, without its newline, and the build warnings as `handle` does; `ports` serves `ports` and `set_ports` as in `handle_with_ports`.
 pub fn handle_line(
     state: &mut EngineState,
+    ports: Option<&dyn AudioPorts>,
     connection: ConnectionId,
     line: &str,
 ) -> (String, Vec<BuildWarning>) {
     let (response, warnings) = match serde_json::from_str(line) {
-        Ok(req) => handle_from(state, connection, req),
+        Ok(req) => handle_from(state, ports, connection, req),
         Err(err) => (
             Response::Err {
                 error: format!("invalid request: {err}"),
@@ -638,7 +685,7 @@ fn create_and_write(path: &Path, text: &str) -> io::Result<()> {
 }
 
 /// `<file name>.<pid>.<n>.tmp` beside `target`, unique within this process.
-fn temp_path(target: &Path) -> PathBuf {
+pub(crate) fn temp_path(target: &Path) -> PathBuf {
     static SAVES: AtomicU64 = AtomicU64::new(0);
     let n = SAVES.fetch_add(1, Ordering::Relaxed);
     let mut name = target.file_name().unwrap_or_default().to_owned();
@@ -818,6 +865,151 @@ fn free_id(modules: &[PresetModule], type_name: &str) -> String {
         .map(|n| format!("{type_name}-{n}"))
         .find(|id| !is_taken(id))
         .expect("a finite Rack leaves some suffix free")
+}
+
+fn port_names(ports: &dyn AudioPorts) -> (Vec<String>, Vec<String>) {
+    let names = |available: Vec<AvailablePort>| {
+        let mut names: Vec<String> = available.into_iter().map(|port| port.name).collect();
+        names.sort();
+        names
+    };
+    let (capture, playback) = ports.audio_ports();
+    (names(capture), names(playback))
+}
+
+fn connected(state: &EngineState, ports: &dyn AudioPorts) -> Value {
+    let own = ports.own_ports();
+    let linked = |own_port: &str, is_input: bool| {
+        state
+            .connections
+            .iter()
+            .find_map(|(from, to)| match is_input {
+                true => (to == own_port).then_some(from),
+                false => (from == own_port).then_some(to),
+            })
+    };
+    json!({
+        "input": linked(&own.input, true),
+        "output_left": linked(&own.output_left, false),
+        "output_right": linked(&own.output_right, false),
+    })
+}
+
+/// Links the Daemon's ports to the named ports, after checking each is listed and storing them in `state.toml`; a link that fails is reported once the others are made.
+fn set_ports(
+    state: &mut EngineState,
+    ports: &dyn AudioPorts,
+    wanted: Ports,
+) -> Result<Value, String> {
+    let (capture, playback) = port_names(ports);
+    if !capture.contains(&wanted.input) {
+        return Err(format!("no capture port '{}'", wanted.input));
+    }
+    for name in [&wanted.output_left, &wanted.output_right] {
+        if !playback.contains(name) {
+            return Err(format!("no playback port '{name}'"));
+        }
+    }
+    let mut saved = state.config.state.clone();
+    saved.ports = Some(wanted.clone());
+    save_state(&state.config, &saved)?;
+    state.config.state = saved;
+    let plan = connect_plan(&state.connections, &ports.own_ports(), &wanted);
+    state.config.ports = wanted;
+    state.revision += 1;
+    let mut failures = Vec::new();
+    for (from, to) in plan.disconnect {
+        match ports.disconnect(&from, &to) {
+            Ok(()) => state
+                .connections
+                .retain(|link| *link != (from.clone(), to.clone())),
+            Err(err) => failures.push(format!("cannot disconnect {from} -> {to}: {err}")),
+        }
+    }
+    for (from, to) in plan.connect {
+        match ports.connect(&from, &to) {
+            Ok(()) => state.connections.push((from, to)),
+            Err(err) => failures.push(format!("cannot connect {from} -> {to}: {err}")),
+        }
+    }
+    if !failures.is_empty() {
+        return Err(failures.join("; "));
+    }
+    Ok(json!({ "connected": connected(state, ports) }))
+}
+
+fn save_state(config: &Config, saved: &SavedState) -> Result<(), String> {
+    write_state(&config.state_file, saved)
+        .map_err(|err| format!("cannot save {}: {err}", config.state_file.display()))
+}
+
+fn settings(state: &EngineState) -> Value {
+    json!({
+        "bank_kind": state.config.bank_kind.to_string(),
+        "bank_dir": state.config.bank_dir.display().to_string(),
+        "ir_dir": state.config.ir_dir.display().to_string(),
+    })
+}
+
+/// Stores `bank_kind` and `ir_dir` in `state.toml` and applies them: a changed `bank_kind` switches to its Bank directory, seeded when missing, and loads Program 0 (the passthrough Rack when that fails); on an error nothing changes.
+fn set_settings(
+    state: &mut EngineState,
+    bank_kind: Option<BankKind>,
+    ir_dir: Option<PathBuf>,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<Value, String> {
+    if let Some(dir) = ir_dir.as_ref().filter(|dir| !dir.is_dir()) {
+        return Err(format!("ir_dir '{}' is not a directory", dir.display()));
+    }
+    let switch = bank_kind.filter(|kind| *kind != state.config.bank_kind);
+    let bank = match switch {
+        Some(_) if state.config.bank_dir_in_config => return Err(BANK_DIR_IN_CONFIG.to_string()),
+        Some(kind) => Some(switched_bank(state, kind)?),
+        None => None,
+    };
+    let mut saved = state.config.state.clone();
+    saved.bank_kind = bank_kind.or(saved.bank_kind);
+    saved.ir_dir = ir_dir.or(saved.ir_dir);
+    save_state(&state.config, &saved)?;
+    if let Some(dir) = &saved.ir_dir {
+        state.config.ir_dir = dir.clone();
+    }
+    state.config.state = saved;
+    if let (Some(kind), Some(bank)) = (switch, bank) {
+        if !state.config.ir_dir_in_config && state.config.state.ir_dir.is_none() {
+            state.config.ir_dir = bank.dir.clone();
+        }
+        state.config.bank_kind = kind;
+        state.config.bank_dir = bank.dir.clone();
+        state.bank = bank;
+        load_first_program(state, warnings)?;
+    }
+    state.revision += 1;
+    Ok(settings(state))
+}
+
+fn switched_bank(state: &EngineState, kind: BankKind) -> Result<Bank, String> {
+    let dir = state.config.kind_bank_dir(kind);
+    ensure_bank(&dir, kind, state.sample_rate as u32)
+        .map_err(|err| format!("cannot create bank {}: {err}", dir.display()))?;
+    Bank::load_dir(&dir).map_err(|err| format!("cannot read bank {}: {err}", dir.display()))
+}
+
+fn load_first_program(
+    state: &mut EngineState,
+    warnings: &mut Vec<BuildWarning>,
+) -> Result<(), String> {
+    state.saved.clear();
+    if load(state, FIRST_PROGRAM, warnings).is_ok() {
+        return Ok(());
+    }
+    swap_rack(
+        &mut state.queues,
+        passthrough_rack(state.sample_rate, state.max_frames),
+    )?;
+    state.active = None;
+    state.modified = false;
+    Ok(())
 }
 
 fn get(state: &EngineState, key: Option<&str>) -> Result<Value, String> {

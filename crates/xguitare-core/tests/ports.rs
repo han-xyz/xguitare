@@ -1,5 +1,5 @@
 use xguitare_core::Ports;
-use xguitare_core::ports::{AvailablePort, choose_ports, foreign_ports};
+use xguitare_core::ports::{AvailablePort, ConnectPlan, choose_ports, connect_plan, foreign_ports};
 
 fn available(list: &[&str], is_physical: bool) -> Vec<AvailablePort> {
     list.iter()
@@ -185,5 +185,29 @@ fn foreign_ports_drop_own_client_and_mark_physical() {
                 is_physical: false,
             },
         ]
+    );
+}
+
+fn link(from: &str, to: &str) -> (String, String) {
+    (from.to_string(), to.to_string())
+}
+
+#[test]
+fn connect_plan_replaces_changed_links_only() {
+    let own = ports("xguitare:in", "xguitare:out_l", "xguitare:out_r");
+    let current = [
+        link("old:capture_1", "xguitare:in"),
+        link("xguitare:out_l", "card:playback_FL"),
+    ];
+    let wanted = ports("card:capture_FL", "card:playback_FL", "card:playback_FR");
+    assert_eq!(
+        connect_plan(&current, &own, &wanted),
+        ConnectPlan {
+            disconnect: vec![link("old:capture_1", "xguitare:in")],
+            connect: vec![
+                link("card:capture_FL", "xguitare:in"),
+                link("xguitare:out_r", "card:playback_FR"),
+            ],
+        }
     );
 }

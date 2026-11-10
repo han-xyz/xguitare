@@ -425,7 +425,8 @@ fn unknown_cmd_is_error() {
     let (mut state, _audio, _dir) = state("unknown-cmd");
     let connection = open_connection(&mut state);
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, connection, r#"{"cmd":"bogus"}"#).0).unwrap();
+        serde_json::from_str(&handle_line(&mut state, None, connection, r#"{"cmd":"bogus"}"#).0)
+            .unwrap();
     assert_eq!(response["ok"], false);
     let message = response["error"].as_str().unwrap();
     assert!(
@@ -439,7 +440,7 @@ fn malformed_json_is_error() {
     let (mut state, _audio, _dir) = state("malformed");
     let connection = open_connection(&mut state);
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, connection, "{\"cmd\":").0).unwrap();
+        serde_json::from_str(&handle_line(&mut state, None, connection, "{\"cmd\":").0).unwrap();
     assert_eq!(response["ok"], false);
     assert!(
         response["error"]
@@ -449,7 +450,7 @@ fn malformed_json_is_error() {
         "{response}"
     );
     let response: Value =
-        serde_json::from_str(&handle_line(&mut state, connection, r#"{"cmd":"status"}"#).0)
+        serde_json::from_str(&handle_line(&mut state, None, connection, r#"{"cmd":"status"}"#).0)
             .unwrap();
     assert_eq!(response["ok"], true);
     assert_eq!(response["preset"], "Clean");
@@ -1174,7 +1175,7 @@ fn rack_edit_without_preset_is_error() {
 fn tuner_null_before_tick() {
     let (mut state, _audio, _dir) = state("tuner-null");
     let connection = open_connection(&mut state);
-    let (line, _) = handle_line(&mut state, connection, r#"{"cmd":"tuner"}"#);
+    let (line, _) = handle_line(&mut state, None, connection, r#"{"cmd":"tuner"}"#);
     assert_eq!(
         serde_json::from_str::<Value>(&line).unwrap(),
         json!({"ok": true, "hz": null, "note": null, "cents": null, "confident": false})
@@ -1217,7 +1218,7 @@ fn tuner_after_rate_change_ignores_old_rate_samples() {
 fn mute_on_off_and_status() {
     let (mut state, _audio, _dir) = state("mute");
     let connection = open_connection(&mut state);
-    let (line, _) = handle_line(&mut state, connection, r#"{"cmd":"mute","on":true}"#);
+    let (line, _) = handle_line(&mut state, None, connection, r#"{"cmd":"mute","on":true}"#);
     assert_eq!(line, r#"{"ok":true,"muted":true}"#);
     assert!(state.shared.muted.load(Ordering::Relaxed));
     assert_eq!(ok(handle(&mut state, Request::Status))["muted"], true);
@@ -1233,7 +1234,7 @@ fn mute_without_on_is_invalid_request() {
     let connection = open_connection(&mut state);
     for line in [r#"{"cmd":"mute"}"#, r#"{"cmd":"mute","on":"yes"}"#] {
         let response: Value =
-            serde_json::from_str(&handle_line(&mut state, connection, line).0).unwrap();
+            serde_json::from_str(&handle_line(&mut state, None, connection, line).0).unwrap();
         assert_eq!(response["ok"], false);
         let message = response["error"].as_str().unwrap();
         assert!(message.starts_with("invalid request: "), "{message}");
@@ -1381,6 +1382,7 @@ fn rack_ir_first_cabinet_when_id_omitted() {
     let connection = open_connection(&mut state);
     let (line, warnings) = handle_line(
         &mut state,
+        None,
         connection,
         r#"{"cmd":"rack_ir","ir":"cabs/x.wav"}"#,
     );
@@ -1551,6 +1553,7 @@ fn save_as_creates_and_loads() {
     let connection = open_connection(&mut state);
     let (line, _) = handle_line(
         &mut state,
+        None,
         connection,
         r#"{"cmd":"save","as":"My Lead Tone!"}"#,
     );

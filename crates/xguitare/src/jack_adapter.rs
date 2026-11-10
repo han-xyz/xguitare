@@ -14,7 +14,7 @@ use xguitare_core::engine::{
     AudioQueues, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES, block_peak,
     raise_peak,
 };
-use xguitare_core::ports::{AvailablePort, choose_ports, foreign_ports};
+use xguitare_core::ports::{AudioPorts, AvailablePort, choose_ports, foreign_ports};
 use xguitare_dsp::{Rack, midi};
 
 const CLIENT_NAME: &str = "xguitare";
@@ -140,6 +140,51 @@ impl Session {
             .deactivate()
             .map(|_| ())
             .map_err(JackError::Deactivate)
+    }
+}
+
+impl AudioPorts for Session {
+    fn audio_ports(&self) -> (Vec<AvailablePort>, Vec<AvailablePort>) {
+        let client = self.client.as_client();
+        (
+            foreign_audio_ports(client, PortFlags::IS_OUTPUT),
+            foreign_audio_ports(client, PortFlags::IS_INPUT),
+        )
+    }
+
+    fn own_ports(&self) -> Ports {
+        let own = |port: &str| format!("{}:{port}", self.client.as_client().name());
+        Ports {
+            input: own("in"),
+            output_left: own("out_l"),
+            output_right: own("out_r"),
+        }
+    }
+
+    fn connect(&self, from: &str, to: &str) -> Result<(), String> {
+        match self.client.as_client().connect_ports_by_name(from, to) {
+            Ok(()) | Err(jack::Error::PortAlreadyConnected(..)) => {
+                info!("connected {from} -> {to}");
+                Ok(())
+            }
+            Err(err) => {
+                warn!("cannot connect {from} -> {to}: {err}");
+                Err(err.to_string())
+            }
+        }
+    }
+
+    fn disconnect(&self, from: &str, to: &str) -> Result<(), String> {
+        match self.client.as_client().disconnect_ports_by_name(from, to) {
+            Ok(()) => {
+                info!("disconnected {from} -> {to}");
+                Ok(())
+            }
+            Err(err) => {
+                warn!("cannot disconnect {from} -> {to}: {err}");
+                Err(err.to_string())
+            }
+        }
     }
 }
 

@@ -48,7 +48,7 @@ fn partial_file_fills_defaults() {
     let config = Config::load(Some(&path)).unwrap();
     let defaults = Config::load(Some(&config_file("partial-empty", ""))).unwrap();
     assert_eq!(config.buffer_size, 64);
-    assert_eq!(config.bank_dir, defaults.bank_dir);
+    assert_eq!(config.bank_dir, path.parent().unwrap().join("bank"));
     assert_eq!(config.socket, defaults.socket);
     assert_eq!(config.crossfade_ms, 20.0);
     assert_eq!(config.ports.input, "auto");
@@ -195,4 +195,67 @@ fn ir_dir_parses() {
     let config = Config::load(Some(&path)).unwrap();
     assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/irs"));
     assert_eq!(config.bank_dir, PathBuf::from("/srv/xg/bank"));
+}
+
+#[test]
+fn bank_dir_default_follows_bank_kind() {
+    let path = config_file("kind-dir", "bank_kind = \"bass\"\n");
+    let config = Config::load(Some(&path)).unwrap();
+    let dir = path.parent().unwrap();
+    assert_eq!(config.bank_dir, dir.join("bank-bass"));
+    assert_eq!(config.ir_dir, dir.join("bank-bass"));
+    let path = config_file("kind-dir-guitar", "");
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.bank_dir, path.parent().unwrap().join("bank"));
+}
+
+#[test]
+fn state_toml_overrides_config() {
+    let path = config_file(
+        "state-overrides",
+        "bank_kind = \"guitar\"\nir_dir = \"/srv/xg/irs\"\n[ports]\ninput = \"a*\"\noutput_left = \"b*\"\n",
+    );
+    let dir = path.parent().unwrap();
+    fs::write(
+        dir.join("state.toml"),
+        "bank_kind = \"bass\"\nir_dir = \"/srv/xg/state-irs\"\n[ports]\ninput = \"card:capture_1\"\noutput_left = \"card:playback_1\"\noutput_right = \"card:playback_2\"\n",
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.state_warning, None);
+    assert_eq!(config.bank_kind, BankKind::Bass);
+    assert_eq!(config.bank_dir, dir.join("bank-bass"));
+    assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/state-irs"));
+    assert_eq!(config.ports.input, "card:capture_1");
+    assert_eq!(config.ports.output_left, "card:playback_1");
+    assert_eq!(config.ports.output_right, "card:playback_2");
+    assert_eq!(config.state_file, dir.join("state.toml"));
+}
+
+#[test]
+fn state_toml_keeps_config_bank_dir() {
+    let path = config_file("state-bank-dir", "bank_dir = \"/srv/xg/bank\"\n");
+    fs::write(
+        path.parent().unwrap().join("state.toml"),
+        "bank_kind = \"bass\"\n",
+    )
+    .unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.bank_dir, PathBuf::from("/srv/xg/bank"));
+    assert_eq!(config.ir_dir, PathBuf::from("/srv/xg/bank"));
+}
+
+#[test]
+fn bad_state_toml_is_ignored_with_warning() {
+    let path = config_file("state-bad", "buffer_size = 64\n");
+    let state = path.parent().unwrap().join("state.toml");
+    fs::write(&state, "bank_kind = \"bass\"\n[ports\n").unwrap();
+    let config = Config::load(Some(&path)).unwrap();
+    assert_eq!(config.buffer_size, 64);
+    assert_eq!(config.bank_kind, BankKind::Guitar);
+    let warning = config.state_warning.unwrap();
+    assert!(
+        warning.starts_with(&format!("{}: line 2:", state.display())),
+        "{warning}"
+    );
 }

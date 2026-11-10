@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `ir_list`, `rack_ir` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -455,3 +455,99 @@ Response:
 | `muted` | The Mute state now. |
 
 Errors: `on` missing or not a boolean gets the transport's `invalid request: ` error, e.g. ``invalid request: missing field `on` ``; Mute is unchanged.
+
+## ports
+
+Lists the JACK audio ports of other clients, physical or not (devices, PipeWire split nodes, other apps), and which of them the Daemon's ports are linked to. The ports are read on every request.
+
+Request:
+
+```json
+{"cmd":"ports"}
+```
+
+Response:
+
+```json
+{"ok":true,"capture":["Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","Scarlett Solo 4th Gen Input 1 Inst/Line:capture_FL"],"playback":["Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL","Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"],"connected":{"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","output_left":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL","output_right":null}}
+```
+
+| Key | Value |
+| --- | --- |
+| `capture` | Ports the Daemon's input can take, sorted bytewise. |
+| `playback` | Ports the Daemon's outputs can feed, sorted bytewise. |
+| `connected` | `input`: the capture port linked to the Daemon's `in`; `output_left`, `output_right`: the playback ports `out_l` and `out_r` feed; each `null` when the Daemon made no such link. Links made by other tools are not listed. |
+
+## set_ports
+
+Links the Daemon's three ports to the named ports now: links the Daemon made that differ are dropped, the new ones made, ones already in place kept. The names are stored in `state.toml` (see the README's Config section), so the next start connects them again; `config.toml` is not changed. The Revision increments.
+
+Request:
+
+```json
+{"cmd":"set_ports","input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","output_left":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL","output_right":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}
+```
+
+Response: `connected` as in `ports`.
+
+```json
+{"ok":true,"connected":{"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","output_left":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL","output_right":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}}
+```
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `no capture port '<name>'` | `input` is not in the `capture` list of `ports`; nothing changes. |
+| `no playback port '<name>'` | `output_left` or `output_right` is not in the `playback` list; nothing changes. |
+| `cannot save <path>: <reason>` | `state.toml` cannot be written; nothing changes. |
+| `cannot connect <from> -> <to>: <reason>` | A link failed after the names were stored; the other links are made and `ports` shows the result. Several failures are joined with `; `. |
+
+## settings
+
+Request:
+
+```json
+{"cmd":"settings"}
+```
+
+Response:
+
+```json
+{"ok":true,"bank_kind":"guitar","bank_dir":"/home/you/.config/xguitare/bank","ir_dir":"/home/you/.config/xguitare/bank"}
+```
+
+| Key | Value |
+| --- | --- |
+| `bank_kind` | `guitar` or `bass`. |
+| `bank_dir` | The Bank directory in use. |
+| `ir_dir` | The IR directory `ir_list` lists. |
+
+## set_settings
+
+Stores and applies `bank_kind`, `ir_dir`, or both; a key left out keeps its value. Both are stored in `state.toml`; `config.toml` is not changed. The Revision increments.
+
+- `bank_kind` different from the current one switches the Bank: `guitar` uses `<config dir>/bank`, `bass` `<config dir>/bank-bass`, where `<config dir>` holds the config file. A missing directory is first created with that kind's starter Presets and cabinet IR. Program 0 of the new Bank then loads; if it does not, the passthrough Rack runs and no Preset is active. When `ir_dir` is set neither in `config.toml` nor through `set_settings`, the IR directory follows the Bank directory. The same `bank_kind` as now changes nothing but is stored.
+- `ir_dir` must be an existing directory; `ir_list` lists it from then on, and Cabinet IR names are looked up there first. The Rack playing now is not rebuilt.
+
+Request:
+
+```json
+{"cmd":"set_settings","bank_kind":"bass"}
+```
+
+Response: as `settings`, after the change.
+
+```json
+{"ok":true,"bank_kind":"bass","bank_dir":"/home/you/.config/xguitare/bank-bass","ir_dir":"/home/you/.config/xguitare/bank-bass"}
+```
+
+Errors (on each, nothing changes):
+
+| `error` | When |
+| --- | --- |
+| `bank_dir is set in config.toml; edit it there` | `bank_kind` would switch the Bank, but the config file names `bank_dir`. |
+| `ir_dir '<path>' is not a directory` | `ir_dir` does not exist or is not a directory. |
+| `cannot create bank <dir>: <reason>`, `cannot read bank <dir>: <reason>` | The new Bank directory cannot be seeded or read. |
+| `cannot save <path>: <reason>` | `state.toml` cannot be written. |
+| `invalid request: unknown variant ...` | `bank_kind` is neither `guitar` nor `bass`. |

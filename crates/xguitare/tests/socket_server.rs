@@ -4,15 +4,36 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
 use xguitare_core::control::{EngineState, PeakMeters, Value};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
+use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::tuner::Tuner;
-use xguitare_core::{Bank, Config};
+use xguitare_core::{Bank, Config, Ports};
+
+struct NoPorts;
+
+impl AudioPorts for NoPorts {
+    fn audio_ports(&self) -> (Vec<AvailablePort>, Vec<AvailablePort>) {
+        (Vec::new(), Vec::new())
+    }
+
+    fn own_ports(&self) -> Ports {
+        unreachable!("the socket tests never ask for ports")
+    }
+
+    fn connect(&self, _: &str, _: &str) -> Result<(), String> {
+        unreachable!("the socket tests never connect")
+    }
+
+    fn disconnect(&self, _: &str, _: &str) -> Result<(), String> {
+        unreachable!("the socket tests never disconnect")
+    }
+}
 
 struct Server {
     path: PathBuf,
@@ -65,7 +86,11 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
     };
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket
-        .spawn(Arc::new(Mutex::new(state)), Arc::clone(&stop))
+        .spawn(
+            Arc::new(Mutex::new(state)),
+            Weak::<NoPorts>::new(),
+            Arc::clone(&stop),
+        )
         .unwrap();
     Server {
         path,
