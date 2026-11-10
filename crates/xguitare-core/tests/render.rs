@@ -161,6 +161,24 @@ fn project_range_tail_stops_at_ten_seconds_with_a_long_ringing_reverb() {
 }
 
 #[test]
+fn project_range_tail_ends_half_a_second_after_an_echo_dies_away() {
+    let takes = takes(&[("takes/a-1.wav", tone(4_800, 0.9))]);
+    let mut song = project(vec![track("a", vec![item(0, "takes/a-1.wav", 4_800)])]);
+    song.master.modules = vec![module(
+        "delay",
+        &[("time", 100.0), ("feedback", 50.0), ("mix", 100.0)],
+    )];
+    let mut render = new_render("tail-echo", &song, &takes, RenderRange::Project);
+    let (left, right) = render_all(&mut render);
+    assert!(left.len() > 4_800 + HALF_SECOND, "{}", left.len());
+    assert!(left.len() < 4_800 + TEN_SECONDS, "{}", left.len());
+    let level = |n: usize| left[n].abs().max(right[n].abs());
+    let quiet_from = left.len() - HALF_SECOND;
+    assert!((quiet_from..left.len()).all(|n| level(n) < 3.2e-5));
+    assert!(level(quiet_from - 1) >= 3.2e-5);
+}
+
+#[test]
 fn loop_range_is_exactly_the_loop_region() {
     let samples = tone(20_000, 0.5);
     let takes = takes(&[("takes/a-1.wav", samples.clone())]);
