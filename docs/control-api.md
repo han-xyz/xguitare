@@ -1167,7 +1167,7 @@ Errors:
 | `a render is already running` | Another Render has not ended yet. |
 | `nothing to render` | No Track has an Item. |
 | `no loop region` | `range` is `loop` and the loop start is not before its end. |
-| `invalid render name '<name>'` | `name` is empty, starts with `.`, or contains `/` or `..`. |
+| `invalid render name '<name>'` | `name` is empty, starts with `.`, or contains `/`, `..` or a control character (shown escaped, as `\n`). |
 | `renders is not a directory` | The Project folder's `renders` is a symlink or not a directory. |
 | `invalid request: bits must be 16, 24 or "32f" …` | `bits` has another value. |
 

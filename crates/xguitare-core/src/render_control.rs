@@ -119,15 +119,15 @@ fn is_running(state: &EngineState) -> bool {
         .is_some_and(|job| job.state() == RenderState::Running)
 }
 
-/// A render name becomes a file name, so it must be one path segment that is not hidden.
+/// A render name becomes a file name, so it must be one path segment that is not hidden; it is logged, so it has no control characters.
 fn checked_render_name(name: &str) -> Result<&str, String> {
     let invalid = name.is_empty()
         || name.contains('/')
-        || name.contains('\0')
+        || name.contains(char::is_control)
         || name.contains("..")
         || name.starts_with('.');
     if invalid {
-        return Err(format!("invalid render name '{name}'"));
+        return Err(format!("invalid render name '{}'", name.escape_debug()));
     }
     Ok(name)
 }

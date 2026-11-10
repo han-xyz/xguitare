@@ -195,6 +195,13 @@ fn refusals_are_verbatim() {
             format!("invalid render name '{name}'")
         );
     }
+    for (name, shown) in [("a\nb", "a\\nb"), ("bell\u{7}", "bell\\u{7}")] {
+        let line = json!({"cmd": "render", "name": name}).to_string();
+        assert_eq!(
+            error(&mut s, &line),
+            format!("invalid render name '{shown}'")
+        );
+    }
     assert!(
         error(&mut s, r#"{"cmd":"render","bits":32}"#)
             .starts_with(r#"invalid request: bits must be 16, 24 or "32f""#)
