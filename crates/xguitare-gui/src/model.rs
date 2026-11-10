@@ -28,6 +28,7 @@ pub const CLIP_DB: f64 = 0.0;
 pub const PEAK_HOLD_FOR: Duration = Duration::from_secs(2);
 pub const CENTS_SPAN: i64 = 50;
 pub const IN_TUNE_CENTS: i64 = 3;
+pub const NO_SIGNAL: &str = "no signal";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
@@ -599,6 +600,13 @@ pub fn cents_fraction(cents: i64) -> f32 {
 
 pub fn cents_text(cents: i64) -> String {
     format!("{cents:+} ct")
+}
+
+pub fn tuner_header_text(reading: Option<&TunerReading>) -> String {
+    match reading {
+        Some(reading) => format!("{}  {}", reading.note, cents_text(reading.cents)),
+        None => NO_SIGNAL.to_string(),
+    }
 }
 
 pub fn in_tune(cents: i64) -> bool {

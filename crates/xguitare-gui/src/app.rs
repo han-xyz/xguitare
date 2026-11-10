@@ -18,11 +18,11 @@ use xguitare_core::{BankKind, Config};
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KeyEvent, KeyModifiers, Link,
-    ModuleType, ParamRow, PeakHold, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading,
-    add_command, bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, engine_readout,
-    filter_bank, forget_removed_units, in_tune, key_to_command, knob_fraction, knob_param_value,
-    link_text, move_target, open_units_from_string, open_units_to_string, palette, param_rows,
-    peak_db, quit_commands, rack_channels, tuner_reading, tuner_toggle, unit_suffix,
+    ModuleType, NO_SIGNAL, ParamRow, PeakHold, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading,
+    add_command, bank_rows, cabinet_ir, cents_fraction, drop_index, engine_readout, filter_bank,
+    forget_removed_units, in_tune, key_to_command, knob_fraction, knob_param_value, link_text,
+    move_target, open_units_from_string, open_units_to_string, palette, param_rows, peak_db,
+    quit_commands, rack_channels, tuner_header_text, tuner_reading, tuner_toggle, unit_suffix,
 };
 use xguitare_gui::widgets::{self, KnobSize, colour};
 
@@ -52,7 +52,6 @@ const OPEN_CHEVRON: &str = "▼";
 const CLOSED_CHEVRON: &str = "▶";
 const DROP_LINE_WIDTH: f32 = 2.0;
 const TUNER_LABEL: &str = "Tuner";
-const TUNER_OFF: &str = "Tuner off";
 const ADD_LABEL: &str = "Add a Module";
 const PRESET_NAME_SIZE: f32 = 30.0;
 const SIDEBAR_BUTTON_HEIGHT: f32 = 40.0;
@@ -63,7 +62,6 @@ const SEARCH_HINT: &str = "Search by name or number";
 const ADD_COMBO_WIDTH: f32 = 320.0;
 const NOTE_SIZE: f32 = 96.0;
 const NO_SIGNAL_SIZE: f32 = 40.0;
-const NO_SIGNAL: &str = "no signal";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -591,12 +589,7 @@ fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Comman
         ui.horizontal(|ui| {
             unit_lamp(ui, colour(palette().green), open);
             unit_name(ui, TUNER_LABEL);
-            let text = match (open, &reading) {
-                (false, _) => TUNER_OFF.to_string(),
-                (true, Some(reading)) => format!("{}  {}", reading.note, cents_text(reading.cents)),
-                (true, None) => NO_SIGNAL.to_string(),
-            };
-            ui.label(RichText::new(text).strong());
+            ui.label(RichText::new(tuner_header_text(reading.as_ref())).strong());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let label = if open { "Close" } else { TUNER_LABEL };
                 if ui.add(Button::new(label).min_size(BUTTON_SIZE)).clicked() {

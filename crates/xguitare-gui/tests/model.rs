@@ -14,15 +14,15 @@ use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
-    KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, PeakHold, Rgb,
-    Throttle, TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir,
+    KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL, ParamRow, PeakHold,
+    Rgb, Throttle, TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir,
     cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout,
     failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_to_command,
     knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
     ladder_segments, latency_ms, meter_fraction, module_types, move_target, open_units_from_string,
     open_units_to_string, palette, param_rows, peak_fraction, quit_commands, rack_channels,
-    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, tuner_reading,
-    tuner_toggle, unit_suffix,
+    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line,
+    tuner_header_text, tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -1207,4 +1207,15 @@ fn open_units_forget_only_a_removed_module() {
         }],
     );
     assert_eq!(open, ["cabinet"].map(str::to_string).into());
+}
+
+#[test]
+fn tuner_header_shows_note_and_cents_or_no_signal() {
+    let reading = TunerReading {
+        note: "E1".into(),
+        hz: 41.2,
+        cents: -3,
+    };
+    assert_eq!(tuner_header_text(Some(&reading)), "E1  -3 ct");
+    assert_eq!(tuner_header_text(None), NO_SIGNAL);
 }
