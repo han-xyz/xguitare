@@ -34,10 +34,8 @@ pub(crate) fn render(
     if is_running(state) {
         return Err(RENDER_RUNNING.to_string());
     }
-    let name = match name {
-        Some(name) => checked_render_name(name)?.to_string(),
-        None => folder_name(dir),
-    };
+    let name = name.map_or_else(|| folder_name(dir), str::to_string);
+    checked_render_name(&name)?;
     let range = range.unwrap_or(RenderRange::Project);
     let render = Render::new(
         &state.config,
