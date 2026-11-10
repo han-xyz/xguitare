@@ -13,7 +13,7 @@ use crate::model::{
     AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
     SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
     filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
-    set_settings_command, settings_draft, tuner_toggle,
+    set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
 use crate::rack::muted_text;
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
@@ -540,11 +540,8 @@ pub fn footer(
             ui.label(text);
         }
         let status = snapshot.status.as_ref();
-        if let Some(shown) = removed
-            .as_ref()
-            .filter(|removed| removed.is_shown(status, now))
-        {
-            ui.label(format!("Removed {} \u{2014}", shown.id));
+        if let Some(id) = shown_undo(removed, status, now).map(|shown| shown.id.clone()) {
+            ui.label(format!("Removed {id} \u{2014}"));
             if ui.add(outlined_button("Undo")).clicked() {
                 undo = removed
                     .take()

@@ -30,7 +30,7 @@ use xguitare_gui::model::{
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, Outgoing, RemovedUnit, Restore, ScreenRect, bypassed,
     closed_unit_rows, drag_outcome, drop_slot, module_title, mute_banner, palette_place, restore,
-    unit_style,
+    shown_undo, unit_style,
 };
 
 struct TempDir(PathBuf);
@@ -1430,6 +1430,16 @@ fn removed_unit_offers_no_undo_after_the_preset_changes() {
         assert!(!removed.is_shown(Some(&other), now));
     }
     assert!(!removed.is_shown(None, now));
+}
+
+#[test]
+fn undo_dropped_by_a_preset_change_never_comes_back() {
+    let now = Instant::now();
+    let mut removed = RemovedUnit::new(&undo_payload(), Some(&funk_status()), "lead", now);
+    assert!(shown_undo(&mut removed, Some(&funk_status()), now).is_some());
+    let blues = json!({"preset": "Blues", "program": 1, "revision": 5});
+    assert!(shown_undo(&mut removed, Some(&blues), now).is_none());
+    assert!(shown_undo(&mut removed, Some(&funk_status()), now).is_none());
 }
 
 #[test]

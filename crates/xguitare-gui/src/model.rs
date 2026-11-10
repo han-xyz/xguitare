@@ -473,6 +473,21 @@ impl RemovedUnit {
     }
 }
 
+/// The Undo offer to show now; an offer not shown, because its time ran out or the active Preset changed, is dropped for good, so that it never comes back when that Preset does.
+pub fn shown_undo<'a>(
+    removed: &'a mut Option<RemovedUnit>,
+    status: Option<&Value>,
+    now: Instant,
+) -> Option<&'a RemovedUnit> {
+    if removed
+        .as_ref()
+        .is_some_and(|removed| !removed.is_shown(status, now))
+    {
+        *removed = None;
+    }
+    removed.as_ref()
+}
+
 /// The `status` payload's Preset name and program; nulls without a status.
 fn preset_of(status: Option<&Value>) -> (Value, Value) {
     status.map_or((Value::Null, Value::Null), |status| {
