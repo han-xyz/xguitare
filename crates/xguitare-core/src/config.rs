@@ -139,6 +139,9 @@ struct PortsFile {
 }
 
 impl Config {
+    /// # Errors
+    ///
+    /// A [`ConfigError`] when there is no home directory, the uid cannot be read, an explicit `path` is missing, the file cannot be read or parsed, or a value is out of range.
     pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
         let dirs = ProjectDirs::from("", "", "xguitare").ok_or(ConfigError::NoHomeDir)?;
         let default_path = dirs.config_dir().join(CONFIG_FILE);
@@ -297,6 +300,10 @@ pub struct SocketDirError {
 }
 
 /// Checks that `dir`, the `/tmp` fallback socket directory, is a real directory owned by this user with mode 0700; a wrong mode on our own directory is tightened rather than refused.
+///
+/// # Errors
+///
+/// A [`SocketDirError`] naming `dir` when it is a symlink, not a directory, owned by another user, or its mode cannot be changed.
 pub fn secure_socket_dir(dir: &Path) -> Result<(), SocketDirError> {
     let uid = current_uid().map_err(|err| socket_dir_error(dir, err.to_string()))?;
     let meta = owned_dir(dir, uid)?;
@@ -308,6 +315,10 @@ pub fn secure_socket_dir(dir: &Path) -> Result<(), SocketDirError> {
 }
 
 /// Refuses `dir` unless it is a real directory owned by `uid` with mode 0700; unlike `secure_socket_dir` it never changes the mode.
+///
+/// # Errors
+///
+/// A [`SocketDirError`] naming `dir` when it is a symlink, not a directory, owned by another uid, or not mode 0700.
 pub fn check_private_dir(dir: &Path, uid: u32) -> Result<(), SocketDirError> {
     let mode = owned_dir(dir, uid)?.mode() & 0o777;
     if mode != SOCKET_DIR_MODE {
@@ -344,6 +355,10 @@ fn socket_dir_error(dir: &Path, reason: String) -> SocketDirError {
 }
 
 /// This process's effective uid, the owner of `/proc/self`.
+///
+/// # Errors
+///
+/// The I/O error when `/proc/self` cannot be read.
 pub fn current_uid() -> std::io::Result<u32> {
     Ok(fs::metadata("/proc/self")?.uid())
 }

@@ -81,6 +81,9 @@ struct ModuleEntry {
 }
 
 impl Preset {
+    /// # Errors
+    ///
+    /// A [`PresetError`] for a TOML syntax error, an unknown Module type or Parameter, a duplicate id, a missing or out-of-Bank Cabinet IR name, a non-finite Parameter value, or a Module order that breaks the Rack layout.
     pub fn parse(text: &str) -> Result<Preset, PresetError> {
         let file: PresetFile = toml::from_str(text).map_err(|error| {
             let (line, col) = crate::toml_position(text, &error);
@@ -114,6 +117,14 @@ impl Preset {
     }
 
     /// Checks the Module order against the Rack's layout rules without building any Module.
+    ///
+    /// # Errors
+    ///
+    /// The [`RackError`] for the first layout rule the order breaks.
+    ///
+    /// # Panics
+    ///
+    /// When a Module names an unregistered type; [`Preset::parse`] never yields one.
     pub fn validate_layout(&self) -> Result<(), RackError> {
         let registry = ModuleRegistry::default();
         let probes: Vec<(String, Box<dyn Module>)> = self
@@ -132,6 +143,10 @@ impl Preset {
         Rack::new(probes).map(|_| ())
     }
 
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the expect is an invariant: a PresetFile always serialises"
+    )]
     pub fn to_toml(&self) -> String {
         let file = PresetFile {
             name: self.name.clone(),
@@ -154,6 +169,12 @@ impl Preset {
         toml::to_string_pretty(&file).expect("a PresetFile always serialises to TOML")
     }
 
+    /// # Errors
+    ///
+    /// [`BuildError::Layout`] when the Module order breaks a Rack layout rule; a Cabinet IR that fails to load is a [`BuildWarning`] instead.
+    /// # Panics
+    ///
+    /// When a Module names an unregistered type; [`Preset::parse`] never yields one.
     pub fn build(
         &self,
         sample_rate: f32,

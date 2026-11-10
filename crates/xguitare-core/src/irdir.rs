@@ -4,6 +4,10 @@ use std::path::Path;
 const IR_EXTENSION: &str = "wav";
 
 /// Every `.wav` file (extension case-insensitive) under `dir`, recursively, as `/`-separated names relative to `dir`, sorted bytewise. Entries whose name starts with `.` or is not UTF-8 are skipped, and so are subdirectories that cannot be read; a symlink is followed, but not a symlink inside a directory reached through one. Fails with `ir_dir <dir>: <io error>` only when `dir` itself cannot be read.
+///
+/// # Errors
+///
+/// `ir_dir <dir>: <io error>` when `dir` itself cannot be read.
 pub fn list_irs(dir: &Path) -> Result<Vec<String>, String> {
     let entries = fs::read_dir(dir).map_err(|err| format!("ir_dir {}: {err}", dir.display()))?;
     let mut names = Vec::new();

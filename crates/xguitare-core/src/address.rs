@@ -18,6 +18,9 @@ pub enum ResolveError {
 }
 
 impl ParamAddress {
+    /// # Errors
+    ///
+    /// An [`AddressError`] unless `input` is `<module>.<param>` with both parts non-empty and no second `.`.
     pub fn parse(input: &str) -> Result<ParamAddress, AddressError> {
         match input.split_once('.') {
             Some((module, param))
@@ -33,6 +36,9 @@ impl ParamAddress {
     }
 }
 
+/// # Errors
+///
+/// [`ResolveError::UnknownModule`] when no Module of `preset` has the id, [`ResolveError::UnknownParam`] when that Module has no such Parameter.
 pub fn resolve(preset: &Preset, addr: &ParamAddress) -> Result<(usize, usize), ResolveError> {
     let module_idx = preset
         .modules

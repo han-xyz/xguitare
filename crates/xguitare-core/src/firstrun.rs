@@ -49,6 +49,10 @@ pub struct Created {
 }
 
 /// Creates `bank_dir` with the starter Presets of `kind` and their cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `.<bank name>.xguitare-staging` beside it (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
+///
+/// # Errors
+///
+/// The I/O error when `bank_dir` has no final name or the staging directory, a Preset, the Cabinet IR or the final rename cannot be written.
 pub fn ensure_bank(
     bank_dir: &Path,
     kind: BankKind,

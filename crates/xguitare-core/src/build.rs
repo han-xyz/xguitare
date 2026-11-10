@@ -6,6 +6,10 @@ use crate::{BuildError, BuildWarning, Config, Preset};
 pub(crate) const ENGINE_BUSY: &str = "engine busy";
 
 /// Builds `preset`'s Rack at `sample_rate` for blocks of up to `max_frames`, resolving IR names under the config's `ir_dir` then its Bank dir.
+///
+/// # Errors
+///
+/// [`BuildError::Layout`] when the Module order breaks a Rack layout rule.
 pub fn build_rack(
     config: &Config,
     sample_rate: f32,
@@ -22,6 +26,10 @@ pub fn build_rack(
 }
 
 /// Drains the Racks the audio thread retired, then pushes `rack` as a `SwapRack`; fails with `engine busy` when the command queue is full.
+///
+/// # Errors
+///
+/// `engine busy` when the command queue is full.
 pub fn swap_rack(queues: &mut EngineQueues, rack: Rack) -> Result<(), String> {
     queues.drain_from_audio();
     queues

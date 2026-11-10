@@ -20,7 +20,13 @@ pub trait AudioPorts {
     fn audio_ports(&self) -> (Vec<AvailablePort>, Vec<AvailablePort>);
     /// The Daemon's own `in`, `out_l` and `out_r` as full port names.
     fn own_ports(&self) -> Ports;
+    /// # Errors
+    ///
+    /// The reason the link from `from` to `to` cannot be made.
     fn connect(&self, from: &str, to: &str) -> Result<(), String>;
+    /// # Errors
+    ///
+    /// The reason the link from `from` to `to` cannot be removed.
     fn disconnect(&self, from: &str, to: &str) -> Result<(), String>;
 }
 

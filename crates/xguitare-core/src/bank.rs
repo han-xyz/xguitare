@@ -16,6 +16,9 @@ pub enum BankEntry {
 }
 
 impl Bank {
+    /// # Errors
+    ///
+    /// The I/O error when `dir` or one of its entries cannot be read; a Preset file that fails to read or parse is an [`BankEntry::Invalid`] entry instead.
     pub fn load_dir(dir: &Path) -> Result<Bank, std::io::Error> {
         let mut files = Vec::new();
         for dir_entry in fs::read_dir(dir)? {

@@ -27,6 +27,10 @@ pub enum IrError {
 }
 
 /// Reads at most `max_ms` of a 16/24/32-bit PCM or 32-bit float wav with one or two channels, refuses a non-finite sample, then resamples to `engine_rate`, truncates to `max_ms` and normalises to unit energy. `name` is the Cabinet IR name as written in the Preset, used in the non-finite error.
+///
+/// # Errors
+///
+/// An [`IrError`] when the file cannot be opened or decoded, has an unsupported format or channel count, or holds a non-finite sample.
 pub fn load_ir(
     path: &Path,
     name: &str,

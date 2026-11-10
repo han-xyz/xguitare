@@ -258,6 +258,10 @@ fn handle_from(
 }
 
 /// Handles one request line from `connection` and returns the response line, without its newline, and the build warnings as `handle` does; `ports` serves `ports` and `set_ports` as in `handle_with_ports`.
+#[allow(
+    clippy::missing_panics_doc,
+    reason = "the expect is an invariant: a Response always serialises"
+)]
 pub fn handle_line(
     state: &mut EngineState,
     ports: Option<&dyn AudioPorts>,
@@ -298,6 +302,10 @@ pub enum Reprepare {
 }
 
 /// Rebuilds the active Preset's Rack, or the empty passthrough Rack when none is active or the build fails, for `buffer_size` frames and pushes it as a `SwapRack`; fails only with `engine busy`, leaving the state unchanged.
+///
+/// # Errors
+///
+/// `engine busy` when the command queue is full.
 pub fn reprepare(state: &mut EngineState, buffer_size: u32) -> Result<Reprepare, String> {
     let max_frames = buffer_size as usize;
     let outcome = rebuild(state, state.sample_rate, max_frames)?;
@@ -315,6 +323,10 @@ pub fn follow_sample_rate(state: &mut EngineState) -> Option<Result<Reprepare, S
 }
 
 /// Rebuilds the live Rack as `reprepare` does, IRs resampled, and the Tuner at `sample_rate`, and sends the switcher the crossfade and Mute ramp lengths at that rate ahead of the Rack; fails only with `engine busy`, leaving the state unchanged.
+///
+/// # Errors
+///
+/// `engine busy` when the command queue has fewer than two free slots.
 pub fn change_sample_rate(state: &mut EngineState, sample_rate: u32) -> Result<Reprepare, String> {
     let sample_rate = sample_rate as f32;
     let fades = FadeLengths::at(sample_rate, state.config.crossfade_ms);
@@ -363,12 +375,19 @@ fn rebuild(
 }
 
 impl Request {
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the expect is an invariant: a Request always serialises"
+    )]
     pub fn to_line(&self) -> String {
         serde_json::to_string(self).expect("a Request always serialises to JSON")
     }
 }
 
 impl Response {
+    /// # Errors
+    ///
+    /// The JSON error when `line` is not a Response.
     pub fn from_line(line: &str) -> Result<Response, serde_json::Error> {
         serde_json::from_str(line)
     }
@@ -491,6 +510,10 @@ fn swap_in(
 }
 
 /// The empty Rack, which sends the input to both outputs unchanged.
+#[allow(
+    clippy::missing_panics_doc,
+    reason = "the expect is an invariant: an empty Rack breaks no layout rule"
+)]
 pub fn passthrough_rack(sample_rate: f32, max_frames: usize) -> Rack {
     let mut rack = Rack::new(Vec::new()).expect("an empty Rack has no layout to violate");
     rack.prepare(sample_rate, max_frames);
@@ -669,6 +692,10 @@ fn write_through(path: &Path, text: &str) -> io::Result<()> {
 }
 
 /// Creates the file `path` names with `text` by `link`ing a temp file beside it to `path` (`save` with `as` passes `fs::hard_link`), so a file or symlink already there fails with `AlreadyExists` and is left as it is. When the filesystem has no hard links (EPERM, EOPNOTSUPP, EXDEV), `path` is created and written directly, still never replacing a file.
+///
+/// # Errors
+///
+/// `AlreadyExists` when `path` already names a file or symlink; the I/O error when the temp file or `path` cannot be created or written.
 pub fn write_new(
     path: &Path,
     text: &str,
