@@ -1,6 +1,6 @@
 use egui::{
-    Color32, EventFilter, Mesh, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Visuals,
-    pos2, vec2,
+    Align2, Button, Color32, EventFilter, FontId, Mesh, Painter, Pos2, Rect, Response, RichText,
+    Role, Sense, Stroke, Ui, Vec2, Visuals, WidgetInfo, pos2, vec2,
 };
 
 use crate::model::{
@@ -29,6 +29,12 @@ const LAMP_GLOW_ALPHA: f32 = 0.3;
 const LADDER_SEGMENT_SIZE: Vec2 = Vec2::new(14.0, 10.0);
 const LADDER_GAP: f32 = 3.0;
 const LADDER_SEGMENT_RADIUS: u8 = 1;
+const CORNER_RADIUS: u8 = 3;
+const BANK_ROW_HEIGHT: f32 = 40.0;
+const BANK_ROW_BORDER: f32 = 3.0;
+const BANK_ROW_PADDING: f32 = 10.0;
+const BANK_NUMBER_WIDTH: f32 = 18.0;
+const BANK_ROW_TEXT_SIZE: f32 = 15.0;
 const IN_TUNE_COLOUR: Color32 = Color32::GREEN;
 const OUT_OF_TUNE_COLOUR: Color32 = Color32::from_rgb(255, 176, 0);
 
@@ -39,7 +45,7 @@ pub enum KnobSize {
 }
 
 impl KnobSize {
-    fn diameter(self) -> f32 {
+    pub fn diameter(self) -> f32 {
         match self {
             KnobSize::Small => SMALL_KNOB_DIAMETER,
             KnobSize::Large => LARGE_KNOB_DIAMETER,
@@ -83,11 +89,85 @@ pub fn visuals() -> Visuals {
         state.bg_stroke.color = colour(colours.button_border);
         state.fg_stroke.color = colour(colours.text);
     }
+    for state in [
+        &mut widgets.noninteractive,
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        state.corner_radius = CORNER_RADIUS.into();
+    }
     widgets.inactive.bg_fill = colour(colours.unit_open);
     widgets.inactive.weak_bg_fill = colour(colours.unit_open);
     widgets.hovered.weak_bg_fill = colour(colours.edge_light);
     widgets.active.weak_bg_fill = colour(colours.button_border);
     visuals
+}
+
+/// Light fill and dark text: the one action a group of buttons is for.
+pub fn primary_button(text: &str) -> Button<'static> {
+    let colours = palette();
+    Button::new(RichText::new(text).color(colour(colours.ground)))
+        .fill(colour(colours.text))
+        .stroke(Stroke::NONE)
+}
+
+pub fn outlined_button(text: &str) -> Button<'static> {
+    Button::new(text.to_string())
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, colour(palette().button_border)))
+}
+
+/// Outlined in the clip red, for an action that removes something.
+pub fn warning_button(text: &str) -> Button<'static> {
+    let red = colour(palette().red);
+    Button::new(RichText::new(text).color(red))
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, red))
+}
+
+/// A Bank row: the program number in a muted column, then the name; the active row has an amber left border on a lighter fill. `enabled` false greys the row and takes no click.
+pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bool) -> Response {
+    let colours = palette();
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let size = vec2(ui.available_width(), BANK_ROW_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let label = format!("{number} {name}");
+    response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, active, &label));
+    let painter = ui.painter();
+    if active {
+        painter.rect_filled(rect, 0, colour(colours.row_active));
+        let border = Rect::from_min_size(rect.min, vec2(BANK_ROW_BORDER, rect.height()));
+        painter.rect_filled(border, 0, colour(colours.yellow));
+    } else if response.hovered() {
+        painter.rect_filled(rect, 0, colour(colours.unit));
+    }
+    let font = FontId::proportional(BANK_ROW_TEXT_SIZE);
+    let number_left = rect.left() + BANK_ROW_BORDER + BANK_ROW_PADDING;
+    painter.text(
+        pos2(number_left, rect.center().y),
+        Align2::LEFT_CENTER,
+        number,
+        font.clone(),
+        colour(colours.muted),
+    );
+    let name_colour = if enabled { colours.text } else { colours.muted };
+    painter.text(
+        pos2(
+            number_left + BANK_NUMBER_WIDTH + BANK_ROW_PADDING,
+            rect.center().y,
+        ),
+        Align2::LEFT_CENTER,
+        name,
+        font,
+        colour(name_colour),
+    );
+    response
 }
 
 pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) -> RackKnob {

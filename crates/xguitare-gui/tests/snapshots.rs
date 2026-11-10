@@ -273,6 +273,34 @@ fn closed_units_wrap_their_knobs_in_the_minimum_window() {
 }
 
 #[test]
+fn closed_unit_knobs_stay_left_of_the_move_buttons() {
+    for width in [1024.0, 1100.0, 1280.0, 1440.0, 1920.0] {
+        let (harness, _) = harness_sized(Vec2::new(width, 900.0));
+        for unit in ["compressor", "preamp", "tonestack", "cabinet", "chorus"] {
+            let unit_rect = harness.get_by_label(&format!("{unit} unit")).rect();
+            let move_left = harness
+                .get_all_by_role_and_label(Role::Button, "↑")
+                .chain(harness.get_all_by_role_and_label(Role::Button, "↓"))
+                .map(|button| button.rect())
+                .filter(|button| unit_rect.contains_rect(*button))
+                .map(|button| button.left())
+                .fold(f32::INFINITY, f32::min);
+            let knobs_right = harness
+                .get_all_by_role(Role::TextInput)
+                .map(|field| field.rect())
+                .filter(|field| unit_rect.contains_rect(*field))
+                .map(|field| field.right())
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert!(move_left.is_finite() && knobs_right.is_finite());
+            assert!(
+                knobs_right < move_left,
+                "{unit} at {width} px: knobs end at {knobs_right}, ↑/↓ start at {move_left}"
+            );
+        }
+    }
+}
+
+#[test]
 fn right_click_on_a_knob_focuses_its_value_field() {
     let (mut harness, _) = harness();
     let field = harness

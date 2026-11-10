@@ -424,6 +424,8 @@ pub struct Palette {
     pub edge_light: Rgb,
     pub edge_dark: Rgb,
     pub button_border: Rgb,
+    pub outline: Rgb,
+    pub row_active: Rgb,
     pub text: Rgb,
     pub muted: Rgb,
     pub knob_body: Rgb,
@@ -448,6 +450,8 @@ pub fn palette() -> Palette {
         edge_light: (0x3d, 0x44, 0x4b),
         edge_dark: (0x11, 0x13, 0x16),
         button_border: (0x4a, 0x52, 0x5a),
+        outline: (0x34, 0x3a, 0x40),
+        row_active: (0x2d, 0x32, 0x37),
         text: (0xe4, 0xe7, 0xea),
         muted: (0xa9, 0xb0, 0xb7),
         knob_body: (0x15, 0x17, 0x1a),
@@ -745,7 +749,7 @@ pub fn cents_fraction(cents: i64) -> f32 {
 }
 
 pub fn cents_text(cents: i64) -> String {
-    format!("{cents:+} ct")
+    format!("{cents:+} ct").replace('-', "\u{2212}")
 }
 
 pub fn tuner_header_text(reading: Option<&TunerReading>) -> String {
@@ -778,11 +782,12 @@ pub fn peak_text(held_db: Option<f64>, clipped: bool) -> String {
     let Some(db) = held_db else {
         return "peak —".to_string();
     };
-    if clipped {
+    let text = if clipped {
         format!("peak {db:+.1} dB, clipped")
     } else {
         format!("peak {db:+.1} dB")
-    }
+    };
+    text.replace('-', "\u{2212}")
 }
 
 pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {
@@ -809,10 +814,7 @@ pub fn engine_readout(status: Option<&Value>) -> Vec<(String, String)> {
     [
         ("Rate", format!("{} kHz", rate as f64 / 1000.0)),
         ("Buffer", format!("{buffer} frames")),
-        (
-            "Buffer latency",
-            format!("{:.1} ms", latency_ms(buffer, rate)),
-        ),
+        ("Latency", format!("{:.1} ms", latency_ms(buffer, rate))),
         ("Xruns", status["xruns"].to_string()),
         ("Daemon", "connected".to_string()),
     ]
@@ -903,6 +905,15 @@ pub fn param_label(param: &str) -> String {
         .next()
         .map(|first| first.to_uppercase().chain(chars).collect())
         .unwrap_or_default()
+}
+
+/// A unit's name: the Module id in sentence case, its type after it when the two differ.
+pub fn module_title(module: &str, type_name: &str) -> String {
+    let title = param_label(module);
+    if type_name.is_empty() || type_name == module {
+        return title;
+    }
+    format!("{title} ({type_name})")
 }
 
 /// The value as a knob shows it: one decimal at most, none on a whole value, a Unicode minus, `kHz` from 1000 Hz, a ratio as `6 : 1`.

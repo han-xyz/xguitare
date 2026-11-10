@@ -28,7 +28,7 @@ use xguitare_gui::model::{
     shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
     typed_value, unit_suffix,
 };
-use xguitare_gui::model::{CLOSED_KNOB_WIDTH, closed_unit_rows};
+use xguitare_gui::model::{CLOSED_KNOB_WIDTH, closed_unit_rows, module_title};
 
 struct TempDir(PathBuf);
 
@@ -842,7 +842,7 @@ fn mute_command_maps_to_request() {
 #[test]
 fn cents_text_is_signed() {
     assert_eq!(cents_text(3), "+3 ct");
-    assert_eq!(cents_text(-3), "-3 ct");
+    assert_eq!(cents_text(-3), "\u{2212}3 ct");
     assert_eq!(cents_text(0), "+0 ct");
 }
 
@@ -1175,7 +1175,7 @@ fn engine_readout_shows_the_engine_numbers() {
     let rows: Vec<(String, String)> = [
         ("Rate", "48 kHz"),
         ("Buffer", "128 frames"),
-        ("Buffer latency", "2.7 ms"),
+        ("Latency", "2.7 ms"),
         ("Xruns", "3"),
         ("Daemon", "connected"),
     ]
@@ -1369,13 +1369,13 @@ fn tuner_header_shows_note_and_cents_or_no_signal() {
         hz: 41.2,
         cents: -3,
     };
-    assert_eq!(tuner_header_text(Some(&reading)), "E1  -3 ct");
+    assert_eq!(tuner_header_text(Some(&reading)), "E1  \u{2212}3 ct");
     assert_eq!(tuner_header_text(None), NO_SIGNAL);
 }
 
 #[test]
 fn peak_text_without_a_status_shows_no_value() {
-    assert_eq!(peak_text(Some(-4.2), false), "peak -4.2 dB");
+    assert_eq!(peak_text(Some(-4.2), false), "peak \u{2212}4.2 dB");
     assert_eq!(peak_text(Some(0.3), true), "peak +0.3 dB, clipped");
     assert_eq!(peak_text(None, false), "peak —");
 }
@@ -1608,4 +1608,11 @@ fn closed_unit_wraps_knobs_that_do_not_fit() {
     assert_eq!(closed_unit_rows(7, 3.0 * CLOSED_KNOB_WIDTH), 3);
     assert_eq!(closed_unit_rows(3, 10.0), 3);
     assert_eq!(closed_unit_rows(0, 500.0), 1);
+}
+
+#[test]
+fn module_title_is_sentence_case_with_a_differing_type() {
+    assert_eq!(module_title("compressor", "compressor"), "Compressor");
+    assert_eq!(module_title("low_drive", "drive"), "Low drive (drive)");
+    assert_eq!(module_title("amp", ""), "Amp");
 }

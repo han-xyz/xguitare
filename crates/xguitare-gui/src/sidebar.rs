@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use egui::{
-    Button, CollapsingHeader, ComboBox, Grid, Key, RichText, ScrollArea, TextEdit, Ui, vec2,
+    Button, CollapsingHeader, ComboBox, Grid, Key, RichText, ScrollArea, TextEdit, Ui, Vec2, vec2,
 };
 use xguitare_core::BankKind;
 
@@ -12,15 +12,19 @@ use crate::model::{
     settings_draft, tuner_toggle,
 };
 use crate::rack::muted_text;
+use crate::widgets::{bank_row, outlined_button, primary_button};
 
 const NO_PRESET: &str = "no preset";
 const PRESET_NAME_SIZE: f32 = 30.0;
+const SECTION_TITLE_SIZE: f32 = 16.0;
+const SIDEBAR_SPACING: Vec2 = vec2(8.0, 4.0);
 const SIDEBAR_BUTTON_HEIGHT: f32 = 40.0;
 const UNSAVED: &str = "unsaved changes";
 const SAVE_AS_LABEL: &str = "Save as new";
 const SAVE_AS_HINT: &str = "New Preset name";
 const SEARCH_HINT: &str = "Search by name or number";
 const CHOOSE: &str = "choose";
+const CHOOSE_MODULE: &str = "Choose a Module";
 const NO_PORTS: &str = "no port list from the Daemon";
 const NO_SETTINGS: &str = "no settings from the Daemon";
 const BANK_KINDS: [(BankKind, &str); 2] = [(BankKind::Guitar, "Guitar"), (BankKind::Bass, "Bass")];
@@ -63,9 +67,12 @@ pub struct SidebarView<'a, 'b> {
 /// One collapsible section per [`SECTIONS`] entry, top to bottom.
 pub fn sidebar(ui: &mut Ui, snapshot: &Snapshot, view: &mut SidebarView) -> Vec<Command> {
     let mut commands = Vec::new();
+    ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
+    ui.visuals_mut().indent_has_left_vline = false;
     ScrollArea::vertical().show(ui, |ui| {
         for section in SECTIONS {
-            CollapsingHeader::new(section.title(view.bank_kind))
+            let title = RichText::new(section.title(view.bank_kind)).size(SECTION_TITLE_SIZE);
+            CollapsingHeader::new(title)
                 .id_salt(("section", section as u8))
                 .default_open(section.open_by_default())
                 .show(ui, |ui| {
@@ -133,11 +140,14 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
     );
     let mut command = None;
     ui.horizontal(|ui| {
-        if ui.add(Button::new("Save").min_size(button_size)).clicked() {
+        if ui
+            .add(primary_button("Save").min_size(button_size))
+            .clicked()
+        {
             command = Some(Command::Save);
         }
         if ui
-            .add(Button::new(SAVE_AS_LABEL).min_size(button_size))
+            .add(outlined_button(SAVE_AS_LABEL).min_size(button_size))
             .clicked()
         {
             *save_as_name = save_as_name.is_none().then(String::new);
@@ -149,7 +159,12 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
     let field = ui.add(TextEdit::singleline(name).hint_text(SAVE_AS_HINT));
     let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
     let (confirm, cancel) = ui
-        .horizontal(|ui| (ui.button("Save").clicked(), ui.button("Cancel").clicked()))
+        .horizontal(|ui| {
+            (
+                ui.add(primary_button("Save")).clicked(),
+                ui.add(outlined_button("Cancel")).clicked(),
+            )
+        })
         .inner;
     if entered || confirm {
         command = Some(Command::SaveAs(name.trim().to_string()));
@@ -173,7 +188,7 @@ fn add_module(ui: &mut Ui, snapshot: &Snapshot, add: &mut AddDraft) -> Option<Co
     let type_label = ui.label("Add Module");
     ComboBox::from_id_salt("add_type")
         .width(width)
-        .selected_text(chosen.map_or(CHOOSE.to_string(), ModuleType::label))
+        .selected_text(chosen.map_or(CHOOSE_MODULE.to_string(), ModuleType::label))
         .show_ui(ui, |ui| {
             for module_type in &snapshot.module_types {
                 let selected = chosen == Some(module_type);
@@ -203,7 +218,10 @@ fn add_module(ui: &mut Ui, snapshot: &Snapshot, add: &mut AddDraft) -> Option<Co
         .response
         .labelled_by(place_label.id);
     let clicked = ui
-        .add_enabled(chosen.is_some(), Button::new("Add"))
+        .add_enabled(
+            chosen.is_some(),
+            primary_button("Add").min_size(vec2(width, 0.0)),
+        )
         .clicked();
     let type_name = chosen.filter(|_| clicked)?.type_name.clone();
     *add = AddDraft::default();
@@ -261,6 +279,7 @@ fn audio_ports(
         let label = ui.label(name);
         let combo = ComboBox::from_id_salt(("port", name))
             .width(ui.available_width())
+            .truncate()
             .selected_text(chosen.as_deref().unwrap_or(CHOOSE))
             .show_ui(ui, |ui| {
                 for port in ports {
@@ -297,15 +316,17 @@ fn settings(
         return None;
     };
     let mut edited = draft.clone().unwrap_or(current.clone());
-    ui.label("Bank kind");
     ui.horizontal(|ui| {
+        ui.label("Bank kind");
         for (kind, name) in BANK_KINDS {
             ui.selectable_value(&mut edited.bank_kind, kind, name);
         }
     });
-    let label = ui.label("IR folder");
-    ui.add(TextEdit::singleline(&mut edited.ir_dir).desired_width(f32::INFINITY))
-        .labelled_by(label.id);
+    ui.horizontal(|ui| {
+        let label = ui.label("IR folder");
+        let field = TextEdit::singleline(&mut edited.ir_dir).desired_width(ui.available_width());
+        ui.add(field).labelled_by(label.id);
+    });
     let apply = set_settings_command(&current, &edited);
     let clicked = ui
         .add_enabled(apply.is_some(), Button::new("Apply"))
@@ -331,16 +352,17 @@ fn engine_readout_grid(ui: &mut Ui, snapshot: &Snapshot) {
 
 fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     let mut clicked = None;
+    ui.spacing_mut().item_spacing.y = 0.0;
     for row in rows {
-        let text = format!("{:>2} {}", row.program, row.name);
+        let number = row.program.to_string();
+        let response = bank_row(ui, &number, &row.name, row.active, row.error.is_none());
         match &row.error {
             Some(error) => {
-                ui.add_enabled(false, Button::selectable(false, text))
-                    .on_disabled_hover_text(error);
+                response.on_hover_text(error);
             }
             None => {
-                if ui.selectable_label(row.active, text).clicked() {
-                    clicked = Some(Command::Load(row.program.to_string()));
+                if response.clicked() {
+                    clicked = Some(Command::Load(number));
                 }
             }
         }

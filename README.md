@@ -296,7 +296,7 @@ The left panel has these sections, from the top; click a section's title to clos
 - `Tuner and Mute`: `Tuner` opens and closes the Tuner view (see Tuner below); `Mute` shows the Daemon's Mute state and turns it on or off, as `xguitare mute` does.
 - `Audio`: `Input`, `Output L` and `Output R` menus listing the ports the Daemon can connect to, each showing the port connected now. Opening a menu reads the port list again, so a device plugged in since shows. `Apply` connects the three chosen ports now and keeps them for the next start (the Control API's `set_ports`, stored in `state.toml`, see Config); it needs a port in each menu. An error, such as a port that has gone away, shows in the footer.
 - `Settings`: `Bank kind` `Guitar` or `Bass`, and the `IR folder` path. `Apply` sends what changed (the Control API's `set_settings`, stored in `state.toml`): another Bank kind switches the Bank and loads its Program 0 (see [Bass](#bass)); another IR folder must be an existing directory and is listed by the cabinet's `IR` menu from then on. An error shows in the footer, e.g. `error: bank_dir is set in config.toml; edit it there`.
-- `Engine`: `Rate` (`48 kHz`), `Buffer` (`128 frames`), `Buffer latency` (one buffer, `2.7 ms`), `Xruns`, and `Daemon` `connected` or `disconnected`.
+- `Engine`: `Rate` (`48 kHz`), `Buffer` (`128 frames`), `Latency` (one buffer, `2.7 ms`), `Xruns`, and `Daemon` `connected` or `disconnected`.
 
 The rack is one 19-inch unit per row between two rails; a closed unit is 64 pixels high per row of knobs (its knobs wrap to another row when the window is too narrow for them), an open unit 190, and the rack scrolls when they do not fit. The window opens at 1280×800 and cannot be made smaller than 1024×640:
 

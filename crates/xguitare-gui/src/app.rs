@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{CentralPanel, Event, Key, Modifiers, Panel, Theme, Ui};
+use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_core::{BankKind, Config};
@@ -15,7 +15,7 @@ use crate::client::{self, TICK};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows, forget_removed_units,
-    key_to_command, open_units_from_string, open_units_to_string, param_rows, peak_db,
+    key_to_command, open_units_from_string, open_units_to_string, palette, param_rows, peak_db,
     quit_commands, remember_removes, shortcuts_active,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
@@ -23,6 +23,8 @@ use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
 use crate::widgets;
 
 const SIDEBAR_WIDTH: f32 = 260.0;
+const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 12);
+const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
@@ -245,8 +247,12 @@ impl eframe::App for App {
             ports: &mut self.ports_draft,
             settings: &mut self.settings_draft,
         };
+        let sidebar_frame = Frame::side_top_panel(ui.style())
+            .fill(widgets::colour(palette().sidebar))
+            .inner_margin(SIDEBAR_MARGIN);
         Panel::left("sidebar")
             .exact_size(SIDEBAR_WIDTH)
+            .frame(sidebar_frame)
             .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut panel)));
         let mut knobs = Knobs {
             throttle: &mut self.throttle,
@@ -262,7 +268,9 @@ impl eframe::App for App {
             holds: &self.holds,
             open_units: &mut self.open_units,
         };
-        CentralPanel::default().show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
+        CentralPanel::default()
+            .frame(Frame::central_panel(ui.style()).inner_margin(RACK_MARGIN))
+            .show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
         remember_removes(&mut self.removing, &commands);
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
