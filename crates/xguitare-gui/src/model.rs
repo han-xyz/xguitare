@@ -458,6 +458,8 @@ pub struct Palette {
     pub green: Rgb,
     pub yellow: Rgb,
     pub red: Rgb,
+    pub section_header: Rgb,
+    pub mute_red: Rgb,
 }
 
 pub fn palette() -> Palette {
@@ -484,6 +486,8 @@ pub fn palette() -> Palette {
         green: (0x46, 0xb4, 0x50),
         yellow: (0xf0, 0xb4, 0x32),
         red: (0xe5, 0x48, 0x3f),
+        section_header: (0x15, 0x17, 0x1a),
+        mute_red: (0xc6, 0x28, 0x28),
     }
 }
 
@@ -785,17 +789,41 @@ pub fn in_tune(cents: i64) -> bool {
     cents.abs() <= IN_TUNE_CENTS
 }
 
-/// Opens or closes the Tuner view: (open after, command to send, whether the Mute is ours after). Opening mutes when `mute_default`; closing unmutes only a Mute this view turned on.
+/// Opens or closes the Tuner view: (open after, command to send, whether the Mute is ours after). Opening mutes when `mute_default` and Mute is off (`muted_now` false); closing unmutes only a Mute this view turned on.
 pub fn tuner_toggle(
     open_now: bool,
     mute_default: bool,
     muted_by_us: bool,
+    muted_now: bool,
 ) -> (bool, Option<Command>, bool) {
-    match (open_now, mute_default, muted_by_us) {
+    match (open_now, mute_default && !muted_now, muted_by_us) {
         (false, true, _) => (true, Some(Command::Mute(true)), true),
         (false, false, _) => (true, None, false),
         (true, _, true) => (false, Some(Command::Mute(false)), false),
         (true, _, false) => (false, None, false),
+    }
+}
+
+pub const BYPASSED_OPACITY: f32 = 0.45;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UnitStyle {
+    pub opacity: f32,
+    pub led_lit: bool,
+}
+
+/// How a unit shows its Module's Bypass: a bypassed unit's switch LED is dark and its name and knobs are dimmed.
+pub fn unit_style(bypassed: bool) -> UnitStyle {
+    if bypassed {
+        UnitStyle {
+            opacity: BYPASSED_OPACITY,
+            led_lit: false,
+        }
+    } else {
+        UnitStyle {
+            opacity: 1.0,
+            led_lit: true,
+        }
     }
 }
 

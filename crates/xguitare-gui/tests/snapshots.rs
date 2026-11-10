@@ -14,6 +14,7 @@ use xguitare_gui::app::App;
 use xguitare_gui::model::{Command, Link, ModuleType, Snapshot};
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
+const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
 const MIN_WINDOW: Vec2 = Vec2::new(1024.0, 640.0);
 const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
 const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
@@ -280,6 +281,7 @@ fn gui_snapshots() {
     write_png(&mut editing, "value-editing");
 
     write_png(&mut harness_sized(MIN_WINDOW).0, "minimum-window");
+    write_png(&mut harness_sized(DEFAULT_WINDOW).0, "default-window");
 
     let (mut bypassed, _, _dir) =
         harness_with(WINDOW, bypassed_snapshot(&["compressor", "chorus"]));
@@ -314,11 +316,14 @@ fn unit_switch_sends_bypass() {
 fn muted_output_shows_the_banner() {
     let (harness, _, _dir) = harness_with(WINDOW, funk_snapshot());
     assert!(harness.query_by_label_contains("Output muted").is_none());
-    let (mut harness, _, _dir) = harness_with(WINDOW, muted_snapshot());
+    let (mut harness, sent, _dir) = harness_with(WINDOW, muted_snapshot());
     harness.get_by_label("Output muted \u{2014} press Mute to unmute");
     harness.get_by_role_and_label(Role::Button, "Tuner").click();
     harness.run_steps(2);
-    harness.get_by_label("Output muted \u{2014} close the Tuner to unmute");
+    harness.get_by_label("Output muted \u{2014} press Mute to unmute");
+    harness.get_by_role_and_label(Role::Button, "Tuner").click();
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
 }
 
 #[test]
@@ -332,10 +337,16 @@ fn units_have_fixed_heights() {
 }
 
 #[test]
+fn five_knobs_fit_one_row_in_the_default_window() {
+    let (harness, _, _dir) = harness_sized(DEFAULT_WINDOW);
+    assert_eq!(unit_height(&harness, "compressor unit"), 64.0);
+}
+
+#[test]
 fn closed_units_wrap_their_knobs_in_the_minimum_window() {
     let (harness, _, _dir) = harness_sized(MIN_WINDOW);
-    assert_eq!(unit_height(&harness, "compressor unit"), 192.0);
-    assert_eq!(unit_height(&harness, "tonestack unit"), 128.0);
+    assert_eq!(unit_height(&harness, "compressor unit"), 128.0);
+    assert_eq!(unit_height(&harness, "tonestack unit"), 64.0);
     for param in ["Threshold", "Ratio", "Attack", "Release", "Makeup"] {
         let field = harness.get_by_role_and_label(Role::TextInput, param).rect();
         let unit = harness.get_by_label("compressor unit").rect();

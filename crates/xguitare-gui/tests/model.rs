@@ -29,7 +29,7 @@ use xguitare_gui::model::{
     typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, bypassed, closed_unit_rows, module_title, mute_banner,
+    CLOSED_KNOB_WIDTH, bypassed, closed_unit_rows, module_title, mute_banner, unit_style,
 };
 
 struct TempDir(PathBuf);
@@ -807,15 +807,38 @@ fn in_tune_within_three() {
 #[test]
 fn tuner_toggle_mutes_and_unmutes() {
     assert_eq!(
-        tuner_toggle(false, true, false),
+        tuner_toggle(false, true, false, false),
         (true, Some(Command::Mute(true)), true)
     );
-    assert_eq!(tuner_toggle(false, false, false), (true, None, false));
     assert_eq!(
-        tuner_toggle(true, true, true),
+        tuner_toggle(false, false, false, false),
+        (true, None, false)
+    );
+    assert_eq!(
+        tuner_toggle(true, true, true, true),
         (false, Some(Command::Mute(false)), false)
     );
-    assert_eq!(tuner_toggle(true, true, false), (false, None, false));
+    assert_eq!(tuner_toggle(true, true, false, true), (false, None, false));
+}
+
+#[test]
+fn tuner_leaves_a_mute_turned_on_by_hand_alone() {
+    let (open, command, muted_by_us) = tuner_toggle(false, true, false, true);
+    assert_eq!((open, command, muted_by_us), (true, None, false));
+    assert_eq!(
+        tuner_toggle(open, true, muted_by_us, true),
+        (false, None, false)
+    );
+}
+
+#[test]
+fn bypassed_unit_is_dimmed_with_a_dark_led() {
+    let on = unit_style(false);
+    let bypassed = unit_style(true);
+    assert!(on.led_lit);
+    assert_eq!(on.opacity, 1.0);
+    assert!(!bypassed.led_lit);
+    assert!(bypassed.opacity < 0.6);
 }
 
 #[test]
@@ -1039,6 +1062,11 @@ fn palette_text_meets_wcag_aa_on_units() {
         assert!(contrast(colours.muted, background) >= 4.5);
     }
     assert_eq!(contrast((255, 255, 255), (0, 0, 0)), 21.0);
+}
+
+#[test]
+fn white_text_on_the_mute_red_meets_wcag_aa() {
+    assert!(contrast((255, 255, 255), palette().mute_red) >= 4.5);
 }
 
 const UNIT_TOPS: [f32; 4] = [100.0, 170.0, 240.0, 430.0];

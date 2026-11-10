@@ -15,6 +15,7 @@ use crate::model::{
     cabinet_ir, cents_fraction, closed_unit_rows, drop_index, format_value, in_tune, key_step,
     knob_fraction, knob_param_value, module_title, move_target, mute_banner, palette, param_label,
     param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
+    unit_style,
 };
 use crate::widgets::{self, KnobSize, colour};
 
@@ -29,11 +30,10 @@ const UNIT_HEIGHT: f32 = 64.0;
 const OPEN_UNIT_HEIGHT: f32 = 190.0;
 const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
-const UNIT_NAME_WIDTH: f32 = 120.0;
+const UNIT_NAME_WIDTH: f32 = 104.0;
 const UNIT_NAME_SIZE: f32 = 18.0;
 const SMALL_TEXT_SIZE: f32 = 13.0;
 const LAMP_SLOT: f32 = 18.0;
-const BYPASSED_OPACITY: f32 = 0.45;
 const BANNER_HEIGHT: f32 = 40.0;
 const BANNER_TEXT_SIZE: f32 = 18.0;
 const BANNER_RADIUS: u8 = 3;
@@ -63,9 +63,8 @@ const SMALL_KNOB_TOP: f32 = 4.0;
 const FOCUS_PENDING: &str = "focus pending";
 const CHEVRON_WIDTH: f32 = 20.0;
 const KNOB_FIELD_GAP: f32 = 8.0;
-/// The widths of a closed unit's header items other than its knobs, left to right: lamp, On/Off switch, name, stripe, chevron, ↑/↓.
-const HEADER_FIXED_ITEMS: [f32; 6] = [
-    LAMP_SLOT,
+/// The widths of a closed unit's header items other than its knobs, left to right: On/Off switch with its LED, name, stripe, chevron, ↑/↓.
+const HEADER_FIXED_ITEMS: [f32; 5] = [
     widgets::FOOTSWITCH_SIZE.x,
     UNIT_NAME_WIDTH,
     STRIPE_WIDTH,
@@ -140,7 +139,7 @@ fn mute_banner_strip(ui: &mut Ui, text: &str) {
     let response = ui.allocate_rect(rect, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, text));
     let painter = ui.painter();
-    painter.rect_filled(rect, BANNER_RADIUS, colour(palette().red));
+    painter.rect_filled(rect, BANNER_RADIUS, colour(palette().mute_red));
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -248,13 +247,6 @@ fn fixed_width_label(ui: &mut Ui, width: f32, label: Label) {
         ui.set_min_size(slot);
         ui.add(label);
     });
-}
-
-/// A bypassed unit's name and knobs are dimmed; they still take input.
-fn dim_when_bypassed(ui: &mut Ui, bypassed: bool) {
-    if bypassed {
-        ui.multiply_opacity(BYPASSED_OPACITY);
-    }
 }
 
 fn unit_stripe(ui: &mut Ui) {
@@ -439,6 +431,7 @@ fn module_unit(
     let open = open_units.contains(module);
     let type_name = unit.rows.first().map_or("", |row| row.module_type.as_str());
     let accent = widgets::accent(type_name);
+    let style = unit_style(unit.bypassed);
     let knobs_width = closed_knobs_width(ui);
     let rows = closed_unit_rows(unit.rows.len(), knobs_width) as f32;
     let (fill, height, header_height) = if open {
@@ -456,8 +449,7 @@ fn module_unit(
         let mut commands = Vec::new();
         let header = unit_header(ui, Sense::click(), header_height, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
-            unit_lamp(ui, accent, !unit.bypassed);
-            if widgets::footswitch(ui, !unit.bypassed, accent).clicked() {
+            if widgets::footswitch(ui, style.led_lit, accent).clicked() {
                 commands.push(Command::Bypass {
                     id: module.to_string(),
                     on: !unit.bypassed,
@@ -465,7 +457,7 @@ fn module_unit(
             }
             let (name, type_part) = module_title(module, type_name);
             ui.scope(|ui| {
-                dim_when_bypassed(ui, unit.bypassed);
+                ui.multiply_opacity(style.opacity);
                 unit_name(ui, &name, type_part);
             });
             unit_stripe(ui);
@@ -477,7 +469,7 @@ fn module_unit(
             let rows = Layout::left_to_right(Align::Min).with_main_wrap(true);
             ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
-                dim_when_bypassed(ui, unit.bypassed);
+                ui.multiply_opacity(style.opacity);
                 if !open {
                     commands.extend(param_knobs(ui, unit.rows, KnobSize::Small, accent, knobs));
                 }
@@ -491,7 +483,7 @@ fn module_unit(
         if open {
             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                 ui.scope(|ui| {
-                    dim_when_bypassed(ui, unit.bypassed);
+                    ui.multiply_opacity(style.opacity);
                     commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
                 });
                 ui.with_layout(Layout::top_down(Align::Max), |ui| {

@@ -1,6 +1,6 @@
 use egui::{
-    Align2, Button, Color32, EventFilter, FontId, Mesh, Painter, Pos2, Rect, Response, Rgba,
-    RichText, Role, Sense, Stroke, Ui, Vec2, Visuals, WidgetInfo, pos2, vec2,
+    Align2, Button, Color32, EventFilter, FontId, Mesh, Painter, Pos2, Rect, Response, RichText,
+    Role, Sense, Stroke, StrokeKind, Ui, Vec2, Visuals, WidgetInfo, pos2, vec2,
 };
 
 use crate::model::{
@@ -35,9 +35,10 @@ const BANK_ROW_BORDER: f32 = 3.0;
 const BANK_ROW_PADDING: f32 = 10.0;
 const BANK_NUMBER_WIDTH: f32 = 18.0;
 const BANK_ROW_TEXT_SIZE: f32 = 15.0;
-pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(40.0, 28.0);
-/// The linear intensity above which a lit footswitch's text is dark rather than white.
-const DARK_TEXT_ABOVE: f32 = 0.2;
+pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(36.0, 40.0);
+const FOOTSWITCH_LED_TOP: f32 = 11.0;
+const FOOTSWITCH_TEXT_BOTTOM: f32 = 6.0;
+const FOOTSWITCH_TEXT_SIZE: f32 = 12.0;
 const IN_TUNE_COLOUR: Color32 = Color32::GREEN;
 const OUT_OF_TUNE_COLOUR: Color32 = Color32::from_rgb(255, 176, 0);
 
@@ -173,30 +174,48 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
     response
 }
 
-/// A Module's On/Off switch: lit in `accent` with `On` while the Module runs, unlit with muted `Off` text while it is bypassed.
+/// A Module's On/Off switch with the unit's LED on its face: while the Module runs the LED is lit in `accent`, the edge is `accent` and the face reads `On`; while it is bypassed the LED is dark and the face reads `Off` in muted text.
 pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
     let colours = palette();
-    let (text, text_colour, fill, edge) = if on {
-        let text_colour = if Rgba::from(accent).intensity() > DARK_TEXT_ABOVE {
-            colour(colours.ground)
-        } else {
-            Color32::WHITE
-        };
-        ("On", text_colour, accent, accent)
+    let (rect, response) = ui.allocate_exact_size(FOOTSWITCH_SIZE, Sense::click());
+    let text = if on { "On" } else { "Off" };
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, text));
+    let (face, edge, text_colour) = if on {
+        (colours.unit_open, accent, colour(colours.text))
     } else {
         (
-            "Off",
-            colour(colours.muted),
-            colour(colours.knob_body),
+            colours.knob_body,
             colour(colours.button_border),
+            colour(colours.muted),
         )
     };
-    let button = Button::new(RichText::new(text).strong().color(text_colour))
-        .fill(fill)
-        .stroke(Stroke::new(1.0, edge))
-        .selected(on)
-        .min_size(FOOTSWITCH_SIZE);
-    ui.add(button)
+    let edge = if response.hovered() {
+        colour(colours.text)
+    } else {
+        edge
+    };
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CORNER_RADIUS,
+        colour(face),
+        Stroke::new(1.0, edge),
+        StrokeKind::Inside,
+    );
+    lamp(
+        painter,
+        pos2(rect.center().x, rect.top() + FOOTSWITCH_LED_TOP),
+        accent,
+        on,
+    );
+    painter.text(
+        pos2(rect.center().x, rect.bottom() - FOOTSWITCH_TEXT_BOTTOM),
+        Align2::CENTER_BOTTOM,
+        text,
+        FontId::proportional(FOOTSWITCH_TEXT_SIZE),
+        text_colour,
+    );
+    response
 }
 
 pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) -> RackKnob {

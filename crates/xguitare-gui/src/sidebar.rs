@@ -3,8 +3,8 @@ use std::time::Instant;
 use egui::collapsing_header::CollapsingState;
 use egui::style::ScrollStyle;
 use egui::{
-    Align2, Button, Color32, ComboBox, CornerRadius, FontId, Frame, Grid, Key, Margin, RichText,
-    Role, ScrollArea, Sense, Stroke, TextEdit, Ui, Vec2, WidgetInfo, vec2,
+    Align2, Button, Color32, ComboBox, CornerRadius, FontId, Frame, Grid, Key, Margin, Pos2,
+    RichText, Role, ScrollArea, Sense, Shape, Stroke, TextEdit, Ui, Vec2, WidgetInfo, vec2,
 };
 use xguitare_core::BankKind;
 
@@ -26,8 +26,7 @@ const SECTION_GAP: f32 = 8.0;
 const SECTION_RADIUS: u8 = 6;
 const SECTION_HEADER_HEIGHT: f32 = 34.0;
 const SECTION_PADDING: i8 = 8;
-const OPEN_ARROW: &str = "▼";
-const CLOSED_ARROW: &str = "▶";
+const ARROW_SIZE: f32 = 10.0;
 const UNSAVED: &str = "unsaved changes";
 const SAVE_AS_LABEL: &str = "Save as new";
 const SAVE_AS_HINT: &str = "New Preset name";
@@ -45,9 +44,9 @@ pub struct Tuner<'a> {
 }
 
 impl Tuner<'_> {
-    fn toggle(&mut self) -> Option<Command> {
+    fn toggle(&mut self, muted_now: bool) -> Option<Command> {
         let (open, command, muted_by_us) =
-            tuner_toggle(*self.open, self.mute_default, *self.muted_by_us);
+            tuner_toggle(*self.open, self.mute_default, *self.muted_by_us, muted_now);
         *self.open = open;
         *self.muted_by_us = muted_by_us;
         command
@@ -92,6 +91,20 @@ pub fn sidebar(ui: &mut Ui, snapshot: &Snapshot, view: &mut SidebarView) -> Vec<
     commands
 }
 
+/// A triangle `ARROW_SIZE` across, centred on `centre`: pointing down when `open`, right when closed.
+fn arrow_points(centre: Pos2, open: bool) -> Vec<Pos2> {
+    let half = ARROW_SIZE / 2.0;
+    let points = if open {
+        [(-half, -half / 2.0), (half, -half / 2.0), (0.0, half / 2.0)]
+    } else {
+        [(-half / 2.0, -half), (half / 2.0, 0.0), (-half / 2.0, half)]
+    };
+    points
+        .into_iter()
+        .map(|(x, y)| centre + vec2(x, y))
+        .collect()
+}
+
 /// A framed section: a header strip holding the title and the collapse arrow, which a click opens or closes, over the body.
 fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mut Ui)) {
     let colours = palette();
@@ -125,7 +138,7 @@ fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mu
                 CornerRadius::same(inner_radius)
             };
             let painter = ui.painter();
-            painter.rect_filled(rect, corners, colour(colours.sidebar));
+            painter.rect_filled(rect, corners, colour(colours.section_header));
             if open {
                 painter.hline(rect.x_range(), rect.bottom(), border);
             }
@@ -137,13 +150,12 @@ fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mu
                 FontId::proportional(SECTION_TITLE_SIZE),
                 colour(colours.text),
             );
-            painter.text(
-                rect.right_center() - vec2(padding, 0.0),
-                Align2::RIGHT_CENTER,
-                if open { OPEN_ARROW } else { CLOSED_ARROW },
-                FontId::proportional(SECTION_TITLE_SIZE),
+            let arrow_centre = rect.right_center() - vec2(padding + ARROW_SIZE / 2.0, 0.0);
+            painter.add(Shape::convex_polygon(
+                arrow_points(arrow_centre, open),
                 colour(colours.muted),
-            );
+                Stroke::NONE,
+            ));
             state.show_body_unindented(ui, |ui| {
                 Frame::new()
                     .inner_margin(Margin::same(SECTION_PADDING))
@@ -317,11 +329,11 @@ fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Co
             .selected(*tuner.open)
             .min_size(button_size);
         if ui.add(tuner_button).clicked() {
-            commands.extend(tuner.toggle());
+            commands.extend(tuner.toggle(muted.unwrap_or_default()));
         }
         let on = muted.unwrap_or_default();
         let mute_button = if on {
-            let red = colour(palette().red);
+            let red = colour(palette().mute_red);
             Button::new(RichText::new("Mute").strong().color(Color32::WHITE))
                 .fill(red)
                 .stroke(Stroke::new(1.0, red))
