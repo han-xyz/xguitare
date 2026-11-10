@@ -74,6 +74,9 @@ pub struct Track {
 pub struct Item {
     /// Frames from the start of the Project.
     pub position: u64,
+    /// Frames of the active Take skipped before `position`: the Item plays its Take from this frame on.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub offset: u64,
     /// The index in `takes` of the Take that plays.
     pub take: usize,
     pub takes: Vec<Take>,
@@ -113,6 +116,10 @@ pub enum ProjectError {
     Volume(String),
     Pan(String),
     ItemPastLastFrame {
+        track: String,
+        item: usize,
+    },
+    OffsetPastLastFrame {
         track: String,
         item: usize,
     },
@@ -380,6 +387,12 @@ fn check_track(track: &Track) -> Result<(), ProjectError> {
                 take: item.take,
             });
         }
+        if item.offset > LAST_FRAME {
+            return Err(ProjectError::OffsetPastLastFrame {
+                track: track.name.clone(),
+                item: index,
+            });
+        }
         let longest = item.takes.iter().map(|take| take.frames).max().unwrap_or(0);
         if item.position.saturating_add(longest) > LAST_FRAME {
             return Err(ProjectError::ItemPastLastFrame {
@@ -389,6 +402,14 @@ fn check_track(track: &Track) -> Result<(), ProjectError> {
         }
     }
     Ok(())
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_zero(frames: &u64) -> bool {
+    *frames == 0
 }
 
 /// Whether `file` is `takes/<name>.wav`: one file directly in the Project's `takes/` folder.
@@ -497,6 +518,12 @@ impl fmt::Display for ProjectError {
             ProjectError::Pan(track) => write!(f, "track '{track}' pan must be between -1 and 1"),
             ProjectError::ItemPastLastFrame { track, item } => {
                 write!(f, "track '{track}' item {item} ends past the last frame")
+            }
+            ProjectError::OffsetPastLastFrame { track, item } => {
+                write!(
+                    f,
+                    "track '{track}' item {item} offset is past the last frame"
+                )
             }
             ProjectError::TakeOutsideProject(file) => write!(
                 f,

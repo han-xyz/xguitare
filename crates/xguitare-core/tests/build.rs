@@ -84,6 +84,7 @@ fn arrangement_builds_one_rack_per_track_and_swaps_in() {
     let mut with_item = Track::from_preset("b", &preset);
     with_item.items.push(Item {
         position: 0,
+        offset: 0,
         take: 0,
         takes: vec![Take {
             file: "takes/b-1.wav".to_string(),
@@ -112,6 +113,7 @@ fn arrangement_with_an_unloaded_take_is_an_error() {
     let mut t = Track::from_preset("a", &Preset::parse("name = \"G\"\n").unwrap());
     t.items.push(Item {
         position: 0,
+        offset: 0,
         take: 0,
         takes: vec![Take {
             file: "takes/a-1.wav".to_string(),

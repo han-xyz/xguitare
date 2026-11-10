@@ -264,6 +264,7 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
                 modules: Vec::new(),
                 items: vec![Item {
                     position: 50 * idx as u64,
+                    offset: 0,
                     take: 0,
                     takes: vec![Take { file, frames: 1000 }],
                 }],
@@ -405,7 +406,7 @@ fn switcher_arrangement_swap_commands_and_close_do_not_allocate() {
 }
 
 #[test]
-fn recording_passes_and_loop_wraps_do_not_allocate() {
+fn take_capture_and_loop_wraps_do_not_allocate() {
     let mut arrangement = sixteen_track_arrangement();
     let input = [0.25; BLOCK];
     let inputs = [&input[..]; 16];

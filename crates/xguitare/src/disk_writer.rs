@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,11 +10,11 @@ use std::time::Duration;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use tracing::warn;
-use xguitare_core::recording::{FinishedTake, ReadStop, TakeReader, next_take_file};
+use xguitare_core::take_capture::{FinishedTake, ReadStop, TakeReader, next_take_file};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-/// Writes each Track's recording passes as mono f32 WAV Takes under `<project>/takes/`.
+/// Writes each Track's Takes as mono f32 WAV files under `<project>/takes/`.
 pub struct TakeWriter {
     project_dir: PathBuf,
     spec: WavSpec,
@@ -35,7 +35,7 @@ enum Output {
         file: String,
         wav: WavWriter<BufWriter<File>>,
     },
-    /// The pass's file could not be written; its frames are read and dropped until the pass ends.
+    /// The Take's file could not be written; its frames are read and dropped until the Take ends.
     Failed,
 }
 
@@ -54,7 +54,7 @@ impl TakeWriter {
         }
     }
 
-    /// Queues one reader per Track, in Track order and with the Track's name, behind the readers already queued for that Track: a pass that a replaced Arrangement handed over continues in the same file.
+    /// Queues one reader per Track, in Track order and with the Track's name, behind the readers already queued for that Track: a Take that a replaced Arrangement handed over continues in the same file.
     pub fn add_readers(&mut self, readers: Vec<(String, TakeReader)>) {
         for (idx, (name, reader)) in readers.into_iter().enumerate() {
             if let Some(track) = self.tracks.get_mut(idx) {
@@ -71,7 +71,7 @@ impl TakeWriter {
         }
     }
 
-    /// Writes what the rings hold and returns the passes that ended, each closed in its own file.
+    /// Writes what the rings hold and returns the Takes that ended, each closed in its own file.
     pub fn drain(&mut self) -> Vec<FinishedTake> {
         let mut finished = Vec::new();
         for (idx, track) in self.tracks.iter_mut().enumerate() {
@@ -80,15 +80,21 @@ impl TakeWriter {
                 track.write(&self.buffer, &self.project_dir, self.spec);
                 match stop {
                     ReadStop::Empty => break,
-                    ReadStop::Done => {
+                    ReadStop::HandedOver => {
                         track.readers.pop_front();
                     }
-                    ReadStop::PassEnd(pass) => {
+                    ReadStop::Abandoned => {
+                        track.readers.pop_front();
+                        if let Some(file) = track.close() {
+                            warn!("take {file} lost its end mark; its file is kept but not placed");
+                        }
+                    }
+                    ReadStop::TakeEnd(span) => {
                         if let Some(file) = track.close() {
                             finished.push(FinishedTake {
                                 track: idx,
                                 file,
-                                pass,
+                                span,
                             });
                         }
                     }
@@ -107,7 +113,13 @@ impl TrackWriter {
         self.written += samples.len() as u64;
         if matches!(self.output, Output::Closed) {
             let file = next_take_file(project_dir, &self.name);
-            self.output = match WavWriter::create(project_dir.join(&file), spec) {
+            let created = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(project_dir.join(&file))
+                .map_err(hound::Error::from)
+                .and_then(|created| WavWriter::new(BufWriter::new(created), spec));
+            self.output = match created {
                 Ok(wav) => Output::Writing { file, wav },
                 Err(err) => {
                     warn!("cannot create take {file}: {err}; dropping this take");
@@ -127,7 +139,7 @@ impl TrackWriter {
         }
     }
 
-    /// Ends the pass: finalizes its file and returns its name, or `None` when it had no frames or failed.
+    /// Ends the Take: finalizes its file and returns its name, or `None` when it had no frames or failed.
     fn close(&mut self) -> Option<String> {
         self.written = 0;
         match std::mem::replace(&mut self.output, Output::Closed) {
@@ -195,7 +207,7 @@ impl DiskThread {
         self.finished.try_iter().collect()
     }
 
-    /// Writes what the rings still hold, then ends the thread; a pass still open is left finalized at its length so far.
+    /// Writes what the rings still hold, then ends the thread; a Take still open is left finalized at its length so far.
     pub fn stop(self) {
         self.stop.store(true, Ordering::Relaxed);
         if self.handle.join().is_err() {

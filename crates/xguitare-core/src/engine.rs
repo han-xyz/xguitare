@@ -24,7 +24,7 @@ pub struct EngineShared {
     pub output_peak_bits: AtomicU32,
     /// While true the switcher ramps both outputs to silence; the tap still carries the input.
     pub muted: AtomicBool,
-    /// Pushes into a recording ring that dropped frames because the disk thread fell behind.
+    /// Pushes into a Take ring that dropped frames because the disk thread fell behind.
     pub disk_overflows: AtomicU64,
 }
 
@@ -41,7 +41,7 @@ pub enum Command {
         module: usize,
         on: bool,
     },
-    /// Runs this Arrangement instead of the Rack: cut in when none runs, else crossfaded in over the crossfade length, carrying on the transport and recording of the Arrangement it replaces.
+    /// Runs this Arrangement instead of the Rack: cut in when none runs, else crossfaded in over the crossfade length, carrying on the transport and open Takes of the Arrangement it replaces.
     SwapArrangement(Box<Arrangement>),
     /// Goes back to the Rack.
     CloseArrangement,

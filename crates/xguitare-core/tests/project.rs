@@ -126,6 +126,7 @@ fn round_trip_keeps_tracks_items_takes_and_racks() {
         guitar.items,
         vec![Item {
             position: 48_000,
+            offset: 0,
             take: 1,
             takes: vec![
                 Take {
@@ -499,6 +500,7 @@ fn save_refuses_what_load_would_reject() {
     let mut track = Track::from_preset("Gtr", &Preset::parse("name = \"P\"\n").unwrap());
     track.items.push(Item {
         position: 0,
+        offset: 0,
         take: 0,
         takes: vec![Take {
             file: "project.toml".to_string(),
@@ -527,4 +529,33 @@ fn add_track_checks_the_track() {
         "track 'Loud' volume must be between -60 and 6 dB"
     );
     assert_eq!(project.tracks, []);
+}
+
+#[test]
+fn item_offset_round_trips_and_is_range_checked() {
+    let dir = temp_dir("item-offset");
+    let (folder, mut project) = Project::new(&dir.0, "Song").unwrap();
+    let mut track = Track::from_preset("Gtr", &Preset::parse("name = \"P\"\n").unwrap());
+    track.items.push(Item {
+        position: 0,
+        offset: 256,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/gtr-1.wav".to_string(),
+            frames: 1000,
+        }],
+    });
+    project.tracks.push(track);
+    project.save(&folder).unwrap();
+    assert!(
+        fs::read_to_string(folder.join(PROJECT_FILE))
+            .unwrap()
+            .contains("offset = 256")
+    );
+    assert_eq!(Project::load(&folder).unwrap(), project);
+    project.tracks[0].items[0].offset = u64::MAX;
+    assert_eq!(
+        project.save(&folder).unwrap_err().to_string(),
+        "track 'Gtr' item 0 offset is past the last frame"
+    );
 }

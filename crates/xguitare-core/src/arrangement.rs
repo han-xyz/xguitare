@@ -8,7 +8,7 @@ use xguitare_dsp::Rack;
 use xguitare_dsp::smooth::Smoother;
 
 use crate::project::{LoopRegion, METER_BEATS, METER_NOTES, Project, TEMPO_BPM, Track};
-use crate::recording::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
+use crate::take_capture::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
 
 const MIN_VOLUME_DB: f32 = -60.0;
 const MAX_VOLUME_DB: f32 = 6.0;
@@ -89,7 +89,7 @@ impl fmt::Display for TakeNotLoaded {
 
 impl std::error::Error for TakeNotLoaded {}
 
-/// The audio thread's Project: every Track through its own Rack, summed with the click to stereo, with transport, loop and count-in; while Recording each armed Track's dry input goes into its recording ring. Allocates and frees nothing after `new`.
+/// The audio thread's Project: every Track through its own Rack, summed with the click to stereo, with transport, loop and count-in; while Recording each armed Track's dry input goes into its Take ring. Allocates and frees nothing after `new`.
 pub struct Arrangement {
     tracks: Vec<TrackPlayer>,
     readers: Vec<TakeReader>,
@@ -126,6 +126,8 @@ struct TrackPlayer {
 
 struct PlacedTake {
     position: u64,
+    /// The first frame of `samples` that plays, at `position`.
+    offset: usize,
     samples: Arc<[f32]>,
 }
 
@@ -226,12 +228,12 @@ impl Arrangement {
         self.count_in.left > 0
     }
 
-    /// The disk thread's ends of the recording rings, one per Track in Track order; empty after the first call.
+    /// The disk thread's ends of the Take rings, one per Track in Track order; empty after the first call.
     pub fn take_readers(&mut self) -> Vec<TakeReader> {
         std::mem::take(&mut self.readers)
     }
 
-    /// The pushes into recording rings that dropped frames since the last call.
+    /// The pushes into Take rings that dropped frames since the last call.
     pub fn take_disk_overflows(&mut self) -> u64 {
         self.tracks
             .iter_mut()
@@ -239,7 +241,7 @@ impl Arrangement {
             .sum()
     }
 
-    /// Takes over the transport, playhead, count-in, click and open recording passes of the Arrangement this one replaces, so a rebuild neither stops playback nor splits a Take; `previous` records nothing more.
+    /// Takes over the transport, playhead, count-in, click and open Takes of the Arrangement this one replaces, so a rebuild neither stops playback nor splits a Take; `previous` records nothing more.
     pub fn continue_from(&mut self, previous: &mut Arrangement) {
         for (track, old) in self.tracks.iter_mut().zip(previous.tracks.iter_mut()) {
             track.recorder.continue_from(&mut old.recorder);
@@ -268,7 +270,7 @@ impl Arrangement {
             ArrangementCommand::Arm { track, on } => self.with_track(track, |t| {
                 t.arm = on;
                 if !on {
-                    t.recorder.end_pass(false);
+                    t.recorder.end_take(false);
                 }
             }),
             ArrangementCommand::Param {
@@ -283,18 +285,18 @@ impl Arrangement {
                 self.with_track(track, |t| t.rack.set_bypass(module, on));
             }
             ArrangementCommand::Play => {
-                self.end_passes(false);
+                self.end_takes(false);
                 self.transport = Transport::Playing;
                 self.count_in = CountIn::default();
             }
             ArrangementCommand::Stop => {
-                self.end_passes(false);
+                self.end_takes(false);
                 self.transport = Transport::Stopped;
                 self.count_in = CountIn::default();
             }
             ArrangementCommand::Record => self.record(),
             ArrangementCommand::Locate(frame) => {
-                self.end_passes(false);
+                self.end_takes(false);
                 self.playhead = frame;
             }
             ArrangementCommand::Loop(region) => self.loop_region = region,
@@ -322,9 +324,9 @@ impl Arrangement {
         }
     }
 
-    fn end_passes(&mut self, wrapped: bool) {
+    fn end_takes(&mut self, wrapped: bool) {
         for track in &mut self.tracks {
-            track.recorder.end_pass(wrapped);
+            track.recorder.end_take(wrapped);
         }
     }
 
@@ -388,7 +390,7 @@ impl Arrangement {
         }
     }
 
-    /// Moves the transport through `frames`, splitting at the count-in end and at each loop wrap, and writes the unarmed Tracks' Items, the armed Tracks' recording and the click for each stretch.
+    /// Moves the transport through `frames`, splitting at the count-in end and at each loop wrap, and writes the unarmed Tracks' Items, the armed Tracks' dry input and the click for each stretch.
     fn advance(&mut self, inputs: &[&[f32]], frames: usize) {
         let mut done = 0;
         while done < frames && self.transport != Transport::Stopped {
@@ -426,7 +428,7 @@ impl Arrangement {
             if wraps && self.playhead == end {
                 self.playhead = start;
                 if recording {
-                    self.end_passes(true);
+                    self.end_takes(true);
                 }
             }
             done += run;
@@ -484,6 +486,9 @@ impl TrackPlayer {
                 let samples = takes.get(file).ok_or_else(|| TakeNotLoaded(file.clone()))?;
                 Ok(PlacedTake {
                     position: item.position,
+                    offset: usize::try_from(item.offset)
+                        .unwrap_or(usize::MAX)
+                        .min(samples.len()),
                     samples: Arc::clone(samples),
                 })
             })
@@ -540,14 +545,14 @@ impl TrackPlayer {
     fn write_items(&mut self, playhead: u64, offset: usize, run: usize) {
         let stretch_end = playhead + run as u64;
         for item in &self.items {
-            let item_end = item.position + item.samples.len() as u64;
+            let audible = &item.samples[item.offset..];
+            let item_end = item.position + audible.len() as u64;
             let from = item.position.max(playhead);
             let to = item_end.min(stretch_end);
             if from >= to {
                 continue;
             }
-            let take =
-                &item.samples[(from - item.position) as usize..(to - item.position) as usize];
+            let take = &audible[(from - item.position) as usize..(to - item.position) as usize];
             let at = offset + (from - playhead) as usize;
             for (out, &sample) in self.source[at..at + take.len()].iter_mut().zip(take) {
                 *out += sample;

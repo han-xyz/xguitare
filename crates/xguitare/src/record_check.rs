@@ -11,7 +11,7 @@ use xguitare_core::build::{build_arrangement, swap_arrangement};
 use xguitare_core::control::passthrough_rack;
 use xguitare_core::engine::{Command, EngineQueues, EngineShared, engine_queues};
 use xguitare_core::project::Project;
-use xguitare_core::recording::add_finished_take;
+use xguitare_core::take_capture::add_finished_take;
 use xguitare_core::{Config, ConfigError};
 
 use crate::disk_writer::{DiskThread, TakeWriter};
@@ -21,8 +21,8 @@ const QUEUE_CAPACITY: usize = 64;
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const FINISH_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// The Project being recorded and everything that turns finished passes into Takes.
-struct Recording<'a> {
+/// The Project being recorded and everything that turns finished Takes into Takes.
+struct RecordCheck<'a> {
     config: Config,
     dir: &'a Path,
     project: Project,
@@ -67,7 +67,7 @@ pub fn run(
     ))
     .map_err(|err| format!("cannot start the disk thread: {err}"))?;
     let armed = project.tracks.iter().filter(|track| track.arm).count();
-    let mut recording = Recording {
+    let mut check = RecordCheck {
         config,
         dir: project_dir,
         project,
@@ -76,33 +76,33 @@ pub fn run(
         disk,
         queues,
     };
-    recording.swap_in()?;
-    recording.send(Command::Arrangement(ArrangementCommand::Locate(at)))?;
-    recording.send(Command::Arrangement(ArrangementCommand::Record))?;
+    check.swap_in()?;
+    check.send(Command::Arrangement(ArrangementCommand::Locate(at)))?;
+    check.send(Command::Arrangement(ArrangementCommand::Record))?;
     let stop_at = Instant::now() + Duration::from_secs_f64(seconds);
     while Instant::now() < stop_at {
         thread::sleep(POLL_INTERVAL);
-        recording.absorb_finished()?;
+        check.absorb_finished()?;
     }
-    recording.send(Command::Arrangement(ArrangementCommand::Stop))?;
+    check.send(Command::Arrangement(ArrangementCommand::Stop))?;
     let deadline = Instant::now() + FINISH_TIMEOUT;
     let mut after_stop = 0;
     while after_stop < armed && Instant::now() < deadline {
         thread::sleep(POLL_INTERVAL);
-        after_stop += recording.absorb_finished()?;
+        after_stop += check.absorb_finished()?;
     }
-    recording.send(Command::CloseArrangement)?;
+    check.send(Command::CloseArrangement)?;
     thread::sleep(POLL_INTERVAL);
-    recording.queues.drain_from_audio();
+    check.queues.drain_from_audio();
     println!(
         "disk_overflows {}",
         shared.disk_overflows.load(Ordering::Relaxed)
     );
-    recording.disk.stop();
-    recording.session.stop().map_err(|err| err.to_string())
+    check.disk.stop();
+    check.session.stop().map_err(|err| err.to_string())
 }
 
-impl Recording<'_> {
+impl RecordCheck<'_> {
     /// Builds the Arrangement of the Project as it is now, queues its readers on the disk thread and swaps it in.
     fn swap_in(&mut self) -> Result<(), String> {
         let (mut arrangement, warnings) = build_arrangement(
@@ -129,7 +129,7 @@ impl Recording<'_> {
             .map_err(|_| "engine busy".to_string())
     }
 
-    /// Turns the passes the disk thread finished into Takes, then swaps in an Arrangement that plays them; returns how many.
+    /// Turns the Takes the disk thread finished into Takes, then swaps in an Arrangement that plays them; returns how many.
     fn absorb_finished(&mut self) -> Result<usize, String> {
         let finished = self.disk.finished();
         for take in &finished {
@@ -138,15 +138,18 @@ impl Recording<'_> {
                 add_finished_take(&mut self.project, self.dir, &mut self.takes, take, latency)
                     .map_err(|err| format!("cannot load take {}: {err}", take.file))?;
             println!(
-                "take {} track {} frames {} record_start {} capture_latency {} playback_latency {} offset_ms {} position {}",
+                "take {} track {} frames {} record_start {} capture_latency {} playback_latency {} offset_ms {} placement {}",
                 take.file,
                 take.track,
-                take.pass.frames,
-                take.pass.start,
+                take.span.frames,
+                take.span.start,
                 latency.capture,
                 latency.playback,
                 self.project.latency_offset_ms,
-                position.map_or_else(|| "none".to_string(), |frame| frame.to_string()),
+                position.map_or_else(
+                    || "none".to_string(),
+                    |placed| format!("{} offset {}", placed.position, placed.offset)
+                ),
             );
         }
         if !finished.is_empty() {

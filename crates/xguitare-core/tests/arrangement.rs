@@ -7,7 +7,7 @@ use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, engine_queues,
 };
 use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
-use xguitare_core::recording::{Pass, ReadStop, TakeReader};
+use xguitare_core::take_capture::{ReadStop, TakeReader, TakeSpan};
 use xguitare_dsp::Rack;
 
 const RATE: u32 = 48_000;
@@ -43,6 +43,7 @@ fn project(tracks: Vec<Track>) -> Project {
 fn item(position: u64, file: &str, frames: u64) -> Item {
     Item {
         position,
+        offset: 0,
         take: 0,
         takes: vec![Take {
             file: file.to_string(),
@@ -420,8 +421,8 @@ fn feed(arrangement: &mut Arrangement, input: &[f32]) {
     }
 }
 
-/// Every pass in `reader` with its samples, and the open pass's samples last.
-fn passes(reader: &mut TakeReader) -> Vec<(Vec<f32>, Option<Pass>)> {
+/// Every Take in `reader` with its samples, and the open Take's samples last.
+fn spans(reader: &mut TakeReader) -> Vec<(Vec<f32>, Option<TakeSpan>)> {
     let mut found = Vec::new();
     let mut samples = Vec::new();
     let mut out = Vec::new();
@@ -429,8 +430,8 @@ fn passes(reader: &mut TakeReader) -> Vec<(Vec<f32>, Option<Pass>)> {
         let stop = reader.read(samples.len() as u64, &mut out);
         samples.extend_from_slice(&out);
         match stop {
-            ReadStop::PassEnd(pass) => found.push((std::mem::take(&mut samples), Some(pass))),
-            ReadStop::Empty | ReadStop::Done => break,
+            ReadStop::TakeEnd(span) => found.push((std::mem::take(&mut samples), Some(span))),
+            ReadStop::Empty | ReadStop::HandedOver | ReadStop::Abandoned => break,
         }
     }
     if !samples.is_empty() {
@@ -449,13 +450,13 @@ fn recording_pushes_the_armed_dry_input_from_the_record_start() {
     feed(&mut a, &input);
     a.apply(ArrangementCommand::Stop);
     feed(&mut a, &ramp(300));
-    let pass = Pass {
+    let span = TakeSpan {
         start: 1000,
         frames: 600,
-        loop_pass: false,
+        loop_take: false,
     };
-    assert_eq!(passes(&mut readers[0]), [(input, Some(pass))]);
-    assert_eq!(passes(&mut readers[1]), []);
+    assert_eq!(spans(&mut readers[0]), [(input, Some(span))]);
+    assert_eq!(spans(&mut readers[1]), []);
 }
 
 #[test]
@@ -467,14 +468,14 @@ fn count_in_is_not_recorded() {
     let bar = 4 * 24_000;
     feed(&mut a, &ramp(bar + 200));
     a.apply(ArrangementCommand::Stop);
-    let found = passes(&mut readers[0]);
+    let found = spans(&mut readers[0]);
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].0, ramp(bar + 200)[bar..]);
-    assert_eq!(found[0].1.map(|pass| pass.start), Some(0));
+    assert_eq!(found[0].1.map(|span| span.start), Some(0));
 }
 
 #[test]
-fn loop_wrap_while_recording_starts_a_loop_pass() {
+fn loop_wrap_while_recording_starts_a_loop_take() {
     let mut p = project(vec![armed("a")]);
     p.loop_region = LoopRegion {
         start: 100,
@@ -488,26 +489,26 @@ fn loop_wrap_while_recording_starts_a_loop_pass() {
     let input = ramp(700);
     feed(&mut a, &input);
     a.apply(ArrangementCommand::Stop);
-    let found = passes(&mut readers[0]);
-    let pass = |frames, loop_pass| {
-        Some(Pass {
+    let found = spans(&mut readers[0]);
+    let span = |frames, loop_take| {
+        Some(TakeSpan {
             start: 100,
             frames,
-            loop_pass,
+            loop_take,
         })
     };
     assert_eq!(
         found,
         [
-            (input[..300].to_vec(), pass(300, false)),
-            (input[300..600].to_vec(), pass(300, true)),
-            (input[600..].to_vec(), pass(100, true)),
+            (input[..300].to_vec(), span(300, false)),
+            (input[300..600].to_vec(), span(300, true)),
+            (input[600..].to_vec(), span(100, true)),
         ]
     );
 }
 
 #[test]
-fn a_swapped_in_arrangement_continues_the_open_pass() {
+fn a_swapped_in_arrangement_continues_the_open_take() {
     let p = project(vec![armed("a")]);
     let mut old = arrangement(&p, &HashMap::new());
     let mut old_readers = old.take_readers();
@@ -520,14 +521,14 @@ fn a_swapped_in_arrangement_continues_the_open_pass() {
     feed(&mut old, &input[300..]);
     feed(&mut new, &input[300..]);
     new.apply(ArrangementCommand::Stop);
-    assert_eq!(passes(&mut old_readers[0]), [(input[..300].to_vec(), None)]);
+    assert_eq!(spans(&mut old_readers[0]), [(input[..300].to_vec(), None)]);
     let mut out = Vec::new();
     assert_eq!(
         new_readers[0].read(300, &mut out),
-        ReadStop::PassEnd(Pass {
+        ReadStop::TakeEnd(TakeSpan {
             start: 0,
             frames: 500,
-            loop_pass: false,
+            loop_take: false,
         })
     );
     assert_eq!(out, input[300..]);
@@ -572,7 +573,7 @@ fn swap_arrangement_crossfades_with_no_step_above_the_fade_slope() {
 }
 
 #[test]
-fn a_full_recording_ring_counts_disk_overflows() {
+fn a_full_take_ring_counts_disk_overflows() {
     let (mut control, audio, _tap) = engine_queues(16);
     let fades = FadeLengths::at(RATE as f32, 20.0);
     let shared = Arc::new(EngineShared::default());

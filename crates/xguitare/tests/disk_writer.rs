@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavReader};
 use xguitare::disk_writer::{DiskThread, TakeWriter};
-use xguitare_core::recording::{FinishedTake, Pass, take_ring};
+use xguitare_core::take_capture::{FinishedTake, TakeSpan, take_ring};
 
 struct TempDir(PathBuf);
 
@@ -46,17 +46,17 @@ fn writes_exactly_the_pushed_frames_into_a_wav() {
     recorder.push(4800, &input[..300]);
     assert_eq!(writer.drain(), []);
     recorder.push(5100, &input[300..]);
-    recorder.end_pass(false);
+    recorder.end_take(false);
     let finished = writer.drain();
     assert_eq!(
         finished,
         [FinishedTake {
             track: 0,
             file: "takes/lead-gtr-1.wav".to_string(),
-            pass: Pass {
+            span: TakeSpan {
                 start: 4800,
                 frames: 700,
-                loop_pass: false,
+                loop_take: false,
             },
         }]
     );
@@ -64,7 +64,7 @@ fn writes_exactly_the_pushed_frames_into_a_wav() {
 }
 
 #[test]
-fn a_closed_ring_hands_its_pass_to_the_next_reader() {
+fn a_handed_over_ring_continues_its_take_in_the_next_reader() {
     let dir = temp_dir("closed");
     let (mut old, old_reader) = take_ring(1000);
     let (mut new, new_reader) = take_ring(1000);
@@ -77,17 +77,46 @@ fn a_closed_ring_hands_its_pass_to_the_next_reader() {
     assert_eq!(writer.drain(), []);
     writer.add_readers(vec![("t".to_string(), new_reader)]);
     new.push(100, &input[100..]);
-    new.end_pass(false);
+    new.end_take(false);
     let finished = writer.drain();
     assert_eq!(finished.len(), 1);
-    assert_eq!(finished[0].pass.frames, 250);
+    assert_eq!(finished[0].span.frames, 250);
     assert_eq!(wav_samples(&dir.0, &finished[0].file), input);
+}
 
+#[test]
+fn a_ring_dropped_mid_take_finishes_that_take_and_the_next_take_gets_its_own_file() {
+    let dir = temp_dir("dropped");
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
     let (mut dropped, reader) = take_ring(1000);
     writer.add_readers(vec![("t".to_string(), reader)]);
-    dropped.push(0, &input);
-    drop(dropped);
+    let input = ramp(300);
+    dropped.push(480, &input);
     assert_eq!(writer.drain(), []);
+    drop(dropped);
+    assert_eq!(
+        writer.drain(),
+        [FinishedTake {
+            track: 0,
+            file: "takes/t-1.wav".to_string(),
+            span: TakeSpan {
+                start: 480,
+                frames: 300,
+                loop_take: false,
+            },
+        }]
+    );
+    assert_eq!(wav_samples(&dir.0, "takes/t-1.wav"), input);
+
+    let (mut next, reader) = take_ring(1000);
+    writer.add_readers(vec![("t".to_string(), reader)]);
+    next.push(0, &[0.5; 100]);
+    next.end_take(false);
+    let finished = writer.drain();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].file, "takes/t-2.wav");
+    assert_eq!(finished[0].span.frames, 100);
+    assert_eq!(wav_samples(&dir.0, "takes/t-2.wav"), [0.5; 100]);
 }
 
 #[test]
@@ -101,11 +130,11 @@ fn disk_thread_reports_each_finished_take() {
         ("b".to_string(), second_reader),
     ]);
     first.push(0, &[0.5; 64]);
-    first.end_pass(true);
+    first.end_take(true);
     first.push(0, &[0.25; 32]);
-    first.end_pass(false);
+    first.end_take(false);
     second.push(10, &[0.75; 16]);
-    second.end_pass(false);
+    second.end_take(false);
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut finished = Vec::new();
     while finished.len() < 3 && Instant::now() < deadline {
@@ -116,7 +145,7 @@ fn disk_thread_reports_each_finished_take() {
     finished.sort_by(|a, b| a.file.cmp(&b.file));
     let files: Vec<(&str, u64, bool)> = finished
         .iter()
-        .map(|take| (take.file.as_str(), take.pass.frames, take.pass.loop_pass))
+        .map(|take| (take.file.as_str(), take.span.frames, take.span.loop_take))
         .collect();
     assert_eq!(
         files,

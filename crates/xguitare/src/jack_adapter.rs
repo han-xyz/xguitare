@@ -16,7 +16,7 @@ use xguitare_core::engine::{
 };
 use xguitare_core::ports::{AudioPorts, AvailablePort, choose_ports, foreign_ports};
 use xguitare_core::project::MAX_TRACKS;
-use xguitare_core::recording::Latency;
+use xguitare_core::take_capture::Latency;
 use xguitare_dsp::{Rack, midi};
 
 const CLIENT_NAME: &str = "xguitare";
