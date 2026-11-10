@@ -342,6 +342,15 @@ fn gui_snapshots() {
 
     write_png(&mut harness_with(WINDOW, muted_snapshot()).0, "mute-banner");
 
+    let (mut switch_focus, _, _dir) = harness();
+    let unit_rect = switch_focus.get_by_label("compressor unit").rect();
+    switch_focus
+        .get_all_by_role_and_label(Role::Button, "On")
+        .find(|switch| unit_rect.contains_rect(switch.rect()))
+        .unwrap()
+        .focus();
+    write_png(&mut switch_focus, "switch-focused");
+
     let (mut header_drag, _, _dir) = harness();
     let from = unit_header_point(&header_drag, "chorus");
     let to = pos2(from.x, unit_top(&header_drag, "preamp") + 10.0);

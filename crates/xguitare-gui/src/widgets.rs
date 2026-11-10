@@ -39,6 +39,7 @@ pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(36.0, 40.0);
 const FOOTSWITCH_LED_TOP: f32 = 11.0;
 const FOOTSWITCH_TEXT_BOTTOM: f32 = 6.0;
 const FOOTSWITCH_TEXT_SIZE: f32 = 12.0;
+const FOOTSWITCH_FOCUS_EDGE_WIDTH: f32 = 2.0;
 const IN_TUNE_COLOUR: Color32 = Color32::GREEN;
 const OUT_OF_TUNE_COLOUR: Color32 = Color32::from_rgb(255, 176, 0);
 
@@ -174,7 +175,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
     response
 }
 
-/// A Module's On/Off switch with the unit's LED on its face: while the Module runs the LED is lit in `accent`, the edge is `accent` and the face reads `On`; while it is bypassed the LED is dark and the face reads `Off` in muted text.
+/// A Module's On/Off switch with the unit's LED on its face: while the Module runs the LED is lit in `accent`, the edge is `accent` and the face reads `On`; while it is bypassed the LED is dark and the face reads `Off` in muted text. Keyboard focus draws a 2 px edge in the text colour.
 pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
     let colours = palette();
     let (rect, response) = ui.allocate_exact_size(FOOTSWITCH_SIZE, Sense::click());
@@ -189,17 +190,22 @@ pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
             colour(colours.muted),
         )
     };
-    let edge = if response.hovered() {
+    let edge = if response.hovered() || response.has_focus() {
         colour(colours.text)
     } else {
         edge
+    };
+    let edge_width = if response.has_focus() {
+        FOOTSWITCH_FOCUS_EDGE_WIDTH
+    } else {
+        1.0
     };
     let painter = ui.painter();
     painter.rect(
         rect,
         CORNER_RADIUS,
         colour(face),
-        Stroke::new(1.0, edge),
+        Stroke::new(edge_width, edge),
         StrokeKind::Inside,
     );
     lamp(
