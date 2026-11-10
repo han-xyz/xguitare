@@ -74,7 +74,7 @@ _Avoid_: channel, lane, strip
 
 **Item**:
 A stretch of audio placed on a Track's timeline at a position; it plays one of its Takes.
-_Avoid_: clip, region, segment
+_Avoid_: clip, region, segment. In the mixer, "clip" means only a meter's flag that the level reached 0 dBFS, never an Item.
 
 **Take**:
 One recording of a passage: an audio file of the dry input. An Item holds one or more Takes, one of them active.

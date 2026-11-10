@@ -18,7 +18,7 @@ use crate::project::Project;
 pub const RENDER_BLOCK: usize = 1024;
 /// The folder under the Project folder that Renders are written to.
 pub const RENDERS_DIR: &str = "renders";
-pub const PART_EXTENSION: &str = "part";
+const PART_EXTENSION: &str = "part";
 const WAV_EXTENSION: &str = "wav";
 /// Master output below this level counts as quiet for the tail rule (−90 dBFS).
 const TAIL_QUIET_LEVEL: f32 = 3.162_277_7e-5;
@@ -335,7 +335,6 @@ pub struct RenderTask {
 }
 
 impl RenderTask {
-    /// Runs [`run_render`] to the end.
     pub fn run(self) {
         run_render(self.render, &self.job, |part, file| {
             fs::hard_link(part, file)
