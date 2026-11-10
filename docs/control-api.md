@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `clip_reset` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -33,13 +33,24 @@ While a Project is open the Engine plays its Tracks, not the active Preset's Rac
 {"cmd":"set","param":"preamp.gain","value":20,"track":"Bass"}
 ```
 
+In place of `track`, `set`, `get`, `bypass`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir` take `bus` (a zero-based index or a Bus name, see `bus_add`) to act on that Bus's Rack, or `"master":true` to act on the Master Rack. These are stereo Racks: they take any Module but the cabinet, in any order. `load` takes them too, but only to refuse them.
+
+```json
+{"cmd":"rack_add","type":"reverb","bus":"Verb"}
+{"cmd":"set","param":"compressor.threshold","value":-18,"master":true}
+```
+
 Errors of the Track scope, on any of these requests:
 
 | `error` | When |
 | --- | --- |
-| `no project open` | `track` is given while no Project is open. |
-| `the project has no tracks` | A Project is open, `track` is left out and the Project has no Track. |
+| `no project open` | `track`, `bus` or `master` is given while no Project is open. |
+| `the project has no tracks` | A Project is open, `track`, `bus` and `master` are left out and the Project has no Track. |
 | `no track '<track>'` | No Track has that index or name, e.g. `no track '5'`. |
+| `no bus '<bus>'` | No Bus has that index or name, e.g. `no bus 'Echo'`. |
+| `give track, bus or master, not more than one` | More than one of `track`, `bus` and `"master":true` is given. |
+| `a cabinet is not allowed on a Bus or Master` | `rack_add` of a `cabinet`, or `rack_ir`, aimed at a Bus or Master. |
+| `a Preset loads only into a Track` | `load` with `bus` or `master`. |
 
 ## status
 
@@ -52,7 +63,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"solo":false,"volume_db":-3.0},{"armed":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"solo":false,"volume_db":0.0}],"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
@@ -62,7 +73,7 @@ Response:
 | `sample_rate` | JACK sample rate in Hz; follows a rate change while the Daemon runs, and the Rack and the Tuner are rebuilt at the new rate. An open Project stops playing while the rate differs from its own (see `project_warning`) and plays again once they match. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack, and an open Project's Tracks, within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare; with Projects also on `project_new`, `project_open`, `project_close`, `track_add`, `track_remove`, `track_set`, `track_select`, `loop`, `tempo`, `click`, a Rack request on a Track, and each Take added to the open Project. A client refreshes when it changes. `mute` does not change it. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare; with Projects also on `project_new`, `project_open`, `project_close`, `track_add`, `track_remove`, `track_set`, `track_select`, `loop`, `tempo`, `click`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, a Rack request on a Track, Bus or Master, and each Take added to the open Project. A client refreshes when it changes. `mute` does not change it. |
 | `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `bypass`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
@@ -75,14 +86,16 @@ Response:
 | `count_in_remaining` | Beats left in the count-in before recording starts, rounded up; `0` when no count-in is under way or no Project is open. |
 | `loaded_audio_bytes` | Bytes of Take audio the open Project holds in memory (4 per frame); `0` when no Project is open. |
 | `project_warning` | Why the open Project does not play, e.g. `project rate 48000 Hz differs from the engine rate 44100 Hz` after a sample-rate change: the transport stops, Takes still open are finished, and `play` and `record` are refused until the rates match; `null` otherwise. |
-| `project` | Name of the open Project; `null` when none is open. The keys below are `null` (`tracks` empty) while no Project is open. |
+| `project` | Name of the open Project; `null` when none is open. The keys below are `null` (`tracks` and `buses` empty) while no Project is open. |
 | `transport` | `stopped`, `playing` or `recording` (also during the count-in), as the audio thread runs it. |
 | `position` | The playhead: `frames` from the Project start, counted from 0, and `bars_beats` as `<bar>.<beat>`, counted from 1 at the Project's tempo and meter. |
 | `tempo` | `bpm` and `meter` `[<beats per bar>, <note value>]`. |
 | `loop` | The loop region: `start` and `end` in frames, and whether it is `on`. |
 | `click` | Whether the click is `on`, and `count_in` bars before recording. |
 | `selected` | Index of the selected Track. |
-| `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, and `input_peak_db` of its input port, measured as `input_peak_db`. |
+| `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
+| `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
+| `master` | `volume_db` (`null` for -inf, which only `project.toml` can set), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
 
 Errors: none besides the transport errors.
 
@@ -822,6 +835,7 @@ Changes a Track; each key left out keeps its value. Every value is checked befor
 | `mute`, `solo` | Booleans; while any Track is soloed, only soloed Tracks sound. |
 | `arm` | Boolean: an armed Track monitors its input through its Rack and records while recording. |
 | `name` | A new name, unique in any letter case. |
+| `to_master` | Boolean: whether the Track's own sound goes to Master; its Sends go to their Buses either way. |
 
 Request:
 
@@ -832,7 +846,7 @@ Request:
 Response: the Track after the change.
 
 ```json
-{"ok":true,"arm":true,"index":0,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","mute":false,"name":"Track 1","pan":-0.25,"solo":false,"volume_db":-3.0}
+{"ok":true,"arm":true,"index":0,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","mute":false,"name":"Track 1","pan":-0.25,"solo":false,"to_master":true,"volume_db":-3.0}
 ```
 
 Errors:
@@ -951,3 +965,168 @@ Response:
 ```
 
 Errors: `no project open`; `count-in must be 0, 1 or 2 bars`; `engine busy`.
+
+## bus_add
+
+Adds a Bus at the end of the open Project: an empty stereo Rack, 0 dB, centred, mute and solo off, and an off Send to it from every Track. Without `name` it is `Bus <n>`, the first number free from 1. Bus names follow the Track name rules.
+
+Request:
+
+```json
+{"cmd":"bus_add","name":"Verb"}
+```
+
+Response:
+
+```json
+{"ok":true,"bus":{"id":0,"index":0,"name":"Verb"}}
+```
+
+| Key | Value |
+| --- | --- |
+| `bus` | The new Bus: its `id` (see `status` `buses`), zero-based `index` and `name`. |
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `no project open` | No Project is open. |
+| `a bus named '<name>' already exists` | Another Bus has the name, in any letter case. |
+| `bus name must not be empty` | The name is empty after control characters and surrounding blanks are removed. |
+| `bus name must not be only digits` | The name is all digits, which the CLI reads as an index. |
+| `at most 8 buses` | The Project has 8 Buses. |
+| `engine busy` | The audio thread's command queue is full; retry. |
+
+## bus_remove
+
+Removes a Bus (`bus`: index or name) and every Send to it. The Buses after it move up one index and keep their ids.
+
+Request:
+
+```json
+{"cmd":"bus_remove","bus":"Verb"}
+```
+
+Response: the Bus removed, as `bus_add` answers.
+
+```json
+{"ok":true,"bus":{"id":0,"index":0,"name":"Verb"}}
+```
+
+Errors: `no project open`; `no bus '<bus>'`; `engine busy`.
+
+## bus_set
+
+Changes a Bus; each key left out keeps its value. Every value is checked before anything changes.
+
+| Key | Value |
+| --- | --- |
+| `bus` | Index or name (required). |
+| `name` | A new name, unique among the Buses in any letter case. |
+| `volume` | dB, −60 to 6. |
+| `pan` | −1 (left) to 1 (right), constant power. |
+| `mute`, `solo` | Booleans; solo is solo in place (see `send_set`). |
+
+Request:
+
+```json
+{"cmd":"bus_set","bus":0,"volume":-3,"solo":true}
+```
+
+Response: the Bus after the change.
+
+```json
+{"ok":true,"bus":{"id":0,"index":0,"mute":false,"name":"Verb","pan":0.0,"solo":true,"volume_db":-3.0}}
+```
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `no project open`, `no bus '<bus>'` | See Track scope. |
+| `bus '<name>' volume must be between -60 and 6 dB` | `volume` is out of range. |
+| `bus '<name>' pan must be between -1 and 1` | `pan` is out of range. |
+| `a bus named '<name>' already exists`, `bus name must not be empty`, `bus name must not be only digits` | As `bus_add`. |
+| `engine busy` | The audio thread's command queue is full; retry. |
+
+## send_set
+
+Changes a Track's Send to a Bus; each key left out keeps its value. Every Track has one Send per Bus, off until a `level` is given.
+
+| Key | Value |
+| --- | --- |
+| `track` | Index or name of the Track (required). |
+| `bus` | Index or name of the Bus (required). |
+| `level` | dB, −60 to 6, or `"off"`. |
+| `pre` | Boolean: `false` (the default) takes the Send after the Track's volume and pan, `true` after its Rack and pan, before its volume. |
+
+Solo is solo in place: while any Track or Bus is soloed, the soloed Tracks and Buses sound, with the Buses a soloed Track sends to and the Tracks that send to a soloed Bus (through a Send that is not off). Mute always wins, on the Track's own sound and on its Sends.
+
+Request:
+
+```json
+{"cmd":"send_set","track":"Guitar","bus":"Verb","level":-6}
+```
+
+Response:
+
+```json
+{"ok":true,"bus":0,"level":-6.0,"pre":false,"track":0}
+```
+
+| Key | Value |
+| --- | --- |
+| `track`, `bus` | The Track's and the Bus's index. |
+| `level` | The Send's level in dB, or `"off"`. |
+| `pre` | Whether it is taken before the Track's volume. An off Send is not saved, so its `pre` is lost with the Project's next save. |
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `no project open`, `no track '<track>'`, `no bus '<bus>'` | See Track scope. |
+| `track '<name>' send level must be -inf or between -60 and 6 dB` | `level` is a number out of range. |
+| `invalid request: level must be a number in dB or "off"` | `level` is a string other than `"off"` (followed by the parser's position). |
+| `engine busy` | The audio thread's command queue is full; retry. |
+
+## master_set
+
+Sets the Master volume. Master is a stereo Rack (empty in a new Project) with this volume; its output goes to the outputs, and the click is added after it.
+
+Request:
+
+```json
+{"cmd":"master_set","volume":-3}
+```
+
+Response:
+
+```json
+{"ok":true,"volume_db":-3.0}
+```
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `no project open` | No Project is open. |
+| `master volume must be -inf or between -60 and 6 dB` | `volume` is out of range. |
+| `engine busy` | The audio thread's command queue is full; retry. |
+
+## clip_reset
+
+Clears the clip flag (`status` `clip`) of a Track (`track`), a Bus (`bus`) or Master (`"master":true`), or of all when none is given. The Revision does not change.
+
+Request:
+
+```json
+{"cmd":"clip_reset","bus":"Verb"}
+```
+
+Response: the index cleared, as `{"track": <index>}`, `{"bus": <index>}` or `{"master": true}`, or nothing more when all were cleared.
+
+```json
+{"ok":true,"bus":0}
+```
+
+Errors: `no project open` (a `track`, `bus` or `master` given while no Project is open); `no track '<track>'`; `no bus '<bus>'`; `give track, bus or master, not more than one`.

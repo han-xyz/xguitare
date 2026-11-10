@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use xguitare_client::{Reconnecting, Transport, UnixSocketTransport};
 use xguitare_core::Config;
@@ -47,9 +47,15 @@ enum Cmd {
         param: String,
         #[arg(allow_hyphen_values = true)]
         value: String,
+        #[command(flatten)]
+        rack: MixerRack,
     },
     /// Show Parameters: all, one Module's, or one
-    Get { param: Option<String> },
+    Get {
+        param: Option<String>,
+        #[command(flatten)]
+        rack: MixerRack,
+    },
     /// Write the live Parameter values back to the active Preset file, or with --as to a new Preset
     Save {
         #[arg(long = "as", value_name = "NAME")]
@@ -75,7 +81,12 @@ enum Cmd {
     /// Turn Mute on or off
     Mute { state: MuteState },
     /// Bypass a Module (on) or switch it back in (off)
-    Bypass { id: String, state: BypassState },
+    Bypass {
+        id: String,
+        state: BypassState,
+        #[command(flatten)]
+        rack: MixerRack,
+    },
     /// Create, open, save, close or list Projects
     #[command(subcommand, arg_required_else_help = false)]
     Project(ProjectCmd),
@@ -98,6 +109,79 @@ enum Cmd {
         #[arg(long)]
         count_in: Option<u32>,
     },
+    /// Add, remove or edit a Bus of the open Project
+    #[command(subcommand, arg_required_else_help = false)]
+    Bus(BusCmd),
+    /// Set a Track's Send to a Bus: a level in dB (-60 to 6) or off; --pre on takes it before the Track's volume
+    Send {
+        track: String,
+        bus: String,
+        #[arg(allow_hyphen_values = true)]
+        level: String,
+        #[arg(long)]
+        pre: Option<Switch>,
+    },
+    /// Set the Master volume in dB, -60 to 6
+    Master {
+        #[arg(allow_negative_numbers = true)]
+        volume: f32,
+    },
+    /// Reset clip indicators: of one Track, Bus or Master, or all
+    #[command(subcommand, arg_required_else_help = false)]
+    Clip(ClipCmd),
+}
+
+/// The Bus (`--bus`, index or name) or Master Rack a Rack command edits instead of the selected Track's.
+#[derive(Args)]
+struct MixerRack {
+    /// Edit this Bus's Rack: a zero-based index or a name
+    #[arg(long, conflicts_with = "master")]
+    bus: Option<String>,
+    /// Edit the Master Rack
+    #[arg(long)]
+    master: bool,
+}
+
+/// A Bus is named by its zero-based index or its name.
+#[derive(Subcommand)]
+enum BusCmd {
+    /// Add a Bus with an empty Rack at 0 dB; without a name it is Bus <n>
+    Add { name: Option<String> },
+    /// Remove a Bus and every Send to it
+    Remove { bus: String },
+    /// Change a Bus's name, volume, pan or switches
+    Edit {
+        bus: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// dB, -60 to 6
+        #[arg(long, allow_negative_numbers = true)]
+        volume: Option<f32>,
+        /// -1 (left) to 1 (right)
+        #[arg(long, allow_negative_numbers = true)]
+        pan: Option<f32>,
+        #[arg(long)]
+        mute: Option<Switch>,
+        #[arg(long)]
+        solo: Option<Switch>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ClipCmd {
+    /// Reset track <track>, bus <bus> or master; with nothing given, all
+    Reset {
+        kind: Option<ClipKind>,
+        /// The Track's or Bus's zero-based index or name
+        name: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ClipKind {
+    Track,
+    Bus,
+    Master,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -153,6 +237,9 @@ enum TrackCmd {
         arm: Option<Switch>,
         #[arg(long)]
         name: Option<String>,
+        /// Whether the Track's own output goes to Master
+        #[arg(long)]
+        to_master: Option<Switch>,
     },
     /// Make a Track the one Rack commands edit
     Select { track: String },
@@ -180,11 +267,22 @@ enum RackCmd {
         after: Option<String>,
         #[arg(long, conflicts_with = "after")]
         at: Option<usize>,
+        #[command(flatten)]
+        rack: MixerRack,
     },
     /// Remove a Module
-    Remove { id: String },
+    Remove {
+        id: String,
+        #[command(flatten)]
+        rack: MixerRack,
+    },
     /// Move a Module to a zero-based position
-    Move { id: String, to: usize },
+    Move {
+        id: String,
+        to: usize,
+        #[command(flatten)]
+        rack: MixerRack,
+    },
 }
 
 #[derive(Subcommand)]
@@ -196,6 +294,8 @@ enum IrCmd {
         file: String,
         #[arg(long)]
         id: Option<String>,
+        #[command(flatten)]
+        rack: MixerRack,
     },
 }
 

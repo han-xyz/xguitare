@@ -460,6 +460,8 @@ fn rack_requests_carry_the_selected_track() {
                 param: "preamp.gain".to_string(),
                 value: 20.0,
                 track: Some(TrackRef::Index(1)),
+                bus: None,
+                master: false,
             }),
             Outgoing::Request(Request::TrackSelect {
                 track: TrackRef::Index(2),
@@ -468,6 +470,8 @@ fn rack_requests_carry_the_selected_track() {
                 id: "chorus".to_string(),
                 on: true,
                 track: Some(TrackRef::Index(2)),
+                bus: None,
+                master: false,
             }),
         ]
     );
@@ -525,6 +529,7 @@ fn project_commands_become_their_requests() {
                 solo: None,
                 arm: Some(true),
                 name: None,
+                to_master: None,
             }),
             request(Request::Transport {
                 action: TransportAction::Record,
@@ -639,6 +644,8 @@ fn undo_goes_back_to_the_track_the_module_left() {
             after: Some("drive".to_string()),
             at: None,
             track: bass.clone(),
+            bus: None,
+            master: false,
         }
     );
     let tracks: Vec<Option<TrackRef>> = removed

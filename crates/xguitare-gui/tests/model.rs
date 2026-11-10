@@ -146,27 +146,37 @@ fn commands_before_quit_are_sent_in_order() {
             param: "preamp.gain".to_string(),
             value: 70.0,
             track: None,
+            bus: None,
+            master: false,
         },
         Request::RackAdd {
             r#type: "delay".to_string(),
             after: Some("reverb".to_string()),
             at: None,
             track: None,
+            bus: None,
+            master: false,
         },
         Request::RackAdd {
             r#type: "gate".to_string(),
             after: None,
             at: Some(0),
             track: None,
+            bus: None,
+            master: false,
         },
         Request::RackMove {
             id: "delay".to_string(),
             to: 4,
             track: None,
+            bus: None,
+            master: false,
         },
         Request::RackRemove {
             id: "delay".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ];
     let expected = expected.into_iter().map(Outgoing::Request).collect();
@@ -176,7 +186,9 @@ fn commands_before_quit_are_sent_in_order() {
         (
             vec![Outgoing::Request(Request::Load {
                 preset: "Lead".to_string(),
-                track: None
+                track: None,
+                bus: None,
+                master: false,
             })],
             false
         )
@@ -426,6 +438,8 @@ fn feedback_only_save_and_errors() {
         param: "preamp.gain".to_string(),
         value: 42.0,
         track: None,
+        bus: None,
+        master: false,
     };
     assert_eq!(
         response_text(&set, busy).as_deref(),
@@ -444,6 +458,8 @@ fn feedback_only_save_and_errors() {
     let load = Request::Load {
         preset: "1".to_string(),
         track: None,
+        bus: None,
+        master: false,
     };
     assert_eq!(response_text(&load, loaded), None);
 }
@@ -530,6 +546,8 @@ fn hold_cleared_on_set_error() {
         param: "preamp.gain".to_string(),
         value: 12.0,
         track: None,
+        bus: None,
+        master: false,
     };
     let busy = Ok(Response::Err {
         error: "engine busy".to_string(),
@@ -897,7 +915,9 @@ fn bypass_command_maps_to_request() {
             vec![Request::Bypass {
                 id: "chorus".to_string(),
                 on: true,
-                track: None
+                track: None,
+                bus: None,
+                master: false,
             }],
             false
         )
@@ -980,6 +1000,8 @@ fn rack_ir_command_maps_to_request() {
                 ir: "cabs/x.wav".to_string(),
                 id: Some("cabinet".to_string()),
                 track: None,
+                bus: None,
+                master: false,
             }],
             false
         )
@@ -1359,11 +1381,15 @@ fn restore_of_a_cabinet_keeps_its_ir() {
                 param: "cabinet.level".to_string(),
                 value: 3.0,
                 track: None,
+                bus: None,
+                master: false,
             },
             Request::RackIr {
                 ir: "bass-cab.wav".to_string(),
                 id: Some("cabinet".to_string()),
                 track: None,
+                bus: None,
+                master: false,
             },
         ]
     );
@@ -1379,6 +1405,8 @@ fn restore_adds_after_the_module_above_or_at_its_old_index() {
             after: Some("drive".to_string()),
             at: None,
             track: None,
+            bus: None,
+            master: false,
         }
     );
     assert_eq!(
@@ -1388,6 +1416,8 @@ fn restore_adds_after_the_module_above_or_at_its_old_index() {
             after: None,
             at: Some(1),
             track: None,
+            bus: None,
+            master: false,
         }
     );
 }
@@ -1401,16 +1431,22 @@ fn restore_follow_ups_address_the_id_rack_add_answered() {
                 param: "drive-3.gain".to_string(),
                 value: 80.0,
                 track: None,
+                bus: None,
+                master: false,
             },
             Request::Set {
                 param: "drive-3.tone".to_string(),
                 value: 60.0,
                 track: None,
+                bus: None,
+                master: false,
             },
             Request::Bypass {
                 id: "drive-3".to_string(),
                 on: true,
                 track: None,
+                bus: None,
+                master: false,
             },
         ]
     );
@@ -1429,7 +1465,9 @@ fn restore_goes_out_in_queue_order() {
             vec![
                 Outgoing::Request(Request::Load {
                     preset: "Funk".to_string(),
-                    track: None
+                    track: None,
+                    bus: None,
+                    master: false,
                 }),
                 Outgoing::Restore(drive_restore()),
             ],
@@ -1720,6 +1758,8 @@ fn refused_remove_names_its_id_only_on_an_error() {
     let remove = Request::RackRemove {
         id: "preamp".into(),
         track: None,
+        bus: None,
+        master: false,
     };
     let refused = Ok(Response::Err {
         error: "busy".into(),

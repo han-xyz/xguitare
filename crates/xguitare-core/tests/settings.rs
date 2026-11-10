@@ -286,6 +286,8 @@ fn set_settings_bank_kind_seeds_and_loads_program_0() {
         Request::Load {
             preset: "2".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let bass_dir = dir.0.join("bank-bass");
@@ -399,6 +401,8 @@ fn fill_queue(state: &mut EngineState) {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ))["params"][0]
         .clone();
@@ -413,6 +417,8 @@ fn fill_queue(state: &mut EngineState) {
             param: param.clone(),
             value: 0.0,
             track: None,
+            bus: None,
+            master: false,
         },
     )
     .0

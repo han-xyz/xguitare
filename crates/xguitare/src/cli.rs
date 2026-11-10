@@ -7,10 +7,13 @@ use std::time::Duration;
 
 use xguitare_client::Transport;
 use xguitare_core::control::{
-    Position, Request, Response, SILENCE_DB, TrackRef, TransportAction, Value,
+    Position, Request, Response, SILENCE_DB, SendLevel, TrackRef, TransportAction, Value,
 };
 
-use crate::{BypassState, Cmd, IrCmd, MuteState, ProjectCmd, RackCmd, Switch, TrackCmd, parse};
+use crate::{
+    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, MuteState, ProjectCmd, RackCmd, Switch,
+    TrackCmd, parse,
+};
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
@@ -114,8 +117,10 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         Cmd::Load { preset } => Request::Load {
             preset,
             track: None,
+            bus: None,
+            master: false,
         },
-        Cmd::Set { param, value } => {
+        Cmd::Set { param, value, rack } => {
             let value: f64 = value
                 .parse()
                 .map_err(|_| "value must be a number".to_string())?;
@@ -126,41 +131,37 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
                 param,
                 value,
                 track: None,
+                bus: rack.bus.map(track_ref),
+                master: rack.master,
             }
         }
-        Cmd::Get { param } => Request::Get { param, track: None },
+        Cmd::Get { param, rack } => Request::Get {
+            param,
+            track: None,
+            bus: rack.bus.map(track_ref),
+            master: rack.master,
+        },
         Cmd::Save { name } => Request::Save { name },
         Cmd::Modules => Request::Modules,
-        Cmd::Rack(RackCmd::Add {
-            type_name,
-            after,
-            at,
-        }) => Request::RackAdd {
-            r#type: type_name,
-            after,
-            at,
-            track: None,
-        },
-        Cmd::Rack(RackCmd::Remove { id }) => Request::RackRemove { id, track: None },
-        Cmd::Rack(RackCmd::Move { id, to }) => Request::RackMove {
-            id,
-            to,
-            track: None,
-        },
+        Cmd::Rack(cmd) => rack_request(cmd),
         Cmd::Ir(IrCmd::List) => Request::IrList,
-        Cmd::Ir(IrCmd::Set { file, id }) => Request::RackIr {
+        Cmd::Ir(IrCmd::Set { file, id, rack }) => Request::RackIr {
             ir: file,
             id,
             track: None,
+            bus: rack.bus.map(track_ref),
+            master: rack.master,
         },
         Cmd::Tuner { .. } => Request::Tuner,
         Cmd::Mute { state } => Request::Mute {
             on: matches!(state, MuteState::On),
         },
-        Cmd::Bypass { id, state } => Request::Bypass {
+        Cmd::Bypass { id, state, rack } => Request::Bypass {
             id,
             on: matches!(state, BypassState::On),
             track: None,
+            bus: rack.bus.map(track_ref),
+            master: rack.master,
         },
         Cmd::Project(cmd) => project_request(cmd),
         Cmd::Track(cmd) => track_request(cmd),
@@ -178,7 +179,105 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
             on: Some(is_on(state)),
             count_in,
         },
+        Cmd::Bus(cmd) => bus_request(cmd),
+        Cmd::Send {
+            track,
+            bus,
+            level,
+            pre,
+        } => Request::SendSet {
+            track: track_ref(track),
+            bus: track_ref(bus),
+            level: Some(parse_level(&level)?),
+            pre: pre.map(is_on),
+        },
+        Cmd::Master { volume } => Request::MasterSet { volume },
+        Cmd::Clip(ClipCmd::Reset { kind, name }) => clip_reset_request(kind, name)?,
     })
+}
+
+fn rack_request(cmd: RackCmd) -> Request {
+    match cmd {
+        RackCmd::Add {
+            type_name,
+            after,
+            at,
+            rack,
+        } => Request::RackAdd {
+            r#type: type_name,
+            after,
+            at,
+            track: None,
+            bus: rack.bus.map(track_ref),
+            master: rack.master,
+        },
+        RackCmd::Remove { id, rack } => Request::RackRemove {
+            id,
+            track: None,
+            bus: rack.bus.map(track_ref),
+            master: rack.master,
+        },
+        RackCmd::Move { id, to, rack } => Request::RackMove {
+            id,
+            to,
+            track: None,
+            bus: rack.bus.map(track_ref),
+            master: rack.master,
+        },
+    }
+}
+
+fn bus_request(cmd: BusCmd) -> Request {
+    match cmd {
+        BusCmd::Add { name } => Request::BusAdd { name },
+        BusCmd::Remove { bus } => Request::BusRemove {
+            bus: track_ref(bus),
+        },
+        BusCmd::Edit {
+            bus,
+            name,
+            volume,
+            pan,
+            mute,
+            solo,
+        } => Request::BusSet {
+            bus: track_ref(bus),
+            name,
+            volume,
+            pan,
+            mute: mute.map(is_on),
+            solo: solo.map(is_on),
+        },
+    }
+}
+
+/// `off`, or a number in dB.
+fn parse_level(level: &str) -> Result<SendLevel, String> {
+    if level == "off" {
+        return Ok(SendLevel::Off);
+    }
+    level
+        .parse()
+        .ok()
+        .filter(|db: &f32| db.is_finite())
+        .map(SendLevel::Db)
+        .ok_or_else(|| "level must be a number in dB or off".to_string())
+}
+
+fn clip_reset_request(kind: Option<ClipKind>, name: Option<String>) -> Result<Request, String> {
+    let (track, bus, master) = match (kind, name) {
+        (None, _) => (None, None, false),
+        (Some(ClipKind::Master), None) => (None, None, true),
+        (Some(ClipKind::Master), Some(_)) => {
+            return Err("clip reset master takes no name".to_string());
+        }
+        (Some(ClipKind::Track), Some(name)) => (Some(track_ref(name)), None, false),
+        (Some(ClipKind::Bus), Some(name)) => (None, Some(track_ref(name)), false),
+        (Some(ClipKind::Track | ClipKind::Bus), None) => {
+            return Err("clip reset track and bus need an index or a name".to_string());
+        }
+    };
+    Ok(Request::ClipReset { track, bus, master })
 }
 
 fn project_request(cmd: ProjectCmd) -> Request {
@@ -207,6 +306,7 @@ fn track_request(cmd: TrackCmd) -> Request {
             solo,
             arm,
             name,
+            to_master,
         } => Request::TrackSet {
             track: track_ref(track),
             input,
@@ -216,6 +316,7 @@ fn track_request(cmd: TrackCmd) -> Request {
             solo: solo.map(is_on),
             arm: arm.map(is_on),
             name,
+            to_master: to_master.map(is_on),
         },
         TrackCmd::Select { track } => Request::TrackSelect {
             track: track_ref(track),
@@ -231,7 +332,7 @@ fn is_on(state: Switch) -> bool {
     matches!(state, Switch::On)
 }
 
-/// Digits name a Track by index, anything else by name.
+/// Digits name a Track or Bus by index, anything else by name.
 fn track_ref(track: String) -> TrackRef {
     match track.parse() {
         Ok(index) => TrackRef::Index(index),
@@ -326,6 +427,18 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
             meter_text(&payload["meter"])
         ),
         Request::Click { .. } => format!("{}\n", click_text(payload)),
+        Request::BusAdd { .. } => format!("added bus {}\n", track_label(&payload["bus"])),
+        Request::BusRemove { .. } => format!("removed bus {}\n", track_label(&payload["bus"])),
+        Request::BusSet { .. } => render_bus(&payload["bus"]),
+        Request::SendSet { .. } => format!(
+            "send track {} -> bus {}: {}, {}\n",
+            text(&payload["track"]),
+            text(&payload["bus"]),
+            level_text(&payload["level"]),
+            pre_text(&payload["pre"])
+        ),
+        Request::MasterSet { .. } => format!("master {} dB\n", text(&payload["volume_db"])),
+        Request::ClipReset { .. } => "clip reset\n".to_string(),
         Request::Ports
         | Request::SetPorts { .. }
         | Request::Settings
@@ -391,7 +504,7 @@ fn track_label(payload: &Value) -> String {
 fn render_track(payload: &Value) -> String {
     let yes_no = |key: &str| if payload[key] == true { "yes" } else { "no" };
     format!(
-        "track {}: input {}, volume {} dB, pan {}, mute {}, solo {}, arm {}\n",
+        "track {}: input {}, volume {} dB, pan {}, mute {}, solo {}, arm {}, to master {}\n",
         track_label(payload),
         text(&payload["input"]),
         text(&payload["volume_db"]),
@@ -399,7 +512,32 @@ fn render_track(payload: &Value) -> String {
         yes_no("mute"),
         yes_no("solo"),
         yes_no("arm"),
+        yes_no("to_master"),
     )
+}
+
+fn render_bus(bus: &Value) -> String {
+    let yes_no = |key: &str| if bus[key] == true { "yes" } else { "no" };
+    format!(
+        "bus {}: volume {} dB, pan {}, mute {}, solo {}\n",
+        track_label(bus),
+        text(&bus["volume_db"]),
+        text(&bus["pan"]),
+        yes_no("mute"),
+        yes_no("solo"),
+    )
+}
+
+fn level_text(level: &Value) -> String {
+    if level.is_number() {
+        format!("{} dB", text(level))
+    } else {
+        text(level)
+    }
+}
+
+fn pre_text(pre: &Value) -> &'static str {
+    if pre == true { "pre" } else { "post" }
 }
 
 fn meter_text(meter: &Value) -> String {
@@ -523,11 +661,14 @@ fn render_project_status(lines: &mut String, payload: &Value) {
         } else {
             " "
         };
-        let flags: Vec<&str> = [("armed", "armed"), ("mute", "muted"), ("solo", "solo")]
+        let mut flags: Vec<&str> = [("armed", "armed"), ("mute", "muted"), ("solo", "solo")]
             .into_iter()
             .filter(|(key, _)| track[*key] == true)
             .map(|(_, flag)| flag)
             .collect();
+        if track["to_master"] == false {
+            flags.push("not to master");
+        }
         let flags = if flags.is_empty() {
             "-".to_string()
         } else {
@@ -536,13 +677,61 @@ fn render_project_status(lines: &mut String, payload: &Value) {
         let peak = track["input_peak_db"].as_f64().unwrap_or(SILENCE_DB);
         let _ = writeln!(
             lines,
-            "  {index}{selected} {}: {flags}; input {}; {} dB, pan {}; peak {peak:.1} dB",
+            "  {index}{selected} {}: {flags}; input {}; {} dB, pan {}; peak {peak:.1} dB; {}",
             text(&track["name"]),
             text(&track["input"]),
             text(&track["volume_db"]),
             text(&track["pan"]),
+            out_text(track),
+        );
+        for send in items(&track["sends"]) {
+            let bus = send["bus"]
+                .as_u64()
+                .map(|bus| &payload["buses"][bus as usize]["name"]);
+            let _ = writeln!(
+                lines,
+                "      send {}: {} dB, {}",
+                text(bus.unwrap_or(&Value::Null)),
+                text(&send["level_db"]),
+                pre_text(&send["pre"])
+            );
+        }
+    }
+    lines.push_str("buses:\n");
+    for (index, bus) in items(&payload["buses"]).enumerate() {
+        let flags: Vec<&str> = [("mute", "muted"), ("solo", "solo")]
+            .into_iter()
+            .filter(|(key, _)| bus[*key] == true)
+            .map(|(_, flag)| flag)
+            .collect();
+        let flags = if flags.is_empty() {
+            "-".to_string()
+        } else {
+            flags.join(", ")
+        };
+        let _ = writeln!(
+            lines,
+            "  {index} {}: {flags}; {} dB, pan {}; {}",
+            text(&bus["name"]),
+            text(&bus["volume_db"]),
+            text(&bus["pan"]),
+            out_text(bus),
         );
     }
+    let master = &payload["master"];
+    let _ = writeln!(
+        lines,
+        "master: {} dB; {}",
+        text(&master["volume_db"]),
+        out_text(master)
+    );
+}
+
+/// `out <left>/<right> dB`, then `, clip` when the clip flag is set.
+fn out_text(meter: &Value) -> String {
+    let side = |side: usize| meter["peak_db"][side].as_f64().unwrap_or(SILENCE_DB);
+    let clip = if meter["clip"] == true { ", clip" } else { "" };
+    format!("out {:.1}/{:.1} dB{clip}", side(0), side(1))
 }
 
 fn status_text(key: &str, value: &Value) -> String {

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use xguitare::{CliEnv, run_cli, run_main};
 use xguitare_client::{ClientError, Transport};
-use xguitare_core::control::{Position, Request, Response, TrackRef, TransportAction};
+use xguitare_core::control::{Position, Request, Response, SendLevel, TrackRef, TransportAction};
 
 struct Canned {
     replies: VecDeque<Result<Response, ClientError>>,
@@ -143,7 +143,9 @@ fn get_format() {
         out.requests,
         [Request::Get {
             param: Some("gain".to_string()),
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(
@@ -155,7 +157,9 @@ fn get_format() {
         out.requests,
         [Request::Get {
             param: None,
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
 }
@@ -171,7 +175,9 @@ fn set_prints_clamped() {
         [Request::Set {
             param: "gain.level".to_string(),
             value: 50.0,
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "gain.level = 20 (clamped)\n");
@@ -184,7 +190,9 @@ fn set_prints_clamped() {
         [Request::Set {
             param: "gain.level".to_string(),
             value: -6.0,
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "gain.level = -6\n");
@@ -209,7 +217,9 @@ fn load_prints() {
         out.requests,
         [Request::Load {
             preset: "Loud".to_string(),
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "loaded 1 Loud\n");
@@ -374,6 +384,8 @@ fn rack_add_prints() {
             after: Some("cabinet".to_string()),
             at: None,
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "added delay-2\n");
@@ -388,6 +400,8 @@ fn rack_add_prints() {
             after: None,
             at: None,
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     let out = cli(
@@ -401,6 +415,8 @@ fn rack_add_prints() {
             after: None,
             at: Some(0),
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     let out = cli(
@@ -426,6 +442,8 @@ fn rack_move_prints() {
             id: "delay".to_string(),
             to: 6,
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "moved delay to 4\n");
@@ -443,6 +461,8 @@ fn rack_remove_prints() {
         [Request::RackRemove {
             id: "delay".to_string(),
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "removed delay\n");
@@ -609,6 +629,8 @@ fn ir_set_prints() {
             ir: "cabs/x.wav".to_string(),
             id: None,
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "ir cabinet cabs/x.wav\n");
@@ -623,6 +645,8 @@ fn ir_set_prints() {
             ir: "cabs/x.wav".to_string(),
             id: Some("cab-2".to_string()),
             track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "ir cab-2 cabs/x.wav\n");
@@ -719,7 +743,9 @@ fn bypass_on_off_prints() {
         [Request::Bypass {
             id: "preamp".to_string(),
             on: true,
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "preamp: bypassed\n");
@@ -733,7 +759,9 @@ fn bypass_on_off_prints() {
         [Request::Bypass {
             id: "preamp".to_string(),
             on: false,
-            track: None
+            track: None,
+            bus: None,
+            master: false,
         }]
     );
     assert_eq!(out.stdout, "preamp: on\n");
@@ -755,12 +783,12 @@ fn status_prints_the_open_project() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","connections":[],"disk_overflows":1,"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"tracks":[{"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04},{"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0}]}"#,
+            r#"{"ok":true,"preset":"Clean","connections":[],"disk_overflows":1,"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"tracks":[{"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04,"to_master":true,"sends":[{"bus":1,"level_db":-6.0,"pre":false},{"bus":0,"level_db":-12.5,"pre":true}],"peak_db":[-12.04,-12.0],"clip":false},{"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0,"to_master":false,"sends":[],"peak_db":[-120.0,-120.0],"clip":true}],"buses":[{"id":3,"name":"Verb","volume_db":-3.0,"pan":0.0,"mute":false,"solo":true,"peak_db":[-20.0,-21.5],"clip":false},{"id":1,"name":"Delay","volume_db":0.0,"pan":0.25,"mute":false,"solo":false,"peak_db":[0.0,-0.4],"clip":true}],"master":{"volume_db":-1.5,"peak_db":[-9.0,-9.24],"clip":false}}"#,
         ),
     );
     assert!(
         out.stdout.ends_with(
-            "connections:\ndisk_overflows: 1\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB\n  1* Bass: muted; input -; 0 dB, pan -0.5; peak -120.0 dB\n"
+            "connections:\ndisk_overflows: 1\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB; out -12.0/-12.0 dB\n      send Delay: -6 dB, post\n      send Verb: -12.5 dB, pre\n  1* Bass: muted, not to master; input -; 0 dB, pan -0.5; peak -120.0 dB; out -120.0/-120.0 dB, clip\nbuses:\n  0 Verb: solo; -3 dB, pan 0; out -20.0/-21.5 dB\n  1 Delay: -; 0 dB, pan 0.25; out 0.0/-0.4 dB, clip\nmaster: -1.5 dB; out -9.0/-9.2 dB\n"
         ),
         "{}",
         out.stdout
@@ -869,6 +897,8 @@ fn track_commands_take_an_index_or_a_name() {
                 "on",
                 "--name",
                 "Lead",
+                "--to-master",
+                "off",
             ],
             Request::TrackSet {
                 track: TrackRef::Name("Guitar".to_string()),
@@ -879,9 +909,10 @@ fn track_commands_take_an_index_or_a_name() {
                 solo: Some(true),
                 arm: Some(true),
                 name: Some("Lead".to_string()),
+                to_master: Some(false),
             },
-            r#"{"ok":true,"index":0,"name":"Lead","input":"card:capture_1","volume_db":-6.0,"pan":-0.5,"mute":false,"solo":true,"arm":true}"#,
-            "track 0 Lead: input card:capture_1, volume -6 dB, pan -0.5, mute no, solo yes, arm yes\n",
+            r#"{"ok":true,"index":0,"name":"Lead","input":"card:capture_1","volume_db":-6.0,"pan":-0.5,"mute":false,"solo":true,"arm":true,"to_master":false}"#,
+            "track 0 Lead: input card:capture_1, volume -6 dB, pan -0.5, mute no, solo yes, arm yes, to master no\n",
         ),
         (
             &["track", "edit", "0", "--input", ""],
@@ -894,9 +925,10 @@ fn track_commands_take_an_index_or_a_name() {
                 solo: None,
                 arm: None,
                 name: None,
+                to_master: None,
             },
-            r#"{"ok":true,"index":0,"name":"Lead","input":null,"volume_db":0.0,"pan":0.0,"mute":false,"solo":false,"arm":false}"#,
-            "track 0 Lead: input -, volume 0 dB, pan 0, mute no, solo no, arm no\n",
+            r#"{"ok":true,"index":0,"name":"Lead","input":null,"volume_db":0.0,"pan":0.0,"mute":false,"solo":false,"arm":false,"to_master":true}"#,
+            "track 0 Lead: input -, volume 0 dB, pan 0, mute no, solo no, arm no, to master yes\n",
         ),
     ];
     for (argv, request, answer, printed) in cases {
@@ -1027,4 +1059,257 @@ fn project_items_prints_one_line_per_item() {
         "Guitar 1.1 2.00s take 1/1\nGuitar 3.1 0.50s take 2/2\n"
     );
     assert_eq!(out.code, 0);
+}
+
+#[test]
+fn bus_commands_send_their_requests_and_print_the_answer() {
+    let bus = |name: &str| TrackRef::Name(name.to_string());
+    let cases: Vec<(&[&str], Request, &str, &str)> = vec![
+        (
+            &["bus", "add", "Verb"],
+            Request::BusAdd {
+                name: Some("Verb".to_string()),
+            },
+            r#"{"ok":true,"bus":{"id":0,"index":0,"name":"Verb"}}"#,
+            "added bus 0 Verb\n",
+        ),
+        (
+            &["bus", "add"],
+            Request::BusAdd { name: None },
+            r#"{"ok":true,"bus":{"id":1,"index":1,"name":"Bus 1"}}"#,
+            "added bus 1 Bus 1\n",
+        ),
+        (
+            &["bus", "remove", "1"],
+            Request::BusRemove {
+                bus: TrackRef::Index(1),
+            },
+            r#"{"ok":true,"bus":{"id":1,"index":1,"name":"Bus 1"}}"#,
+            "removed bus 1 Bus 1\n",
+        ),
+        (
+            &[
+                "bus", "edit", "Verb", "--name", "Room", "--volume", "-3", "--pan", "-0.5",
+                "--mute", "on", "--solo", "off",
+            ],
+            Request::BusSet {
+                bus: bus("Verb"),
+                name: Some("Room".to_string()),
+                volume: Some(-3.0),
+                pan: Some(-0.5),
+                mute: Some(true),
+                solo: Some(false),
+            },
+            r#"{"ok":true,"bus":{"id":0,"index":0,"name":"Room","volume_db":-3.0,"pan":-0.5,"mute":true,"solo":false}}"#,
+            "bus 0 Room: volume -3 dB, pan -0.5, mute yes, solo no\n",
+        ),
+    ];
+    assert_cases(cases);
+}
+
+#[test]
+fn send_master_and_clip_commands_send_their_requests_and_print_the_answer() {
+    let bus = |name: &str| TrackRef::Name(name.to_string());
+    let cases: Vec<(&[&str], Request, &str, &str)> = vec![
+        (
+            &["send", "0", "Verb", "-6"],
+            Request::SendSet {
+                track: TrackRef::Index(0),
+                bus: bus("Verb"),
+                level: Some(SendLevel::Db(-6.0)),
+                pre: None,
+            },
+            r#"{"ok":true,"track":0,"bus":0,"level":-6.0,"pre":false}"#,
+            "send track 0 -> bus 0: -6 dB, post\n",
+        ),
+        (
+            &["send", "Guitar", "1", "off", "--pre", "on"],
+            Request::SendSet {
+                track: TrackRef::Name("Guitar".to_string()),
+                bus: TrackRef::Index(1),
+                level: Some(SendLevel::Off),
+                pre: Some(true),
+            },
+            r#"{"ok":true,"track":0,"bus":1,"level":"off","pre":true}"#,
+            "send track 0 -> bus 1: off, pre\n",
+        ),
+        (
+            &["master", "-3"],
+            Request::MasterSet { volume: -3.0 },
+            r#"{"ok":true,"volume_db":-3.0}"#,
+            "master -3 dB\n",
+        ),
+        (
+            &["clip", "reset"],
+            Request::ClipReset {
+                track: None,
+                bus: None,
+                master: false,
+            },
+            r#"{"ok":true}"#,
+            "clip reset\n",
+        ),
+        (
+            &["clip", "reset", "track", "Guitar"],
+            Request::ClipReset {
+                track: Some(TrackRef::Name("Guitar".to_string())),
+                bus: None,
+                master: false,
+            },
+            r#"{"ok":true,"track":0}"#,
+            "clip reset\n",
+        ),
+        (
+            &["clip", "reset", "bus", "0"],
+            Request::ClipReset {
+                track: None,
+                bus: Some(TrackRef::Index(0)),
+                master: false,
+            },
+            r#"{"ok":true,"bus":0}"#,
+            "clip reset\n",
+        ),
+        (
+            &["clip", "reset", "master"],
+            Request::ClipReset {
+                track: None,
+                bus: None,
+                master: true,
+            },
+            r#"{"ok":true,"master":true}"#,
+            "clip reset\n",
+        ),
+    ];
+    assert_cases(cases);
+}
+
+fn assert_cases(cases: Vec<(&[&str], Request, &str, &str)>) {
+    for (argv, request, answer, printed) in cases {
+        let out = cli(argv, reply(answer));
+        assert_eq!(out.requests, [request], "{argv:?}");
+        assert_eq!(out.stdout, printed, "{argv:?}");
+        assert_eq!(out.code, 0, "{argv:?}");
+    }
+}
+
+#[test]
+fn rack_commands_take_a_bus_or_master() {
+    let verb = Some(TrackRef::Name("Verb".to_string()));
+    let cases: Vec<(&[&str], Request, &str)> = vec![
+        (
+            &["rack", "add", "reverb", "--bus", "Verb"],
+            Request::RackAdd {
+                r#type: "reverb".to_string(),
+                after: None,
+                at: None,
+                track: None,
+                bus: verb.clone(),
+                master: false,
+            },
+            r#"{"ok":true,"id":"reverb"}"#,
+        ),
+        (
+            &["rack", "remove", "gain", "--master"],
+            Request::RackRemove {
+                id: "gain".to_string(),
+                track: None,
+                bus: None,
+                master: true,
+            },
+            r#"{"ok":true,"id":"gain"}"#,
+        ),
+        (
+            &["rack", "move", "gain", "0", "--bus", "1"],
+            Request::RackMove {
+                id: "gain".to_string(),
+                to: 0,
+                track: None,
+                bus: Some(TrackRef::Index(1)),
+                master: false,
+            },
+            r#"{"ok":true,"id":"gain","to":0}"#,
+        ),
+        (
+            &["set", "reverb.mix", "-0.5", "--bus", "Verb"],
+            Request::Set {
+                param: "reverb.mix".to_string(),
+                value: -0.5,
+                track: None,
+                bus: verb.clone(),
+                master: false,
+            },
+            r#"{"ok":true,"param":"reverb.mix","value":0.0,"clamped":true}"#,
+        ),
+        (
+            &["get", "--master"],
+            Request::Get {
+                param: None,
+                track: None,
+                bus: None,
+                master: true,
+            },
+            r#"{"ok":true,"params":[]}"#,
+        ),
+        (
+            &["bypass", "reverb", "on", "--bus", "Verb"],
+            Request::Bypass {
+                id: "reverb".to_string(),
+                on: true,
+                track: None,
+                bus: verb,
+                master: false,
+            },
+            r#"{"ok":true,"bypass":true}"#,
+        ),
+        (
+            &["ir", "set", "cab.wav", "--master"],
+            Request::RackIr {
+                ir: "cab.wav".to_string(),
+                id: None,
+                track: None,
+                bus: None,
+                master: true,
+            },
+            r#"{"ok":false,"error":"a cabinet is not allowed on a Bus or Master"}"#,
+        ),
+    ];
+    for (argv, request, answer) in cases {
+        let out = cli(argv, reply(answer));
+        assert_eq!(out.requests, [request], "{argv:?}");
+    }
+    let out = cli(
+        &["ir", "set", "cab.wav", "--master"],
+        reply(r#"{"ok":false,"error":"a cabinet is not allowed on a Bus or Master"}"#),
+    );
+    assert_eq!(
+        out.stderr,
+        "error: a cabinet is not allowed on a Bus or Master\n"
+    );
+}
+
+#[test]
+fn mixer_usage_errors_print_one_line() {
+    for (argv, stderr) in [
+        (
+            &["send", "0", "0", "loud"][..],
+            "error: level must be a number in dB or off\n",
+        ),
+        (
+            &["clip", "reset", "master", "0"][..],
+            "error: clip reset master takes no name\n",
+        ),
+        (
+            &["clip", "reset", "bus"][..],
+            "error: clip reset track and bus need an index or a name\n",
+        ),
+        (
+            &["rack", "add", "gain", "--bus", "0", "--master"][..],
+            "error: the argument '--bus <BUS>' cannot be used with '--master'\n",
+        ),
+    ] {
+        let out = cli(argv, reply(r#"{"ok":true}"#));
+        assert_eq!(out.stderr, stderr, "{argv:?}");
+        assert_eq!(out.code, 1, "{argv:?}");
+        assert!(out.requests.is_empty(), "{argv:?}");
+    }
 }

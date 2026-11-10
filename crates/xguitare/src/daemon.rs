@@ -457,6 +457,8 @@ fn apply_program_changes(state: &mut EngineState) {
         let load = Request::Load {
             preset: program.to_string(),
             track: None,
+            bus: None,
+            master: false,
         };
         let (response, warnings) = handle(state, load);
         for warning in warnings {

@@ -14,20 +14,24 @@ use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
-use crate::arrangement::ArrangementCommand;
 use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
 use crate::engine::{
-    Command, EngineQueues, EngineShared, FadeLengths, SWITCHER_MAX_FRAMES, take_peak,
+    Command, EngineQueues, EngineShared, FadeLengths, MeterPoint, MixMeters, SWITCHER_MAX_FRAMES,
+    take_peak,
 };
 use crate::firstrun::{BASS_IR, DEFAULT_IR, ensure_bank};
+use crate::mixer_control::{
+    BusChange, bus_add, bus_remove, bus_set, clip_reset, master_set, send_set,
+};
 use crate::ports::{AudioPorts, AvailablePort, connect_plan};
 use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
-use crate::project::{LoopRegion, MAX_TRACKS};
+use crate::project::{LoopRegion, MAX_BUSES, MAX_TRACKS, ProjectError};
 use crate::project_control::{
-    Projects, TrackChange, change_track_module, click, create_projects_dir, items, project_close,
-    project_list, project_new, project_open, project_save, rebuild_arrangement,
-    rebuild_arrangement_slots, set_loop, set_track_modules, status_fields, target_track, tempo,
-    track_add, track_preset, track_remove, track_select, track_set, transport,
+    ProjectRack, Projects, TrackChange, bypass_command, change_rack_module, click,
+    create_projects_dir, items, param_command, project_close, project_list, project_new,
+    project_open, project_save, rack_preset, rebuild_arrangement, rebuild_arrangement_slots,
+    set_loop, set_rack_modules, status_fields, target_rack, tempo, track_add, track_remove,
+    track_select, track_set, transport,
 };
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
 use crate::tuner::Tuner;
@@ -50,6 +54,9 @@ const SAVE_AS_TRIES: u64 = 8;
 const NO_AUDIO_PORTS: &str = "audio ports are not available";
 const BANK_DIR_IN_CONFIG: &str = "bank_dir is set in config.toml; edit it there";
 const PROJECTS_DIR_NOT_ABSOLUTE: &str = "projects_dir must be an absolute path";
+const PRESET_INTO_TRACK: &str = "a Preset loads only into a Track";
+const OFF: &str = "off";
+const BAD_LEVEL: &str = "level must be a number in dB or \"off\"";
 /// Linux `EPERM`, which `hard_link` returns on a filesystem without hard links; `EACCES` shares its `ErrorKind`.
 const EPERM: i32 = 1;
 
@@ -62,17 +69,29 @@ pub enum Request {
         preset: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     Set {
         param: String,
         value: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     Get {
         param: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     Save {
         /// Writes a new Preset file with this name instead of the active Preset's file.
@@ -86,17 +105,29 @@ pub enum Request {
         at: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     RackRemove {
         id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     RackMove {
         id: String,
         to: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     Tuner,
     Mute {
@@ -107,6 +138,10 @@ pub enum Request {
         on: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     IrList,
     RackIr {
@@ -114,6 +149,10 @@ pub enum Request {
         id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
     },
     Ports,
     SetPorts {
@@ -157,6 +196,7 @@ pub enum Request {
         solo: Option<bool>,
         arm: Option<bool>,
         name: Option<String>,
+        to_master: Option<bool>,
     },
     TrackSelect {
         track: TrackRef,
@@ -178,6 +218,38 @@ pub enum Request {
         on: Option<bool>,
         count_in: Option<u32>,
     },
+    BusAdd {
+        name: Option<String>,
+    },
+    BusRemove {
+        bus: BusRef,
+    },
+    BusSet {
+        bus: BusRef,
+        name: Option<String>,
+        volume: Option<f32>,
+        pan: Option<f32>,
+        mute: Option<bool>,
+        solo: Option<bool>,
+    },
+    SendSet {
+        track: TrackRef,
+        bus: BusRef,
+        level: Option<SendLevel>,
+        pre: Option<bool>,
+    },
+    MasterSet {
+        volume: f32,
+    },
+    /// Clears the clip flag of the Track, Bus or Master given, or of all when none is.
+    ClipReset {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<TrackRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bus: Option<BusRef>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        master: bool,
+    },
 }
 
 /// A Track by its zero-based index (a JSON number) or its name (a JSON string).
@@ -186,6 +258,53 @@ pub enum Request {
 pub enum TrackRef {
     Index(usize),
     Name(String),
+}
+
+/// A Bus by its zero-based index (a JSON number) or its name (a JSON string).
+pub type BusRef = TrackRef;
+
+/// A Send level on the wire: a number in dB or the string `"off"`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "LevelOnWire", into = "LevelOnWire")]
+pub enum SendLevel {
+    Db(f32),
+    Off,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum LevelOnWire {
+    Db(f32),
+    Word(String),
+}
+
+impl TryFrom<LevelOnWire> for SendLevel {
+    type Error = &'static str;
+
+    fn try_from(level: LevelOnWire) -> Result<Self, Self::Error> {
+        match level {
+            LevelOnWire::Db(db) => Ok(SendLevel::Db(db)),
+            LevelOnWire::Word(word) if word == OFF => Ok(SendLevel::Off),
+            LevelOnWire::Word(_) => Err(BAD_LEVEL),
+        }
+    }
+}
+
+impl From<SendLevel> for LevelOnWire {
+    fn from(level: SendLevel) -> Self {
+        match level {
+            SendLevel::Db(db) => LevelOnWire::Db(db),
+            SendLevel::Off => LevelOnWire::Word(OFF.to_string()),
+        }
+    }
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_false(on: &bool) -> bool {
+    !on
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,6 +378,35 @@ struct Peaks {
     input: f32,
     output: f32,
     tracks: [f32; MAX_TRACKS],
+    mix: MixPeaks,
+}
+
+/// Post-fader left and right peaks per Track, Bus and Master.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct MixPeaks {
+    pub tracks: [[f32; 2]; MAX_TRACKS],
+    pub buses: [[f32; 2]; MAX_BUSES],
+    pub master: [f32; 2],
+}
+
+impl MixPeaks {
+    fn take(meters: &MixMeters) -> MixPeaks {
+        MixPeaks {
+            tracks: std::array::from_fn(|idx| meters.take_peak(MeterPoint::Track(idx))),
+            buses: std::array::from_fn(|idx| meters.take_peak(MeterPoint::Bus(idx))),
+            master: meters.take_peak(MeterPoint::Master),
+        }
+    }
+
+    fn raise(&mut self, other: &MixPeaks) {
+        let pairs = self.tracks.iter_mut().zip(&other.tracks);
+        let pairs = pairs.chain(self.buses.iter_mut().zip(&other.buses));
+        for (mine, theirs) in pairs.chain([(&mut self.master, &other.master)]) {
+            for (peak, other) in mine.iter_mut().zip(theirs) {
+                *peak = peak.max(*other);
+            }
+        }
+    }
 }
 
 /// Registers a new connection; its first `status` reports the peaks since the previous `status` on any connection, so a one-request client such as the CLI still sees them.
@@ -279,7 +427,9 @@ fn drain_peaks(state: &mut EngineState) {
     let output = take_peak(&state.shared.output_peak_bits);
     let tracks: [f32; MAX_TRACKS] =
         std::array::from_fn(|idx| take_peak(&state.shared.track_input_peak_bits[idx]));
+    let mix = MixPeaks::take(&state.shared.mix_meters);
     for peaks in state.peaks.meters.values_mut() {
+        peaks.mix.raise(&mix);
         peaks.input = peaks.input.max(input);
         peaks.output = peaks.output.max(output);
         for (peak, track) in peaks.tracks.iter_mut().zip(tracks) {
@@ -323,13 +473,28 @@ fn handle_from(
     let result = match req {
         Request::Status => Ok(status(state, connection)),
         Request::List => Ok(list(state)),
-        Request::Load { preset, track } => load(state, &preset, track.as_ref(), &mut warnings),
+        Request::Load {
+            preset,
+            track,
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| load(state, &preset, rack, &mut warnings)),
         Request::Set {
             param,
             value,
             track,
-        } => set(state, &param, value, track.as_ref()),
-        Request::Get { param, track } => get(state, param.as_deref(), track.as_ref()),
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| set(state, &param, value, rack)),
+        Request::Get {
+            param,
+            track,
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| get(state, param.as_deref(), rack)),
         Request::Save { name: None } => save(state),
         Request::Save { name: Some(name) } => save_as(state, &name),
         Request::Modules => Ok(modules()),
@@ -338,25 +503,44 @@ fn handle_from(
             after,
             at,
             track,
-        } => rack_add(
-            state,
-            &r#type,
-            after.as_deref(),
-            at,
-            track.as_ref(),
-            &mut warnings,
-        ),
-        Request::RackRemove { id, track } => rack_remove(state, &id, track.as_ref(), &mut warnings),
-        Request::RackMove { id, to, track } => {
-            rack_move(state, &id, to, track.as_ref(), &mut warnings)
-        }
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| rack_add(state, &r#type, after.as_deref(), at, rack, &mut warnings)),
+        Request::RackRemove {
+            id,
+            track,
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| rack_remove(state, &id, rack, &mut warnings)),
+        Request::RackMove {
+            id,
+            to,
+            track,
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| rack_move(state, &id, to, rack, &mut warnings)),
         Request::Tuner => Ok(tuner(state)),
         Request::Mute { on } => Ok(mute(state, on)),
-        Request::Bypass { id, on, track } => bypass(state, &id, on, track.as_ref()),
+        Request::Bypass {
+            id,
+            on,
+            track,
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| bypass(state, &id, on, rack)),
         Request::IrList => ir_list(state),
-        Request::RackIr { ir, id, track } => {
-            rack_ir(state, &ir, id.as_deref(), track.as_ref(), &mut warnings)
-        }
+        Request::RackIr {
+            ir,
+            id,
+            track,
+            bus,
+            master,
+        } => target_rack(state, track.as_ref(), bus.as_ref(), master)
+            .and_then(|rack| rack_ir(state, &ir, id.as_deref(), rack, &mut warnings)),
         Request::Ports => ports.ok_or(NO_AUDIO_PORTS.to_string()).map(|ports| {
             let (capture, playback) = port_names(ports);
             json!({"capture": capture, "playback": playback, "connected": connected(state, ports)})
@@ -396,6 +580,7 @@ fn handle_from(
             solo,
             arm,
             name,
+            to_master,
         } => track_set(
             state,
             ports,
@@ -408,6 +593,7 @@ fn handle_from(
                 solo,
                 arm,
                 name,
+                to_master,
             },
         ),
         Request::TrackSelect { track } => track_select(state, &track),
@@ -415,6 +601,36 @@ fn handle_from(
         Request::Loop { start, end, on } => set_loop(state, LoopRegion { start, end, on }),
         Request::Tempo { bpm, meter } => tempo(state, bpm, meter),
         Request::Click { on, count_in } => click(state, on, count_in),
+        Request::BusAdd { name } => bus_add(state, name.as_deref()),
+        Request::BusRemove { bus } => bus_remove(state, &bus),
+        Request::BusSet {
+            bus,
+            name,
+            volume,
+            pan,
+            mute,
+            solo,
+        } => bus_set(
+            state,
+            &bus,
+            &BusChange {
+                name,
+                volume,
+                pan,
+                mute,
+                solo,
+            },
+        ),
+        Request::SendSet {
+            track,
+            bus,
+            level,
+            pre,
+        } => send_set(state, &track, &bus, level, pre),
+        Request::MasterSet { volume } => master_set(state, volume),
+        Request::ClipReset { track, bus, master } => {
+            clip_reset(state, track.as_ref(), bus.as_ref(), master)
+        }
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
@@ -595,7 +811,7 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         "connections": connections,
     });
     if let Some(fields) = payload.as_object_mut() {
-        fields.extend(status_fields(state, &peaks.tracks));
+        fields.extend(status_fields(state, &peaks.tracks, &peaks.mix));
     }
     payload
 }
@@ -643,10 +859,12 @@ fn list(state: &EngineState) -> Value {
 fn load(
     state: &mut EngineState,
     key: &str,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    let target = target_track(state, track)?;
+    if rack.is_some_and(ProjectRack::is_stereo) {
+        return Err(PRESET_INTO_TRACK.to_string());
+    }
     let (program, entry) = state
         .bank
         .by_name_or_number(key)
@@ -656,8 +874,8 @@ fn load(
         BankEntry::Invalid { error, .. } => return Err(error.clone()),
     };
     let payload = json!({"program": program, "name": preset.name});
-    if let Some(track) = target {
-        set_track_modules(state, track, preset.modules, warnings)?;
+    if let Some(rack) = rack {
+        set_rack_modules(state, rack, preset.modules, warnings)?;
         return Ok(payload);
     }
     install_preset(state, file, preset, warnings)?;
@@ -711,17 +929,13 @@ fn set(
     state: &mut EngineState,
     address: &str,
     value: f64,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
 ) -> Result<Value, String> {
     if !value.is_finite() {
         return Err("value must be a finite number".to_string());
     }
     let address = ParamAddress::parse(address).map_err(|err| err.to_string())?;
-    let target = target_track(state, track)?;
-    let preset = match target {
-        Some(track) => track_preset(state, track),
-        None => state.active.as_ref().ok_or(NO_PRESET)?.1.clone(),
-    };
+    let preset = rack_or_live_preset(state, rack)?;
     let (module, param) = resolve(&preset, &address).map_err(|err| err.to_string())?;
     let spec = param_spec(&preset.modules[module], param);
     let clamped = value < f64::from(spec.min) || value > f64::from(spec.max);
@@ -732,14 +946,9 @@ fn set(
         "value": shortest_f64(applied),
         "clamped": clamped,
     });
-    if let Some(track) = target {
-        let command = ArrangementCommand::Param {
-            track,
-            module,
-            param,
-            value: applied,
-        };
-        change_track_module(state, track, command, |modules| {
+    if let Some(rack) = rack {
+        let command = param_command(rack, module, param, applied);
+        change_rack_module(state, rack, command, |modules| {
             modules[module].params[param].1 = applied;
         })?;
         return Ok(payload);
@@ -764,12 +973,12 @@ fn bypass(
     state: &mut EngineState,
     id: &str,
     on: bool,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
 ) -> Result<Value, String> {
-    if let Some(track) = target_track(state, track)? {
-        let module = module_index(&track_preset(state, track).modules, id)?;
-        let command = ArrangementCommand::Bypass { track, module, on };
-        change_track_module(state, track, command, |modules| {
+    if let Some(rack) = rack {
+        let module = module_index(&rack_preset(state, rack).modules, id)?;
+        let command = bypass_command(rack, module, on);
+        change_rack_module(state, rack, command, |modules| {
             modules[module].bypass = on;
         })?;
         return Ok(json!({ "bypass": on }));
@@ -990,11 +1199,15 @@ fn rack_add(
     type_name: &str,
     after: Option<&str>,
     at: Option<usize>,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
     let (ir_dir, bank_dir) = (state.config.ir_dir.clone(), state.config.bank_dir.clone());
-    edit_rack(state, track, warnings, |preset| {
+    let is_stereo = rack.is_some_and(ProjectRack::is_stereo);
+    if is_stereo && type_name == CABINET_TYPE {
+        return Err(ProjectError::CabinetOnBus.to_string());
+    }
+    edit_rack(state, rack, warnings, |preset| {
         let spec = ModuleRegistry::default()
             .spec(type_name)
             .ok_or_else(|| format!("unknown module type '{type_name}'"))?;
@@ -1020,7 +1233,9 @@ fn rack_add(
                     .collect(),
             },
         );
-        preset.validate_layout().map_err(|err| err.to_string())?;
+        if !is_stereo {
+            preset.validate_layout().map_err(|err| err.to_string())?;
+        }
         if type_name == CABINET_TYPE {
             let ir = CABINET_IRS
                 .into_iter()
@@ -1035,10 +1250,10 @@ fn rack_add(
 fn rack_remove(
     state: &mut EngineState,
     id: &str,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    edit_rack(state, track, warnings, |preset| {
+    edit_rack(state, rack, warnings, |preset| {
         let modules = &mut preset.modules;
         modules.remove(module_index(modules, id)?);
         Ok(json!({ "id": id }))
@@ -1049,10 +1264,10 @@ fn rack_move(
     state: &mut EngineState,
     id: &str,
     to: usize,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    edit_rack(state, track, warnings, |preset| {
+    edit_rack(state, rack, warnings, |preset| {
         let modules = &mut preset.modules;
         let module = modules.remove(module_index(modules, id)?);
         let to = to.min(modules.len());
@@ -1063,14 +1278,14 @@ fn rack_move(
 
 fn edit_rack(
     state: &mut EngineState,
-    track: Option<&TrackRef>,
+    rack: Option<ProjectRack>,
     warnings: &mut Vec<BuildWarning>,
     edit: impl FnOnce(&mut Preset) -> Result<Value, String>,
 ) -> Result<Value, String> {
-    if let Some(track) = target_track(state, track)? {
-        let mut preset = track_preset(state, track);
+    if let Some(rack) = rack {
+        let mut preset = rack_preset(state, rack);
         let payload = edit(&mut preset)?;
-        set_track_modules(state, track, preset.modules, warnings)?;
+        set_rack_modules(state, rack, preset.modules, warnings)?;
         return Ok(payload);
     }
     let (file, preset) = state.active.as_ref().ok_or(NO_PRESET)?;
@@ -1091,12 +1306,14 @@ fn rack_ir(
     state: &mut EngineState,
     ir: &str,
     id: Option<&str>,
-    track: Option<&TrackRef>,
+    rack_target: Option<ProjectRack>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<Value, String> {
-    let target = target_track(state, track)?;
-    let (file, mut preset) = match target {
-        Some(track) => (PathBuf::new(), track_preset(state, track)),
+    if rack_target.is_some_and(ProjectRack::is_stereo) {
+        return Err(ProjectError::CabinetOnBus.to_string());
+    }
+    let (file, mut preset) = match rack_target {
+        Some(rack) => (PathBuf::new(), rack_preset(state, rack)),
         None => state.active.clone().ok_or(NO_PRESET)?,
     };
     let index = cabinet_index(&preset.modules, id)?;
@@ -1112,9 +1329,9 @@ fn rack_ir(
     {
         return Err(error.clone());
     }
-    if let Some(track) = target {
+    if let Some(target) = rack_target {
         drop(rack);
-        set_track_modules(state, track, preset.modules, warnings)?;
+        set_rack_modules(state, target, preset.modules, warnings)?;
         return Ok(json!({"id": id, "ir": ir}));
     }
     *warnings = build_warnings;
@@ -1351,11 +1568,16 @@ fn swap_saving_state(state: &mut EngineState, config: &Config, rack: Rack) -> Re
     Err(busy)
 }
 
-fn get(state: &EngineState, key: Option<&str>, track: Option<&TrackRef>) -> Result<Value, String> {
-    let preset = match target_track(state, track)? {
-        Some(track) => track_preset(state, track),
-        None => state.active.as_ref().ok_or(NO_PRESET)?.1.clone(),
-    };
+/// The Project Rack's Modules as a Preset, or the active Preset for the live Rack.
+fn rack_or_live_preset(state: &EngineState, rack: Option<ProjectRack>) -> Result<Preset, String> {
+    match rack {
+        Some(rack) => Ok(rack_preset(state, rack)),
+        None => Ok(state.active.as_ref().ok_or(NO_PRESET)?.1.clone()),
+    }
+}
+
+fn get(state: &EngineState, key: Option<&str>, rack: Option<ProjectRack>) -> Result<Value, String> {
+    let preset = rack_or_live_preset(state, rack)?;
     let preset = &preset;
     let selected: Vec<(usize, usize)> = match key {
         None => preset

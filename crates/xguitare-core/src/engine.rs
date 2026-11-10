@@ -41,7 +41,7 @@ pub struct EngineShared {
 
 /// One meter of [`MixMeters`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Strip {
+pub enum MeterPoint {
     Track(usize),
     Bus(usize),
     Master,
@@ -50,13 +50,13 @@ pub enum Strip {
 /// Post-fader stereo peaks and latching clip flags per Track, Bus and Master, written by the audio thread and read by the control thread.
 #[derive(Debug, Default)]
 pub struct MixMeters {
-    tracks: [StripMeter; MAX_TRACKS],
-    buses: [StripMeter; MAX_BUSES],
-    master: StripMeter,
+    tracks: [PointMeter; MAX_TRACKS],
+    buses: [PointMeter; MAX_BUSES],
+    master: PointMeter,
 }
 
 #[derive(Debug, Default)]
-struct StripMeter {
+struct PointMeter {
     /// f32 bits of the largest |sample| on each side since the last `take_peak`.
     peak_bits: [AtomicU32; 2],
     clip: AtomicBool,
@@ -66,9 +66,9 @@ struct StripMeter {
 const CLIP_LEVEL: f32 = 1.0;
 
 impl MixMeters {
-    /// Raises the strip's peaks to `peak` and sets its clip flag when a side reaches 0 dBFS; a strip out of range is ignored.
-    pub fn raise(&self, strip: Strip, peak: [f32; 2]) {
-        let Some(meter) = self.meter(strip) else {
+    /// Raises the meter point's peaks to `peak` and sets its clip flag when a side reaches 0 dBFS; a point out of range is ignored.
+    pub fn raise(&self, point: MeterPoint, peak: [f32; 2]) {
+        let Some(meter) = self.meter(point) else {
             return;
         };
         for (bits, value) in meter.peak_bits.iter().zip(peak) {
@@ -79,15 +79,15 @@ impl MixMeters {
         }
     }
 
-    /// The strip's left and right peaks since the last call, reset to 0; zeros for a strip out of range.
-    pub fn take_peak(&self, strip: Strip) -> [f32; 2] {
-        self.meter(strip)
+    /// The point's left and right peaks since the last call, reset to 0; zeros for a point out of range.
+    pub fn take_peak(&self, point: MeterPoint) -> [f32; 2] {
+        self.meter(point)
             .map_or([0.0; 2], |meter| meter.peak_bits.each_ref().map(take_peak))
     }
 
-    /// Whether the strip has reached 0 dBFS since its clip flag was last reset.
-    pub fn clip(&self, strip: Strip) -> bool {
-        self.meter(strip)
+    /// Whether the meter point has reached 0 dBFS since its clip flag was last reset.
+    pub fn clip(&self, point: MeterPoint) -> bool {
+        self.meter(point)
             .is_some_and(|meter| meter.clip.load(Ordering::Relaxed))
     }
 
@@ -101,11 +101,11 @@ impl MixMeters {
         }
     }
 
-    /// Clears the clip flag of `strip`, or of every strip for `None`.
-    pub fn clip_reset(&self, strip: Option<Strip>) {
-        let clear = |meter: &StripMeter| meter.clip.store(false, Ordering::Relaxed);
-        match strip {
-            Some(strip) => self.meter(strip).into_iter().for_each(clear),
+    /// Clears the clip flag of `point`, or of every point for `None`.
+    pub fn clip_reset(&self, point: Option<MeterPoint>) {
+        let clear = |meter: &PointMeter| meter.clip.store(false, Ordering::Relaxed);
+        match point {
+            Some(point) => self.meter(point).into_iter().for_each(clear),
             None => self
                 .tracks
                 .iter()
@@ -115,11 +115,11 @@ impl MixMeters {
         }
     }
 
-    fn meter(&self, strip: Strip) -> Option<&StripMeter> {
-        match strip {
-            Strip::Track(idx) => self.tracks.get(idx),
-            Strip::Bus(idx) => self.buses.get(idx),
-            Strip::Master => Some(&self.master),
+    fn meter(&self, point: MeterPoint) -> Option<&PointMeter> {
+        match point {
+            MeterPoint::Track(idx) => self.tracks.get(idx),
+            MeterPoint::Bus(idx) => self.buses.get(idx),
+            MeterPoint::Master => Some(&self.master),
         }
     }
 }

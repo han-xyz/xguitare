@@ -158,6 +158,7 @@ fn track_set(track: TrackRef) -> Request {
         solo: None,
         arm: None,
         name: None,
+        to_master: None,
     }
 }
 
@@ -339,6 +340,8 @@ fn project_errors_without_an_open_project() {
             param: "gain.level".to_string(),
             value: 0.0,
             track: Some(index(0)),
+            bus: None,
+            master: false,
         },
     ] {
         assert_eq!(error(handle(&mut state, request)), "no project open");
@@ -541,7 +544,9 @@ fn track_remove_and_select_resolve_index_or_name() {
             Request::Set {
                 param: "gain.level".to_string(),
                 value: 0.0,
-                track: None
+                track: None,
+                bus: None,
+                master: false,
             }
         )),
         "the project has no tracks"
@@ -620,7 +625,7 @@ fn track_set_validates_every_value_before_changing_anything() {
     }
     assert_eq!(
         ok(handle(&mut state, request)),
-        json!({"index": 0, "name": "Guitar", "input": null, "volume_db": -6.0, "pan": -0.5, "mute": true, "solo": false, "arm": false})
+        json!({"index": 0, "name": "Guitar", "input": null, "volume_db": -6.0, "pan": -0.5, "mute": true, "solo": false, "arm": false, "to_master": true})
     );
     assert_eq!(
         arrangement_commands(&mut audio),
@@ -874,6 +879,8 @@ fn rack_requests_edit_the_selected_or_named_track() {
             param: "gain.level".to_string(),
             value: 4.0,
             track: Some(named("Guitar")),
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(
@@ -890,6 +897,8 @@ fn rack_requests_edit_the_selected_or_named_track() {
             id: "gain".to_string(),
             on: true,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(
@@ -903,6 +912,8 @@ fn rack_requests_edit_the_selected_or_named_track() {
             after: None,
             at: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     ok(handle(
@@ -910,6 +921,8 @@ fn rack_requests_edit_the_selected_or_named_track() {
         Request::Load {
             preset: "Amp".to_string(),
             track: Some(index(0)),
+            bus: None,
+            master: false,
         },
     ));
     let got = ok(handle(
@@ -917,6 +930,8 @@ fn rack_requests_edit_the_selected_or_named_track() {
         Request::Get {
             param: Some("gain.level".to_string()),
             track: Some(index(0)),
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(got["params"][0]["value"], 0.0);
@@ -959,7 +974,7 @@ fn status_reports_transport_position_and_tracks() {
     assert_eq!(status["disk_overflows"], 2);
     assert_eq!(
         status["tracks"][0],
-        json!({"name": "Guitar", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": false, "solo": false, "armed": false, "input_peak_db": -6.0})
+        json!({"name": "Guitar", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": false, "solo": false, "armed": false, "input_peak_db": -6.0, "to_master": true, "sends": [], "peak_db": [-120.0, -120.0], "clip": false})
     );
 }
 

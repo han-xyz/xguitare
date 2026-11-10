@@ -469,6 +469,8 @@ impl Restore {
             after,
             at,
             track: self.track.clone(),
+            bus: None,
+            master: false,
         }
     }
 
@@ -478,16 +480,22 @@ impl Restore {
             param: format!("{id}.{param}"),
             value: *value,
             track: self.track.clone(),
+            bus: None,
+            master: false,
         });
         let bypass = self.bypass.then(|| Request::Bypass {
             id: id.to_string(),
             on: true,
             track: self.track.clone(),
+            bus: None,
+            master: false,
         });
         let ir = self.ir.clone().map(|ir| Request::RackIr {
             ir,
             id: Some(id.to_string()),
             track: self.track.clone(),
+            bus: None,
+            master: false,
         });
         sets.chain(bypass).chain(ir).collect()
     }
@@ -956,17 +964,25 @@ pub enum Outgoing {
 }
 
 /// `selected` is the Track the Rack requests act on while a Project is open, `None` without one; a [`Command::TrackSelect`] moves it for the commands after it.
+#[allow(clippy::too_many_lines, reason = "one match arm per queued command")]
 pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
     let mut selected = selected;
     for command in queued {
         let track = selected.map(TrackRef::Index);
         let req = match command {
-            Command::Load(preset) => Request::Load { preset, track },
+            Command::Load(preset) => Request::Load {
+                preset,
+                track,
+                bus: None,
+                master: false,
+            },
             Command::Set { param, value } => Request::Set {
                 param,
                 value,
                 track,
+                bus: None,
+                master: false,
             },
             Command::Save => Request::Save { name: None },
             Command::SaveAs(name) => Request::Save { name: Some(name) },
@@ -979,15 +995,36 @@ pub fn requests_until_quit(queued: Vec<Command>, selected: Option<usize>) -> (Ve
                 after,
                 at,
                 track,
+                bus: None,
+                master: false,
             },
-            Command::RackRemove { id } => Request::RackRemove { id, track },
-            Command::RackMove { id, to } => Request::RackMove { id, to, track },
+            Command::RackRemove { id } => Request::RackRemove {
+                id,
+                track,
+                bus: None,
+                master: false,
+            },
+            Command::RackMove { id, to } => Request::RackMove {
+                id,
+                to,
+                track,
+                bus: None,
+                master: false,
+            },
             Command::Mute(on) => Request::Mute { on },
-            Command::Bypass { id, on } => Request::Bypass { id, on, track },
+            Command::Bypass { id, on } => Request::Bypass {
+                id,
+                on,
+                track,
+                bus: None,
+                master: false,
+            },
             Command::RackIr { id, ir } => Request::RackIr {
                 ir,
                 id: Some(id),
                 track,
+                bus: None,
+                master: false,
             },
             Command::SetPorts {
                 input,
@@ -1063,6 +1100,7 @@ fn track_set_request(track: usize, edit: TrackEdit) -> Request {
         solo: edit.solo,
         arm: edit.arm,
         name: edit.name,
+        to_master: None,
     }
 }
 

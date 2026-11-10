@@ -122,6 +122,8 @@ fn bypass(id: &str, on: bool) -> Request {
         id: id.to_string(),
         on,
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -130,6 +132,8 @@ fn set(param: &str, value: f64) -> Request {
         param: param.to_string(),
         value,
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -163,6 +167,8 @@ fn status_reports_fields() {
             "click": null,
             "selected": null,
             "tracks": [],
+            "buses": [],
+            "master": null,
             "disk_overflows": 0,
             "count_in_remaining": 0,
             "loaded_audio_bytes": 0,
@@ -204,6 +210,8 @@ fn load_returns_build_warnings() {
         Request::Load {
             preset: "Cab".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     );
     assert!(matches!(response, Response::Ok(_)));
@@ -222,6 +230,8 @@ fn load_by_name_and_number() {
         Request::Load {
             preset: "Loud".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(payload, json!({"program": 1, "name": "Loud"}));
@@ -234,6 +244,8 @@ fn load_by_name_and_number() {
         Request::Load {
             preset: "0".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(payload, json!({"program": 0, "name": "Clean"}));
@@ -252,6 +264,8 @@ fn load_invalid_entry_is_error() {
         Request::Load {
             preset: "2".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert!(message.starts_with("line 1:"), "{message}");
@@ -364,6 +378,8 @@ fn get_all_and_one() {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(all, json!({"params": [expected]}));
@@ -372,6 +388,8 @@ fn get_all_and_one() {
         Request::Get {
             param: Some("gain".to_string()),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(module, all);
@@ -380,6 +398,8 @@ fn get_all_and_one() {
         Request::Get {
             param: Some("gain.level".to_string()),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(one, all);
@@ -388,7 +408,9 @@ fn get_all_and_one() {
             &mut state,
             Request::Get {
                 param: Some("delay".to_string()),
-                track: None
+                track: None,
+                bus: None,
+                master: false,
             }
         )),
         "no module 'delay'"
@@ -409,6 +431,8 @@ fn get_carries_integer() {
         Request::Load {
             preset: "Hot".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let all = ok(handle(
@@ -416,6 +440,8 @@ fn get_carries_integer() {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let integer: Vec<(&str, bool)> = all["params"]
@@ -455,7 +481,9 @@ fn queue_full_is_engine_busy() {
             &mut state,
             Request::Load {
                 preset: "1".to_string(),
-                track: None
+                track: None,
+                bus: None,
+                master: false,
             }
         )),
         "engine busy"
@@ -739,6 +767,8 @@ fn rate_change_doubles_fade_frames() {
         Request::Load {
             preset: "Loud".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let crossfade_48k = frames_to_settle(&run_blocks(&mut switcher, 8192));
@@ -751,6 +781,8 @@ fn rate_change_doubles_fade_frames() {
         Request::Load {
             preset: "Clean".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let crossfade_96k = frames_to_settle(&run_blocks(&mut switcher, 8192));
@@ -880,6 +912,8 @@ fn revision_increments_on_load_set_save() {
         Request::Load {
             preset: "1".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(revision(&mut state), 2);
@@ -946,6 +980,8 @@ fn rack_add(type_name: &str, after: Option<&str>) -> Request {
         after: after.map(str::to_string),
         at: None,
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -955,6 +991,8 @@ fn rack_add_at(type_name: &str, at: usize) -> Request {
         after: None,
         at: Some(at),
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -963,6 +1001,8 @@ fn rack_move(id: &str, to: usize) -> Request {
         id: id.to_string(),
         to,
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -970,6 +1010,8 @@ fn rack_remove(id: &str) -> Request {
     Request::RackRemove {
         id: id.to_string(),
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -1045,6 +1087,8 @@ fn rack_add_at_inserts_at_index() {
         after: Some("gain".to_string()),
         at: Some(0),
         track: None,
+        bus: None,
+        master: false,
     };
     assert_eq!(error(handle(&mut state, both)), "give either after or at");
     assert_eq!(ids(&state), ["gate", "gain", "cabinet", "delay"]);
@@ -1314,6 +1358,8 @@ fn rack_ir(ir: &str, id: Option<&str>) -> Request {
         ir: ir.to_string(),
         id: id.map(str::to_string),
         track: None,
+        bus: None,
+        master: false,
     }
 }
 
@@ -1370,6 +1416,8 @@ fn non_finite_ir_refused_by_rack_ir_warned_on_load() {
         Request::Load {
             preset: "Nan".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     );
     assert!(matches!(response, Response::Ok(_)));
@@ -1469,6 +1517,8 @@ fn rack_ir_errors_verbatim() {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let bad = state.config.ir_dir.join("bad.wav");
@@ -1498,7 +1548,9 @@ fn rack_ir_errors_verbatim() {
             &mut state,
             Request::Get {
                 param: None,
-                track: None
+                track: None,
+                bus: None,
+                master: false,
             }
         )),
         before
@@ -1527,6 +1579,8 @@ fn get_cabinet_carries_ir() {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     let params = all["params"].as_array().unwrap();
@@ -1613,6 +1667,8 @@ fn modified_tracks_changes() {
         Request::Load {
             preset: "Loud".to_string(),
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert!(!is_modified(&mut state));
@@ -1841,6 +1897,8 @@ fn bypass_switches_the_module_and_shows_in_get() {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(all["params"][0]["bypass"], true);
@@ -1856,6 +1914,8 @@ fn bypass_switches_the_module_and_shows_in_get() {
         Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         },
     ));
     assert_eq!(all["params"][0]["bypass"], false);

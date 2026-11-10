@@ -180,7 +180,7 @@ disk_overflows: 0
 project: -
 ```
 
-While a Project is open, `status` goes on with the transport, the playhead, tempo, loop, click and one line per Track (see Projects).
+While a Project is open, `status` goes on with the transport, the playhead, tempo, loop, click, one line per Track, one per Bus and a Master line (see Projects).
 
 `list` shows the Bank; `*` marks the active Preset:
 
@@ -307,7 +307,7 @@ preamp: on
 
 The GUI's Project view (see [Project view](#project-view)) does all of this from the window.
 
-A Project is a recording session: Tracks, each with its own Rack, input, volume, pan, mute, solo and arm, summed with a click to the stereo output. While one is open the Daemon plays it instead of the active Preset; closing it brings the Preset back. Presets, the Bank and MIDI program change work as before when no Project is open; with one open, `load`, `set`, `get`, `bypass`, `rack` and `ir set` edit the selected Track (`track select`) instead.
+A Project is a recording session: Tracks, each with its own Rack, input, volume, pan, mute, solo and arm, mixed through Buses and Master (see [Mixer](#mixer)) with a click to the stereo output. While one is open the Daemon plays it instead of the active Preset; closing it brings the Preset back. Presets, the Bank and MIDI program change work as before when no Project is open; with one open, `load`, `set`, `get`, `bypass`, `rack` and `ir set` edit the selected Track (`track select`) instead, and `set`, `get`, `bypass`, `rack` and `ir set` take `--bus <bus>` or `--master` to edit a Bus's or the Master Rack.
 
 ### Folder layout
 
@@ -344,7 +344,9 @@ tempo: 120 bpm 4/4
 loop: off 0..0
 click off, count-in 0 bars
 tracks:
-  0* Guitar: armed; input Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO; 0 dB, pan 0; peak -88.8 dB
+  0* Guitar: armed; input Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO; 0 dB, pan 0; peak -88.8 dB; out -91.8/-91.8 dB
+buses:
+master: 0 dB; out -91.8/-91.8 dB
 $ xguitare project save
 saved /home/you/Music/xguitare/live/project.toml
 $ xguitare project close
@@ -353,13 +355,45 @@ closed Live
 
 - `project new|open|save|close|list|items`: `open <name> --restore` loads the autosave; `close` saves, and saves again once the Takes still being written are added (after a recording, a `project new` or `open` meanwhile answers `a project is still closing; try again`). A sample rate other than the audio server's is refused; if the audio server's rate changes while a Project is open, the Project stops and `play` and `record` are refused until the rates match again.
 - `project items` prints one line per Item: its Track, where it starts as `<bar>.<beat>`, its length in seconds (its active Take's frames minus the frames its `offset` skips) and which Take plays, e.g. `Guitar 2.1 4.00s take 2/2`. Right after `stop` the new Takes are not listed yet: they show up about a second later, once the disk thread has finished writing them.
-- `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name (a name cannot be only digits); `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off` and `--name`.
+- `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name (a name cannot be only digits); `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off`, `--to-master on|off` and `--name`.
 - An armed Track monitors its input through its Rack, also while stopped, and records while recording; an unarmed Track plays its Items.
 - `play`, `stop` (the playhead stays), `record` (from stopped, after the count-in) and `locate <bar>.<beat>|<bar>|<seconds>s`, e.g. `locate 3.2` or `locate 12.5s`, up to an hour past the last Take or the loop end.
 - `tempo <bpm> [<beats>/<note>]`, e.g. `tempo 100 3/4`; `click on|off [--count-in 0|1|2]`; all are saved with the Project. The loop region is set through the Control API `loop`, or in the GUI by dragging its edges on the ruler or pressing `R`.
 - While recording, a Track cannot be removed and an armed Track's input cannot change; `stop` first.
 
 Each Track records the dry input; its Rack is applied on playback, so its sound can still change after recording. A recording becomes a Take on a new Item; with the loop on, each pass after a wrap becomes another Take of the same Item, the newest one playing.
+
+### Mixer
+
+Each Track's sound goes, after its Rack, volume and pan, to Master (unless `to master` is off) and through a Send to each Bus. A Bus is a stereo Rack with a volume, pan, mute and solo, and goes to Master; Master is a stereo Rack with a volume, and goes to the output. The click is added after Master and does not follow its volume.
+
+```console
+$ xguitare bus add Verb
+added bus 0 Verb
+$ xguitare rack add reverb --bus Verb
+added reverb
+$ xguitare send 0 Verb -6
+send track 0 -> bus 0: -6 dB, post
+$ xguitare master -3
+master -3 dB
+$ xguitare status
+...
+tracks:
+  0  Guitar: -; input -; 0 dB, pan 0; peak -120.0 dB; out -120.0/-120.0 dB
+      send Verb: -6 dB, post
+  1* Keys: -; input -; 0 dB, pan 0; peak -120.0 dB; out -120.0/-120.0 dB
+buses:
+  0 Verb: -; 0 dB, pan 0; out -120.0/-120.0 dB
+master: -3 dB; out -120.0/-120.0 dB
+```
+
+- `bus add [name]` adds a Bus with an empty Rack at 0 dB, centred; without a name it is `Bus <n>`, the first number free. A Project has at most 8 Buses; Bus names follow the Track name rules. `bus remove <bus>` removes it and every Send to it. `bus edit <bus>` takes `--name`, `--volume <dB>` (−60 to 6), `--pan <−1..1>` and `--mute|--solo on|off`. A Bus is named by its zero-based index or its name.
+- `send <track> <bus> <level>` sets a Track's Send to a Bus: a level in dB (−60 to 6) or `off`, the default. A Send is taken after the Track's volume and pan (post-fader); `--pre on` takes it after the Rack and pan, before the volume.
+- `master <dB>` sets the Master volume (−60 to 6).
+- `track edit <track> --to-master off` keeps a Track's own sound out of Master, so it is heard only through its Sends.
+- `rack add|remove|move`, `set`, `get`, `bypass` and `ir set` take `--bus <bus>` or `--master` to edit that Rack instead of the selected Track's; a Bus or Master Rack takes every Module type but the cabinet (`a cabinet is not allowed on a Bus or Master`), in any order, and `load` puts a Preset only into a Track.
+- Solo is solo in place: while anything is soloed, the soloed Tracks and Buses sound, with the Buses a soloed Track sends to and the Tracks that send to a soloed Bus. Mute always wins.
+- `status` shows each Track's, Bus's and Master's output peaks (left/right, after the volume) since the last `status`, and `clip` once a side has reached 0 dBFS. The clip flag stays until `clip reset` (all), `clip reset track <track>`, `clip reset bus <bus>` or `clip reset master`.
 
 ### Latency compensation
 

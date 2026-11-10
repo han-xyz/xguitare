@@ -5,7 +5,7 @@ use xguitare_core::Preset;
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
 use xguitare_core::build::build_stereo_rack;
 use xguitare_core::engine::{
-    Command, EngineShared, FadeLengths, RackSwitcher, Strip, engine_queues,
+    Command, EngineShared, FadeLengths, MeterPoint, RackSwitcher, engine_queues,
 };
 use xguitare_core::project::{Bus, LoopRegion, Master, Project, Send, Track};
 use xguitare_dsp::{Gain, Module, Rack, StereoRack};
@@ -385,23 +385,23 @@ fn clip_latches_until_reset() {
     let (hot, soft) = ([1.5; BLOCK], [0.25; BLOCK]);
     switcher.process_tracks(&hot, &[&hot, &soft], &mut left, &mut right);
     let meters = &shared.mix_meters;
-    for strip in [Strip::Track(0), Strip::Bus(0), Strip::Master] {
-        assert!(meters.clip(strip), "{strip:?} did not clip");
+    for point in [MeterPoint::Track(0), MeterPoint::Bus(0), MeterPoint::Master] {
+        assert!(meters.clip(point), "{point:?} did not clip");
     }
-    assert!(!meters.clip(Strip::Track(1)));
-    let [peak_l, peak_r] = meters.take_peak(Strip::Track(1));
+    assert!(!meters.clip(MeterPoint::Track(1)));
+    let [peak_l, peak_r] = meters.take_peak(MeterPoint::Track(1));
     assert_close(peak_l, 0.25);
     assert_close(peak_r, 0.25);
-    assert_eq!(meters.take_peak(Strip::Track(1)), [0.0, 0.0]);
+    assert_eq!(meters.take_peak(MeterPoint::Track(1)), [0.0, 0.0]);
 
     let silence = [0.0; BLOCK];
     switcher.process_tracks(&silence, &[&silence, &silence], &mut left, &mut right);
-    assert!(meters.clip(Strip::Master), "the clip did not latch");
-    meters.clip_reset(Some(Strip::Master));
-    assert!(!meters.clip(Strip::Master));
-    assert!(meters.clip(Strip::Track(0)) && meters.clip(Strip::Bus(0)));
+    assert!(meters.clip(MeterPoint::Master), "the clip did not latch");
+    meters.clip_reset(Some(MeterPoint::Master));
+    assert!(!meters.clip(MeterPoint::Master));
+    assert!(meters.clip(MeterPoint::Track(0)) && meters.clip(MeterPoint::Bus(0)));
     meters.clip_reset(None);
-    assert!(!meters.clip(Strip::Track(0)) && !meters.clip(Strip::Bus(0)));
+    assert!(!meters.clip(MeterPoint::Track(0)) && !meters.clip(MeterPoint::Bus(0)));
 }
 
 #[test]
@@ -528,9 +528,15 @@ fn closing_the_arrangement_clears_the_meters() {
     let hot = [1.5; BLOCK];
     let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
     switcher.process_tracks(&hot, &[&hot], &mut left, &mut right);
-    assert!(shared.mix_meters.clip(Strip::Master));
+    assert!(shared.mix_meters.clip(MeterPoint::Master));
     assert!(control.commands.push(Command::CloseArrangement).is_ok());
     switcher.apply_commands();
-    assert!(!shared.mix_meters.clip(Strip::Master) && !shared.mix_meters.clip(Strip::Track(0)));
-    assert_eq!(shared.mix_meters.take_peak(Strip::Track(0)), [0.0, 0.0]);
+    assert!(
+        !shared.mix_meters.clip(MeterPoint::Master)
+            && !shared.mix_meters.clip(MeterPoint::Track(0))
+    );
+    assert_eq!(
+        shared.mix_meters.take_peak(MeterPoint::Track(0)),
+        [0.0, 0.0]
+    );
 }

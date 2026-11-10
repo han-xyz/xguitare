@@ -7,7 +7,7 @@ use std::sync::Arc;
 use xguitare_dsp::smooth::Smoother;
 use xguitare_dsp::{Rack, StereoRack};
 
-use crate::engine::{MixMeters, Strip, set_module_bypass, set_module_param};
+use crate::engine::{MeterPoint, MixMeters, set_module_bypass, set_module_param};
 use crate::project::{
     Bus, LoopRegion, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM, Track,
 };
@@ -557,12 +557,12 @@ impl Arrangement {
 
     pub(crate) fn raise_meters(&self, meters: &MixMeters) {
         for (idx, track) in self.tracks.iter().enumerate() {
-            meters.raise(Strip::Track(idx), track.peak);
+            meters.raise(MeterPoint::Track(idx), track.peak);
         }
         for (idx, bus) in self.buses.iter().enumerate() {
-            meters.raise(Strip::Bus(idx), bus.peak);
+            meters.raise(MeterPoint::Bus(idx), bus.peak);
         }
-        meters.raise(Strip::Master, self.master.peak);
+        meters.raise(MeterPoint::Master, self.master.peak);
     }
 
     fn with_track(&mut self, track: usize, change: impl FnOnce(&mut TrackPlayer)) {

@@ -10,12 +10,15 @@ use serde_json::{Map, Value, json};
 use crate::arrangement::ArrangementCommand;
 use crate::arrangement::Transport;
 use crate::build::{ENGINE_BUSY, build_arrangement, swap_arrangement};
-use crate::control::{EngineState, Position, TrackRef, TransportAction, peak_db, slug};
-use crate::engine::{Command, transport_from_code};
+use crate::control::{
+    BusRef, EngineState, MixPeaks, Position, TrackRef, TransportAction, peak_db, slug,
+};
+use crate::engine::{Command, MeterPoint, transport_from_code};
+use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
-    LoopRegion, PROJECT_FILE, Project, Track, autosave_due, autosave_newer, check_project,
-    check_track, checked_name,
+    LoopRegion, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due, autosave_newer,
+    check_project, check_track, checked_name,
 };
 use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
 use crate::{BuildWarning, Config, Preset, PresetModule};
@@ -32,6 +35,8 @@ pub const STILL_CLOSING: &str = "a project is still closing; try again";
 /// How far past the Project's last Item or loop end `locate` may move the playhead.
 const LOCATE_SECONDS_PAST_END: f64 = 3600.0;
 const DEFAULT_TRACK_NAME: &str = "Track";
+const MASTER_NAME: &str = "Master";
+const ONE_TARGET: &str = "give track, bus or master, not more than one";
 const SECONDS_SUFFIX: char = 's';
 
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
@@ -286,11 +291,54 @@ fn add_takes(
     (added, failures)
 }
 
-/// The Track a Rack request edits: `None` while no Project is open and no Track is named, else the named Track or the selected one.
-pub(crate) fn target_track(
+/// The Rack a Rack request edits while a Project is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectRack {
+    Track(usize),
+    Bus(usize),
+    Master,
+}
+
+impl ProjectRack {
+    /// Whether it is a stereo Rack, which takes no cabinet and has no layout rule.
+    pub(crate) fn is_stereo(self) -> bool {
+        !matches!(self, ProjectRack::Track(_))
+    }
+}
+
+/// Refuses more than one of `track`, `bus` and `master`.
+pub(crate) fn check_one_target(track: bool, bus: bool, master: bool) -> Result<(), String> {
+    if [track, bus, master]
+        .into_iter()
+        .filter(|given| *given)
+        .count()
+        > 1
+    {
+        return Err(ONE_TARGET.to_string());
+    }
+    Ok(())
+}
+
+/// The Rack a Rack request edits: `None` (the live Rack) while no Project is open and none is named, else the named Track, Bus or Master, or the selected Track.
+pub(crate) fn target_rack(
     state: &EngineState,
     track: Option<&TrackRef>,
-) -> Result<Option<usize>, String> {
+    bus: Option<&BusRef>,
+    master: bool,
+) -> Result<Option<ProjectRack>, String> {
+    check_one_target(track.is_some(), bus.is_some(), master)?;
+    if let Some(bus) = bus {
+        let project = current_project(state)?;
+        return resolve_bus(project, bus).map(|bus| Some(ProjectRack::Bus(bus)));
+    }
+    if master {
+        current_project(state)?;
+        return Ok(Some(ProjectRack::Master));
+    }
+    Ok(target_track(state, track)?.map(ProjectRack::Track))
+}
+
+fn target_track(state: &EngineState, track: Option<&TrackRef>) -> Result<Option<usize>, String> {
     let Some(open) = state.projects.open.as_ref() else {
         return match track {
             Some(_) => Err(NO_PROJECT.to_string()),
@@ -304,40 +352,104 @@ pub(crate) fn target_track(
     }
 }
 
-/// The Track's Modules as a Preset named after it, for the Rack requests to read and edit.
-pub(crate) fn track_preset(state: &EngineState, track: usize) -> Preset {
-    let track = &open_project(state).project.tracks[track];
+/// The open Project, or `no project open`.
+pub(crate) fn current_project(state: &EngineState) -> Result<&Project, String> {
+    state
+        .projects
+        .open
+        .as_ref()
+        .map(|open| &open.project)
+        .ok_or_else(|| NO_PROJECT.to_string())
+}
+
+/// The Rack's Modules as a Preset named after its Track or Bus (or `Master`), for the Rack requests to read and edit.
+pub(crate) fn rack_preset(state: &EngineState, rack: ProjectRack) -> Preset {
+    let project = &open_project(state).project;
+    let (name, modules) = match rack {
+        ProjectRack::Track(track) => (
+            project.tracks[track].name.as_str(),
+            &project.tracks[track].modules,
+        ),
+        ProjectRack::Bus(bus) => (
+            project.buses[bus].name.as_str(),
+            &project.buses[bus].modules,
+        ),
+        ProjectRack::Master => (MASTER_NAME, &project.master.modules),
+    };
     Preset {
-        name: track.name.clone(),
-        modules: track.modules.clone(),
+        name: name.to_string(),
+        modules: modules.clone(),
     }
 }
 
-/// Replaces the Track's Modules and swaps in the rebuilt Arrangement; on an error nothing changes.
-pub(crate) fn set_track_modules(
+fn rack_modules_mut(project: &mut Project, rack: ProjectRack) -> &mut Vec<PresetModule> {
+    match rack {
+        ProjectRack::Track(track) => &mut project.tracks[track].modules,
+        ProjectRack::Bus(bus) => &mut project.buses[bus].modules,
+        ProjectRack::Master => &mut project.master.modules,
+    }
+}
+
+/// Replaces the Rack's Modules and swaps in the rebuilt Arrangement; on an error nothing changes.
+pub(crate) fn set_rack_modules(
     state: &mut EngineState,
-    track: usize,
+    rack: ProjectRack,
     modules: Vec<PresetModule>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
     let mut project = open_project(state).project.clone();
-    project.tracks[track].modules = modules;
+    *rack_modules_mut(&mut project, rack) = modules;
     swap_project(state, project, warnings)
 }
 
-/// Sends `command` to the Arrangement, then applies `change` to the Track's Modules.
-pub(crate) fn change_track_module(
+/// Sends `command` to the Arrangement, then applies `change` to the Rack's Modules.
+pub(crate) fn change_rack_module(
     state: &mut EngineState,
-    track: usize,
+    rack: ProjectRack,
     command: ArrangementCommand,
     change: impl FnOnce(&mut Vec<PresetModule>),
 ) -> Result<(), String> {
     send(state, &[command])?;
     let open = open_project_mut(state);
-    change(&mut open.project.tracks[track].modules);
+    change(rack_modules_mut(&mut open.project, rack));
     open.changed = true;
     state.revision += 1;
     Ok(())
+}
+
+pub(crate) fn param_command(
+    rack: ProjectRack,
+    module: usize,
+    param: usize,
+    value: f32,
+) -> ArrangementCommand {
+    match rack {
+        ProjectRack::Track(track) => ArrangementCommand::Param {
+            track,
+            module,
+            param,
+            value,
+        },
+        ProjectRack::Bus(bus) => ArrangementCommand::BusParam {
+            bus,
+            module,
+            param,
+            value,
+        },
+        ProjectRack::Master => ArrangementCommand::MasterParam {
+            module,
+            param,
+            value,
+        },
+    }
+}
+
+pub(crate) fn bypass_command(rack: ProjectRack, module: usize, on: bool) -> ArrangementCommand {
+    match rack {
+        ProjectRack::Track(track) => ArrangementCommand::Bypass { track, module, on },
+        ProjectRack::Bus(bus) => ArrangementCommand::BusBypass { bus, module, on },
+        ProjectRack::Master => ArrangementCommand::MasterBypass { module, on },
+    }
 }
 
 pub(crate) fn project_new(state: &mut EngineState, name: &str) -> Result<Value, String> {
@@ -497,6 +609,7 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     let mut track_ids = open.track_ids.clone();
     track_ids.remove(index);
     swap_project_with_ids(state, project, track_ids, &mut Vec::new())?;
+    clear_moved_clips(state, MeterPoint::Track, index, MAX_TRACKS);
     let open = open_project_mut(state);
     if index < open.selected {
         open.selected -= 1;
@@ -509,6 +622,18 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     Ok(json!({"index": index, "name": removed.name}))
 }
 
+/// Clears the clip flags from `first` to `count`, whose Tracks or Buses moved or went after a removal.
+pub(crate) fn clear_moved_clips(
+    state: &EngineState,
+    point: impl Fn(usize) -> MeterPoint,
+    first: usize,
+    count: usize,
+) {
+    for index in first..count {
+        state.shared.mix_meters.clip_reset(Some(point(index)));
+    }
+}
+
 /// The values of a `track_set` request; `None` leaves that value as it is.
 pub(crate) struct TrackChange {
     pub input: Option<String>,
@@ -518,6 +643,7 @@ pub(crate) struct TrackChange {
     pub solo: Option<bool>,
     pub arm: Option<bool>,
     pub name: Option<String>,
+    pub to_master: Option<bool>,
 }
 
 /// Checks every value against the Project's rules, and the input against the capture ports when `ports` is given, before changing anything; a rename rebuilds the Arrangement, the rest are commands.
@@ -550,6 +676,7 @@ pub(crate) fn track_set(
     new.mute = change.mute.unwrap_or(new.mute);
     new.solo = change.solo.unwrap_or(new.solo);
     new.arm = change.arm.unwrap_or(new.arm);
+    new.to_master = change.to_master.unwrap_or(new.to_master);
     check_track(&new).map_err(|err| err.to_string())?;
     let renamed = new.name != old.name;
     let mut project = open.project.clone();
@@ -573,6 +700,9 @@ pub(crate) fn track_set(
             change
                 .arm
                 .map(|on| ArrangementCommand::Arm { track: index, on }),
+            change
+                .to_master
+                .map(|on| ArrangementCommand::ToMaster { track: index, on }),
         ]
         .into_iter()
         .flatten()
@@ -596,6 +726,7 @@ pub(crate) fn track_set(
         "mute": new.mute,
         "solo": new.solo,
         "arm": new.arm,
+        "to_master": new.to_master,
     }))
 }
 
@@ -726,8 +857,12 @@ pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
     Ok(json!({"sample_rate": project.sample_rate, "tracks": tracks}))
 }
 
-/// The Project fields of `status`, with `track_peaks` the input peaks of each Track since this connection's last `status`.
-pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<String, Value> {
+/// The Project fields of `status`, with `track_peaks` the input peaks of each Track and `mix` the post-fader peaks since this connection's last `status`.
+pub(crate) fn status_fields(
+    state: &EngineState,
+    track_peaks: &[f32],
+    mix: &MixPeaks,
+) -> Map<String, Value> {
     let shared = &state.shared;
     let mut fields = Map::new();
     fields.insert(
@@ -762,6 +897,8 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
             fields.insert(key.to_string(), Value::Null);
         }
         fields.insert("tracks".to_string(), json!([]));
+        fields.insert("buses".to_string(), json!([]));
+        fields.insert("master".to_string(), Value::Null);
         return fields;
     };
     let project = &open.project;
@@ -771,11 +908,13 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
         Transport::Playing => "playing",
         Transport::Recording => "recording",
     };
+    let meters = &shared.mix_meters;
     let tracks: Vec<Value> = project
         .tracks
         .iter()
         .zip(track_peaks)
-        .map(|(track, &peak)| {
+        .enumerate()
+        .map(|(index, (track, &peak))| {
             json!({
                 "name": track.name,
                 "input": track.input,
@@ -785,6 +924,10 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
                 "solo": track.solo,
                 "armed": track.arm,
                 "input_peak_db": peak_db(peak),
+                "to_master": track.to_master,
+                "sends": sends_status(project, track),
+                "peak_db": peaks_db(mix.tracks[index]),
+                "clip": meters.clip(MeterPoint::Track(index)),
             })
         })
         .collect();
@@ -807,6 +950,8 @@ pub(crate) fn status_fields(state: &EngineState, track_peaks: &[f32]) -> Map<Str
         ),
         ("selected", json!(open.selected)),
         ("tracks", json!(tracks)),
+        ("buses", buses_status(project, mix, meters)),
+        ("master", master_status(project, mix, meters)),
     ] {
         fields.insert(key.to_string(), value);
     }
@@ -856,7 +1001,7 @@ fn open(
 }
 
 /// Builds `project`'s Arrangement, swaps it in and makes `project` the open Project's; on an error nothing changes.
-fn swap_project(
+pub(crate) fn swap_project(
     state: &mut EngineState,
     project: Project,
     warnings: &mut Vec<BuildWarning>,
@@ -952,7 +1097,7 @@ fn click_commands(project: &Project) -> [ArrangementCommand; 2] {
     ]
 }
 
-fn commit(state: &mut EngineState, project: Project) {
+pub(crate) fn commit(state: &mut EngineState, project: Project) {
     let open = open_project_mut(state);
     open.project = project;
     open.changed = true;
@@ -986,7 +1131,7 @@ fn start_arrangement(
     Ok((readers, warnings))
 }
 
-fn send(state: &mut EngineState, commands: &[ArrangementCommand]) -> Result<(), String> {
+pub(crate) fn send(state: &mut EngineState, commands: &[ArrangementCommand]) -> Result<(), String> {
     if state.queues.commands.slots() < commands.len() {
         return Err(ENGINE_BUSY.to_string());
     }
@@ -1014,14 +1159,30 @@ fn load_takes(dir: &Path, project: &Project) -> Result<HashMap<String, Arc<[f32]
     Ok(takes)
 }
 
-fn resolve_track(project: &Project, track: &TrackRef) -> Result<usize, String> {
-    let found = match track {
-        TrackRef::Index(index) => (*index < project.tracks.len()).then_some(*index),
-        TrackRef::Name(name) => project.tracks.iter().position(|t| t.name == *name),
+pub(crate) fn resolve_track(project: &Project, track: &TrackRef) -> Result<usize, String> {
+    resolve_ref(
+        "track",
+        project.tracks.iter().map(|t| t.name.as_str()),
+        track,
+    )
+}
+
+pub(crate) fn resolve_bus(project: &Project, bus: &BusRef) -> Result<usize, String> {
+    resolve_ref("bus", project.buses.iter().map(|b| b.name.as_str()), bus)
+}
+
+fn resolve_ref<'a>(
+    kind: &str,
+    mut names: impl Iterator<Item = &'a str>,
+    wanted: &TrackRef,
+) -> Result<usize, String> {
+    let found = match wanted {
+        TrackRef::Index(index) => names.nth(*index).map(|_| *index),
+        TrackRef::Name(name) => names.position(|other| other == name),
     };
-    found.ok_or_else(|| match track {
-        TrackRef::Index(index) => format!("no track '{index}'"),
-        TrackRef::Name(name) => format!("no track '{name}'"),
+    found.ok_or_else(|| match wanted {
+        TrackRef::Index(index) => format!("no {kind} '{index}'"),
+        TrackRef::Name(name) => format!("no {kind} '{name}'"),
     })
 }
 

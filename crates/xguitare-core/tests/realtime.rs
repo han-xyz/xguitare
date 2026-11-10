@@ -7,7 +7,7 @@ use assert_no_alloc::*;
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
 use xguitare_core::build::build_stereo_rack;
 use xguitare_core::engine::{
-    Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, SWITCHER_MAX_FRAMES, Strip,
+    Command, EngineShared, FadeLengths, FromAudio, MeterPoint, RackSwitcher, SWITCHER_MAX_FRAMES,
     block_peak, engine_queues, raise_peak, tap_block,
 };
 use xguitare_core::project::{Bus, Item, LoopRegion, Master, Project, Send, Take, Track};
@@ -712,7 +712,7 @@ fn sixteen_tracks_eight_buses_and_master_do_not_allocate() {
         for _ in 0..100 {
             switcher.process_tracks(&input, &inputs, &mut left, &mut right);
         }
-        let _ = shared.mix_meters.take_peak(Strip::Master);
+        let _ = shared.mix_meters.take_peak(MeterPoint::Master);
         shared.mix_meters.clip_reset(None);
     });
     assert!(left.iter().any(|&sample| sample != 0.0));

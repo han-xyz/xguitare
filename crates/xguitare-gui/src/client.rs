@@ -241,6 +241,8 @@ impl Client {
             Some(track) => self.payload(&Request::Get {
                 param: None,
                 track: Some(track.clone()),
+                bus: None,
+                master: false,
             }),
             None => self.snapshot.params.clone(),
         };
@@ -452,6 +454,8 @@ impl Client {
         self.snapshot.params = self.payload(&Request::Get {
             param: None,
             track: None,
+            bus: None,
+            master: false,
         });
         let project_open = project_name(self.snapshot.status.as_ref()).is_some();
         self.snapshot.items = if project_open {

@@ -8,6 +8,7 @@ pub mod engine;
 pub mod firstrun;
 mod ir;
 mod irdir;
+mod mixer_control;
 pub mod ports;
 mod preset;
 pub mod project;
