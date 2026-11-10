@@ -24,8 +24,6 @@ use xguitare_gui::project_model::AutosaveOffer;
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
-/// Tall enough for the mixer columns to show whole above the Rack.
-const TALL_WINDOW: Vec2 = Vec2::new(1440.0, 1200.0);
 const MIN_WINDOW: Vec2 = Vec2::new(1024.0, 640.0);
 const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
 const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
@@ -1199,10 +1197,11 @@ fn mixer_snapshots() {
     let (mut eight_buses, _, _dir) = harness_with(DEFAULT_WINDOW, eight_buses_snapshot());
     click_button(&mut eight_buses, "Mixer");
     write_png(&mut eight_buses, "mixer-eight-buses");
-    eight_buses.event(Event::PointerMoved(pos2(700.0, 420.0)));
+    let sends = eight_buses.get_by_label("Send Guitar to Verb").rect();
+    eight_buses.event(Event::PointerMoved(sends.center()));
     eight_buses.event(Event::MouseWheel {
         unit: MouseWheelUnit::Point,
-        delta: Vec2::new(0.0, -1000.0),
+        delta: Vec2::new(0.0, -200.0),
         phase: TouchPhase::Move,
         source: MouseWheelSource::Unknown,
         modifiers: Modifiers::NONE,
@@ -1239,6 +1238,33 @@ fn transport_bar_fits_one_row_at_1280() {
 }
 
 #[test]
+fn mixer_faders_and_switches_show_whole_above_the_rack() {
+    for (size, snapshot) in [
+        (WINDOW, mixer_snapshot()),
+        (DEFAULT_WINDOW, eight_buses_snapshot()),
+    ] {
+        let (mut harness, _, _dir) = harness_with(size, snapshot);
+        click_button(&mut harness, "Mixer");
+        let rack_top = harness.get_by_label("Guitar — Rack").rect().top();
+        for name in ["Verb", "Guitar", "Bass", "Keys", "Master"] {
+            let mut labels = vec![format!("Volume {name}"), format!("Volume {name} value")];
+            if name != "Master" {
+                labels.push(format!("Solo {name}"));
+            }
+            for label in labels {
+                for node in harness.get_all_by_label(&label) {
+                    let bottom = node.rect().bottom();
+                    assert!(
+                        bottom < rack_top,
+                        "{label} at {size:?} ends at {bottom}, below the Rack heading at {rack_top}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dragging_the_mixer_split_resizes_the_rack() {
     let (mut harness, _, _dir) = harness_with(WINDOW, mixer_snapshot());
     click_button(&mut harness, "Mixer");
@@ -1254,7 +1280,7 @@ fn dragging_the_mixer_split_resizes_the_rack() {
 
 #[test]
 fn mixer_columns_send_their_commands() {
-    let (mut harness, sent, _dir) = harness_with(TALL_WINDOW, mixer_snapshot());
+    let (mut harness, sent, _dir) = harness_with(WINDOW, mixer_snapshot());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
     for label in [

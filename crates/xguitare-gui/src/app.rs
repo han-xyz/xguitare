@@ -37,6 +37,7 @@ use crate::widgets;
 const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
+const MIXER_MARGIN: Margin = Margin::same(8);
 const RACK_HEADING_SIZE: f32 = 18.0;
 const MIXER_GAP: i8 = 4;
 const MIXER_MIN_HEIGHT: f32 = 60.0;
@@ -433,7 +434,7 @@ impl eframe::App for App {
             open_units: &mut self.open_units,
         };
         CentralPanel::default()
-            .frame(Frame::central_panel(ui.style()).inner_margin(RACK_MARGIN))
+            .frame(Frame::central_panel(ui.style()).inner_margin(central_margin(&self.mixer)))
             .show(ui, |ui| {
                 commands.extend(central_view(ui, snapshot, &mut self.mixer, &mut view));
             });
@@ -556,6 +557,15 @@ fn project_panels(
         .frame(Frame::new().fill(widgets::colour(palette().rail)))
         .show(ui, |ui| commands.extend(tracks_view(ui, snapshot, view)));
     commands
+}
+
+/// Narrower above and below while the mixer is open, so that its columns and the Rack fit together.
+fn central_margin(mixer: &MixerView) -> Margin {
+    if mixer.open {
+        MIXER_MARGIN
+    } else {
+        RACK_MARGIN
+    }
 }
 
 /// The Rack alone with no Project open; with one, the mixer panel while it is open with the Rack of the column chosen in it below, else the selected Track's Rack.

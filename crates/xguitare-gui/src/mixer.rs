@@ -24,13 +24,13 @@ const COLUMN_WIDTH: f32 = 118.0;
 const COLUMN_GAP: f32 = 4.0;
 /// A column's outer width: its content, inner margin and stroke.
 const MASTER_WIDTH: f32 = COLUMN_WIDTH + 10.0;
-const NAME_HEIGHT: f32 = 26.0;
-const SEND_ROW_HEIGHT: f32 = 40.0;
+const NAME_HEIGHT: f32 = 24.0;
+const SEND_ROW_HEIGHT: f32 = 36.0;
 /// The Send rows a column shows before they scroll.
 const SEND_ROWS_SHOWN: usize = 2;
-const TO_MASTER_HEIGHT: f32 = 28.0;
+const TO_MASTER_HEIGHT: f32 = 26.0;
 const PAN_HEIGHT: f32 = 58.0;
-const FADER_SIZE: egui::Vec2 = egui::Vec2::new(26.0, 140.0);
+const FADER_SIZE: egui::Vec2 = egui::Vec2::new(26.0, 96.0);
 const FADER_CAP: egui::Vec2 = egui::Vec2::new(26.0, 12.0);
 const METER_BAR_WIDTH: f32 = 7.0;
 const METER_GAP: f32 = 2.0;
