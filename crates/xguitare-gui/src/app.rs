@@ -15,7 +15,7 @@ use xguitare_core::control::{BusRef, TrackRef};
 use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
-use crate::mixer::{MixerView, RenderDraft, mixer_panel, render_dialog};
+use crate::mixer::{MIXER_HEIGHT, MixerView, RenderDraft, mixer_panel, render_dialog};
 use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
@@ -38,9 +38,10 @@ const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const RACK_HEADING_SIZE: f32 = 18.0;
-const MIXER_GAP: f32 = 8.0;
-/// The height kept for the Rack under the mixer panel; the columns above scroll up and down in the rest.
-const RACK_MIN_HEIGHT: f32 = 240.0;
+const MIXER_GAP: i8 = 4;
+const MIXER_MIN_HEIGHT: f32 = 60.0;
+/// The least the split under the mixer panel leaves the Rack, which scrolls inside it.
+const RACK_MIN_HEIGHT: f32 = 120.0;
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
@@ -573,11 +574,20 @@ fn central_view(
     };
     let mut commands = Vec::new();
     if mixer.open {
-        ScrollArea::vertical()
-            .id_salt("mixer_columns")
-            .max_height((ui.available_height() - RACK_MIN_HEIGHT).max(0.0))
-            .show(ui, |ui| commands.extend(mixer_panel(ui, snapshot, mixer)));
-        ui.add_space(MIXER_GAP);
+        let max_height = (ui.available_height() - RACK_MIN_HEIGHT).max(MIXER_MIN_HEIGHT);
+        Panel::top("mixer_split")
+            .resizable(true)
+            .default_size(MIXER_HEIGHT)
+            .size_range(MIXER_MIN_HEIGHT..=max_height)
+            .frame(Frame::new().inner_margin(Margin {
+                bottom: MIXER_GAP,
+                ..Margin::ZERO
+            }))
+            .show(ui, |ui| {
+                ScrollArea::vertical()
+                    .id_salt("mixer_columns")
+                    .show(ui, |ui| commands.extend(mixer_panel(ui, snapshot, mixer)));
+            });
     }
     let shown = if mixer.open {
         mixer.rack.and_then(|shown| shown.column(status))

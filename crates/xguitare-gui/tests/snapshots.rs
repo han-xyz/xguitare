@@ -1239,6 +1239,20 @@ fn transport_bar_fits_one_row_at_1280() {
 }
 
 #[test]
+fn dragging_the_mixer_split_resizes_the_rack() {
+    let (mut harness, _, _dir) = harness_with(WINDOW, mixer_snapshot());
+    click_button(&mut harness, "Mixer");
+    let heading = harness.get_by_label("Guitar — Rack").rect().top();
+    let edge = pos2(700.0, heading - 4.0);
+    drag_and_release(&mut harness, edge, edge - Vec2::new(0.0, 100.0));
+    let moved = harness.get_by_label("Guitar — Rack").rect().top();
+    assert!(
+        (heading - 100.0 - moved).abs() < 8.0,
+        "the Rack heading moved from {heading} to {moved}"
+    );
+}
+
+#[test]
 fn mixer_columns_send_their_commands() {
     let (mut harness, sent, _dir) = harness_with(TALL_WINDOW, mixer_snapshot());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);

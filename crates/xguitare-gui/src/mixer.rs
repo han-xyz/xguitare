@@ -37,6 +37,19 @@ const METER_GAP: f32 = 2.0;
 const CLIP_LED: egui::Vec2 = egui::Vec2::new(16.0, 8.0);
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(30.0, 22.0);
 const SMALL_TEXT: f32 = 11.0;
+const VALUE_FIELD_HEIGHT: f32 = 20.0;
+/// The gap between a column's rows: egui's default item spacing.
+const ROW_GAP: f32 = 3.0;
+/// The mixer panel's height with each column whole: its frame, the name, `to Master` and the Send rows shown, pan, the fader, its value field and M/S.
+pub const MIXER_HEIGHT: f32 = 10.0
+    + NAME_HEIGHT
+    + TO_MASTER_HEIGHT
+    + SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32
+    + PAN_HEIGHT
+    + FADER_SIZE.y
+    + VALUE_FIELD_HEIGHT
+    + SWITCH_SIZE.y
+    + 5.0 * ROW_GAP;
 const SOLO_IN_PLACE_ALPHA: u8 = 90;
 const PRE_SIZE: egui::Vec2 = egui::Vec2::new(32.0, 20.0);
 const DIALOG_WIDTH: f32 = 420.0;
