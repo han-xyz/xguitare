@@ -502,6 +502,7 @@ Errors:
 | `no playback port '<name>'` | `output_left` or `output_right` is not in the `playback` list; nothing changes. |
 | `cannot save <path>: <reason>` | `state.toml` cannot be written; nothing changes. |
 | `cannot connect <from> -> <to>: <reason>` | A link failed after the names were stored; the other links are made and `ports` shows the result. Several failures are joined with `; `. |
+| `cannot disconnect <from> -> <to>: <reason>` | Removing an old link failed after the names were stored; the other links are made and `ports` shows the result. Several failures are joined with `; `. |
 
 ## settings
 
@@ -525,7 +526,7 @@ Response:
 
 ## set_settings
 
-Stores and applies `bank_kind`, `ir_dir`, or both; a key left out keeps its value. Both are stored in `state.toml`; `config.toml` is not changed. The Revision increments.
+Stores and applies `bank_kind`, `ir_dir`, or both; a key left out keeps its value. Both are stored in `state.toml`; `config.toml` is not changed. The Revision increments. A request that changes nothing (no key, the same `bank_kind`, the `ir_dir` already stored) writes nothing and leaves the Revision as it is.
 
 - `bank_kind` different from the current one switches the Bank. The Bank directory in use is stored as the current kind's in `state.toml` `[banks]`; the new kind uses the directory `[banks]` holds for it, else `<config dir>/bank-<kind>` (`bank-guitar` or `bank-bass`), where `<config dir>` holds the config file, and that is stored too. A missing directory is first created with that kind's starter Presets and cabinet IR. Program 0 of the new Bank then plays; when it is missing, invalid or does not build, the passthrough Rack runs and no Preset is active. When `ir_dir` is set neither in `config.toml` nor through `set_settings`, the IR directory follows the Bank directory. The same `bank_kind` as now changes nothing and is not stored.
 - `ir_dir` must be an absolute path to an existing directory; `ir_list` lists it from then on, and Cabinet IR names are looked up there first. The Rack playing now is not rebuilt.

@@ -133,7 +133,7 @@ Set `bank_kind = "bass"` in the config to seed the Bank directory (default `~/.c
 bank_kind = "bass"
 ```
 
-Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `~/.config/xguitare/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
+Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `<config dir>/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
 
 The first run creates five Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module.
 
@@ -295,7 +295,7 @@ The left panel has these sections, from the top; click a section's title to clos
 - `Rack`: `Add Module` and `Place` menus and an `Add` button (see Rack editing below).
 - `Tuner and Mute`: `Tuner` opens and closes the Tuner view (see Tuner below); `Mute` shows the Daemon's Mute state and turns it on or off, as `xguitare mute` does.
 - `Audio`: `Input`, `Output L` and `Output R` menus listing the ports the Daemon can connect to, each showing the port connected now. Opening a menu reads the port list again, so a device plugged in since shows. `Apply` connects the three chosen ports now and keeps them for the next start (the Control API's `set_ports`, stored in `state.toml`, see Config); it needs a port in each menu. An error, such as a port that has gone away, shows in the footer.
-- `Settings`: `Bank kind` `Guitar` or `Bass`, and the `IR folder` path. `Apply` sends what changed (the Control API's `set_settings`, stored in `state.toml`): another Bank kind switches the Bank and loads its Program 0 (see [Bass](#bass)); another IR folder must be an existing directory and is listed by the cabinet's `IR` menu from then on. An error shows in the footer, e.g. `error: bank_dir is set in config.toml; edit it there`.
+- `Settings`: `Bank kind` `Guitar` or `Bass`, and the `IR folder` path. `Apply` sends what changed (the Control API's `set_settings`, stored in `state.toml`): another Bank kind switches the Bank and loads its Program 0 (see [Bass](#bass)); another IR folder must be an existing directory, given as an absolute path, and is listed by the cabinet's `IR` menu from then on. An error shows in the footer, e.g. `error: bank_dir is set in config.toml; edit it there`.
 - `Engine`: `Rate` (`48 kHz`), `Buffer` (`128 frames`), `Latency` (one buffer, `2.7 ms`), `Xruns`, and `Daemon` `connected` or `disconnected`.
 
 The rack is one 19-inch unit per row between two rails; a closed unit is 64 pixels high per row of knobs (its knobs wrap to another row when the window is too narrow for them), an open unit 190, and the rack scrolls when they do not fit. The window opens at 1280×800 and cannot be made smaller than 1024×640:
@@ -378,7 +378,7 @@ output_right = "Scarlett*playback_FR"
 
 `<config dir>` is the directory holding the config file in use, also for `--config <path>`.
 
-The Daemon keeps the choices made in the GUI (or through the Control API's `set_ports` and `set_settings`) in `state.toml` beside the config file, mode 0600, and never rewrites `config.toml`, so its comments survive. `state.toml` is read after `config.toml` and overrides it: `[ports]` (`input`, `output_left`, `output_right`, exact port names), `bank_kind`, `ir_dir`, and `[banks]` (`guitar`, `bass`: each kind's Bank directory, recorded on the first switch; the one of `bank_kind` is the Bank directory). A `bank_dir` in `config.toml` is never overridden, and the GUI cannot switch the Bank kind while it is set. If `state.toml` cannot be parsed, the Daemon logs `<path>: line N:M: <error>; ignoring it` and starts with `config.toml` alone. To drop the GUI's choices, stop the Daemon and delete `state.toml`.
+The Daemon keeps the choices made in the GUI (or through the Control API's `set_ports` and `set_settings`) in `state.toml` beside the config file, mode 0600, and never rewrites `config.toml`, so its comments survive. `state.toml` is read after `config.toml` and overrides it: `[ports]` (`input`, `output_left`, `output_right`, exact port names), `bank_kind`, `ir_dir`, and `[banks]` (`guitar`, `bass`: each kind's Bank directory, recorded on the first switch; the one of `bank_kind` is the Bank directory). A `bank_dir` in `config.toml` is never overridden, `state.toml`'s `bank_kind` is ignored while it is set, and the GUI cannot switch the Bank kind while it is set. If `state.toml` cannot be parsed, the Daemon logs `<path>: line N:M: <error>; ignoring it` and starts with `config.toml` alone. To drop the GUI's choices, stop the Daemon and delete `state.toml`.
 
 If `$XDG_RUNTIME_DIR` is unset, the socket defaults to `/tmp/xguitare-<uid>/xguitare.sock` and the Daemon warns.
 
