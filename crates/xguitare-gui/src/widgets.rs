@@ -144,7 +144,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
         painter.rect_filled(rect, 0, colour(colours.row_active));
         let border = Rect::from_min_size(rect.min, vec2(BANK_ROW_BORDER, rect.height()));
         painter.rect_filled(border, 0, colour(colours.yellow));
-    } else if response.hovered() {
+    } else if enabled && response.hovered() {
         painter.rect_filled(rect, 0, colour(colours.unit));
     }
     let font = FontId::proportional(BANK_ROW_TEXT_SIZE);

@@ -912,13 +912,10 @@ pub fn param_label(param: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A unit's name: the Module id in sentence case, its type after it when the two differ.
-pub fn module_title(module: &str, type_name: &str) -> String {
-    let title = param_label(module);
-    if type_name.is_empty() || type_name == module {
-        return title;
-    }
-    format!("{title} ({type_name})")
+/// A unit's name: the Module id in sentence case, and its type when the two differ.
+pub fn module_title<'a>(module: &str, type_name: &'a str) -> (String, Option<&'a str>) {
+    let differs = !type_name.is_empty() && type_name != module;
+    (param_label(module), differs.then_some(type_name))
 }
 
 /// The value as a knob shows it: one decimal at most, none on a whole value, a Unicode minus, `kHz` from 1000 Hz, a ratio as `6 : 1`.

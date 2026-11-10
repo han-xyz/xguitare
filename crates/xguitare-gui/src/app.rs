@@ -23,7 +23,7 @@ use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
 use crate::widgets;
 
 const SIDEBAR_WIDTH: f32 = 260.0;
-const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 12);
+const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const OPEN_UNITS_KEY: &str = "open_units";
 const DIGIT_KEYS: [Key; 9] = [

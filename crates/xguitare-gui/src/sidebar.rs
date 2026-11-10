@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use egui::style::ScrollStyle;
 use egui::{
     Button, CollapsingHeader, ComboBox, Grid, Key, RichText, ScrollArea, TextEdit, Ui, Vec2, vec2,
 };
@@ -69,6 +70,7 @@ pub fn sidebar(ui: &mut Ui, snapshot: &Snapshot, view: &mut SidebarView) -> Vec<
     let mut commands = Vec::new();
     ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
     ui.visuals_mut().indent_has_left_vline = false;
+    ui.spacing_mut().scroll = ScrollStyle::solid();
     ScrollArea::vertical().show(ui, |ui| {
         for section in SECTIONS {
             let title = RichText::new(section.title(view.bank_kind)).size(SECTION_TITLE_SIZE);

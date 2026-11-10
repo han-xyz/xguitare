@@ -2,9 +2,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Button, Color32, ComboBox, CursorIcon, Frame, Id, InnerResponse, Key, Label, Layout,
-    Margin, Modifiers, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui,
-    UiBuilder, Vec2, WidgetInfo, pos2, vec2,
+    Align, Button, Color32, ComboBox, CursorIcon, FontSelection, Frame, Id, InnerResponse, Key,
+    Label, Layout, Margin, Modifiers, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke,
+    TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo, WidgetText, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 
@@ -187,9 +187,30 @@ fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
     widgets::lamp(ui.painter(), rect.center(), lit_colour, lit);
 }
 
-fn unit_name(ui: &mut Ui, name: &str) {
-    let text = RichText::new(name).strong().size(UNIT_NAME_SIZE);
-    fixed_width_label(ui, UNIT_NAME_WIDTH, Label::new(text).truncate());
+/// The unit's name, truncated so that its `(type)` after it always shows.
+fn unit_name(ui: &mut Ui, name: &str, type_name: Option<&str>) {
+    let text = |text: &str| RichText::new(text).strong().size(UNIT_NAME_SIZE);
+    let Some(type_name) = type_name else {
+        fixed_width_label(ui, UNIT_NAME_WIDTH, Label::new(text(name)).truncate());
+        return;
+    };
+    let suffix = WidgetText::from(text(&format!(" ({type_name})"))).into_galley(
+        ui,
+        Some(TextWrapMode::Extend),
+        f32::INFINITY,
+        FontSelection::Default,
+    );
+    let slot = vec2(UNIT_NAME_WIDTH, ui.available_height());
+    ui.allocate_ui_with_layout(slot, Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_size(slot);
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let name_width = (UNIT_NAME_WIDTH - suffix.size().x).max(0.0);
+        ui.scope(|ui| {
+            ui.set_max_width(name_width);
+            ui.add(Label::new(text(name)).truncate());
+        });
+        ui.add(Label::new(suffix));
+    });
 }
 
 /// `label` at the left of a slot `width` wide, centred in the row's height.
@@ -265,7 +286,7 @@ fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) {
         unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
             unit_lamp(ui, colour(palette().green), open);
-            unit_name(ui, TUNER_LABEL);
+            unit_name(ui, TUNER_LABEL, None);
             unit_stripe(ui);
             ui.label(RichText::new(tuner_header_text(reading.as_ref())).strong());
         });
@@ -396,7 +417,8 @@ fn module_unit(
         let header = unit_header(ui, Sense::click(), header_height, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
             unit_lamp(ui, accent, true);
-            unit_name(ui, &module_title(module, type_name));
+            let (name, type_part) = module_title(module, type_name);
+            unit_name(ui, &name, type_part);
             unit_stripe(ui);
             let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
             let chevron = Button::new(chevron).small().frame(false);

@@ -396,7 +396,7 @@ fn add_module_after_the_rack_rules_default() {
 #[test]
 fn audio_and_settings_apply() {
     let (mut harness, sent, _dir) = harness();
-    for title in ["Audio", "Settings"] {
+    for title in ["Preset", "Bass Bank", "Audio", "Settings"] {
         harness.get_by_label(title).click();
         harness.run_steps(2);
     }

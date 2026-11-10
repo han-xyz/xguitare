@@ -1615,7 +1615,13 @@ fn closed_unit_wraps_knobs_that_do_not_fit() {
 
 #[test]
 fn module_title_is_sentence_case_with_a_differing_type() {
-    assert_eq!(module_title("compressor", "compressor"), "Compressor");
-    assert_eq!(module_title("low_drive", "drive"), "Low drive (drive)");
-    assert_eq!(module_title("amp", ""), "Amp");
+    assert_eq!(
+        module_title("compressor", "compressor"),
+        ("Compressor".to_string(), None)
+    );
+    assert_eq!(
+        module_title("low_drive", "drive"),
+        ("Low drive".to_string(), Some("drive"))
+    );
+    assert_eq!(module_title("amp", ""), ("Amp".to_string(), None));
 }
