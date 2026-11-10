@@ -263,6 +263,15 @@ pub fn open_units_to_string(open: &BTreeSet<String>) -> String {
 }
 
 /// A stored string that does not parse, from an older or edited file, reads as no unit open.
+/// Drops the open state of every Module a [`Command::RackRemove`] among `commands` removes; another Preset lacking an id keeps it.
+pub fn forget_removed_units(open: &mut BTreeSet<String>, commands: &[Command]) {
+    for command in commands {
+        if let Command::RackRemove { id } = command {
+            open.remove(id);
+        }
+    }
+}
+
 pub fn open_units_from_string(stored: &str) -> BTreeSet<String> {
     serde_json::from_str(stored).unwrap_or_default()
 }

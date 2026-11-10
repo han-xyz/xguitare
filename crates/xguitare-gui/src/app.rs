@@ -20,9 +20,9 @@ use xguitare_gui::model::{
     BankRow, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KeyEvent, KeyModifiers, Link,
     ModuleType, ParamRow, PeakHold, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading,
     add_command, bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, engine_readout,
-    filter_bank, in_tune, key_to_command, knob_fraction, knob_param_value, link_text, move_target,
-    open_units_from_string, open_units_to_string, palette, param_rows, peak_db, quit_commands,
-    rack_channels, tuner_reading, tuner_toggle, unit_suffix,
+    filter_bank, forget_removed_units, in_tune, key_to_command, knob_fraction, knob_param_value,
+    link_text, move_target, open_units_from_string, open_units_to_string, palette, param_rows,
+    peak_db, quit_commands, rack_channels, tuner_reading, tuner_toggle, unit_suffix,
 };
 use xguitare_gui::widgets::{self, KnobSize, colour};
 
@@ -204,11 +204,6 @@ impl eframe::App for App {
             latest = Some(snapshot);
         }
         if let Some(snapshot) = latest {
-            if let Some(params) = &snapshot.params {
-                let rack = param_rows(params);
-                self.open_units
-                    .retain(|id| rack.iter().any(|(module, _)| module == id));
-            }
             if snapshot.last_message != self.snapshot.last_message
                 && let Some((text, at)) = &snapshot.last_message
             {
@@ -261,6 +256,7 @@ impl eframe::App for App {
             open_units: &mut self.open_units,
         };
         CentralPanel::default().show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
+        forget_removed_units(&mut self.open_units, &commands);
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
             let _ = self.commands.send(command);

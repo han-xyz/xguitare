@@ -17,12 +17,12 @@ use xguitare_gui::model::{
     KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, PeakHold, Rgb,
     Throttle, TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir,
     cents_fraction, cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout,
-    failed_set, filter_bank, in_tune, ir_names, key_to_command, knob_angle_deg, knob_fraction,
-    knob_param_value, knob_points, knob_value_from_drag, ladder_segments, latency_ms,
-    meter_fraction, module_types, move_target, open_units_from_string, open_units_to_string,
-    palette, param_rows, peak_fraction, quit_commands, rack_channels, refresh_decision,
-    requests_until_quit, response_text, spawn_policy, status_line, tuner_reading, tuner_toggle,
-    unit_suffix,
+    failed_set, filter_bank, forget_removed_units, in_tune, ir_names, key_to_command,
+    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
+    ladder_segments, latency_ms, meter_fraction, module_types, move_target, open_units_from_string,
+    open_units_to_string, palette, param_rows, peak_fraction, quit_commands, rack_channels,
+    refresh_decision, requests_until_quit, response_text, spawn_policy, status_line, tuner_reading,
+    tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -1193,4 +1193,18 @@ fn save_as_command_maps_to_request() {
             false
         )
     );
+}
+
+#[test]
+fn open_units_forget_only_a_removed_module() {
+    let mut open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
+    forget_removed_units(&mut open, &[Command::Load("lead".into())]);
+    assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+    forget_removed_units(
+        &mut open,
+        &[Command::RackRemove {
+            id: "preamp".into(),
+        }],
+    );
+    assert_eq!(open, ["cabinet"].map(str::to_string).into());
 }
