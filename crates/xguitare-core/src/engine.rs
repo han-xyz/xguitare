@@ -156,7 +156,7 @@ pub enum Command {
         module: usize,
         on: bool,
     },
-    /// Runs this Arrangement instead of the Rack: cut in when none runs, else crossfaded in over the crossfade length, carrying on the transport and open Takes of the Arrangement it replaces.
+    /// Runs this Arrangement instead of the Rack: cut in when none runs (switching the Metronome off), else crossfaded in over the crossfade length, carrying on the transport and open Takes of the Arrangement it replaces.
     SwapArrangement(Box<Arrangement>),
     /// Goes back to the Rack.
     CloseArrangement,
@@ -383,6 +383,7 @@ impl RackSwitcher {
                 Command::Metronome(settings) => self.metronome.apply(settings),
                 Command::SwapArrangement(new) => {
                     if self.arrangement.is_none() {
+                        self.metronome.switch_off();
                         self.arrangement = Some(new);
                     } else if self.incoming_arrangement.is_none() {
                         self.start_arrangement_fade(new);

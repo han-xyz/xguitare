@@ -972,7 +972,7 @@ Errors: `no project open`; `count-in must be 0, 1 or 2 bars`; `engine busy`.
 
 Changes the Metronome, a short blip on every beat, beat 1 of each bar higher (1.5 kHz instead of 1 kHz) and 6 dB louder, added to the outputs. A key left out keeps its value. With no Project open it plays over the Rack at its own `bpm` (20 to 300, decimals allowed) and `meter` (as a Project's); turning it `on` starts at beat 1 of a bar, and a new tempo or meter keeps the beat count. `volume` is dB, −40 to 0 (default −12), and applies to the Project click too. Mute silences it; it keeps counting, so it comes back in time. `bpm`, `meter` and `volume` are saved in `state.toml` (`[metronome]`: `bpm`, `meter`, `volume_db`); the Metronome always starts off.
 
-While a Project is open the Metronome is the Project's click: `on` is the `click` request's `on`, and `bpm` and `meter` are the `tempo` request's, saved with the Project. The Metronome's own tempo and meter are kept and come back on `project_close`.
+While a Project is open the Metronome is the Project's click: `on` is the `click` request's `on`, and `bpm` and `meter` are the `tempo` request's, saved with the Project. Opening a Project (`project_new`, `project_open`) switches the Metronome off, and it stays off after `project_close`; its own tempo and meter are kept and come back then.
 
 Request:
 

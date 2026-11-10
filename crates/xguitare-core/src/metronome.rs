@@ -195,6 +195,12 @@ impl PracticeMetronome {
         }
     }
 
+    /// Switches it off, as an Arrangement starting does.
+    pub(crate) fn switch_off(&mut self) {
+        self.settings.on = false;
+        self.beat = 0;
+    }
+
     /// Adds the beats of the next `out_l.len()` frames to both outputs.
     pub(crate) fn process(&mut self, out_l: &mut [f32], out_r: &mut [f32]) {
         if !self.settings.on {

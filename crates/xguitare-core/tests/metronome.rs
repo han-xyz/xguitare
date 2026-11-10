@@ -1,11 +1,13 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use xguitare_core::arrangement::Arrangement;
 use xguitare_core::engine::{
     Command, EngineQueues, EngineShared, FadeLengths, RackSwitcher, engine_queues,
 };
 use xguitare_core::metronome::{MetronomeSettings, TapTempo};
-use xguitare_dsp::Rack;
+use xguitare_core::project::{LoopRegion, Master, Project};
+use xguitare_dsp::{Rack, StereoRack};
 
 const RATE: f32 = 48_000.0;
 const BLOCK: usize = 128;
@@ -258,4 +260,45 @@ fn a_tapped_tempo_is_clamped() {
     let at = |ms: u64| start + std::time::Duration::from_millis(ms);
     tap.tap(at(0));
     assert_eq!(tap.tap(at(100)), Some(300.0));
+}
+
+#[test]
+fn an_arrangement_switches_the_practice_metronome_off() {
+    let mut rig = rig();
+    rig.send(settings(120.0, (4, 4), 0.0));
+    rig.run(BLOCK);
+    let project = Project {
+        name: "Song".to_string(),
+        sample_rate: RATE as u32,
+        tempo_bpm: 120.0,
+        meter: (4, 4),
+        loop_region: LoopRegion::default(),
+        latency_offset_ms: 0.0,
+        click: false,
+        count_in: 0,
+        tracks: Vec::new(),
+        buses: Vec::new(),
+        master: Master::default(),
+    };
+    let mut master = StereoRack::new(Vec::new()).expect("no Modules");
+    master.prepare(RATE, BLOCK);
+    let arrangement = Arrangement::new(
+        &project,
+        Vec::new(),
+        Vec::new(),
+        master,
+        &std::collections::HashMap::new(),
+        RATE,
+        BLOCK,
+    )
+    .expect("no Takes");
+    for command in [
+        Command::SwapArrangement(Box::new(arrangement)),
+        Command::CloseArrangement,
+    ] {
+        assert!(rig.control.commands.push(command).is_ok());
+    }
+    let out = rig.run(30_000);
+    assert!(out.iter().all(|&sample| sample == 0.0));
+    assert_eq!(rig.beat(), 0);
 }

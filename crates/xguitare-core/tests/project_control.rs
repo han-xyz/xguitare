@@ -1607,3 +1607,12 @@ fn with_a_project_open_the_metronome_is_the_project_click() {
         json!({"on": false, "bpm": 90.0, "meter": [3, 4], "volume_db": -30.0, "beat": 0})
     );
 }
+
+#[test]
+fn opening_a_project_switches_the_practice_metronome_off() {
+    let (mut state, _audio, _dir) = state("metronome-off-on-open");
+    ok(handle(&mut state, metronome(Some(true), None, None, None)));
+    new_project(&mut state, "Song");
+    close(&mut state);
+    assert_eq!(status(&mut state)["metronome"]["on"], false);
+}

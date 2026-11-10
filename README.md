@@ -329,7 +329,7 @@ metronome off, 118.5 bpm 3/4, volume -20 dB
 - Its tempo, meter and volume are kept in `state.toml` for the next start; it always starts off.
 - `status` shows it on its `metronome:` line, with the beat in the bar it last played.
 
-While a Project is open, the Metronome is the Project's click: `metronome on|off` is `click on|off`, `metronome tempo` and `metronome tap` set the Project's tempo and meter, and the volume and the accent on beat 1 apply to the click and count-in. The Metronome's own tempo and meter come back when the Project closes.
+While a Project is open, the Metronome is the Project's click: `metronome on|off` is `click on|off`, `metronome tempo` and `metronome tap` set the Project's tempo and meter, and the volume and the accent on beat 1 apply to the click and count-in. Opening a Project switches the Metronome off, and it stays off after the Project closes; its own tempo and meter come back then.
 
 ## Projects
 
