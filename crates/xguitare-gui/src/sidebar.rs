@@ -3,19 +3,20 @@ use std::time::Instant;
 use egui::collapsing_header::CollapsingState;
 use egui::style::ScrollStyle;
 use egui::{
-    Align2, Button, Color32, ComboBox, CornerRadius, FontId, Frame, Grid, Key, Margin, Pos2,
-    RichText, Role, ScrollArea, Sense, Shape, Stroke, TextEdit, Ui, Vec2, WidgetInfo, vec2,
+    Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragAndDrop, FontId, Frame, Grid,
+    Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role, ScrollArea, Sense,
+    Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, vec2,
 };
 use xguitare_core::BankKind;
 
 use crate::model::{
-    AddPlace, BankRow, Command, Feedback, Link, ModuleType, PortSelection, SECTIONS, Section,
-    SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout, filter_bank,
-    link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
+    AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
+    SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
+    filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
     set_settings_command, settings_draft, tuner_toggle,
 };
 use crate::rack::muted_text;
-use crate::widgets::{bank_row, colour, outlined_button, primary_button};
+use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
 
 const NO_PRESET: &str = "no preset";
 const PRESET_NAME_SIZE: f32 = 30.0;
@@ -32,7 +33,13 @@ const SAVE_AS_LABEL: &str = "Save as new";
 const SAVE_AS_HINT: &str = "New Preset name";
 const SEARCH_HINT: &str = "Search by name or number";
 const CHOOSE: &str = "choose";
-const CHOOSE_MODULE: &str = "Choose a Module";
+const RACK_RULES: &str = "by the Rack rules";
+const TILE_COLUMNS: usize = 2;
+const TILE_HEIGHT: f32 = 30.0;
+const TILE_RADIUS: u8 = 3;
+const TILE_SWATCH_WIDTH: f32 = 6.0;
+const TILE_TEXT_INSET: f32 = 14.0;
+const TILE_TEXT_SIZE: f32 = 14.0;
 const NO_PORTS: &str = "no port list from the Daemon";
 const NO_SETTINGS: &str = "no settings from the Daemon";
 const BANK_KINDS: [(BankKind, &str); 2] = [(BankKind::Guitar, "Guitar"), (BankKind::Bass, "Bass")];
@@ -53,10 +60,9 @@ impl Tuner<'_> {
     }
 }
 
-/// The Add Module picker's choices; `place` `None` follows the Rack rules for the chosen type.
+/// The Place menu's choice; `None` follows the Rack rules for the type of the tile clicked.
 #[derive(Debug, Default)]
 pub struct AddDraft {
-    pub type_name: Option<String>,
     pub place: Option<AddPlace>,
 }
 
@@ -260,57 +266,111 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
     command
 }
 
+/// One tile per Module type: a click adds the type at the Place menu's place, a drag carries it into the Rack.
 fn add_module(ui: &mut Ui, snapshot: &Snapshot, add: &mut AddDraft) -> Option<Command> {
     let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     let rack = rack_channels(&modules, &snapshot.module_types);
-    let chosen: Option<&ModuleType> = add.type_name.as_ref().and_then(|type_name| {
-        snapshot
-            .module_types
-            .iter()
-            .find(|module_type| &module_type.type_name == type_name)
-    });
     let width = ui.available_width();
-    let type_label = ui.label("Add Module");
-    ComboBox::from_id_salt("add_type")
-        .width(width)
-        .selected_text(chosen.map_or(CHOOSE_MODULE.to_string(), ModuleType::label))
-        .show_ui(ui, |ui| {
-            for module_type in &snapshot.module_types {
-                let selected = chosen == Some(module_type);
-                if ui.selectable_label(selected, module_type.label()).clicked() {
-                    add.type_name = Some(module_type.type_name.clone());
+    ui.label("Add Module");
+    let gap = ui.spacing().item_spacing.x;
+    let tile_size = vec2(
+        (width - gap * (TILE_COLUMNS - 1) as f32) / TILE_COLUMNS as f32,
+        TILE_HEIGHT,
+    );
+    let mut clicked = None;
+    for row in snapshot.module_types.chunks(TILE_COLUMNS) {
+        ui.horizontal(|ui| {
+            for module_type in row {
+                if module_tile(ui, module_type, tile_size).clicked() {
+                    clicked = Some(module_type);
                 }
             }
-        })
-        .response
-        .labelled_by(type_label.id);
-    let channels = chosen.map_or("", |module_type| module_type.channels.as_str());
-    let place = add_place(&rack, channels, add.place.as_ref());
+        });
+    }
+    let offered = add_places(&rack);
+    let chosen = add.place.clone().filter(|place| offered.contains(place));
     let place_label = ui.label("Place");
     ComboBox::from_id_salt("add_place")
         .width(width)
-        .selected_text(place.label())
+        .selected_text(
+            chosen
+                .as_ref()
+                .map_or(RACK_RULES.to_string(), AddPlace::label),
+        )
         .show_ui(ui, |ui| {
-            for option in add_places(&rack) {
+            if ui.selectable_label(chosen.is_none(), RACK_RULES).clicked() {
+                add.place = None;
+            }
+            for option in &offered {
                 if ui
-                    .selectable_label(option == place, option.label())
+                    .selectable_label(chosen.as_ref() == Some(option), option.label())
                     .clicked()
                 {
-                    add.place = Some(option);
+                    add.place = Some(option.clone());
                 }
             }
         })
         .response
         .labelled_by(place_label.id);
-    let clicked = ui
-        .add_enabled(
-            chosen.is_some(),
-            primary_button("Add").min_size(vec2(width, 0.0)),
-        )
-        .clicked();
-    let type_name = chosen.filter(|_| clicked)?.type_name.clone();
+    let module_type = clicked?;
+    let place = add_place(&rack, &module_type.channels, add.place.as_ref());
     *add = AddDraft::default();
-    Some(add_command(&type_name, &place))
+    Some(add_command(&module_type.type_name, &place))
+}
+
+/// Named in the accessibility tree by the type and its channels; while dragged it follows the pointer and carries [`Dragged::Tile`].
+fn module_tile(ui: &mut Ui, module_type: &ModuleType, size: Vec2) -> Response {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, module_type.label()));
+    let type_name = &module_type.type_name;
+    paint_tile(ui.painter(), rect, type_name, response.hovered());
+    if response.dragged() {
+        DragAndDrop::set_payload(ui.ctx(), Dragged::Tile(type_name.clone()));
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+        if let Some(pointer) = ui.ctx().pointer_interact_pos() {
+            let painter = ui
+                .ctx()
+                .layer_painter(LayerId::new(Order::Tooltip, response.id));
+            paint_tile(
+                &painter,
+                Rect::from_center_size(pointer, size),
+                type_name,
+                true,
+            );
+        }
+    }
+    response.on_hover_cursor(CursorIcon::Grab)
+}
+
+fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
+    let colours = palette();
+    let border = if hovered {
+        colours.text
+    } else {
+        colours.button_border
+    };
+    painter.rect(
+        rect,
+        TILE_RADIUS,
+        colour(colours.knob_body),
+        Stroke::new(1.0, colour(border)),
+        StrokeKind::Inside,
+    );
+    let swatch = Rect::from_min_size(rect.min, vec2(TILE_SWATCH_WIDTH, rect.height()));
+    let swatch_corners = CornerRadius {
+        nw: TILE_RADIUS,
+        sw: TILE_RADIUS,
+        ne: 0,
+        se: 0,
+    };
+    painter.rect_filled(swatch, swatch_corners, accent(type_name));
+    painter.text(
+        rect.left_center() + vec2(TILE_TEXT_INSET, 0.0),
+        Align2::LEFT_CENTER,
+        type_name,
+        FontId::proportional(TILE_TEXT_SIZE),
+        colour(colours.text),
+    );
 }
 
 /// Turning Mute off by hand means closing the Tuner view leaves it off.
@@ -463,7 +523,15 @@ fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     clicked
 }
 
-pub fn footer(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instant) {
+/// `Undo` sends the commands that put the last removed Module back, once.
+pub fn footer(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    feedback: &Feedback,
+    removed: &mut Option<RemovedUnit>,
+    now: Instant,
+) -> Vec<Command> {
+    let mut undo = Vec::new();
     ui.horizontal(|ui| {
         if snapshot.link != Link::Connected {
             ui.label(link_text(&snapshot.link, now));
@@ -471,5 +539,15 @@ pub fn footer(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instan
         if let Some(text) = feedback.text(now) {
             ui.label(text);
         }
+        if let Some(shown) = removed.as_ref().filter(|removed| removed.is_shown(now)) {
+            ui.label(format!("Removed {} \u{2014}", shown.id));
+            if ui.add(outlined_button("Undo")).clicked() {
+                undo = removed
+                    .take()
+                    .map(|removed| removed.undo)
+                    .unwrap_or_default();
+            }
+        }
     });
+    undo
 }

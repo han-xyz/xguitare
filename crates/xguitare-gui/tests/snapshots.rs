@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use egui::{Key, Modifiers, Role, Vec2};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Role, Vec2, pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use egui_system_font_provider::SystemFontProvider;
@@ -250,6 +250,51 @@ fn edit_value(harness: &mut Harness<App>, param: &str, text: &str) {
 }
 
 const CLOSED: &str = "▶";
+const DRAG_STEPS: usize = 6;
+
+fn press_and_drag(harness: &mut Harness<App>, from: Pos2, to: Pos2) {
+    harness.event(Event::PointerMoved(from));
+    harness.run_steps(1);
+    pointer_button(harness, from, true);
+    for step in 1..=DRAG_STEPS {
+        let t = step as f32 / DRAG_STEPS as f32;
+        harness.event(Event::PointerMoved(from + (to - from) * t));
+        harness.run_steps(1);
+    }
+}
+
+fn pointer_button(harness: &mut Harness<App>, pos: Pos2, pressed: bool) {
+    harness.event(Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(1);
+}
+
+fn drag_and_release(harness: &mut Harness<App>, from: Pos2, to: Pos2) {
+    press_and_drag(harness, from, to);
+    pointer_button(harness, to, false);
+    harness.run_steps(2);
+}
+
+/// A point on the unit's name, which drags the unit by its header.
+fn unit_header_point(harness: &Harness<App>, unit: &str) -> Pos2 {
+    let rect = harness.get_by_label(&format!("{unit} unit")).rect();
+    pos2(rect.left() + 130.0, rect.center().y)
+}
+
+fn unit_top(harness: &Harness<App>, unit: &str) -> f32 {
+    harness.get_by_label(&format!("{unit} unit")).rect().top()
+}
+
+fn tile_centre(harness: &Harness<App>, label: &str) -> Pos2 {
+    harness
+        .get_by_role_and_label(Role::Button, label)
+        .rect()
+        .center()
+}
 
 #[test]
 fn gui_snapshots() {
@@ -289,6 +334,113 @@ fn gui_snapshots() {
     write_png(&mut bypassed, "units-bypassed");
 
     write_png(&mut harness_with(WINDOW, muted_snapshot()).0, "mute-banner");
+
+    let (mut header_drag, _, _dir) = harness();
+    let from = unit_header_point(&header_drag, "chorus");
+    let to = pos2(from.x, unit_top(&header_drag, "preamp") + 10.0);
+    press_and_drag(&mut header_drag, from, to);
+    write_png(&mut header_drag, "header-drag");
+
+    let (mut palette_drag, _, _dir) = harness();
+    let from = tile_centre(&palette_drag, "gate (mono)");
+    let to = pos2(800.0, unit_top(&palette_drag, "preamp") + 10.0);
+    press_and_drag(&mut palette_drag, from, to);
+    write_png(&mut palette_drag, "palette-drag");
+
+    let (mut undo, _, _dir) = harness();
+    let from = unit_header_point(&undo, "chorus");
+    drag_and_release(&mut undo, from, pos2(100.0, 400.0));
+    write_png(&mut undo, "undo-footer");
+}
+
+#[test]
+fn unit_dragged_by_its_header_moves_to_the_gap() {
+    let (mut harness, sent, _dir) = harness();
+    let from = unit_header_point(&harness, "chorus");
+    let to = pos2(from.x, unit_top(&harness, "preamp") + 10.0);
+    drag_and_release(&mut harness, from, to);
+    assert_eq!(harness.query_all_by_label("▼").count(), 0);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackMove {
+            id: "chorus".to_string(),
+            to: 1,
+        }]
+    );
+}
+
+#[test]
+fn unit_dragged_by_its_ear_moves_to_the_gap() {
+    let (mut harness, sent, _dir) = harness();
+    let unit = harness.get_by_label("compressor unit").rect();
+    let from = pos2(unit.left() + 15.0, unit.center().y);
+    let to = pos2(from.x, unit_top(&harness, "chorus") + 50.0);
+    drag_and_release(&mut harness, from, to);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackMove {
+            id: "compressor".to_string(),
+            to: 4,
+        }]
+    );
+}
+
+#[test]
+fn unit_dropped_outside_the_rack_is_removed_and_undo_restores_it() {
+    let (mut harness, sent, _dir) = harness();
+    let from = unit_header_point(&harness, "chorus");
+    drag_and_release(&mut harness, from, pos2(100.0, 400.0));
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackRemove {
+            id: "chorus".to_string(),
+        }]
+    );
+    harness.get_by_label("Removed chorus \u{2014}");
+    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.run_steps(2);
+    let set = |param: &str, value| Command::Set {
+        param: format!("chorus.{param}"),
+        value,
+    };
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::RackAdd {
+                type_name: "chorus".to_string(),
+                after: None,
+                at: Some(4),
+            },
+            set("rate", 0.8),
+            set("depth", 40.0),
+            set("mix", 20.0),
+        ]
+    );
+    assert!(harness.query_by_label("Undo").is_none());
+}
+
+#[test]
+fn tile_dragged_into_the_rack_adds_at_the_gap() {
+    let (mut harness, sent, _dir) = harness();
+    let from = tile_centre(&harness, "gate (mono)");
+    let to = pos2(800.0, unit_top(&harness, "preamp") + 10.0);
+    drag_and_release(&mut harness, from, to);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackAdd {
+            type_name: "gate".to_string(),
+            after: Some("compressor".to_string()),
+            at: None,
+        }]
+    );
+}
+
+#[test]
+fn tile_dropped_outside_the_rack_adds_nothing() {
+    let (mut harness, sent, _dir) = harness();
+    let from = tile_centre(&harness, "gate (mono)");
+    drag_and_release(&mut harness, from, pos2(from.x + 40.0, from.y + 80.0));
+    assert_eq!(sent_now(&sent), []);
 }
 
 #[test]
@@ -453,20 +605,18 @@ fn escape_reverts_a_typed_value() {
 }
 
 #[test]
-fn add_module_after_the_rack_rules_default() {
+fn clicking_a_tile_adds_it_by_the_rack_rules() {
     let (mut harness, sent, _dir) = harness();
-    harness.get_by_label("Add Module").click();
-    harness.run_steps(2);
-    harness.get_by_label("delay (stereo)").click();
-    harness.run_steps(2);
     assert_eq!(
         harness
             .get_by_role_and_label(Role::ComboBox, "Place")
             .value()
             .as_deref(),
-        Some("after chorus")
+        Some("by the Rack rules")
     );
-    harness.get_by_label("Add").click();
+    harness
+        .get_by_role_and_label(Role::Button, "delay (stereo)")
+        .click();
     harness.run_steps(2);
     assert_eq!(
         sent_now(&sent),
@@ -508,17 +658,15 @@ fn audio_and_settings_apply() {
 }
 
 #[test]
-fn place_chosen_before_the_type_is_kept() {
+fn a_tile_click_adds_at_the_chosen_place() {
     let (mut harness, sent, _dir) = harness();
     harness.get_by_label("Place").click();
     harness.run_steps(2);
     harness.get_by_label("at the front").click();
     harness.run_steps(2);
-    harness.get_by_label("Add Module").click();
-    harness.run_steps(2);
-    harness.get_by_label("gate (mono)").click();
-    harness.run_steps(2);
-    harness.get_by_label("Add").click();
+    harness
+        .get_by_role_and_label(Role::Button, "gate (mono)")
+        .click();
     harness.run_steps(2);
     assert_eq!(
         sent_now(&sent),

@@ -18,18 +18,18 @@ use xguitare_gui::model::{
     ParamRow, PeakHold, PortChoices, PortSelection, Rgb, SECTIONS, Section, SettingsDraft,
     Throttle, TunerReading, accent_for, add_after, add_command, add_place, add_places,
     autoscroll_delta, bank_kind, bank_rows, cabinet_ir, cents_fraction, cents_text,
-    counts_toward_spawn, drop_index, ear_holes, engine_readout, failed_set, filter_bank,
-    forget_removed_units, format_value, in_tune, ir_names, key_step, key_to_command,
-    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
-    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
-    open_units_to_string, palette, param_label, param_rows, parse_typed_value, peak_db, peak_text,
-    port_choices, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
-    requests_until_quit, response_text, set_ports_command, set_settings_command, settings_draft,
-    shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
-    typed_value, unit_suffix,
+    counts_toward_spawn, ear_holes, engine_readout, failed_set, filter_bank, forget_removed_units,
+    format_value, in_tune, ir_names, key_step, key_to_command, knob_angle_deg, knob_fraction,
+    knob_param_value, knob_points, knob_value_from_drag, ladder_segments, latency_ms, module_types,
+    move_target, open_units_from_string, open_units_to_string, palette, param_label, param_rows,
+    parse_typed_value, peak_db, peak_text, port_choices, quit_commands, rack_channels,
+    refresh_decision, refused_remove, remember_removes, requests_until_quit, response_text,
+    set_ports_command, set_settings_command, settings_draft, shortcuts_active, spawn_policy,
+    tuner_header_text, tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, bypassed, closed_unit_rows, module_title, mute_banner, unit_style,
+    CLOSED_KNOB_WIDTH, Dragged, RackArea, RemovedUnit, bypassed, closed_unit_rows, drag_outcome,
+    drop_slot, module_title, mute_banner, palette_place, undo_commands, unit_style,
 };
 
 struct TempDir(PathBuf);
@@ -1069,34 +1069,242 @@ fn white_text_on_the_mute_red_meets_wcag_aa() {
     assert!(contrast((255, 255, 255), palette().mute_red) >= 4.5);
 }
 
-const UNIT_TOPS: [f32; 4] = [100.0, 170.0, 240.0, 430.0];
+const UNIT_EDGES: [f32; 5] = [100.0, 170.0, 240.0, 430.0, 494.0];
+
+fn rack_ids() -> Vec<String> {
+    ["compressor", "preamp", "cabinet", "chorus"]
+        .map(String::from)
+        .to_vec()
+}
+
+const RACK_AREA: RackArea = RackArea {
+    left: 300.0,
+    top: 80.0,
+    right: 1300.0,
+    bottom: 800.0,
+};
 
 #[test]
-fn drop_index_above_the_top_unit_is_the_front() {
-    assert_eq!(drop_index(2, Some(40.0), &UNIT_TOPS), 0);
-    assert_eq!(drop_index(2, Some(120.0), &UNIT_TOPS), 0);
+fn drop_slot_above_the_middle_of_the_first_unit_is_the_front() {
+    assert_eq!(drop_slot(40.0, &UNIT_EDGES), 0);
+    assert_eq!(drop_slot(130.0, &UNIT_EDGES), 0);
 }
 
 #[test]
-fn drop_index_in_the_middle_is_the_unit_under_the_pointer() {
-    assert_eq!(drop_index(0, Some(300.0), &UNIT_TOPS), 2);
-    assert_eq!(drop_index(3, Some(170.0), &UNIT_TOPS), 1);
+fn drop_slot_is_the_gap_nearest_the_pointer() {
+    assert_eq!(drop_slot(140.0, &UNIT_EDGES), 1);
+    assert_eq!(drop_slot(230.0, &UNIT_EDGES), 2);
+    assert_eq!(drop_slot(300.0, &UNIT_EDGES), 2);
+    assert_eq!(drop_slot(340.0, &UNIT_EDGES), 3);
 }
 
 #[test]
-fn drop_index_below_the_bottom_unit_is_the_end() {
-    assert_eq!(drop_index(0, Some(900.0), &UNIT_TOPS), 3);
+fn drop_slot_below_the_middle_of_the_last_unit_is_the_end() {
+    assert_eq!(drop_slot(470.0, &UNIT_EDGES), 4);
+    assert_eq!(drop_slot(900.0, &UNIT_EDGES), 4);
+    assert_eq!(drop_slot(900.0, &[]), 0);
 }
 
 #[test]
-fn drop_index_over_its_own_unit_is_the_same_place() {
-    assert_eq!(drop_index(1, Some(200.0), &UNIT_TOPS), 1);
-    assert_eq!(drop_index(2, Some(0.0), &[]), 2);
+fn palette_drop_at_a_slot_is_after_the_unit_above_it() {
+    assert_eq!(palette_place(0, &rack_ids()), AddPlace::Front);
+    assert_eq!(
+        palette_place(2, &rack_ids()),
+        AddPlace::After("preamp".to_string())
+    );
+    assert_eq!(
+        palette_place(4, &rack_ids()),
+        AddPlace::After("chorus".to_string())
+    );
 }
 
 #[test]
-fn drop_index_released_outside_the_window_stays() {
-    assert_eq!(drop_index(2, None, &UNIT_TOPS), 2);
+fn unit_dropped_on_another_slot_moves_there() {
+    let outcome = |from, y| {
+        drag_outcome(
+            &Dragged::Unit(from),
+            Some((600.0, y)),
+            &RACK_AREA,
+            &UNIT_EDGES,
+            &rack_ids(),
+        )
+    };
+    assert_eq!(
+        outcome(0, 470.0),
+        Some(Command::RackMove {
+            id: "compressor".to_string(),
+            to: 3,
+        })
+    );
+    assert_eq!(
+        outcome(3, 120.0),
+        Some(Command::RackMove {
+            id: "chorus".to_string(),
+            to: 0,
+        })
+    );
+    assert_eq!(
+        outcome(0, 230.0),
+        Some(Command::RackMove {
+            id: "compressor".to_string(),
+            to: 1,
+        })
+    );
+}
+
+#[test]
+fn unit_dropped_beside_itself_stays() {
+    for y in [150.0, 230.0] {
+        let outcome = drag_outcome(
+            &Dragged::Unit(1),
+            Some((600.0, y)),
+            &RACK_AREA,
+            &UNIT_EDGES,
+            &rack_ids(),
+        );
+        assert_eq!(outcome, None);
+    }
+}
+
+#[test]
+fn unit_dropped_outside_the_rack_is_removed() {
+    for pointer in [(100.0, 300.0), (600.0, 850.0)] {
+        assert_eq!(
+            drag_outcome(
+                &Dragged::Unit(2),
+                Some(pointer),
+                &RACK_AREA,
+                &UNIT_EDGES,
+                &rack_ids(),
+            ),
+            Some(Command::RackRemove {
+                id: "cabinet".to_string(),
+            })
+        );
+    }
+}
+
+#[test]
+fn drag_released_outside_the_window_is_cancelled() {
+    for dragged in [Dragged::Unit(2), Dragged::Tile("delay".to_string())] {
+        assert_eq!(
+            drag_outcome(&dragged, None, &RACK_AREA, &UNIT_EDGES, &rack_ids()),
+            None
+        );
+    }
+}
+
+#[test]
+fn tile_dropped_in_the_rack_adds_at_the_slot() {
+    let tile = Dragged::Tile("gate".to_string());
+    assert_eq!(
+        drag_outcome(
+            &tile,
+            Some((600.0, 90.0)),
+            &RACK_AREA,
+            &UNIT_EDGES,
+            &rack_ids()
+        ),
+        Some(add_command("gate", &AddPlace::Front))
+    );
+    assert_eq!(
+        drag_outcome(
+            &tile,
+            Some((600.0, 300.0)),
+            &RACK_AREA,
+            &UNIT_EDGES,
+            &rack_ids()
+        ),
+        Some(Command::RackAdd {
+            type_name: "gate".to_string(),
+            after: Some("preamp".to_string()),
+            at: None,
+        })
+    );
+}
+
+#[test]
+fn tile_dropped_outside_the_rack_adds_nothing() {
+    let tile = Dragged::Tile("gate".to_string());
+    assert_eq!(
+        drag_outcome(
+            &tile,
+            Some((100.0, 300.0)),
+            &RACK_AREA,
+            &UNIT_EDGES,
+            &rack_ids()
+        ),
+        None
+    );
+}
+
+fn undo_payload() -> serde_json::Value {
+    json!({"params": [
+        {"module": "drive", "type": "drive", "param": "gain", "value": 30.0},
+        {"module": "lead", "type": "drive", "param": "gain", "value": 80.0, "bypass": true},
+        {"module": "lead", "type": "drive", "param": "tone", "value": 60.0, "bypass": true},
+        {"module": "cabinet", "type": "cabinet", "param": "level", "value": 3.0,
+            "ir": "bass-cab.wav"},
+    ]})
+}
+
+#[test]
+fn undo_re_adds_the_type_at_its_position_with_values_and_bypass() {
+    assert_eq!(
+        undo_commands(&undo_payload(), "lead"),
+        [
+            Command::RackAdd {
+                type_name: "drive".to_string(),
+                after: None,
+                at: Some(1),
+            },
+            Command::Set {
+                param: "drive-2.gain".to_string(),
+                value: 80.0,
+            },
+            Command::Set {
+                param: "drive-2.tone".to_string(),
+                value: 60.0,
+            },
+            Command::Bypass {
+                id: "drive-2".to_string(),
+                on: true,
+            },
+        ]
+    );
+}
+
+#[test]
+fn undo_of_a_cabinet_restores_its_ir() {
+    assert_eq!(
+        undo_commands(&undo_payload(), "cabinet"),
+        [
+            Command::RackAdd {
+                type_name: "cabinet".to_string(),
+                after: None,
+                at: Some(2),
+            },
+            Command::Set {
+                param: "cabinet.level".to_string(),
+                value: 3.0,
+            },
+            Command::RackIr {
+                id: "cabinet".to_string(),
+                ir: "bass-cab.wav".to_string(),
+            },
+        ]
+    );
+    assert_eq!(undo_commands(&undo_payload(), "reverb"), []);
+}
+
+#[test]
+fn removed_unit_offers_undo_for_ten_seconds() {
+    let now = Instant::now();
+    let removed = RemovedUnit::new(&undo_payload(), "drive", now);
+    assert_eq!(removed.id, "drive");
+    assert_eq!(removed.undo, undo_commands(&undo_payload(), "drive"));
+    assert!(removed.is_shown(now + Duration::from_millis(9_999)));
+    assert!(!removed.is_shown(now + Duration::from_secs(10)));
 }
 
 #[test]

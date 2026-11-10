@@ -275,7 +275,7 @@ pub fn parse_typed_value(text: &str) -> Option<f64> {
     Some(value * scale).filter(|value| value.is_finite())
 }
 
-/// How far to scroll the Rack while a unit is dragged by its ears with the pointer at `pointer_y` in a scroll area from `top` to `bottom`: negative up, positive down, growing to [`AUTOSCROLL_MAX_PX`] as the pointer reaches an edge within [`AUTOSCROLL_EDGE_PX`]; 0 elsewhere.
+/// How far to scroll the Rack while a unit or a Module tile is dragged with the pointer at `pointer_y` in a scroll area from `top` to `bottom`: negative up, positive down, growing to [`AUTOSCROLL_MAX_PX`] as the pointer reaches an edge within [`AUTOSCROLL_EDGE_PX`]; 0 elsewhere.
 pub fn autoscroll_delta(pointer_y: f32, top: f32, bottom: f32) -> f32 {
     let speed = |depth: f32| AUTOSCROLL_MAX_PX * (depth / AUTOSCROLL_EDGE_PX).clamp(0.0, 1.0);
     let from_top = pointer_y - top;
@@ -309,16 +309,135 @@ impl ClipLatch {
     }
 }
 
-/// The Rack position a unit dragged from `from` lands on: the unit under `pointer_y`, given each unit's top edge in Rack order; above the first unit is the front, below the last the end. A release outside the window (`None`) or an empty Rack leaves it at `from`.
-pub fn drop_index(from: usize, pointer_y: Option<f32>, unit_tops: &[f32]) -> usize {
-    let Some(pointer_y) = pointer_y.filter(|_| !unit_tops.is_empty()) else {
-        return from;
-    };
-    unit_tops
-        .iter()
-        .filter(|&&top| top <= pointer_y)
+/// The gap a dragged unit or Module tile is dropped into, 0 the front to `unit_edges.len() - 1` the end: the number of units whose middle is above `pointer_y`. `unit_edges` holds each unit's top edge in Rack order and, last, the last unit's bottom edge.
+pub fn drop_slot(pointer_y: f32, unit_edges: &[f32]) -> usize {
+    unit_edges
+        .windows(2)
+        .filter(|edges| (edges[0] + edges[1]) / 2.0 < pointer_y)
         .count()
-        .saturating_sub(1)
+}
+
+/// Where a Module tile dropped into gap `slot` of the Rack `ids` goes.
+pub fn palette_place(slot: usize, ids: &[String]) -> AddPlace {
+    slot.checked_sub(1)
+        .and_then(|above| ids.get(above))
+        .map_or(AddPlace::Front, |id| AddPlace::After(id.clone()))
+}
+
+/// What is being dragged: the unit at a Rack position, or a Module tile of the left panel by its type.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Dragged {
+    Unit(usize),
+    Tile(String),
+}
+
+/// The visible part of the Rack, in screen pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RackArea {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+impl RackArea {
+    pub fn contains(&self, (x, y): (f32, f32)) -> bool {
+        (self.left..=self.right).contains(&x) && (self.top..=self.bottom).contains(&y)
+    }
+}
+
+/// The command a drag released at `pointer` sends: inside `area` a unit moves to the [`drop_slot`] and a tile is added there; outside it a unit is removed and a tile does nothing. A release outside the window (`None`) or beside the unit's own place sends nothing.
+pub fn drag_outcome(
+    dragged: &Dragged,
+    pointer: Option<(f32, f32)>,
+    area: &RackArea,
+    unit_edges: &[f32],
+    ids: &[String],
+) -> Option<Command> {
+    let pointer = pointer?;
+    let slot = area
+        .contains(pointer)
+        .then(|| drop_slot(pointer.1, unit_edges));
+    match (dragged, slot) {
+        (Dragged::Unit(from), None) => Some(Command::RackRemove {
+            id: ids[*from].clone(),
+        }),
+        (Dragged::Unit(from), Some(slot)) => {
+            let to = if slot > *from { slot - 1 } else { slot };
+            (to != *from).then(|| Command::RackMove {
+                id: ids[*from].clone(),
+                to,
+            })
+        }
+        (Dragged::Tile(_), None) => None,
+        (Dragged::Tile(type_name), Some(slot)) => {
+            Some(add_command(type_name, &palette_place(slot, ids)))
+        }
+    }
+}
+
+/// The commands that put Module `id` of a `get` payload back after its Remove: `rack_add` of its type at its position, then a `set` per Parameter, `bypass` when it was bypassed and `rack_ir` for its Cabinet IR. They address the id the Daemon gives the new Module, its type or `<type>-2`, `<type>-3`… when that is taken, which a custom id from the Preset file is not; empty when the payload has no such Module.
+pub fn undo_commands(get_payload: &Value, id: &str) -> Vec<Command> {
+    let modules = param_rows(get_payload);
+    let Some(index) = modules.iter().position(|(module, _)| module == id) else {
+        return Vec::new();
+    };
+    let rows = &modules[index].1;
+    let type_name = rows.first().map_or("", |row| row.module_type.as_str());
+    let is_taken = |candidate: &str| {
+        modules
+            .iter()
+            .any(|(module, _)| module != id && module == candidate)
+    };
+    let new_id = std::iter::once(type_name.to_string())
+        .chain((2..).map(|n| format!("{type_name}-{n}")))
+        .find(|candidate| !is_taken(candidate))
+        .expect("a finite Rack leaves some suffix free");
+    let add = Command::RackAdd {
+        type_name: type_name.to_string(),
+        after: None,
+        at: Some(index),
+    };
+    let sets = rows
+        .iter()
+        .map(|row| set_command(&format!("{new_id}.{}", row.param), row.value));
+    let bypass = bypassed(get_payload, id).then(|| Command::Bypass {
+        id: new_id.clone(),
+        on: true,
+    });
+    let ir = cabinet_ir(get_payload, id).map(|ir| Command::RackIr {
+        id: new_id.clone(),
+        ir,
+    });
+    std::iter::once(add)
+        .chain(sets)
+        .chain(bypass)
+        .chain(ir)
+        .collect()
+}
+
+pub const UNDO_FOR: Duration = Duration::from_secs(10);
+
+/// A Module the GUI removed, with the [`undo_commands`] that put it back, offered for [`UNDO_FOR`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemovedUnit {
+    pub id: String,
+    pub undo: Vec<Command>,
+    since: Instant,
+}
+
+impl RemovedUnit {
+    pub fn new(get_payload: &Value, id: &str, now: Instant) -> RemovedUnit {
+        RemovedUnit {
+            id: id.to_string(),
+            undo: undo_commands(get_payload, id),
+            since: now,
+        }
+    }
+
+    pub fn is_shown(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.since) < UNDO_FOR
+    }
 }
 
 /// The peak text's value: the largest peak seen, held for [`PEAK_HOLD_FOR`], then the current one.

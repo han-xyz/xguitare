@@ -14,9 +14,9 @@ use xguitare_core::{BankKind, Config};
 use crate::client::{self, TICK};
 use crate::model::{
     ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
-    SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows, forget_removed_units,
-    key_to_command, open_units_from_string, open_units_to_string, palette, param_rows, peak_db,
-    quit_commands, remember_removes, shortcuts_active,
+    RemovedUnit, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
+    forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, palette,
+    param_rows, peak_db, quit_commands, remember_removes, shortcuts_active,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
@@ -54,6 +54,7 @@ pub struct App {
     holds: [PeakHold; 2],
     open_units: BTreeSet<String>,
     removing: BTreeSet<String>,
+    removed: Option<RemovedUnit>,
     bank_query: String,
     save_as_name: Option<String>,
     add_draft: AddDraft,
@@ -138,6 +139,7 @@ impl App {
             holds: [PeakHold::default(); 2],
             open_units,
             removing: BTreeSet::new(),
+            removed: None,
             bank_query: String::new(),
             save_as_name: None,
             add_draft: AddDraft::default(),
@@ -168,6 +170,20 @@ impl App {
             .flat_map(|(_, rows)| rows.into_iter().map(|row| row.address))
             .collect();
         self.throttle.retain(|address| present.contains(address));
+    }
+}
+
+impl App {
+    /// The last [`Command::RackRemove`] among `commands` becomes the footer's Undo, from the `get` payload shown when it was sent.
+    fn remember_undo(&mut self, commands: &[Command], now: Instant) {
+        let Some(params) = &self.snapshot.params else {
+            return;
+        };
+        for command in commands {
+            if let Command::RackRemove { id } = command {
+                self.removed = Some(RemovedUnit::new(params, id, now));
+            }
+        }
     }
 }
 
@@ -208,6 +224,13 @@ impl eframe::App for App {
                 && let Some((id, _)) = &snapshot.refused_remove
             {
                 self.removing.remove(id);
+                if self
+                    .removed
+                    .as_ref()
+                    .is_some_and(|removed| &removed.id == id)
+                {
+                    self.removed = None;
+                }
             }
             if snapshot.params != self.snapshot.params
                 && let Some(params) = &snapshot.params
@@ -231,7 +254,9 @@ impl eframe::App for App {
             .filter_map(|key| key_to_command(key, &rows))
             .collect();
         commands.extend(self.throttle.tick(now));
-        Panel::bottom("status").show(ui, |ui| footer(ui, snapshot, &self.feedback, now));
+        Panel::bottom("status").show(ui, |ui| {
+            commands.extend(footer(ui, snapshot, &self.feedback, &mut self.removed, now))
+        });
         let mut tuner = Tuner {
             open: &mut self.tuner_open,
             muted_by_us: &mut self.muted_by_us,
@@ -273,6 +298,7 @@ impl eframe::App for App {
             .frame(Frame::central_panel(ui.style()).inner_margin(RACK_MARGIN))
             .show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
         remember_removes(&mut self.removing, &commands);
+        self.remember_undo(&commands, now);
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
             let _ = self.commands.send(command);

@@ -2,20 +2,20 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Align2, Button, Color32, ComboBox, CursorIcon, FontId, FontSelection, Frame, Id,
-    InnerResponse, Key, Label, Layout, Margin, Modifiers, Rect, Response, RichText, Role,
-    ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo, WidgetText,
-    pos2, vec2,
+    Align, Align2, Button, Color32, ComboBox, CursorIcon, DragAndDrop, FontId, FontSelection,
+    Frame, Id, InnerResponse, Key, Label, Layout, Margin, Modifiers, Rect, Response, RichText,
+    Role, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo,
+    WidgetText, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 
 use crate::model::{
-    CLOSED_KNOB_WIDTH, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KnobKey, NO_SIGNAL,
-    ParamRow, PeakHold, Rgb, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed,
-    cabinet_ir, cents_fraction, closed_unit_rows, drop_index, format_value, in_tune, key_step,
-    knob_fraction, knob_param_value, module_title, move_target, mute_banner, palette, param_label,
-    param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
-    unit_style,
+    CLOSED_KNOB_WIDTH, ClipLatch, Command, Direction, Dragged, EAR_WIDTH, Feedback, KnobKey,
+    NO_SIGNAL, ParamRow, PeakHold, RackArea, Rgb, Snapshot, Throttle, TunerReading,
+    autoscroll_delta, bypassed, cabinet_ir, cents_fraction, closed_unit_rows, drag_outcome,
+    drop_slot, format_value, in_tune, key_step, knob_fraction, knob_param_value, module_title,
+    move_target, mute_banner, palette, param_label, param_rows, peak_db, peak_text,
+    tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::widgets::{self, KnobSize, colour};
 
@@ -49,7 +49,8 @@ const MOVE_BUTTON_GAP: f32 = 8.0;
 const MOVE_BUTTONS_WIDTH: f32 = 2.0 * MOVE_BUTTON_SIZE.x + MOVE_BUTTON_GAP;
 const OPEN_CHEVRON: &str = "▼";
 const CLOSED_CHEVRON: &str = "▶";
-const DROP_LINE_WIDTH: f32 = 2.0;
+const DROP_LINE_WIDTH: f32 = 3.0;
+const GRIP: &str = "⠿";
 const TUNER_LABEL: &str = "Tuner";
 const METER_BRIDGE_LABEL: &str = "Meter bridge";
 const NOTE_SIZE: f32 = 96.0;
@@ -110,7 +111,7 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
         let left = ui.cursor().left() + (ui.available_width() - width) / 2.0;
         let column = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, f32::INFINITY));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
-            Frame::new()
+            let rack = Frame::new()
                 .fill(colour(palette().rail))
                 .stroke(Stroke::new(1.0, colour(palette().outline)))
                 .inner_margin(Margin::symmetric(RAIL_WIDTH, 0))
@@ -118,14 +119,13 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
                     ui.spacing_mut().item_spacing.y = UNIT_GAP;
                     meter_bridge(ui, snapshot, view.clips, view.holds);
                     tuner_unit(ui, snapshot, view.tuner_open);
-                    commands.extend(module_units(
-                        ui,
-                        snapshot,
-                        &modules,
-                        view.knobs,
-                        view.open_units,
-                    ));
+                    let (unit_commands, placed) =
+                        module_units(ui, snapshot, &modules, view.knobs, view.open_units);
+                    commands.extend(unit_commands);
+                    placed
                 });
+            let area = rack.response.rect.intersect(ui.clip_rect());
+            commands.extend(drag_and_drop(ui, &modules, &rack.inner, area));
         });
     });
     commands
@@ -340,14 +340,14 @@ fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
     });
 }
 
-/// A unit dropped by its ears moves to the unit under the pointer; while it is dragged, a line marks where it will land, and the Rack scrolls when the pointer nears the top or bottom of the view.
+/// Each unit's commands, and its rect with the drag response of its header and ears.
 fn module_units(
     ui: &mut Ui,
     snapshot: &Snapshot,
     modules: &[(String, Vec<ParamRow>)],
     knobs: &mut Knobs,
     open_units: &mut BTreeSet<String>,
-) -> Vec<Command> {
+) -> (Vec<Command>, Vec<(Rect, Response)>) {
     let mut commands = Vec::new();
     let mut placed = Vec::with_capacity(modules.len());
     for (index, (module, rows)) in modules.iter().enumerate() {
@@ -369,47 +369,89 @@ fn module_units(
                     irs: &snapshot.irs,
                 }),
         };
-        let (unit_commands, rect, ears) = module_unit(ui, &unit, knobs, open_units);
+        let (unit_commands, rect, handle) = module_unit(ui, &unit, knobs, open_units);
         commands.extend(unit_commands);
-        placed.push((rect, ears));
+        placed.push((rect, handle));
     }
-    let tops: Vec<f32> = placed.iter().map(|(rect, _)| rect.top()).collect();
-    let pointer_y = ui
-        .input(|input| input.pointer.latest_pos())
-        .map(|pos| pos.y);
-    if let Some(y) = pointer_y
-        && placed.iter().any(|(_, ears)| ears.dragged())
-    {
-        let view = ui.clip_rect();
-        let delta = autoscroll_delta(y, view.top(), view.bottom());
+    (commands, placed)
+}
+
+/// A unit dragged by its header or ears, or a Module tile dragged from the left panel: while the pointer is over the Rack `area`, a line in the dragged type's colour marks the gap it drops into and the Rack scrolls near the top or bottom of the view; the release sends its [`drag_outcome`].
+fn drag_and_drop(
+    ui: &mut Ui,
+    modules: &[(String, Vec<ParamRow>)],
+    placed: &[(Rect, Response)],
+    area: Rect,
+) -> Option<Command> {
+    let dragged = placed
+        .iter()
+        .position(|(_, handle)| handle.dragged() || handle.drag_stopped())
+        .map(Dragged::Unit)
+        .or_else(|| DragAndDrop::payload::<Dragged>(ui.ctx()).map(|tile| (*tile).clone()))?;
+    let (type_name, released) = match &dragged {
+        Dragged::Unit(index) => (
+            modules[*index]
+                .1
+                .first()
+                .map_or("", |row| row.module_type.as_str()),
+            placed[*index].1.drag_stopped(),
+        ),
+        Dragged::Tile(type_name) => (
+            type_name.as_str(),
+            ui.input(|input| input.pointer.any_released()),
+        ),
+    };
+    let edges: Vec<f32> = placed
+        .iter()
+        .map(|(rect, _)| rect.top())
+        .chain(placed.last().map(|(rect, _)| rect.bottom()))
+        .collect();
+    let pointer = ui.input(|input| input.pointer.latest_pos());
+    if let Some(pos) = pointer.filter(|pos| area.contains(*pos)) {
+        let delta = autoscroll_delta(pos.y, area.top(), area.bottom());
         if delta != 0.0 {
             ui.scroll_with_delta(vec2(0.0, -delta));
             ui.ctx().request_repaint();
         }
+        insert_line(
+            ui,
+            placed,
+            drop_slot(pos.y, &edges),
+            widgets::accent(type_name),
+        );
     }
-    for (from, (_, ears)) in placed.iter().enumerate() {
-        let to = drop_index(from, pointer_y, &tops);
-        if ears.dragged() {
-            let (target, _) = &placed[to];
-            let y = if to > from {
-                target.bottom()
-            } else {
-                target.top()
-            };
-            ui.painter().hline(
-                target.x_range(),
-                y,
-                Stroke::new(DROP_LINE_WIDTH, colour(palette().text)),
-            );
-        }
-        if ears.drag_stopped() && to != from {
-            commands.push(Command::RackMove {
-                id: modules[from].0.clone(),
-                to,
-            });
-        }
+    if !released {
+        return None;
     }
-    commands
+    let ids: Vec<String> = modules.iter().map(|(id, _)| id.clone()).collect();
+    let area = RackArea {
+        left: area.left(),
+        top: area.top(),
+        right: area.right(),
+        bottom: area.bottom(),
+    };
+    drag_outcome(
+        &dragged,
+        pointer.map(|pos| (pos.x, pos.y)),
+        &area,
+        &edges,
+        &ids,
+    )
+}
+
+/// In the middle of the gap above the unit at `slot`, or below the last unit.
+fn insert_line(ui: &Ui, placed: &[(Rect, Response)], slot: usize, accent: Color32) {
+    let half_gap = UNIT_GAP / 2.0;
+    let y = match placed.get(slot) {
+        Some((rect, _)) => rect.top() - half_gap,
+        None => match placed.last() {
+            Some((rect, _)) => rect.bottom() + half_gap,
+            None => return,
+        },
+    };
+    let x_range = placed[0].0.x_range();
+    ui.painter()
+        .hline(x_range, y, Stroke::new(DROP_LINE_WIDTH, accent));
 }
 
 struct ModuleUnit<'a> {
@@ -420,7 +462,7 @@ struct ModuleUnit<'a> {
     ir_choice: Option<IrChoice<'a>>,
 }
 
-/// The unit's commands, its rect, and the drag response of its two ears.
+/// The unit's commands, its rect, and the drag response of its header and its two ears.
 fn module_unit(
     ui: &mut Ui,
     unit: &ModuleUnit,
@@ -445,10 +487,12 @@ fn module_unit(
         )
     };
     let mut toggled = false;
+    let mut header_drag = None;
     let inner = rack_unit(ui, &format!("{module} unit"), fill, height, |ui| {
         let mut commands = Vec::new();
-        let header = unit_header(ui, Sense::click(), header_height, |ui| {
+        let header = unit_header(ui, Sense::click_and_drag(), header_height, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
+            ui.style_mut().interaction.selectable_labels = false;
             if widgets::footswitch(ui, style.led_lit, accent).clicked() {
                 commands.push(Command::Bypass {
                     id: module.to_string(),
@@ -480,6 +524,8 @@ fn module_unit(
             });
         });
         toggled |= header.response.clicked();
+        grip(ui, header.response.rect);
+        header_drag = Some(header.response);
         if open {
             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                 ui.scope(|ui| {
@@ -510,10 +556,11 @@ fn module_unit(
         open_units.insert(module.to_string());
     }
     let rect = inner.response.rect;
-    let ear_size = vec2(EAR_WIDTH, rect.height());
-    let ears = [
-        Rect::from_min_size(rect.min, ear_size),
-        Rect::from_min_size(pos2(rect.right() - EAR_WIDTH, rect.top()), ear_size),
+    let side = f32::from(UNIT_SIDE_MARGIN);
+    let side_size = vec2(side, rect.height());
+    let handle = [
+        Rect::from_min_size(rect.min, side_size),
+        Rect::from_min_size(pos2(rect.right() - side, rect.top()), side_size),
     ]
     .into_iter()
     .enumerate()
@@ -524,10 +571,14 @@ fn module_unit(
             Sense::drag(),
         )
     })
+    .chain(header_drag)
     .reduce(|left, right| left.union(right))
     .expect("a unit has two ears")
     .on_hover_cursor(CursorIcon::Grab);
-    (inner.inner, rect, ears)
+    if handle.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+    }
+    (inner.inner, rect, handle)
 }
 struct IrChoice<'a> {
     current: Option<String>,
@@ -560,6 +611,17 @@ fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
         }
     });
     commands
+}
+
+/// In the gap between the left ear and the header, which drags with the ears.
+fn grip(ui: &Ui, header: Rect) {
+    ui.painter().text(
+        pos2(header.left() - HEADER_GAP / 2.0, header.center().y),
+        Align2::CENTER_CENTER,
+        GRIP,
+        FontId::proportional(SMALL_TEXT_SIZE),
+        colour(palette().muted),
+    );
 }
 
 /// Added right to left, so that they read ↑ ↓ at the right of the unit.
