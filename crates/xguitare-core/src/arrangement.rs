@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_4, SQRT_2, TAU};
 use std::fmt;
+use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use xguitare_dsp::Rack;
 use xguitare_dsp::smooth::Smoother;
 
 use crate::project::{LoopRegion, Project, Track};
+use crate::recording::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
 
 const MIN_VOLUME_DB: f32 = -60.0;
 const MAX_VOLUME_DB: f32 = 6.0;
@@ -86,9 +88,10 @@ impl fmt::Display for TakeNotLoaded {
 
 impl std::error::Error for TakeNotLoaded {}
 
-/// The audio thread's Project: every Track through its own Rack, summed with the click to stereo, with transport, loop and count-in. Allocates and frees nothing after `new`.
+/// The audio thread's Project: every Track through its own Rack, summed with the click to stereo, with transport, loop and count-in; while Recording each armed Track's dry input goes into its recording ring. Allocates and frees nothing after `new`.
 pub struct Arrangement {
     tracks: Vec<TrackPlayer>,
+    readers: Vec<TakeReader>,
     silence: Vec<f32>,
     click: Vec<f32>,
     sample_rate: f32,
@@ -112,6 +115,7 @@ struct TrackPlayer {
     mute: bool,
     solo: bool,
     arm: bool,
+    recorder: TakeRecorder,
     gain_l: Smoother,
     gain_r: Smoother,
     source: Vec<f32>,
@@ -152,10 +156,10 @@ impl Arrangement {
     /// # Panics
     ///
     /// When `racks` does not hold one Rack per Track, or a Rack is prepared for fewer than `max_frames`.
-    pub fn new(
+    pub fn new<S: BuildHasher>(
         project: &Project,
         racks: Vec<Rack>,
-        takes: &HashMap<String, Arc<[f32]>>,
+        takes: &HashMap<String, Arc<[f32]>, S>,
         sample_rate: f32,
         max_frames: usize,
     ) -> Result<Arrangement, TakeNotLoaded> {
@@ -165,16 +169,29 @@ impl Arrangement {
             "a Rack prepared for fewer than {max_frames} frames"
         );
         let any_solo = project.tracks.iter().any(|track| track.solo);
+        let ring_capacity = sample_rate.ceil() as usize * RING_SECONDS as usize;
+        let mut readers = Vec::with_capacity(racks.len());
         let tracks = project
             .tracks
             .iter()
             .zip(racks)
             .map(|(track, rack)| {
-                TrackPlayer::new(track, rack, takes, sample_rate, max_frames, any_solo)
+                let (recorder, reader) = take_ring(ring_capacity);
+                readers.push(reader);
+                TrackPlayer::new(
+                    track,
+                    rack,
+                    recorder,
+                    takes,
+                    sample_rate,
+                    max_frames,
+                    any_solo,
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Arrangement {
             tracks,
+            readers,
             silence: vec![0.0; max_frames],
             click: vec![0.0; max_frames],
             sample_rate,
@@ -208,8 +225,24 @@ impl Arrangement {
         self.count_in.left > 0
     }
 
-    /// Takes over the transport, playhead, count-in and click of the Arrangement this one replaces, so a rebuild does not stop playback.
-    pub fn continue_from(&mut self, previous: &Arrangement) {
+    /// The disk thread's ends of the recording rings, one per Track in Track order; empty after the first call.
+    pub fn take_readers(&mut self) -> Vec<TakeReader> {
+        std::mem::take(&mut self.readers)
+    }
+
+    /// The pushes into recording rings that dropped frames since the last call.
+    pub fn take_disk_overflows(&mut self) -> u64 {
+        self.tracks
+            .iter_mut()
+            .map(|track| track.recorder.take_overflows())
+            .sum()
+    }
+
+    /// Takes over the transport, playhead, count-in, click and open recording passes of the Arrangement this one replaces, so a rebuild neither stops playback nor splits a Take; `previous` records nothing more.
+    pub fn continue_from(&mut self, previous: &mut Arrangement) {
+        for (track, old) in self.tracks.iter_mut().zip(previous.tracks.iter_mut()) {
+            track.recorder.continue_from(&mut old.recorder);
+        }
         self.transport = previous.transport;
         self.playhead = previous.playhead;
         self.click_on = previous.click_on;
@@ -231,7 +264,12 @@ impl Arrangement {
             }
             ArrangementCommand::Mute { track, on } => self.with_track(track, |t| t.mute = on),
             ArrangementCommand::Solo { track, on } => self.with_track(track, |t| t.solo = on),
-            ArrangementCommand::Arm { track, on } => self.with_track(track, |t| t.arm = on),
+            ArrangementCommand::Arm { track, on } => self.with_track(track, |t| {
+                t.arm = on;
+                if !on {
+                    t.recorder.end_pass(false);
+                }
+            }),
             ArrangementCommand::Param {
                 track,
                 module,
@@ -244,15 +282,20 @@ impl Arrangement {
                 self.with_track(track, |t| t.rack.set_bypass(module, on));
             }
             ArrangementCommand::Play => {
+                self.end_passes(false);
                 self.transport = Transport::Playing;
                 self.count_in = CountIn::default();
             }
             ArrangementCommand::Stop => {
+                self.end_passes(false);
                 self.transport = Transport::Stopped;
                 self.count_in = CountIn::default();
             }
             ArrangementCommand::Record => self.record(),
-            ArrangementCommand::Locate(frame) => self.playhead = frame,
+            ArrangementCommand::Locate(frame) => {
+                self.end_passes(false);
+                self.playhead = frame;
+            }
             ArrangementCommand::Loop(region) => self.loop_region = region,
             ArrangementCommand::Tempo { bpm, meter } => {
                 self.frames_per_beat = frames_per_beat(self.sample_rate, bpm);
@@ -266,6 +309,12 @@ impl Arrangement {
     fn with_track(&mut self, track: usize, change: impl FnOnce(&mut TrackPlayer)) {
         if let Some(track) = self.tracks.get_mut(track) {
             change(track);
+        }
+    }
+
+    fn end_passes(&mut self, wrapped: bool) {
+        for track in &mut self.tracks {
+            track.recorder.end_pass(wrapped);
         }
     }
 
@@ -289,7 +338,7 @@ impl Arrangement {
         for track in &mut self.tracks {
             track.source[..frames].fill(0.0);
         }
-        self.advance(frames);
+        self.advance(inputs, frames);
         out_l.fill(0.0);
         out_r.fill(0.0);
         let any_solo = self.tracks.iter().any(|track| track.solo);
@@ -316,8 +365,8 @@ impl Arrangement {
         }
     }
 
-    /// Moves the transport through `frames`, splitting at the count-in end and at each loop wrap, and writes the unarmed Tracks' Items and the click for each stretch.
-    fn advance(&mut self, frames: usize) {
+    /// Moves the transport through `frames`, splitting at the count-in end and at each loop wrap, and writes the unarmed Tracks' Items, the armed Tracks' recording and the click for each stretch.
+    fn advance(&mut self, inputs: &[&[f32]], frames: usize) {
         let mut done = 0;
         while done < frames && self.transport != Transport::Stopped {
             let rest = frames - done;
@@ -336,14 +385,26 @@ impl Arrangement {
             } else {
                 rest
             };
-            for track in self.tracks.iter_mut().filter(|track| !track.arm) {
-                track.write_items(self.playhead, done, run);
+            let recording = self.transport == Transport::Recording;
+            for (idx, track) in self.tracks.iter_mut().enumerate() {
+                if !track.arm {
+                    track.write_items(self.playhead, done, run);
+                } else if recording {
+                    let input = inputs
+                        .get(idx)
+                        .and_then(|input| input.get(done..done + run))
+                        .unwrap_or(&self.silence[..run]);
+                    track.recorder.push(self.playhead, input);
+                }
             }
             let grid = self.click_on.then_some(self.playhead);
             self.click_stretch(grid, done, run);
             self.playhead += run as u64;
             if wraps && self.playhead == end {
                 self.playhead = start;
+                if recording {
+                    self.end_passes(true);
+                }
             }
             done += run;
         }
@@ -383,10 +444,11 @@ fn frames_per_beat(sample_rate: f32, bpm: f64) -> f64 {
 }
 
 impl TrackPlayer {
-    fn new(
+    fn new<S: BuildHasher>(
         track: &Track,
         rack: Rack,
-        takes: &HashMap<String, Arc<[f32]>>,
+        recorder: TakeRecorder,
+        takes: &HashMap<String, Arc<[f32]>, S>,
         sample_rate: f32,
         max_frames: usize,
         any_solo: bool,
@@ -411,6 +473,7 @@ impl TrackPlayer {
             mute: track.mute,
             solo: track.solo,
             arm: track.arm,
+            recorder,
             gain_l: Smoother::new(0.0),
             gain_r: Smoother::new(0.0),
             source: vec![0.0; max_frames],

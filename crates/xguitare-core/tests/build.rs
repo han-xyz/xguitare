@@ -1,8 +1,12 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use xguitare_core::build::build_rack;
+use xguitare_core::build::{build_arrangement, build_rack, swap_arrangement};
+use xguitare_core::engine::{Command, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
+use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
 use xguitare_core::{Bank, BankEntry, BankKind, Config, Preset};
 
 struct TempDir(PathBuf);
@@ -58,4 +62,70 @@ fn missing_ir_warns_like_load() {
             config.bank_dir.join("missing.wav").display()
         )]
     );
+}
+
+fn project_with(tracks: Vec<Track>) -> Project {
+    Project {
+        name: "p".to_string(),
+        sample_rate: 48_000,
+        tempo_bpm: 120.0,
+        meter: (4, 4),
+        loop_region: LoopRegion::default(),
+        latency_offset_ms: 0.0,
+        tracks,
+    }
+}
+
+#[test]
+fn arrangement_builds_one_rack_per_track_and_swaps_in() {
+    let dir = temp_dir("arrangement");
+    let config = config(&dir.0);
+    let preset = Preset::parse("name = \"G\"\n[[module]]\ntype = \"gain\"\n").unwrap();
+    let mut with_item = Track::from_preset("b", &preset);
+    with_item.items.push(Item {
+        position: 0,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/b-1.wav".to_string(),
+            frames: 2,
+        }],
+    });
+    let project = project_with(vec![Track::from_preset("a", &preset), with_item]);
+    let takes = HashMap::from([("takes/b-1.wav".to_string(), Arc::from(vec![0.5, 0.5]))]);
+    let (mut arrangement, warnings) =
+        build_arrangement(&config, &project, &takes, 48_000.0, 128).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(arrangement.take_readers().len(), 2);
+
+    let (mut control, mut audio, _tap) = engine_queues(4);
+    swap_arrangement(&mut control, arrangement).unwrap();
+    assert!(matches!(
+        audio.commands.pop(),
+        Ok(Command::SwapArrangement(_))
+    ));
+}
+
+#[test]
+fn arrangement_with_an_unloaded_take_is_an_error() {
+    let dir = temp_dir("arrangement-unloaded");
+    let config = config(&dir.0);
+    let mut t = Track::from_preset("a", &Preset::parse("name = \"G\"\n").unwrap());
+    t.items.push(Item {
+        position: 0,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/a-1.wav".to_string(),
+            frames: 2,
+        }],
+    });
+    let error = build_arrangement(
+        &config,
+        &project_with(vec![t]),
+        &HashMap::new(),
+        48_000.0,
+        128,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.to_string(), "take 'takes/a-1.wav' is not loaded");
 }

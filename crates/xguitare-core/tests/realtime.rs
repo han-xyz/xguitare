@@ -403,3 +403,74 @@ fn switcher_arrangement_swap_commands_and_close_do_not_allocate() {
     assert_eq!(retired, 2);
     drop(switcher);
 }
+
+#[test]
+fn recording_passes_and_loop_wraps_do_not_allocate() {
+    let mut arrangement = sixteen_track_arrangement();
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        arrangement.apply(ArrangementCommand::Record);
+        for _ in 0..100 {
+            arrangement.process(&inputs, &mut left, &mut right);
+        }
+        arrangement.apply(ArrangementCommand::Arm {
+            track: 0,
+            on: false,
+        });
+        arrangement.apply(ArrangementCommand::Locate(500));
+        for _ in 0..20 {
+            arrangement.process(&inputs, &mut left, &mut right);
+        }
+        arrangement.apply(ArrangementCommand::Stop);
+        arrangement.process(&inputs, &mut left, &mut right);
+        let _ = arrangement.take_disk_overflows();
+    });
+}
+
+#[test]
+fn arrangement_crossfades_while_recording_do_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, shared);
+    let arrangements = [
+        sixteen_track_arrangement(),
+        sixteen_track_arrangement(),
+        sixteen_track_arrangement(),
+        sixteen_track_arrangement(),
+    ];
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        for (idx, arrangement) in arrangements.into_iter().enumerate() {
+            assert!(
+                control
+                    .commands
+                    .push(Command::SwapArrangement(arrangement))
+                    .is_ok()
+            );
+            if idx == 0 {
+                let record = Command::Arrangement(ArrangementCommand::Record);
+                assert!(control.commands.push(record).is_ok());
+            }
+            switcher.apply_commands();
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+        for _ in 0..40 {
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+        assert!(control.commands.push(Command::CloseArrangement).is_ok());
+        switcher.apply_commands();
+        switcher.process(&input, &mut left, &mut right);
+    });
+    let mut retired = 0;
+    while let Ok(FromAudio::RetiredArrangement(_)) = control.from_audio.pop() {
+        retired += 1;
+    }
+    assert_eq!(retired, 4);
+    drop(switcher);
+}

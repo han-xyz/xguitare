@@ -44,9 +44,25 @@ impl Crossfader {
         out_l: &mut [f32],
         out_r: &mut [f32],
     ) -> bool {
-        let frames = input.len();
-        old.process(input, out_l, out_r);
-        new.process(input, &mut self.new_l, &mut self.new_r);
+        self.process_with(
+            &mut out_l[..input.len()],
+            &mut out_r[..input.len()],
+            |left, right| old.process(input, left, right),
+            |left, right| new.process(input, left, right),
+        )
+    }
+
+    /// [`Crossfader::process`] for any two sources: `run_old` writes the outgoing block into `out_l`/`out_r` and `run_new` the incoming one into buffers of the same length, at most the prepared `max_frames`.
+    pub fn process_with(
+        &mut self,
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+        run_old: impl FnOnce(&mut [f32], &mut [f32]),
+        run_new: impl FnOnce(&mut [f32], &mut [f32]),
+    ) -> bool {
+        let frames = out_l.len();
+        run_old(out_l, out_r);
+        run_new(&mut self.new_l[..frames], &mut self.new_r[..frames]);
         for i in 0..frames {
             let n = self.position + i;
             let new_gain = if n >= self.length {

@@ -24,6 +24,8 @@ pub struct EngineShared {
     pub output_peak_bits: AtomicU32,
     /// While true the switcher ramps both outputs to silence; the tap still carries the input.
     pub muted: AtomicBool,
+    /// Pushes into a recording ring that dropped frames because the disk thread fell behind.
+    pub disk_overflows: AtomicU64,
 }
 
 pub enum Command {
@@ -39,11 +41,11 @@ pub enum Command {
         module: usize,
         on: bool,
     },
-    /// Runs this Arrangement instead of the Rack, cut in with no fade; it carries on the transport of the Arrangement it replaces.
+    /// Runs this Arrangement instead of the Rack: cut in when none runs, else crossfaded in over the crossfade length, carrying on the transport and recording of the Arrangement it replaces.
     SwapArrangement(Box<Arrangement>),
     /// Goes back to the Rack.
     CloseArrangement,
-    /// Ignored while no Arrangement runs.
+    /// Applies to every Arrangement the switcher holds; ignored while none runs.
     Arrangement(ArrangementCommand),
 }
 
@@ -113,8 +115,8 @@ pub fn take_peak(peak: &AtomicU32) -> f32 {
 /// The control side, the audio side, and the control thread's end of the input tap.
 pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues, Consumer<f32>) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);
-    // At most every queued SwapRack, SwapArrangement or CloseArrangement plus the current, the fading-in and the pending Rack, minus the one left current, can be retired between two drains, and the control side drains before each such push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
-    let (from_audio_tx, from_audio_rx) = RingBuffer::new(capacity + 2 + PROGRAM_CHANGE_SLOTS);
+    // At most every queued SwapRack, SwapArrangement or CloseArrangement plus the current, the fading-in and the pending Rack (minus the one left current) and the current, fading-in and pending Arrangement can be retired between two drains, and the control side drains before each such push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
+    let (from_audio_tx, from_audio_rx) = RingBuffer::new(capacity + 5 + PROGRAM_CHANGE_SLOTS);
     let (tap_tx, tap_rx) = RingBuffer::new(TAP_CAPACITY);
     (
         EngineQueues {
@@ -164,7 +166,10 @@ pub struct RackSwitcher {
     incoming: Option<Box<Rack>>,
     pending: Option<Box<Rack>>,
     arrangement: Option<Box<Arrangement>>,
+    incoming_arrangement: Option<Box<Arrangement>>,
+    pending_arrangement: Option<Box<Arrangement>>,
     crossfader: Crossfader,
+    arrangement_fader: Crossfader,
     max_frames: usize,
     fades: FadeLengths,
     queues: AudioQueues,
@@ -183,6 +188,8 @@ impl RackSwitcher {
     ) -> RackSwitcher {
         let mut crossfader = Crossfader::new();
         crossfader.prepare(max_frames);
+        let mut arrangement_fader = Crossfader::new();
+        arrangement_fader.prepare(max_frames);
         let reserved_slots = queues.from_audio.buffer().capacity() - PROGRAM_CHANGE_SLOTS;
         shared
             .running_frames
@@ -192,7 +199,10 @@ impl RackSwitcher {
             incoming: None,
             pending: None,
             arrangement: None,
+            incoming_arrangement: None,
+            pending_arrangement: None,
             crossfader,
+            arrangement_fader,
             max_frames,
             fades,
             queues,
@@ -233,20 +243,34 @@ impl RackSwitcher {
                     }
                 }
                 Command::SetFadeLengths(fades) => self.fades = fades,
-                Command::SwapArrangement(mut new) => {
-                    if let Some(old) = self.arrangement.take() {
-                        new.continue_from(&old);
-                        self.retire_arrangement(old);
+                Command::SwapArrangement(new) => {
+                    if self.arrangement.is_none() {
+                        self.arrangement = Some(new);
+                    } else if self.incoming_arrangement.is_none() {
+                        self.start_arrangement_fade(new);
+                    } else if let Some(replaced) = self.pending_arrangement.replace(new) {
+                        self.retire_arrangement(replaced);
                     }
-                    self.arrangement = Some(new);
                 }
                 Command::CloseArrangement => {
-                    if let Some(old) = self.arrangement.take() {
+                    let held = [
+                        self.arrangement.take(),
+                        self.incoming_arrangement.take(),
+                        self.pending_arrangement.take(),
+                    ];
+                    for old in held.into_iter().flatten() {
                         self.retire_arrangement(old);
                     }
                 }
                 Command::Arrangement(command) => {
-                    if let Some(arrangement) = self.arrangement.as_mut() {
+                    for arrangement in [
+                        &mut self.arrangement,
+                        &mut self.incoming_arrangement,
+                        &mut self.pending_arrangement,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
                         arrangement.apply(command);
                     }
                 }
@@ -273,20 +297,84 @@ impl RackSwitcher {
         out_r: &mut [f32],
     ) -> bool {
         tap_block(&mut self.queues.tap, input);
-        let fits = match self.arrangement.as_mut() {
-            Some(arrangement) if input.len() <= arrangement.max_frames() => {
-                arrangement.process(track_inputs, out_l, out_r);
-                true
-            }
-            Some(_) => {
-                out_l.fill(0.0);
-                out_r.fill(0.0);
-                false
-            }
-            None => self.run_racks(input, out_l, out_r),
+        let fits = if self.arrangement.is_some() {
+            self.run_arrangements(track_inputs, out_l, out_r)
+        } else {
+            self.run_racks(input, out_l, out_r)
         };
         self.apply_mute(out_l, out_r);
         fits
+    }
+
+    fn start_arrangement_fade(&mut self, mut new: Box<Arrangement>) {
+        if let Some(current) = self.arrangement.as_mut() {
+            new.continue_from(current);
+        }
+        self.incoming_arrangement = Some(new);
+        self.arrangement_fader.start(self.fades.crossfade_frames);
+    }
+
+    fn finish_arrangement_fade(&mut self, new: Box<Arrangement>) {
+        if let Some(old) = self.arrangement.replace(new) {
+            self.retire_arrangement(old);
+        }
+        if let Some(next) = self.pending_arrangement.take() {
+            self.start_arrangement_fade(next);
+        }
+    }
+
+    /// Runs the current Arrangement, or crossfades to the incoming one; an Arrangement that cannot run this block ends the fade with a cut, and silence comes out while the one left cannot run it either.
+    fn run_arrangements(
+        &mut self,
+        track_inputs: &[&[f32]],
+        out_l: &mut [f32],
+        out_r: &mut [f32],
+    ) -> bool {
+        let frames = out_l.len();
+        let fits = |arrangement: &Option<Box<Arrangement>>| {
+            arrangement
+                .as_deref()
+                .is_none_or(|arrangement| frames <= arrangement.max_frames())
+        };
+        while !(fits(&self.arrangement) && fits(&self.incoming_arrangement)) {
+            let Some(incoming) = self.incoming_arrangement.take() else {
+                break;
+            };
+            self.finish_arrangement_fade(incoming);
+        }
+        if frames > self.max_frames || !fits(&self.arrangement) || !fits(&self.incoming_arrangement)
+        {
+            out_l.fill(0.0);
+            out_r.fill(0.0);
+            return false;
+        }
+        let Some(current) = self.arrangement.as_deref_mut() else {
+            return false;
+        };
+        let mut overflows = 0;
+        let faded = if let Some(incoming) = self.incoming_arrangement.as_deref_mut() {
+            let faded = self.arrangement_fader.process_with(
+                out_l,
+                out_r,
+                |left, right| current.process(track_inputs, left, right),
+                |left, right| incoming.process(track_inputs, left, right),
+            );
+            overflows += incoming.take_disk_overflows();
+            faded
+        } else {
+            current.process(track_inputs, out_l, out_r);
+            false
+        };
+        overflows += current.take_disk_overflows();
+        if overflows > 0 {
+            self.shared
+                .disk_overflows
+                .fetch_add(overflows, Ordering::Relaxed);
+        }
+        if faded && let Some(new) = self.incoming_arrangement.take() {
+            self.finish_arrangement_fade(new);
+        }
+        true
     }
 
     fn run_racks(&mut self, input: &[f32], out_l: &mut [f32], out_r: &mut [f32]) -> bool {

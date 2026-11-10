@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand, TakeNotLoaded, Transport};
-use xguitare_core::engine::{Command, FadeLengths, FromAudio, RackSwitcher, engine_queues};
+use xguitare_core::engine::{
+    Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, engine_queues,
+};
 use xguitare_core::project::{Item, LoopRegion, Project, Take, Track};
+use xguitare_core::recording::{Pass, ReadStop, TakeReader};
 use xguitare_dsp::Rack;
 
 const RATE: u32 = 48_000;
@@ -320,7 +324,7 @@ fn swapped_arrangement_continues_the_transport() {
     old.apply(ArrangementCommand::Play);
     run(&mut old, &[], 1000);
     let mut new = arrangement(&project(vec![track("t")]), &HashMap::new());
-    new.continue_from(&old);
+    new.continue_from(&mut old);
     assert_eq!(new.transport(), Transport::Playing);
     assert_eq!(new.playhead(), 1000);
 }
@@ -369,11 +373,19 @@ fn switcher_runs_a_swapped_in_arrangement_until_it_is_closed() {
     let swap = Command::SwapArrangement(Box::new(second));
     assert!(control.commands.push(swap).is_ok());
     switcher.apply_commands();
-    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    let fade_blocks = 960_usize.div_ceil(BLOCK);
+    for _ in 0..fade_blocks {
+        assert!(
+            control.from_audio.pop().is_err(),
+            "retired before the fade ended"
+        );
+        switcher.process_tracks(&input, &[], &mut left, &mut right);
+    }
     let Ok(FromAudio::RetiredArrangement(retired)) = control.from_audio.pop() else {
         panic!("expected the replaced Arrangement");
     };
-    assert_eq!(retired.playhead(), BLOCK as u64);
+    let swapped_at = (1 + fade_blocks) * BLOCK;
+    assert_eq!(retired.playhead(), swapped_at as u64);
 
     assert!(control.commands.push(Command::CloseArrangement).is_ok());
     switcher.apply_commands();
@@ -382,6 +394,204 @@ fn switcher_runs_a_swapped_in_arrangement_until_it_is_closed() {
         panic!("expected the closed Arrangement");
     };
     assert_eq!(closed.transport(), Transport::Playing);
-    assert_eq!(closed.playhead(), 2 * BLOCK as u64);
+    assert_eq!(closed.playhead(), swapped_at as u64);
     assert!(close(left[0], 0.5) && close(right[0], 0.5));
+}
+
+fn armed(name: &str) -> Track {
+    let mut t = track(name);
+    t.arm = true;
+    t
+}
+
+fn ramp(frames: usize) -> Vec<f32> {
+    (0..frames).map(|i| i as f32 / 1000.0).collect()
+}
+
+/// Runs `input` through Track 1 in blocks that move along it.
+fn feed(arrangement: &mut Arrangement, input: &[f32]) {
+    for chunk in input.chunks(BLOCK) {
+        let (mut l, mut r) = ([0.0; BLOCK], [0.0; BLOCK]);
+        arrangement.process(&[chunk], &mut l[..chunk.len()], &mut r[..chunk.len()]);
+    }
+}
+
+/// Every pass in `reader` with its samples, and the open pass's samples last.
+fn passes(reader: &mut TakeReader) -> Vec<(Vec<f32>, Option<Pass>)> {
+    let mut found = Vec::new();
+    let mut samples = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        let stop = reader.read(samples.len() as u64, &mut out);
+        samples.extend_from_slice(&out);
+        match stop {
+            ReadStop::PassEnd(pass) => found.push((std::mem::take(&mut samples), Some(pass))),
+            ReadStop::Empty | ReadStop::Done => break,
+        }
+    }
+    if !samples.is_empty() {
+        found.push((samples, None));
+    }
+    found
+}
+
+#[test]
+fn recording_pushes_the_armed_dry_input_from_the_record_start() {
+    let mut a = arrangement(&project(vec![armed("a"), track("b")]), &HashMap::new());
+    let mut readers = a.take_readers();
+    a.apply(ArrangementCommand::Locate(1000));
+    a.apply(ArrangementCommand::Record);
+    let input = ramp(600);
+    feed(&mut a, &input);
+    a.apply(ArrangementCommand::Stop);
+    feed(&mut a, &ramp(300));
+    let pass = Pass {
+        start: 1000,
+        frames: 600,
+        loop_pass: false,
+    };
+    assert_eq!(passes(&mut readers[0]), [(input, Some(pass))]);
+    assert_eq!(passes(&mut readers[1]), []);
+}
+
+#[test]
+fn count_in_is_not_recorded() {
+    let mut a = arrangement(&project(vec![armed("a")]), &HashMap::new());
+    let mut readers = a.take_readers();
+    a.apply(ArrangementCommand::CountIn(1));
+    a.apply(ArrangementCommand::Record);
+    let bar = 4 * 24_000;
+    feed(&mut a, &ramp(bar + 200));
+    a.apply(ArrangementCommand::Stop);
+    let found = passes(&mut readers[0]);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].0, ramp(bar + 200)[bar..]);
+    assert_eq!(found[0].1.map(|pass| pass.start), Some(0));
+}
+
+#[test]
+fn loop_wrap_while_recording_starts_a_loop_pass() {
+    let mut p = project(vec![armed("a")]);
+    p.loop_region = LoopRegion {
+        start: 100,
+        end: 400,
+        on: true,
+    };
+    let mut a = arrangement(&p, &HashMap::new());
+    let mut readers = a.take_readers();
+    a.apply(ArrangementCommand::Locate(100));
+    a.apply(ArrangementCommand::Record);
+    let input = ramp(700);
+    feed(&mut a, &input);
+    a.apply(ArrangementCommand::Stop);
+    let found = passes(&mut readers[0]);
+    let pass = |frames, loop_pass| {
+        Some(Pass {
+            start: 100,
+            frames,
+            loop_pass,
+        })
+    };
+    assert_eq!(
+        found,
+        [
+            (input[..300].to_vec(), pass(300, false)),
+            (input[300..600].to_vec(), pass(300, true)),
+            (input[600..].to_vec(), pass(100, true)),
+        ]
+    );
+}
+
+#[test]
+fn a_swapped_in_arrangement_continues_the_open_pass() {
+    let p = project(vec![armed("a")]);
+    let mut old = arrangement(&p, &HashMap::new());
+    let mut old_readers = old.take_readers();
+    old.apply(ArrangementCommand::Record);
+    let input = ramp(500);
+    feed(&mut old, &input[..300]);
+    let mut new = arrangement(&p, &HashMap::new());
+    let mut new_readers = new.take_readers();
+    new.continue_from(&mut old);
+    feed(&mut old, &input[300..]);
+    feed(&mut new, &input[300..]);
+    new.apply(ArrangementCommand::Stop);
+    assert_eq!(passes(&mut old_readers[0]), [(input[..300].to_vec(), None)]);
+    let mut out = Vec::new();
+    assert_eq!(
+        new_readers[0].read(300, &mut out),
+        ReadStop::PassEnd(Pass {
+            start: 0,
+            frames: 500,
+            loop_pass: false,
+        })
+    );
+    assert_eq!(out, input[300..]);
+}
+
+#[test]
+fn swap_arrangement_crossfades_with_no_step_above_the_fade_slope() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::default());
+    let loud = arrangement(&project(vec![armed("t")]), &HashMap::new());
+    let mut muted_track = armed("t");
+    muted_track.mute = true;
+    let silent = arrangement(&project(vec![muted_track]), &HashMap::new());
+    let input = [1.0; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let mut heard = Vec::new();
+    for swap_in in [loud, silent] {
+        assert!(
+            control
+                .commands
+                .push(Command::SwapArrangement(Box::new(swap_in)))
+                .is_ok()
+        );
+        switcher.apply_commands();
+        for _ in 0..8 {
+            switcher.process_tracks(&input, &[&input], &mut left, &mut right);
+            heard.extend_from_slice(&left);
+        }
+    }
+    assert!(close(heard[0], 1.0));
+    assert!(close(*heard.last().unwrap(), 0.0));
+    let slope = 1.0 / 960.0;
+    let steepest = heard
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0, f32::max);
+    assert!(
+        steepest <= slope + TOLERANCE,
+        "step {steepest} above {slope}"
+    );
+}
+
+#[test]
+fn a_full_recording_ring_counts_disk_overflows() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let shared = Arc::new(EngineShared::default());
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::clone(&shared));
+    let a = arrangement(&project(vec![armed("t")]), &HashMap::new());
+    assert!(
+        control
+            .commands
+            .push(Command::SwapArrangement(Box::new(a)))
+            .is_ok()
+    );
+    let record = Command::Arrangement(ArrangementCommand::Record);
+    assert!(control.commands.push(record).is_ok());
+    switcher.apply_commands();
+    let input = [0.5; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let ring_blocks = 2 * RATE as usize / BLOCK;
+    for _ in 0..ring_blocks {
+        switcher.process_tracks(&input, &[&input], &mut left, &mut right);
+    }
+    assert_eq!(shared.disk_overflows.load(Ordering::Relaxed), 0);
+    for _ in 0..3 {
+        switcher.process_tracks(&input, &[&input], &mut left, &mut right);
+    }
+    assert_eq!(shared.disk_overflows.load(Ordering::Relaxed), 3);
 }

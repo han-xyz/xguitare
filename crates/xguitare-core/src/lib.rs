@@ -11,6 +11,7 @@ mod irdir;
 pub mod ports;
 mod preset;
 pub mod project;
+pub mod recording;
 mod registry;
 mod state;
 pub mod tuner;
