@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use xguitare_core::control::{Position, Request, Response, TrackRef, TransportAction};
+use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_gui::mixer_model::MixerTarget;
 use xguitare_gui::model::{
@@ -473,6 +473,54 @@ fn rack_requests_carry_the_selected_track() {
                 track: Some(TrackRef::Index(2)),
                 bus: None,
                 master: false,
+            }),
+        ]
+    );
+}
+
+#[test]
+fn rack_requests_follow_show_rack_to_a_bus_and_master() {
+    let queued = vec![
+        Command::ShowRack(MixerTarget::Bus(1)),
+        Command::RackAdd {
+            type_name: "reverb".to_string(),
+            after: None,
+            at: None,
+        },
+        Command::Set {
+            param: "reverb.mix".to_string(),
+            value: 40.0,
+        },
+        Command::ShowRack(MixerTarget::Master),
+        Command::RackRemove {
+            id: "compressor".to_string(),
+        },
+    ];
+    let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(0)));
+    assert!(!quit);
+    assert_eq!(
+        outgoing,
+        [
+            Outgoing::Request(Request::RackAdd {
+                r#type: "reverb".to_string(),
+                after: None,
+                at: None,
+                track: None,
+                bus: Some(BusRef::Index(1)),
+                master: false,
+            }),
+            Outgoing::Request(Request::Set {
+                param: "reverb.mix".to_string(),
+                value: 40.0,
+                track: None,
+                bus: Some(BusRef::Index(1)),
+                master: false,
+            }),
+            Outgoing::Request(Request::RackRemove {
+                id: "compressor".to_string(),
+                track: None,
+                bus: None,
+                master: true,
             }),
         ]
     );
