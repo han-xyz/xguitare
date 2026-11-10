@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::model::{
     Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, ir_names, module_types,
-    refresh_decision, requests_until_quit, response_text, spawn_policy,
+    refresh_decision, refused_remove, requests_until_quit, response_text, spawn_policy,
 };
 use serde_json::Value;
 use tracing::{info, warn};
@@ -81,6 +81,7 @@ impl Client {
                 irs: Vec::new(),
                 last_message: None,
                 failed_set: None,
+                refused_remove: None,
             },
         }
     }
@@ -163,6 +164,9 @@ impl Client {
             }
             if let Some(param) = failed_set(&req, &response) {
                 self.snapshot.failed_set = Some((param, Instant::now()));
+            }
+            if let Some(id) = refused_remove(&req, &response) {
+                self.snapshot.refused_remove = Some((id, Instant::now()));
             }
             if let Some(text) = response_text(&req, response) {
                 self.snapshot.last_message = Some((text, Instant::now()));

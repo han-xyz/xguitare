@@ -96,6 +96,7 @@ impl App {
                 irs: Vec::new(),
                 last_message: None,
                 failed_set: None,
+                refused_remove: None,
             },
             stop,
             throttle: Throttle::default(),
@@ -171,7 +172,14 @@ impl eframe::App for App {
                 self.feedback.show(text.clone(), *at);
             }
             self.release_stale_holds(&snapshot);
-            if let Some(params) = &snapshot.params {
+            if snapshot.refused_remove != self.snapshot.refused_remove
+                && let Some((id, _)) = &snapshot.refused_remove
+            {
+                self.removing.remove(id);
+            }
+            if snapshot.params != self.snapshot.params
+                && let Some(params) = &snapshot.params
+            {
                 forget_removed_units(&mut self.open_units, &mut self.removing, params);
             }
             self.snapshot = snapshot;

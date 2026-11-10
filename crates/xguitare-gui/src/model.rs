@@ -52,6 +52,7 @@ pub struct Snapshot {
     pub irs: Vec<String>,
     pub last_message: Option<(String, Instant)>,
     pub failed_set: Option<(String, Instant)>,
+    pub refused_remove: Option<(String, Instant)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -330,7 +331,7 @@ pub fn remember_removes(removing: &mut BTreeSet<String>, commands: &[Command]) {
     }
 }
 
-/// Drops the open state of each id in `removing` that the `get` payload no longer has; a refused Remove keeps its unit open, and another Preset lacking an id that was never removed keeps it.
+/// Settles every id in `removing` against the first `get` payload after its Remove: the open state of an id the payload no longer has is dropped, a Module still there means the Remove was refused and keeps its unit open. Another Preset lacking an id that was never removed keeps it.
 pub fn forget_removed_units(
     open: &mut BTreeSet<String>,
     removing: &mut BTreeSet<String>,
@@ -340,13 +341,11 @@ pub fn forget_removed_units(
         .into_iter()
         .map(|(id, _)| id)
         .collect();
-    removing.retain(|id| {
-        let removed = !present.contains(id);
-        if removed {
-            open.remove(id);
+    for id in std::mem::take(removing) {
+        if !present.contains(&id) {
+            open.remove(&id);
         }
-        !removed
-    });
+    }
 }
 
 /// A stored string that does not parse, from an older or edited file, reads as no unit open.
@@ -911,6 +910,15 @@ impl Feedback {
             .as_ref()
             .filter(|(_, at)| now.saturating_duration_since(*at) < FEEDBACK_FOR)
             .map(|(text, _)| text.as_str())
+    }
+}
+
+/// The id of a `rack remove` that the Daemon refused or that never reached it.
+pub fn refused_remove(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {
+    match (req, response) {
+        (_, Ok(Response::Ok(_))) => None,
+        (Request::RackRemove { id }, _) => Some(id.clone()),
+        _ => None,
     }
 }
 

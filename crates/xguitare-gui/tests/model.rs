@@ -21,7 +21,7 @@ use xguitare_gui::model::{
     key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
     knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
     open_units_from_string, open_units_to_string, palette, param_rows, parse_typed_value, peak_db,
-    peak_text, quit_commands, rack_channels, refresh_decision, remember_removes,
+    peak_text, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
     requests_until_quit, response_text, spawn_policy, tuner_header_text, tuner_reading,
     tuner_toggle, unit_suffix,
 };
@@ -1192,6 +1192,41 @@ fn open_units_keep_a_refused_remove_open() {
         &get_with_modules(&["preamp", "cabinet"]),
     );
     assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+}
+
+#[test]
+fn open_units_stay_open_when_a_later_preset_lacks_a_refused_remove() {
+    let mut open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
+    let mut removing = BTreeSet::new();
+    remember_removes(
+        &mut removing,
+        &[Command::RackRemove {
+            id: "preamp".into(),
+        }],
+    );
+    forget_removed_units(
+        &mut open,
+        &mut removing,
+        &get_with_modules(&["preamp", "cabinet"]),
+    );
+    forget_removed_units(&mut open, &mut removing, &get_with_modules(&["gate"]));
+    assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
+}
+
+#[test]
+fn refused_remove_names_its_id_only_on_an_error() {
+    let remove = Request::RackRemove {
+        id: "preamp".into(),
+    };
+    let refused = Ok(Response::Err {
+        error: "busy".into(),
+    });
+    assert_eq!(refused_remove(&remove, &refused).as_deref(), Some("preamp"));
+    assert_eq!(refused_remove(&remove, &Ok(Response::Ok(json!({})))), None);
+    assert_eq!(
+        refused_remove(&Request::Save { name: None }, &refused),
+        None
+    );
 }
 
 #[test]
