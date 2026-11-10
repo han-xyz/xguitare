@@ -271,7 +271,7 @@ impl Arrangement {
     ///
     /// # Panics
     ///
-    /// When `racks` does not hold one Rack per Track or `bus_racks` one per Bus, or a Track's Rack is prepared for fewer than `max_frames`.
+    /// When `racks` does not hold one Rack per Track or `bus_racks` one per Bus, or a Rack is prepared for fewer than `max_frames`.
     pub fn new<S: BuildHasher>(
         project: &Project,
         racks: Vec<Rack>,
@@ -286,6 +286,13 @@ impl Arrangement {
         assert!(
             racks.iter().all(|rack| rack.max_frames() >= max_frames),
             "a Rack prepared for fewer than {max_frames} frames"
+        );
+        assert!(
+            bus_racks
+                .iter()
+                .chain([&master_rack])
+                .all(|rack| rack.max_frames() >= max_frames),
+            "a Bus or Master Rack prepared for fewer than {max_frames} frames"
         );
         let ring_capacity = sample_rate.ceil() as usize * RING_SECONDS as usize;
         let mut readers = Vec::with_capacity(racks.len());
@@ -527,24 +534,24 @@ impl Arrangement {
         }
     }
 
-    /// Solo in place: with anything soloed, a Track sounds when soloed or sending to a soloed Bus, a Bus when soloed or fed by a soloed Track; mute always silences.
+    /// Solo in place: with anything soloed, a Track sounds when soloed or sending to a soloed Bus, a Bus when soloed or sent to by a soloed Track; mute always silences.
     fn update_audible(&mut self) {
         let any_solo =
             self.tracks.iter().any(|track| track.solo) || self.buses.iter().any(|bus| bus.solo);
         for (idx, bus) in self.buses.iter_mut().enumerate() {
-            let fed_by_solo = self
+            let sent_to_by_solo = self
                 .tracks
                 .iter()
                 .any(|track| track.solo && track.sends[idx].is_on());
-            bus.audible = !bus.mute && (!any_solo || bus.solo || fed_by_solo);
+            bus.audible = !bus.mute && (!any_solo || bus.solo || sent_to_by_solo);
         }
         for track in &mut self.tracks {
-            let feeds_solo = track
+            let sends_to_solo = track
                 .sends
                 .iter()
                 .zip(&self.buses)
                 .any(|(send, bus)| bus.solo && send.is_on());
-            track.audible = !track.mute && (!any_solo || track.solo || feeds_solo);
+            track.audible = !track.mute && (!any_solo || track.solo || sends_to_solo);
         }
     }
 
@@ -719,10 +726,6 @@ fn frames_per_beat(sample_rate: f32, bpm: f64) -> f64 {
 }
 
 impl TrackPlayer {
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "one Track's state, Rack, Take ring and buffers come from separate places"
-    )]
     fn new<S: BuildHasher>(
         track: &Track,
         buses: &[Bus],

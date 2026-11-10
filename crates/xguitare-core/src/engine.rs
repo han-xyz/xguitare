@@ -91,6 +91,16 @@ impl MixMeters {
             .is_some_and(|meter| meter.clip.load(Ordering::Relaxed))
     }
 
+    /// Resets every peak and clip flag, for when no Arrangement runs.
+    pub fn clear(&self) {
+        self.clip_reset(None);
+        for meter in self.tracks.iter().chain(&self.buses).chain([&self.master]) {
+            for bits in &meter.peak_bits {
+                bits.store(0, Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Clears the clip flag of `strip`, or of every strip for `None`.
     pub fn clip_reset(&self, strip: Option<Strip>) {
         let clear = |meter: &StripMeter| meter.clip.store(false, Ordering::Relaxed);
@@ -389,6 +399,7 @@ impl RackSwitcher {
                         .store(transport_code(Transport::Stopped), Ordering::Relaxed);
                     self.shared.playhead.store(0, Ordering::Relaxed);
                     self.shared.count_in_remaining.store(0, Ordering::Relaxed);
+                    self.shared.mix_meters.clear();
                 }
                 Command::Arrangement(
                     command @ (ArrangementCommand::Param { .. }

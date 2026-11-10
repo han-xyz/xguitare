@@ -8,7 +8,7 @@ use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, RackSwitcher, Strip, engine_queues,
 };
 use xguitare_core::project::{Bus, LoopRegion, Master, Project, Send, Track};
-use xguitare_dsp::{Rack, StereoRack};
+use xguitare_dsp::{Gain, Module, Rack, StereoRack};
 
 const RATE: f32 = 48_000.0;
 const BLOCK: usize = 256;
@@ -456,4 +456,81 @@ fn a_bus_param_during_a_crossfade_lands_on_the_new_arrangement_only() {
         switcher.process_tracks(&input, &[&input], &mut left, &mut right);
     }
     assert_close(left[BLOCK - 1], 0.5 * db(-20.0));
+}
+
+#[test]
+#[should_panic(expected = "a Bus or Master Rack prepared for fewer than 256 frames")]
+fn a_bus_rack_prepared_for_fewer_frames_is_refused() {
+    let p = bus_only(false);
+    let mut rack = Rack::new(Vec::new()).expect("valid layout");
+    rack.prepare(RATE, BLOCK);
+    let small = build_stereo_rack(RATE, BLOCK / 2, &[]).expect("no cabinet");
+    let _ = Arrangement::new(
+        &p,
+        vec![rack],
+        vec![small],
+        stereo_rack(""),
+        &HashMap::new(),
+        RATE,
+        BLOCK,
+    );
+}
+
+#[test]
+#[should_panic(expected = "a Bus or Master Rack prepared for fewer than 256 frames")]
+fn a_master_rack_prepared_for_fewer_frames_is_refused() {
+    let p = project(vec![armed("t")], Vec::new());
+    let mut rack = Rack::new(Vec::new()).expect("valid layout");
+    rack.prepare(RATE, BLOCK);
+    let unprepared = StereoRack::new(Vec::new()).expect("no Modules");
+    let _ = Arrangement::new(
+        &p,
+        vec![rack],
+        Vec::new(),
+        unprepared,
+        &HashMap::new(),
+        RATE,
+        BLOCK,
+    );
+}
+
+#[test]
+fn pre_send_is_taken_after_the_track_rack() {
+    let p = bus_only(true);
+    let mut gain: Box<dyn Module> = Box::new(Gain::new());
+    gain.set_param(0, -6.0);
+    let mut rack = Rack::new(vec![("gain".to_string(), gain)]).expect("valid layout");
+    rack.prepare(RATE, BLOCK);
+    rack.module_mut(0).reset();
+    let mut mix = Arrangement::new(
+        &p,
+        vec![rack],
+        vec![stereo_rack("")],
+        stereo_rack(""),
+        &HashMap::new(),
+        RATE,
+        BLOCK,
+    )
+    .expect("no Takes");
+    assert_close(settled(&mut mix, &[0.5]).0, 0.5 * db(-6.0));
+}
+
+#[test]
+fn closing_the_arrangement_clears_the_meters() {
+    let shared = Arc::new(EngineShared::default());
+    let (mut control, mut switcher) = switcher(&shared);
+    let swap = Command::SwapArrangement(Box::new(arrangement(&project(
+        vec![armed("t")],
+        Vec::new(),
+    ))));
+    assert!(control.commands.push(swap).is_ok());
+    switcher.apply_commands();
+    let hot = [1.5; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    switcher.process_tracks(&hot, &[&hot], &mut left, &mut right);
+    assert!(shared.mix_meters.clip(Strip::Master));
+    assert!(control.commands.push(Command::CloseArrangement).is_ok());
+    switcher.apply_commands();
+    assert!(!shared.mix_meters.clip(Strip::Master) && !shared.mix_meters.clip(Strip::Track(0)));
+    assert_eq!(shared.mix_meters.take_peak(Strip::Track(0)), [0.0, 0.0]);
 }

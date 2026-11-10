@@ -104,6 +104,11 @@ impl StereoRack {
         }
     }
 
+    /// The largest block `prepare` sized the Rack for; 0 before `prepare`.
+    pub fn max_frames(&self) -> usize {
+        self.max_frames
+    }
+
     /// Runs one block of `in_l.len()` frames, which must not exceed the `max_frames` given to `prepare`, into `out_l`/`out_r`.
     pub fn process(&mut self, in_l: &[f32], in_r: &[f32], out_l: &mut [f32], out_r: &mut [f32]) {
         let frames = in_l.len();

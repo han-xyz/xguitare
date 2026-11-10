@@ -99,7 +99,7 @@ pub struct Bus {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Send {
-    /// The id of the Bus it feeds.
+    /// The id of the Bus it sends to.
     pub bus: u64,
     /// `-inf` is off.
     pub level_db: f32,
@@ -597,7 +597,7 @@ fn check_mixer(project: &Project) -> Result<(), ProjectError> {
         return Err(ProjectError::MasterVolume);
     }
     for track in &project.tracks {
-        let mut fed = HashSet::new();
+        let mut sent_to = HashSet::new();
         for send in &track.sends {
             if !ids.contains(&send.bus) {
                 return Err(ProjectError::UnknownBus {
@@ -605,7 +605,7 @@ fn check_mixer(project: &Project) -> Result<(), ProjectError> {
                     bus: send.bus,
                 });
             }
-            if !fed.insert(send.bus) {
+            if !sent_to.insert(send.bus) {
                 return Err(ProjectError::DuplicateSend {
                     track: track.name.clone(),
                     bus: send.bus,
