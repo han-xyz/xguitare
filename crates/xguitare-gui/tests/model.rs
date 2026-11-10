@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,14 +13,15 @@ use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
-    Band, BankRow, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
+    Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
     KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, Rgb, Throttle,
     TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir, cents_fraction,
-    cents_text, counts_toward_spawn, ear_holes, failed_set, in_tune, ir_names, key_to_command,
-    knob_angle_deg, knob_fraction, knob_points, knob_value_from_drag, ladder_segments,
-    meter_fraction, module_types, move_target, palette, param_rows, peak_fraction, quit_commands,
-    rack_channels, refresh_decision, requests_until_quit, response_text, spawn_policy, status_line,
-    tuner_reading, tuner_toggle, unit_suffix,
+    cents_text, counts_toward_spawn, drop_index, ear_holes, failed_set, in_tune, ir_names,
+    key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
+    knob_value_from_drag, ladder_segments, meter_fraction, module_types, move_target,
+    open_units_from_string, open_units_to_string, palette, param_rows, peak_fraction,
+    quit_commands, rack_channels, refresh_decision, requests_until_quit, response_text,
+    spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -977,4 +979,102 @@ fn palette_text_meets_wcag_aa_on_units() {
         assert!(contrast(colours.muted, background) >= 4.5);
     }
     assert_eq!(contrast((255, 255, 255), (0, 0, 0)), 21.0);
+}
+
+const UNIT_TOPS: [f32; 4] = [100.0, 170.0, 240.0, 430.0];
+
+#[test]
+fn drop_index_above_the_top_unit_is_the_front() {
+    assert_eq!(drop_index(2, 40.0, &UNIT_TOPS), 0);
+    assert_eq!(drop_index(2, 120.0, &UNIT_TOPS), 0);
+}
+
+#[test]
+fn drop_index_in_the_middle_is_the_unit_under_the_pointer() {
+    assert_eq!(drop_index(0, 300.0, &UNIT_TOPS), 2);
+    assert_eq!(drop_index(3, 170.0, &UNIT_TOPS), 1);
+}
+
+#[test]
+fn drop_index_below_the_bottom_unit_is_the_end() {
+    assert_eq!(drop_index(0, 900.0, &UNIT_TOPS), 3);
+}
+
+#[test]
+fn drop_index_over_its_own_unit_is_the_same_place() {
+    assert_eq!(drop_index(1, 200.0, &UNIT_TOPS), 1);
+    assert_eq!(drop_index(0, 0.0, &[]), 0);
+}
+
+#[test]
+fn clip_latch_latches_at_zero_db() {
+    let mut latch = ClipLatch::default();
+    latch.observe(-0.1);
+    assert!(!latch.is_clipped());
+    latch.observe(0.0);
+    assert!(latch.is_clipped());
+}
+
+#[test]
+fn clip_latch_stays_when_the_level_drops() {
+    let mut latch = ClipLatch::default();
+    latch.observe(2.5);
+    latch.observe(-40.0);
+    latch.observe(-120.0);
+    assert!(latch.is_clipped());
+}
+
+#[test]
+fn clip_latch_clears_on_reset() {
+    let mut latch = ClipLatch::default();
+    latch.observe(1.0);
+    latch.reset();
+    assert!(!latch.is_clipped());
+    latch.observe(-3.0);
+    assert!(!latch.is_clipped());
+}
+
+fn knob_row(min: f64, max: f64, default: f64, integer: bool) -> ParamRow {
+    ParamRow {
+        address: "preamp.gain".to_string(),
+        module: "preamp".to_string(),
+        module_type: "preamp".to_string(),
+        param: "gain".to_string(),
+        value: min,
+        min,
+        max,
+        default,
+        unit: String::new(),
+        integer,
+    }
+}
+
+#[test]
+fn knob_drag_fine_moves_a_tenth() {
+    let row = knob_row(-60.0, 20.0, 0.0, false);
+    let coarse = knob_value_from_drag(0.5, 0.0, 1.0, -22.0, false, false);
+    let fine = knob_value_from_drag(0.5, 0.0, 1.0, -22.0, true, false);
+    assert!((knob_param_value(&row, coarse, false) - -12.0).abs() < 1e-4);
+    assert!((knob_param_value(&row, fine, false) - -19.2).abs() < 1e-4);
+}
+
+#[test]
+fn knob_drag_integer_parameter_steps() {
+    let row = knob_row(1.0, 4.0, 2.0, true);
+    assert_eq!(knob_param_value(&row, 0.4, false), 2.0);
+    assert_eq!(knob_param_value(&row, 0.55, false), 3.0);
+    assert_eq!(knob_param_value(&row, 1.0, false), 4.0);
+}
+
+#[test]
+fn knob_drag_reset_gives_the_default() {
+    let row = knob_row(-60.0, 20.0, -6.0, false);
+    assert_eq!(knob_param_value(&row, 0.9, true), -6.0);
+}
+
+#[test]
+fn open_units_round_trip_through_their_string() {
+    let open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
+    assert_eq!(open_units_from_string(&open_units_to_string(&open)), open);
+    assert_eq!(open_units_from_string("not json"), BTreeSet::new());
 }

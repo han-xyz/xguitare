@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -24,6 +24,7 @@ pub const EAR_WIDTH: f32 = 30.0;
 pub const EAR_HOLE_RADIUS: f32 = 4.0;
 pub const EAR_HOLE_INSET: f32 = 22.0;
 pub const NEUTRAL_ACCENT: (u8, u8, u8) = (120, 120, 120);
+pub const CLIP_DB: f64 = 0.0;
 pub const CENTS_SPAN: i64 = 50;
 pub const IN_TUNE_CENTS: i64 = 3;
 
@@ -178,6 +179,57 @@ pub fn knob_points(fraction: f32, radius: f32) -> KnobPoints {
 fn point_at_deg(radius: f32, deg: f32) -> (f32, f32) {
     let rad = deg.to_radians();
     (radius * rad.cos(), radius * rad.sin())
+}
+
+/// The value a [`ParamRow`]'s knob at `fraction` stands for: the Parameter default on `reset`, whole numbers for an integer Parameter.
+pub fn knob_param_value(row: &ParamRow, fraction: f32, reset: bool) -> f64 {
+    if reset {
+        return row.default;
+    }
+    let value = row.min + f64::from(fraction) * (row.max - row.min);
+    if row.integer { value.round() } else { value }
+}
+
+/// Latches once a peak reaches [`CLIP_DB`] and stays lit until [`ClipLatch::reset`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ClipLatch {
+    clipped: bool,
+}
+
+impl ClipLatch {
+    pub fn observe(&mut self, peak_db: f64) {
+        self.clipped |= peak_db >= CLIP_DB;
+    }
+
+    pub fn is_clipped(&self) -> bool {
+        self.clipped
+    }
+
+    pub fn reset(&mut self) {
+        self.clipped = false;
+    }
+}
+
+/// The Rack position a unit dragged from `from` lands on: the unit under `pointer_y`, given each unit's top edge in Rack order; above the first unit is the front, below the last the end.
+pub fn drop_index(from: usize, pointer_y: f32, unit_tops: &[f32]) -> usize {
+    if unit_tops.is_empty() {
+        return from;
+    }
+    unit_tops
+        .iter()
+        .filter(|&&top| top <= pointer_y)
+        .count()
+        .saturating_sub(1)
+}
+
+/// The open Module ids as kept in eframe storage.
+pub fn open_units_to_string(open: &BTreeSet<String>) -> String {
+    serde_json::json!(open).to_string()
+}
+
+/// A stored string that does not parse, from an older or edited file, reads as no unit open.
+pub fn open_units_from_string(stored: &str) -> BTreeSet<String> {
+    serde_json::from_str(stored).unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -519,7 +571,12 @@ pub fn meter_fraction(db: f64) -> f32 {
 
 /// A peak the payload lacks or carries as `null` (a non-finite value serialises as `null`) reads as −120 dB.
 pub fn peak_fraction(status: &Value, key: &str) -> f32 {
-    meter_fraction(status[key].as_f64().unwrap_or(SILENCE_DB))
+    meter_fraction(peak_db(status, key))
+}
+
+/// The peak behind [`peak_fraction`], in dB.
+pub fn peak_db(status: &Value, key: &str) -> f64 {
+    status[key].as_f64().unwrap_or(SILENCE_DB)
 }
 
 pub fn status_line(status: &Value) -> String {

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,39 +7,54 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use egui::{
-    Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CornerRadius, Event, Frame, Key,
-    Layout, Margin, Modifiers, Panel, Rect, RichText, ScrollArea, Sides, TextStyle, Theme, Ui,
-    vec2,
+    Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CursorIcon, Event, Frame,
+    InnerResponse, Key, Label, Layout, Margin, Modifiers, Panel, Rect, Response, RichText,
+    ScrollArea, Sense, Stroke, TextStyle, Theme, Ui, Vec2, pos2, vec2,
 };
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_core::Config;
+use xguitare_core::control::SILENCE_DB;
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
-    BankRow, Command, Direction, Feedback, KeyEvent, KeyModifiers, Link, ModuleType, ParamRow,
-    SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command, bank_rows, cabinet_ir,
-    cents_fraction, cents_text, in_tune, key_to_command, link_text, move_target, param_rows,
-    peak_fraction, quit_commands, rack_channels, status_line, tuner_reading, tuner_toggle,
-    unit_suffix,
+    BankRow, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KeyEvent, KeyModifiers, Link,
+    ModuleType, ParamRow, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command,
+    bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, in_tune, key_to_command,
+    knob_fraction, knob_param_value, link_text, move_target, open_units_from_string,
+    open_units_to_string, palette, param_rows, peak_db, peak_fraction, quit_commands,
+    rack_channels, status_line, tuner_reading, tuner_toggle, unit_suffix,
 };
-use xguitare_gui::widgets::{self, KnobSpec};
+use xguitare_gui::widgets::{self, KnobSize, colour};
 
 const NO_PRESET: &str = "no preset";
 const NO_IR: &str = "none";
 const CABINET: &str = "cabinet";
 const BANK_WIDTH: f32 = 220.0;
-const CARD_FILL: Color32 = Color32::from_rgb(40, 37, 34);
-const CARD_RADIUS: u8 = 8;
-const CARD_MARGIN: i8 = 8;
-const CARD_GAP: f32 = 8.0;
-const BAND_HEIGHT: f32 = 4.0;
-const AMP_BAND_HEIGHT: f32 = 12.0;
-const PLATE_FILL: Color32 = Color32::from_rgb(16, 15, 14);
-const PLATE_TEXT: Color32 = Color32::from_rgb(230, 225, 215);
-const PLATE_RADIUS: u8 = 4;
-const PLATE_MARGIN: Margin = Margin::symmetric(6, 2);
-const AMP_LABEL: &str = "amp";
-const AMP_TYPES: [&str; 2] = ["preamp", "tonestack"];
+const OPEN_UNITS_KEY: &str = "open_units";
+const RAIL_WIDTH: i8 = 14;
+const UNIT_GAP: f32 = 4.0;
+const UNIT_MARGIN: i8 = 8;
+const UNIT_SIDE_MARGIN: i8 = EAR_WIDTH as i8 + 14;
+const UNIT_HEIGHT: f32 = 66.0;
+const OPEN_UNIT_HEIGHT: f32 = 190.0;
+const METER_BRIDGE_HEIGHT: f32 = 70.0;
+const UNIT_NAME_WIDTH: f32 = 120.0;
+const UNIT_NAME_SIZE: f32 = 18.0;
+const SMALL_TEXT_SIZE: f32 = 13.0;
+const LAMP_SLOT: f32 = 18.0;
+const METER_LABEL_WIDTH: f32 = 52.0;
+const METERS: [(&str, &str); 2] = [("Input", "input_peak_db"), ("Output", "output_peak_db")];
+const CLEAR_CLIP_HINT: &str = "Click to clear the clip lamp";
+const BUTTON_SIZE: Vec2 = Vec2::new(64.0, 36.0);
+const MOVE_BUTTON_SIZE: Vec2 = Vec2::splat(36.0);
+const MOVE_BUTTONS_WIDTH: f32 = 90.0;
+const OPEN_CHEVRON: &str = "▼";
+const CLOSED_CHEVRON: &str = "▶";
+const DROP_LINE_WIDTH: f32 = 2.0;
+const TUNER_LABEL: &str = "Tuner";
+const TUNER_OFF: &str = "Tuner off";
+const ADD_LABEL: &str = "Add a Module to the bottom of the rack";
+const ADD_COMBO_WIDTH: f32 = 320.0;
 const NOTE_SIZE: f32 = 96.0;
 const NO_SIGNAL_SIZE: f32 = 40.0;
 const NO_SIGNAL: &str = "no signal";
@@ -67,15 +82,23 @@ pub struct App {
     tuner_open: bool,
     muted_by_us: bool,
     tuner_mute: bool,
+    clips: [ClipLatch; 2],
+    open_units: BTreeSet<String>,
 }
 
 impl App {
     pub fn new(
-        ctx: egui::Context,
+        cc: &eframe::CreationContext,
         config: Config,
         config_path: Option<PathBuf>,
         stop: Arc<AtomicBool>,
     ) -> App {
+        let ctx = cc.egui_ctx.clone();
+        let open_units = cc
+            .storage
+            .and_then(|storage| storage.get_string(OPEN_UNITS_KEY))
+            .map(|stored| open_units_from_string(&stored))
+            .unwrap_or_default();
         ctx.set_theme(Theme::Dark);
         ctx.set_visuals_of(Theme::Dark, widgets::visuals());
         let tuner_mute = config.tuner_mute;
@@ -107,6 +130,8 @@ impl App {
             tuner_open: false,
             muted_by_us: false,
             tuner_mute,
+            clips: [ClipLatch::default(); 2],
+            open_units,
         }
     }
 }
@@ -147,7 +172,16 @@ impl eframe::App for App {
         if self.stop.load(Ordering::Relaxed) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if let Some(snapshot) = self.snapshots.try_iter().last() {
+        let mut latest = None;
+        for snapshot in self.snapshots.try_iter() {
+            if let Some(status) = &snapshot.status {
+                for ((_, key), clip) in METERS.iter().zip(&mut self.clips) {
+                    clip.observe(peak_db(status, key));
+                }
+            }
+            latest = Some(snapshot);
+        }
+        if let Some(snapshot) = latest {
             if snapshot.last_message != self.snapshot.last_message
                 && let Some((text, at)) = &snapshot.last_message
             {
@@ -186,8 +220,15 @@ impl eframe::App for App {
             muted_by_us: &mut self.muted_by_us,
             mute_default: self.tuner_mute,
         };
+        let mut view = RackView {
+            knobs: &mut knobs,
+            tuner: &mut tuner,
+            clips: &mut self.clips,
+            open_units: &mut self.open_units,
+        };
         CentralPanel::default().show(ui, |ui| {
-            commands.extend(preset_panel(ui, snapshot, &mut knobs, &mut tuner))
+            commands.extend(preset_header(ui, snapshot));
+            commands.extend(rack_view(ui, snapshot, &mut view))
         });
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
@@ -197,6 +238,10 @@ impl eframe::App for App {
         if self.throttle.has_pending() {
             ui.ctx().request_repaint_after(SET_INTERVAL);
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(OPEN_UNITS_KEY, open_units_to_string(&self.open_units));
     }
 
     fn on_exit(&mut self) {
@@ -301,61 +346,180 @@ impl Tuner<'_> {
     }
 }
 
-fn preset_panel(
-    ui: &mut Ui,
-    snapshot: &Snapshot,
-    knobs: &mut Knobs,
-    tuner: &mut Tuner,
-) -> Vec<Command> {
-    let mut commands = Vec::new();
+fn preset_header(ui: &mut Ui, snapshot: &Snapshot) -> Option<Command> {
     let preset = snapshot
         .status
         .as_ref()
         .and_then(|status| status["preset"].as_str());
-    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     ui.horizontal(|ui| {
-        if ui.button("Save").clicked() {
-            commands.push(Command::Save);
-        }
+        let save = ui.button("Save").clicked();
         ui.label(preset.unwrap_or(NO_PRESET));
-        let rack = rack_channels(&modules, &snapshot.module_types);
-        commands.extend(add_combo(ui, &snapshot.module_types, &rack));
-        if ui.button("Tuner").clicked() {
-            commands.extend(tuner.toggle());
-        }
-    });
-    if *tuner.open {
-        commands.extend(tuner_view(ui, snapshot, tuner));
-        return commands;
-    }
+        save.then_some(Command::Save)
+    })
+    .inner
+}
+
+struct RackView<'a, 'b> {
+    knobs: &'a mut Knobs<'b>,
+    tuner: &'a mut Tuner<'b>,
+    clips: &'a mut [ClipLatch; 2],
+    open_units: &'a mut BTreeSet<String>,
+}
+
+fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     ScrollArea::vertical().show(ui, |ui| {
-        for (index, (module, rows)) in modules.iter().enumerate() {
-            let place = (index, modules.len());
-            let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
-            let ir_choice = snapshot
-                .params
-                .as_ref()
-                .filter(|_| is_cabinet)
-                .map(|params| IrChoice {
-                    current: cabinet_ir(params, module),
-                    irs: &snapshot.irs,
-                });
-            commands.extend(module_card(ui, module, rows, place, ir_choice, knobs));
-            ui.add_space(CARD_GAP);
-        }
+        Frame::new()
+            .fill(colour(palette().rail))
+            .inner_margin(Margin::symmetric(RAIL_WIDTH, 0))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = UNIT_GAP;
+                meter_bridge(ui, snapshot, view.clips);
+                commands.extend(tuner_unit(ui, snapshot, view.tuner));
+                commands.extend(module_units(
+                    ui,
+                    snapshot,
+                    &modules,
+                    view.knobs,
+                    view.open_units,
+                ));
+                let rack = rack_channels(&modules, &snapshot.module_types);
+                commands.extend(add_row(ui, &snapshot.module_types, &rack));
+            });
     });
     commands
 }
 
-fn tuner_view(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Command> {
-    let mut commands = Vec::new();
+/// One rack unit: `fill` behind `content`, the bevel edges, and both ears over the sides.
+fn rack_unit<R>(
+    ui: &mut Ui,
+    fill: Rgb,
+    min_height: f32,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> InnerResponse<R> {
+    let colours = palette();
+    let inner = Frame::new()
+        .fill(colour(fill))
+        .inner_margin(Margin::symmetric(UNIT_SIDE_MARGIN, UNIT_MARGIN))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(min_height - 2.0 * f32::from(UNIT_MARGIN));
+            content(ui)
+        });
+    let rect = inner.response.rect;
+    let painter = ui.painter();
+    painter.hline(
+        rect.x_range(),
+        rect.top(),
+        Stroke::new(1.0, colour(colours.edge_light)),
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, colour(colours.edge_dark)),
+    );
+    widgets::rack_ears(painter, rect);
+    inner
+}
+
+fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(LAMP_SLOT), Sense::hover());
+    widgets::lamp(ui.painter(), rect.center(), lit_colour, lit);
+}
+
+fn unit_name(ui: &mut Ui, name: &str) -> Response {
+    let text = RichText::new(name).strong().size(UNIT_NAME_SIZE);
+    ui.add_sized(
+        vec2(UNIT_NAME_WIDTH, 0.0),
+        Label::new(text).sense(Sense::click()),
+    )
+}
+
+fn muted_text(text: impl Into<String>) -> RichText {
+    RichText::new(text)
+        .size(SMALL_TEXT_SIZE)
+        .color(colour(palette().muted))
+}
+
+/// A click on either ladder clears both clip lamps.
+fn meter_bridge(ui: &mut Ui, snapshot: &Snapshot, clips: &mut [ClipLatch; 2]) {
+    let mut cleared = false;
+    rack_unit(ui, palette().meter_bridge, METER_BRIDGE_HEIGHT, |ui| {
+        for ((label, key), clip) in METERS.iter().zip(clips.iter()) {
+            ui.horizontal(|ui| {
+                ui.add_sized(vec2(METER_LABEL_WIDTH, 0.0), Label::new(muted_text(*label)));
+                let db = snapshot
+                    .status
+                    .as_ref()
+                    .map_or(SILENCE_DB, |status| peak_db(status, key));
+                let ladder = widgets::led_ladder(ui, db, clip.is_clipped())
+                    .interact(Sense::click())
+                    .on_hover_text(CLEAR_CLIP_HINT);
+                cleared |= ladder.clicked();
+                ui.label(muted_text(peak_text(db, clip.is_clipped())));
+            });
+        }
+    });
+    if cleared {
+        clips.iter_mut().for_each(ClipLatch::reset);
+    }
+}
+
+fn peak_text(db: f64, clipped: bool) -> String {
+    if clipped {
+        format!("peak {db:+.1} dB, clipped")
+    } else {
+        format!("peak {db:+.1} dB")
+    }
+}
+
+fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Command> {
+    let open = *tuner.open;
+    let (fill, height) = if open {
+        (palette().unit_open, OPEN_UNIT_HEIGHT)
+    } else {
+        (palette().unit, UNIT_HEIGHT)
+    };
     let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
+    rack_unit(ui, fill, height, |ui| {
+        let mut commands = Vec::new();
+        ui.horizontal(|ui| {
+            unit_lamp(ui, colour(palette().green), open);
+            unit_name(ui, TUNER_LABEL);
+            let text = match (open, &reading) {
+                (false, _) => TUNER_OFF.to_string(),
+                (true, Some(reading)) => format!("{}  {}", reading.note, cents_text(reading.cents)),
+                (true, None) => NO_SIGNAL.to_string(),
+            };
+            ui.label(RichText::new(text).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let label = if open { "Close" } else { TUNER_LABEL };
+                if ui.add(Button::new(label).min_size(BUTTON_SIZE)).clicked() {
+                    commands.extend(tuner.toggle());
+                }
+            });
+        });
+        if open {
+            commands.extend(tuner_view(ui, snapshot, reading.as_ref(), tuner));
+        }
+        commands
+    })
+    .inner
+}
+
+fn tuner_view(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    reading: Option<&TunerReading>,
+    tuner: &mut Tuner,
+) -> Option<Command> {
     let muted = snapshot
         .status
         .as_ref()
         .and_then(|status| status["muted"].as_bool());
     ui.vertical_centered(|ui| {
-        match &reading {
+        match reading {
             Some(reading) => {
                 let colour = widgets::tune_colour(in_tune(reading.cents));
                 ui.label(RichText::new(&reading.note).size(NOTE_SIZE).color(colour));
@@ -368,74 +532,161 @@ fn tuner_view(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Comman
             }
         }
         let mut checked = muted.unwrap_or_default();
-        if ui
+        let changed = ui
             .add_enabled(muted.is_some(), Checkbox::new(&mut checked, "Mute"))
-            .changed()
-        {
-            commands.push(Command::Mute(checked));
-            if !checked {
-                *tuner.muted_by_us = false;
-            }
+            .changed();
+        if !changed {
+            return None;
         }
-        if ui.button("Close").clicked() {
-            commands.extend(tuner.toggle());
+        if !checked {
+            *tuner.muted_by_us = false;
         }
-    });
+        Some(Command::Mute(checked))
+    })
+    .inner
+}
+
+/// A unit dropped by its ears moves to the unit under the pointer; while it is dragged, a line marks where it will land.
+fn module_units(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    modules: &[(String, Vec<ParamRow>)],
+    knobs: &mut Knobs,
+    open_units: &mut BTreeSet<String>,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let mut placed = Vec::with_capacity(modules.len());
+    for (index, (module, rows)) in modules.iter().enumerate() {
+        let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
+        let unit = ModuleUnit {
+            module,
+            rows,
+            place: (index, modules.len()),
+            ir_choice: snapshot
+                .params
+                .as_ref()
+                .filter(|_| is_cabinet)
+                .map(|params| IrChoice {
+                    current: cabinet_ir(params, module),
+                    irs: &snapshot.irs,
+                }),
+        };
+        let (unit_commands, rect, ears) = module_unit(ui, &unit, knobs, open_units);
+        commands.extend(unit_commands);
+        placed.push((rect, ears));
+    }
+    let tops: Vec<f32> = placed.iter().map(|(rect, _)| rect.top()).collect();
+    let Some(pointer_y) = ui
+        .input(|input| input.pointer.latest_pos())
+        .map(|pos| pos.y)
+    else {
+        return commands;
+    };
+    for (from, (_, ears)) in placed.iter().enumerate() {
+        let to = drop_index(from, pointer_y, &tops);
+        if ears.dragged() {
+            let (target, _) = &placed[to];
+            let y = if to > from {
+                target.bottom()
+            } else {
+                target.top()
+            };
+            ui.painter().hline(
+                target.x_range(),
+                y,
+                Stroke::new(DROP_LINE_WIDTH, colour(palette().text)),
+            );
+        }
+        if ears.drag_stopped() && to != from {
+            commands.push(Command::RackMove {
+                id: modules[from].0.clone(),
+                to,
+            });
+        }
+    }
     commands
 }
 
-fn module_card(
-    ui: &mut Ui,
-    module: &str,
-    rows: &[ParamRow],
-    (index, len): (usize, usize),
-    ir_choice: Option<IrChoice>,
-    knobs: &mut Knobs,
-) -> Vec<Command> {
-    let type_name = rows.first().map_or("", |row| row.module_type.as_str());
-    let is_amp = AMP_TYPES.contains(&type_name);
-    let band = if is_amp { AMP_BAND_HEIGHT } else { BAND_HEIGHT };
-    let card = Frame::new()
-        .fill(CARD_FILL)
-        .corner_radius(CARD_RADIUS)
-        .inner_margin(Margin {
-            top: band as i8 + CARD_MARGIN,
-            ..Margin::same(CARD_MARGIN)
-        })
-        .show(ui, |ui| {
-            let (_, clicked) = Sides::new().show(
-                ui,
-                |ui| {
-                    label_plate(ui, &module_label(module, rows));
-                    if is_amp {
-                        ui.label(AMP_LABEL);
-                    }
-                },
-                |ui| module_buttons(ui, module, index, len),
-            );
-            let mut commands: Vec<Command> = clicked.into_iter().collect();
-            if let Some(ir_choice) = &ir_choice {
-                commands.extend(ir_row(ui, module, ir_choice));
-            }
-            ui.horizontal_wrapped(|ui| {
-                commands.extend(rows.iter().filter_map(|row| param_knob(ui, row, knobs)));
-            });
-            commands
-        });
-    let rect = card.response.rect;
-    ui.painter().rect_filled(
-        Rect::from_min_size(rect.min, vec2(rect.width(), band)),
-        CornerRadius {
-            nw: CARD_RADIUS,
-            ne: CARD_RADIUS,
-            sw: 0,
-            se: 0,
-        },
-        widgets::accent(type_name),
-    );
-    card.inner
+struct ModuleUnit<'a> {
+    module: &'a str,
+    rows: &'a [ParamRow],
+    place: (usize, usize),
+    ir_choice: Option<IrChoice<'a>>,
 }
 
+/// The unit's commands, its rect, and the drag response of its two ears.
+fn module_unit(
+    ui: &mut Ui,
+    unit: &ModuleUnit,
+    knobs: &mut Knobs,
+    open_units: &mut BTreeSet<String>,
+) -> (Vec<Command>, Rect, Response) {
+    let module = unit.module;
+    let open = open_units.contains(module);
+    let type_name = unit.rows.first().map_or("", |row| row.module_type.as_str());
+    let accent = widgets::accent(type_name);
+    let (fill, height) = if open {
+        (palette().unit_open, OPEN_UNIT_HEIGHT)
+    } else {
+        (palette().unit, UNIT_HEIGHT)
+    };
+    let mut toggled = false;
+    let inner = rack_unit(ui, fill, height, |ui| {
+        let mut commands = Vec::new();
+        ui.horizontal(|ui| {
+            unit_lamp(ui, accent, true);
+            toggled |= unit_name(ui, &module_label(module, unit.rows)).clicked();
+            let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
+            toggled |= ui.small_button(chevron).clicked();
+            let knobs_width = (ui.available_width() - MOVE_BUTTONS_WIDTH).max(0.0);
+            let wrapped = Layout::left_to_right(Align::Center).with_main_wrap(true);
+            ui.allocate_ui_with_layout(vec2(knobs_width, 0.0), wrapped, |ui| {
+                if !open {
+                    commands.extend(param_knobs(ui, unit.rows, KnobSize::Small, accent, knobs));
+                }
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                commands.extend(move_buttons(ui, module, unit.place));
+            });
+        });
+        if open {
+            ui.horizontal_wrapped(|ui| {
+                commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
+            });
+            if let Some(ir_choice) = &unit.ir_choice {
+                commands.extend(ir_row(ui, module, ir_choice));
+            }
+            if ui.button("Remove").clicked() {
+                commands.push(Command::RackRemove {
+                    id: module.to_string(),
+                });
+            }
+        }
+        commands
+    });
+    if toggled && !open_units.remove(module) {
+        open_units.insert(module.to_string());
+    }
+    let rect = inner.response.rect;
+    let ear_size = vec2(EAR_WIDTH, rect.height());
+    let ears = [
+        Rect::from_min_size(rect.min, ear_size),
+        Rect::from_min_size(pos2(rect.right() - EAR_WIDTH, rect.top()), ear_size),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(side, ear)| {
+        ui.interact(
+            ear,
+            ui.scope_id().with(("ears", module, side)),
+            Sense::drag(),
+        )
+    })
+    .reduce(|left, right| left.union(right))
+    .expect("a unit has two ears")
+    .on_hover_cursor(CursorIcon::Grab);
+    (inner.inner, rect, ears)
+}
 struct IrChoice<'a> {
     current: Option<String>,
     irs: &'a [String],
@@ -469,16 +720,6 @@ fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
     commands
 }
 
-fn label_plate(ui: &mut Ui, text: &str) {
-    Frame::new()
-        .fill(PLATE_FILL)
-        .corner_radius(PLATE_RADIUS)
-        .inner_margin(PLATE_MARGIN)
-        .show(ui, |ui| {
-            ui.label(RichText::new(text).color(PLATE_TEXT).strong())
-        });
-}
-
 fn module_label(module: &str, rows: &[ParamRow]) -> String {
     match rows.first() {
         Some(row) if row.module_type != module => format!("{module} ({})", row.module_type),
@@ -493,7 +734,8 @@ fn add_combo(
 ) -> Option<Command> {
     let mut added = None;
     ComboBox::from_id_salt("add_module")
-        .selected_text("Add")
+        .selected_text(ADD_LABEL)
+        .width(ADD_COMBO_WIDTH)
         .show_ui(ui, |ui| {
             for module_type in module_types {
                 if ui.selectable_label(false, module_type.label()).clicked() {
@@ -504,18 +746,27 @@ fn add_combo(
     added
 }
 
-/// Added right to left, so that they read ▲ ▼ ✕ at the right of the card header.
-fn module_buttons(ui: &mut Ui, module: &str, index: usize, len: usize) -> Option<Command> {
+fn add_row(ui: &mut Ui, module_types: &[ModuleType], rack: &[(String, String)]) -> Option<Command> {
+    let colours = palette();
+    Frame::new()
+        .fill(colour(colours.knob_body))
+        .stroke(Stroke::new(1.0, colour(colours.button_border)))
+        .inner_margin(Margin::same(UNIT_MARGIN))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.vertical_centered(|ui| add_combo(ui, module_types, rack))
+                .inner
+        })
+        .inner
+}
+
+/// Added right to left, so that they read ↑ ↓ at the right of the unit.
+fn move_buttons(ui: &mut Ui, module: &str, (index, len): (usize, usize)) -> Option<Command> {
     let mut clicked = None;
-    if ui.small_button("✕").clicked() {
-        clicked = Some(Command::RackRemove {
-            id: module.to_string(),
-        });
-    }
-    for (text, direction) in [("▼", Direction::Down), ("▲", Direction::Up)] {
+    for (text, direction) in [("↓", Direction::Down), ("↑", Direction::Up)] {
         let to = move_target(index, direction, len);
         if ui
-            .add_enabled(to.is_some(), Button::new(text).small())
+            .add_enabled(to.is_some(), Button::new(text).min_size(MOVE_BUTTON_SIZE))
             .clicked()
             && let Some(to) = to
         {
@@ -528,40 +779,67 @@ fn module_buttons(ui: &mut Ui, module: &str, index: usize, len: usize) -> Option
     clicked
 }
 
+fn param_knobs(
+    ui: &mut Ui,
+    rows: &[ParamRow],
+    size: KnobSize,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> Vec<Command> {
+    rows.iter()
+        .filter_map(|row| param_knob(ui, row, size, accent, knobs))
+        .collect()
+}
+
 /// A double-click reset is a final value, like a release.
-fn param_knob(ui: &mut Ui, row: &ParamRow, knobs: &mut Knobs) -> Option<Command> {
+fn param_knob(
+    ui: &mut Ui,
+    row: &ParamRow,
+    size: KnobSize,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> Option<Command> {
     let held = knobs.throttle.hold_local(&row.address, knobs.revision);
     let shown = match knobs.locals.get(&row.address) {
         Some(local) if held => *local,
         _ => row.value,
     };
-    let mut value = shown as f32;
-    let spec = KnobSpec {
-        min: row.min as f32,
-        max: row.max as f32,
-        default: row.default as f32,
-        integer: row.integer,
-        label: &row.param,
-        suffix: unit_suffix(&row.unit),
-    };
-    let response = widgets::knob(ui, &mut value, &spec);
-    if !response.changed && !response.drag_stopped {
-        return None;
-    }
-    let value = if response.changed {
-        f64::from(value)
+    let fraction = knob_fraction(shown as f32, row.min as f32, row.max as f32);
+    ui.horizontal(|ui| {
+        let knob = widgets::rack_knob(ui, size, fraction, accent);
+        let value = if knob.reset || knob.response.dragged() {
+            knob_param_value(row, knob.fraction, knob.reset)
+        } else {
+            shown
+        };
+        ui.vertical(|ui| {
+            ui.label(muted_text(&row.param));
+            ui.label(RichText::new(value_text(value, row)).strong());
+        });
+        if knob.reset || knob.response.drag_stopped() {
+            knobs.locals.insert(row.address.clone(), value);
+            return Some(
+                knobs
+                    .throttle
+                    .on_release(&row.address, value, knobs.revision),
+            );
+        }
+        if value == shown {
+            return None;
+        }
+        knobs.locals.insert(row.address.clone(), value);
+        knobs.throttle.on_drag(&row.address, value, knobs.now)
+    })
+    .inner
+}
+
+fn value_text(value: f64, row: &ParamRow) -> String {
+    let suffix = unit_suffix(&row.unit);
+    if row.integer {
+        format!("{}{suffix}", value.round())
     } else {
-        shown
-    };
-    knobs.locals.insert(row.address.clone(), value);
-    if response.drag_stopped || response.reset {
-        return Some(
-            knobs
-                .throttle
-                .on_release(&row.address, value, knobs.revision),
-        );
+        format!("{value:.1}{suffix}")
     }
-    knobs.throttle.on_drag(&row.address, value, knobs.now)
 }
 
 fn status_bar(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instant) {

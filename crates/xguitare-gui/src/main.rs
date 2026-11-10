@@ -61,14 +61,7 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     eframe::run_native(
         APP_NAME,
         options,
-        Box::new(move |cc| {
-            Ok(Box::new(App::new(
-                cc.egui_ctx.clone(),
-                config,
-                config_path,
-                stop,
-            )))
-        }),
+        Box::new(move |cc| Ok(Box::new(App::new(cc, config, config_path, stop)))),
     )
     .map_err(|err| err.to_string())
 }

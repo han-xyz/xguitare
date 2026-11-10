@@ -1,20 +1,13 @@
 use egui::{
-    Align, Color32, Layout, Mesh, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Visuals,
-    pos2, vec2,
+    Color32, Mesh, Painter, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Visuals, pos2, vec2,
 };
 
 use crate::model::{
-    Band, EAR_HOLE_RADIUS, EAR_WIDTH, KNOB_ARC_START_DEG, KNOB_ARC_SWEEP_DEG, LADDER_SEGMENTS,
-    METER_RED_DB, Rgb, accent_for, ear_holes, knob_angle_deg, knob_fraction, knob_points,
-    knob_value_from_drag, ladder_segments, meter_fraction, palette,
+    Band, EAR_HOLE_RADIUS, EAR_WIDTH, LADDER_SEGMENTS, METER_RED_DB, Rgb, accent_for, ear_holes,
+    knob_points, knob_value_from_drag, ladder_segments, meter_fraction, palette,
 };
 
 const METER_SIZE: Vec2 = Vec2::new(120.0, 12.0);
-const KNOB_DIAMETER: f32 = 48.0;
-const KNOB_CELL_WIDTH: f32 = 72.0;
-const KNOB_ARC_WIDTH: f32 = 4.0;
-const KNOB_BODY_INSET: f32 = 7.0;
-const KNOB_POINTER_WIDTH: f32 = 2.5;
 const ARC_SEGMENTS: usize = 48;
 const CENTS_BAR_SIZE: Vec2 = Vec2::new(120.0, 10.0);
 const CENTS_TICK_WIDTH: f32 = 1.5;
@@ -38,21 +31,6 @@ const LADDER_GAP: f32 = 3.0;
 const LADDER_SEGMENT_RADIUS: u8 = 1;
 const IN_TUNE_COLOUR: Color32 = Color32::GREEN;
 const OUT_OF_TUNE_COLOUR: Color32 = Color32::from_rgb(255, 176, 0);
-
-pub struct KnobSpec<'a> {
-    pub min: f32,
-    pub max: f32,
-    pub default: f32,
-    pub integer: bool,
-    pub label: &'a str,
-    pub suffix: &'a str,
-}
-
-pub struct KnobResponse {
-    pub changed: bool,
-    pub drag_stopped: bool,
-    pub reset: bool,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KnobSize {
@@ -297,86 +275,6 @@ pub fn cents_arc(ui: &mut Ui, fraction: Option<f32>, colour: Color32) {
     painter.line_segment(
         [center, point_at(center, radius, needle_deg)],
         Stroke::new(CENTS_NEEDLE_WIDTH, colour),
-    );
-}
-
-pub fn knob(ui: &mut Ui, value: &mut f32, spec: &KnobSpec) -> KnobResponse {
-    let layout = Layout::top_down(Align::Center);
-    ui.allocate_ui_with_layout(vec2(KNOB_CELL_WIDTH, 0.0), layout, |ui| {
-        ui.label(spec.label);
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::splat(KNOB_DIAMETER), Sense::click_and_drag());
-        let before = *value;
-        let unrounded_id = response.id;
-        if response.drag_started() {
-            ui.data_mut(|data| data.insert_temp(unrounded_id, *value));
-        }
-        if response.dragged() {
-            let fine = ui.input(|input| input.modifiers.shift);
-            let dy = response.drag_delta().y;
-            let unrounded = ui
-                .data(|data| data.get_temp(unrounded_id))
-                .unwrap_or(*value);
-            let (min, max) = (spec.min, spec.max);
-            *value = knob_value_from_drag(unrounded, min, max, dy, fine, spec.integer);
-            let next = knob_value_from_drag(unrounded, min, max, dy, fine, false);
-            ui.data_mut(|data| data.insert_temp(unrounded_id, next));
-        }
-        let reset = response.double_clicked();
-        if reset {
-            *value = spec.default;
-        }
-        let fraction = knob_fraction(*value, spec.min, spec.max);
-        paint_knob(ui, rect, fraction, response.hovered());
-        ui.label(knob_text(*value, spec));
-        KnobResponse {
-            changed: reset || *value != before,
-            drag_stopped: response.drag_stopped(),
-            reset,
-        }
-    })
-    .inner
-}
-
-fn knob_text(value: f32, spec: &KnobSpec) -> String {
-    if spec.integer {
-        format!("{}{}", value.round(), spec.suffix)
-    } else {
-        format!("{value:.1}{}", spec.suffix)
-    }
-}
-
-fn paint_knob(ui: &Ui, rect: Rect, fraction: f32, hovered: bool) {
-    let visuals = ui.visuals();
-    let widget = if hovered {
-        &visuals.widgets.hovered
-    } else {
-        &visuals.widgets.inactive
-    };
-    let center = rect.center();
-    let radius = rect.width() / 2.0 - KNOB_ARC_WIDTH / 2.0;
-    let value_deg = knob_angle_deg(fraction);
-    let painter = ui.painter();
-    painter.line(
-        arc_points(
-            center,
-            radius,
-            KNOB_ARC_START_DEG,
-            KNOB_ARC_START_DEG + KNOB_ARC_SWEEP_DEG,
-        ),
-        Stroke::new(KNOB_ARC_WIDTH, visuals.extreme_bg_color),
-    );
-    if fraction > 0.0 {
-        painter.line(
-            arc_points(center, radius, KNOB_ARC_START_DEG, value_deg),
-            Stroke::new(KNOB_ARC_WIDTH, visuals.selection.bg_fill),
-        );
-    }
-    let body_radius = radius - KNOB_BODY_INSET;
-    painter.circle_filled(center, body_radius, widget.bg_fill);
-    painter.line_segment(
-        [center, point_at(center, body_radius, value_deg)],
-        Stroke::new(KNOB_POINTER_WIDTH, widget.fg_stroke.color),
     );
 }
 
