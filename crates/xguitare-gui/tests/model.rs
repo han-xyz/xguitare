@@ -28,8 +28,9 @@ use xguitare_gui::model::{
     tuner_header_text, tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, Dragged, RackArea, RemovedUnit, bypassed, closed_unit_rows, drag_outcome,
-    drop_slot, module_title, mute_banner, palette_place, undo_commands, unit_style,
+    CLOSED_KNOB_WIDTH, Dragged, Outgoing, RemovedUnit, Restore, ScreenRect, bypassed,
+    closed_unit_rows, drag_outcome, drop_slot, module_title, mute_banner, palette_place, restore,
+    unit_style,
 };
 
 struct TempDir(PathBuf);
@@ -153,13 +154,14 @@ fn commands_before_quit_are_sent_in_order() {
             id: "delay".to_string(),
         },
     ];
+    let expected = expected.into_iter().map(Outgoing::Request).collect();
     assert_eq!(requests_until_quit(queued), (expected, true));
     assert_eq!(
         requests_until_quit(vec![Command::Load("Lead".to_string())]),
         (
-            vec![Request::Load {
+            vec![Outgoing::Request(Request::Load {
                 preset: "Lead".to_string()
-            }],
+            })],
             false
         )
     );
@@ -849,14 +851,14 @@ fn quit_with_tuner_open_unmutes_first() {
     );
     assert_eq!(quit_commands(true, false), vec![Command::Quit]);
     assert_eq!(quit_commands(false, false), vec![Command::Quit]);
-    let (requests, quit) = requests_until_quit(quit_commands(true, true));
+    let (requests, quit) = single_requests_until_quit(quit_commands(true, true));
     assert_eq!((requests, quit), (vec![Request::Mute { on: false }], true));
 }
 
 #[test]
 fn mute_command_maps_to_request() {
     assert_eq!(
-        requests_until_quit(vec![Command::Mute(true), Command::Mute(false)]),
+        single_requests_until_quit(vec![Command::Mute(true), Command::Mute(false)]),
         (
             vec![Request::Mute { on: true }, Request::Mute { on: false }],
             false
@@ -871,7 +873,7 @@ fn bypass_command_maps_to_request() {
         on: true,
     };
     assert_eq!(
-        requests_until_quit(vec![command]),
+        single_requests_until_quit(vec![command]),
         (
             vec![Request::Bypass {
                 id: "chorus".to_string(),
@@ -946,7 +948,7 @@ fn cabinet_ir_from_get() {
 #[test]
 fn rack_ir_command_maps_to_request() {
     assert_eq!(
-        requests_until_quit(vec![Command::RackIr {
+        single_requests_until_quit(vec![Command::RackIr {
             id: "cabinet".to_string(),
             ir: "cabs/x.wav".to_string(),
         }]),
@@ -1077,7 +1079,14 @@ fn rack_ids() -> Vec<String> {
         .to_vec()
 }
 
-const RACK_AREA: RackArea = RackArea {
+const WINDOW: ScreenRect = ScreenRect {
+    left: 0.0,
+    top: 0.0,
+    right: 1440.0,
+    bottom: 900.0,
+};
+
+const RACK_AREA: ScreenRect = ScreenRect {
     left: 300.0,
     top: 80.0,
     right: 1300.0,
@@ -1124,6 +1133,7 @@ fn unit_dropped_on_another_slot_moves_there() {
         drag_outcome(
             &Dragged::Unit(from),
             Some((600.0, y)),
+            &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
             &rack_ids(),
@@ -1158,6 +1168,7 @@ fn unit_dropped_beside_itself_stays() {
         let outcome = drag_outcome(
             &Dragged::Unit(1),
             Some((600.0, y)),
+            &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
             &rack_ids(),
@@ -1173,6 +1184,7 @@ fn unit_dropped_outside_the_rack_is_removed() {
             drag_outcome(
                 &Dragged::Unit(2),
                 Some(pointer),
+                &WINDOW,
                 &RACK_AREA,
                 &UNIT_EDGES,
                 &rack_ids(),
@@ -1188,7 +1200,31 @@ fn unit_dropped_outside_the_rack_is_removed() {
 fn drag_released_outside_the_window_is_cancelled() {
     for dragged in [Dragged::Unit(2), Dragged::Tile("delay".to_string())] {
         assert_eq!(
-            drag_outcome(&dragged, None, &RACK_AREA, &UNIT_EDGES, &rack_ids()),
+            drag_outcome(
+                &dragged,
+                None,
+                &WINDOW,
+                &RACK_AREA,
+                &UNIT_EDGES,
+                &rack_ids()
+            ),
+            None
+        );
+    }
+}
+
+#[test]
+fn drag_released_at_a_point_outside_the_window_is_cancelled() {
+    for pointer in [(-20.0, 300.0), (600.0, 950.0), (1500.0, 300.0)] {
+        assert_eq!(
+            drag_outcome(
+                &Dragged::Unit(2),
+                Some(pointer),
+                &WINDOW,
+                &RACK_AREA,
+                &UNIT_EDGES,
+                &rack_ids(),
+            ),
             None
         );
     }
@@ -1201,6 +1237,7 @@ fn tile_dropped_in_the_rack_adds_at_the_slot() {
         drag_outcome(
             &tile,
             Some((600.0, 90.0)),
+            &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
             &rack_ids()
@@ -1211,6 +1248,7 @@ fn tile_dropped_in_the_rack_adds_at_the_slot() {
         drag_outcome(
             &tile,
             Some((600.0, 300.0)),
+            &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
             &rack_ids()
@@ -1230,6 +1268,7 @@ fn tile_dropped_outside_the_rack_adds_nothing() {
         drag_outcome(
             &tile,
             Some((100.0, 300.0)),
+            &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
             &rack_ids()
@@ -1248,26 +1287,94 @@ fn undo_payload() -> serde_json::Value {
     ]})
 }
 
+/// [`requests_until_quit`] for commands that each send one request.
+fn single_requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
+    let (outgoing, quit) = requests_until_quit(queued);
+    let requests = outgoing
+        .into_iter()
+        .map(|outgoing| match outgoing {
+            Outgoing::Request(req) => req,
+            Outgoing::Restore(restore) => panic!("unexpected {restore:?}"),
+        })
+        .collect();
+    (requests, quit)
+}
+
+fn drive_restore() -> Restore {
+    Restore {
+        type_name: "drive".to_string(),
+        after: Some("drive".to_string()),
+        values: vec![("gain".to_string(), 80.0), ("tone".to_string(), 60.0)],
+        bypass: true,
+        ir: None,
+    }
+}
+
 #[test]
-fn undo_re_adds_the_type_at_its_position_with_values_and_bypass() {
+fn restore_keeps_type_the_module_above_values_and_bypass() {
+    assert_eq!(restore(&undo_payload(), "lead"), Some(drive_restore()));
     assert_eq!(
-        undo_commands(&undo_payload(), "lead"),
+        restore(&undo_payload(), "drive").map(|restore| restore.after),
+        Some(None)
+    );
+    assert_eq!(restore(&undo_payload(), "reverb"), None);
+}
+
+#[test]
+fn restore_of_a_cabinet_keeps_its_ir() {
+    let cabinet = restore(&undo_payload(), "cabinet").unwrap();
+    assert_eq!(cabinet.ir.as_deref(), Some("bass-cab.wav"));
+    assert_eq!(
+        cabinet.follow_up_requests("cabinet"),
         [
-            Command::RackAdd {
-                type_name: "drive".to_string(),
-                after: None,
-                at: Some(1),
+            Request::Set {
+                param: "cabinet.level".to_string(),
+                value: 3.0,
             },
-            Command::Set {
-                param: "drive-2.gain".to_string(),
+            Request::RackIr {
+                ir: "bass-cab.wav".to_string(),
+                id: Some("cabinet".to_string()),
+            },
+        ]
+    );
+}
+
+#[test]
+fn restore_adds_after_the_module_that_was_above_while_it_is_there() {
+    let present = ["drive", "drive-2", "cabinet"].map(String::from);
+    assert_eq!(
+        drive_restore().add_request(&present),
+        Request::RackAdd {
+            r#type: "drive".to_string(),
+            after: Some("drive".to_string()),
+            at: None,
+        }
+    );
+    assert_eq!(
+        drive_restore().add_request(&["cabinet".to_string()]),
+        Request::RackAdd {
+            r#type: "drive".to_string(),
+            after: None,
+            at: Some(0),
+        }
+    );
+}
+
+#[test]
+fn restore_follow_ups_address_the_id_rack_add_answered() {
+    assert_eq!(
+        drive_restore().follow_up_requests("drive-3"),
+        [
+            Request::Set {
+                param: "drive-3.gain".to_string(),
                 value: 80.0,
             },
-            Command::Set {
-                param: "drive-2.tone".to_string(),
+            Request::Set {
+                param: "drive-3.tone".to_string(),
                 value: 60.0,
             },
-            Command::Bypass {
-                id: "drive-2".to_string(),
+            Request::Bypass {
+                id: "drive-3".to_string(),
                 on: true,
             },
         ]
@@ -1275,36 +1382,62 @@ fn undo_re_adds_the_type_at_its_position_with_values_and_bypass() {
 }
 
 #[test]
-fn undo_of_a_cabinet_restores_its_ir() {
+fn restore_goes_out_in_queue_order() {
+    let queued = vec![
+        Command::Load("Funk".to_string()),
+        Command::Restore(drive_restore()),
+        Command::Quit,
+    ];
     assert_eq!(
-        undo_commands(&undo_payload(), "cabinet"),
-        [
-            Command::RackAdd {
-                type_name: "cabinet".to_string(),
-                after: None,
-                at: Some(2),
-            },
-            Command::Set {
-                param: "cabinet.level".to_string(),
-                value: 3.0,
-            },
-            Command::RackIr {
-                id: "cabinet".to_string(),
-                ir: "bass-cab.wav".to_string(),
-            },
-        ]
+        requests_until_quit(queued),
+        (
+            vec![
+                Outgoing::Request(Request::Load {
+                    preset: "Funk".to_string()
+                }),
+                Outgoing::Restore(drive_restore()),
+            ],
+            true
+        )
     );
-    assert_eq!(undo_commands(&undo_payload(), "reverb"), []);
+}
+
+fn funk_status() -> serde_json::Value {
+    json!({"preset": "Funk", "program": 2, "revision": 4})
 }
 
 #[test]
 fn removed_unit_offers_undo_for_ten_seconds() {
     let now = Instant::now();
-    let removed = RemovedUnit::new(&undo_payload(), "drive", now);
-    assert_eq!(removed.id, "drive");
-    assert_eq!(removed.undo, undo_commands(&undo_payload(), "drive"));
-    assert!(removed.is_shown(now + Duration::from_millis(9_999)));
-    assert!(!removed.is_shown(now + Duration::from_secs(10)));
+    let status = funk_status();
+    let removed = RemovedUnit::new(&undo_payload(), Some(&status), "lead", now).unwrap();
+    assert_eq!(removed.id, "lead");
+    assert_eq!(removed.restore, drive_restore());
+    let later = json!({"preset": "Funk", "program": 2, "revision": 9});
+    assert!(removed.is_shown(Some(&later), now + Duration::from_millis(9_999)));
+    assert!(!removed.is_shown(Some(&later), now + Duration::from_secs(10)));
+}
+
+#[test]
+fn removed_unit_offers_no_undo_after_the_preset_changes() {
+    let now = Instant::now();
+    let removed = RemovedUnit::new(&undo_payload(), Some(&funk_status()), "lead", now).unwrap();
+    for other in [
+        json!({"preset": "Blues", "program": 1, "revision": 5}),
+        json!({"preset": "Funk", "program": 0, "revision": 5}),
+    ] {
+        assert!(!removed.is_shown(Some(&other), now));
+    }
+    assert!(!removed.is_shown(None, now));
+}
+
+#[test]
+fn removed_unit_absent_from_the_payload_offers_no_undo() {
+    let status = funk_status();
+    assert_eq!(
+        RemovedUnit::new(&undo_payload(), Some(&status), "reverb", Instant::now()),
+        None
+    );
 }
 
 #[test]
@@ -1480,7 +1613,7 @@ fn engine_readout_disconnected() {
 #[test]
 fn save_as_command_maps_to_request() {
     assert_eq!(
-        requests_until_quit(vec![Command::SaveAs("Funk".to_string())]),
+        single_requests_until_quit(vec![Command::SaveAs("Funk".to_string())]),
         (
             vec![Request::Save {
                 name: Some("Funk".to_string())
@@ -1868,7 +2001,7 @@ fn ports_and_settings_commands_become_requests() {
         },
     ];
     assert_eq!(
-        requests_until_quit(queued),
+        single_requests_until_quit(queued),
         (
             vec![
                 Request::SetPorts {

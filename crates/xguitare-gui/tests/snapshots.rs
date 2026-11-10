@@ -11,7 +11,7 @@ use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
 use xguitare_core::{BankKind, Config};
 use xguitare_gui::app::App;
-use xguitare_gui::model::{Command, Link, ModuleType, Snapshot};
+use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot};
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
@@ -399,24 +399,54 @@ fn unit_dropped_outside_the_rack_is_removed_and_undo_restores_it() {
     harness.get_by_label("Removed chorus \u{2014}");
     harness.get_by_role_and_label(Role::Button, "Undo").click();
     harness.run_steps(2);
-    let set = |param: &str, value| Command::Set {
-        param: format!("chorus.{param}"),
-        value,
-    };
+    let values = [("rate", 0.8), ("depth", 40.0), ("mix", 20.0)]
+        .map(|(param, value)| (param.to_string(), value))
+        .to_vec();
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Restore(Restore {
+            type_name: "chorus".to_string(),
+            after: Some("cabinet".to_string()),
+            values,
+            bypass: false,
+            ir: None,
+        })]
+    );
+    assert!(harness.query_by_label("Undo").is_none());
+}
+
+#[test]
+fn loading_a_preset_drops_the_undo() {
+    let (mut harness, sent, _dir) = harness();
+    let from = unit_header_point(&harness, "chorus");
+    drag_and_release(&mut harness, from, pos2(100.0, 400.0));
+    harness.get_by_role_and_label(Role::Button, "Undo");
+    harness.key_press(Key::Num2);
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Undo").is_none());
     assert_eq!(
         sent_now(&sent),
         [
-            Command::RackAdd {
-                type_name: "chorus".to_string(),
-                after: None,
-                at: Some(4),
+            Command::RackRemove {
+                id: "chorus".to_string(),
             },
-            set("rate", 0.8),
-            set("depth", 40.0),
-            set("mix", 20.0),
+            Command::Load("1".to_string()),
         ]
     );
-    assert!(harness.query_by_label("Undo").is_none());
+}
+
+#[test]
+fn unit_released_below_the_rack_moves_to_the_end() {
+    let (mut harness, sent, _dir) = harness();
+    let from = unit_header_point(&harness, "compressor");
+    drag_and_release(&mut harness, from, pos2(from.x, 700.0));
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackMove {
+            id: "compressor".to_string(),
+            to: 4,
+        }]
+    );
 }
 
 #[test]

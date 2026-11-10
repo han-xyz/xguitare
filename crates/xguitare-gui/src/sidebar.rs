@@ -523,15 +523,15 @@ fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     clicked
 }
 
-/// `Undo` sends the commands that put the last removed Module back, once.
+/// `Undo` puts the last removed Module back, once.
 pub fn footer(
     ui: &mut Ui,
     snapshot: &Snapshot,
     feedback: &Feedback,
     removed: &mut Option<RemovedUnit>,
     now: Instant,
-) -> Vec<Command> {
-    let mut undo = Vec::new();
+) -> Option<Command> {
+    let mut undo = None;
     ui.horizontal(|ui| {
         if snapshot.link != Link::Connected {
             ui.label(link_text(&snapshot.link, now));
@@ -539,13 +539,16 @@ pub fn footer(
         if let Some(text) = feedback.text(now) {
             ui.label(text);
         }
-        if let Some(shown) = removed.as_ref().filter(|removed| removed.is_shown(now)) {
+        let status = snapshot.status.as_ref();
+        if let Some(shown) = removed
+            .as_ref()
+            .filter(|removed| removed.is_shown(status, now))
+        {
             ui.label(format!("Removed {} \u{2014}", shown.id));
             if ui.add(outlined_button("Undo")).clicked() {
                 undo = removed
                     .take()
-                    .map(|removed| removed.undo)
-                    .unwrap_or_default();
+                    .map(|removed| Command::Restore(removed.restore));
             }
         }
     });

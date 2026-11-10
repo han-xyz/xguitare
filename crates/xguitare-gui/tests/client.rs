@@ -8,10 +8,10 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use xguitare_core::Config;
 use xguitare_gui::client;
-use xguitare_gui::model::{Command, Link};
+use xguitare_gui::model::{Command, Link, Restore};
 
 const WAIT: Duration = Duration::from_secs(2);
 
@@ -241,6 +241,117 @@ fn revision_change_fetches_ports_and_settings_again() {
             break;
         }
     }
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}
+
+/// Answers every request line by its `cmd` and passes on each request as sent.
+fn serve_and_capture(
+    listener: UnixListener,
+    mut reply: impl FnMut(&str) -> String + Send + 'static,
+) -> Receiver<Value> {
+    let (requests, received) = mpsc::channel();
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(&stream);
+        let mut writer = &stream;
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            let request: Value = serde_json::from_str(&line).unwrap();
+            let cmd = request["cmd"].as_str().unwrap().to_string();
+            writer
+                .write_all(format!("{}\n", reply(&cmd)).as_bytes())
+                .unwrap();
+            if requests.send(request).is_err() {
+                return;
+            }
+            line.clear();
+        }
+    });
+    received
+}
+
+const RACK_AFTER_A_NEW_DRIVE: &str = r#"{"ok":true,"params":[
+    {"module":"drive","type":"drive","param":"gain","value":30.0},
+    {"module":"drive-2","type":"drive","param":"gain","value":50.0}]}"#;
+
+fn drive_restore() -> Restore {
+    Restore {
+        type_name: "drive".to_string(),
+        after: Some("drive".to_string()),
+        values: vec![("gain".to_string(), 80.0)],
+        bypass: true,
+        ir: None,
+    }
+}
+
+/// The requests the client sends after `get` has answered, up to `until`.
+fn requests_after_get(received: &Receiver<Value>, until: &str) -> Vec<Value> {
+    while received.recv_timeout(WAIT).unwrap()["cmd"] != "get" {}
+    let mut sent = Vec::new();
+    loop {
+        let request = received.recv_timeout(WAIT).unwrap();
+        let cmd = request["cmd"].clone();
+        if cmd != "status" && cmd != "tuner" {
+            sent.push(request);
+        }
+        if cmd == until {
+            return sent;
+        }
+    }
+}
+
+#[test]
+fn undo_sends_its_values_to_the_id_rack_add_answers() {
+    let dir = temp_dir("undo-id");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_capture(listener, |cmd| match cmd {
+        "get" => RACK_AFTER_A_NEW_DRIVE.replace('\n', ""),
+        "rack_add" => r#"{"ok":true,"id":"drive-3"}"#.to_string(),
+        "bypass" => r#"{"ok":true,"id":"drive-3","bypass":true}"#.to_string(),
+        _ => reply(cmd).to_string(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, _snapshots, handle) = client::spawn(config, None, stop, || {});
+    thread::sleep(client::TICK * 2);
+    commands.send(Command::Restore(drive_restore())).unwrap();
+    let sent = requests_after_get(&received, "bypass");
+    assert_eq!(
+        sent,
+        [
+            json!({"cmd": "rack_add", "type": "drive", "after": "drive", "at": null}),
+            json!({"cmd": "set", "param": "drive-3.gain", "value": 80.0}),
+            json!({"cmd": "bypass", "id": "drive-3", "on": true}),
+        ]
+    );
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+fn refused_undo_sends_nothing_more() {
+    let dir = temp_dir("undo-refused");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_capture(listener, |cmd| match cmd {
+        "get" => RACK_AFTER_A_NEW_DRIVE.replace('\n', ""),
+        "rack_add" => {
+            r#"{"ok":false,"error":"mono module 'drive-3' after the cabinet"}"#.to_string()
+        }
+        _ => reply(cmd).to_string(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, _snapshots, handle) = client::spawn(config, None, stop, || {});
+    thread::sleep(client::TICK * 2);
+    commands.send(Command::Restore(drive_restore())).unwrap();
+    commands.send(Command::Mute(false)).unwrap();
+    let sent = requests_after_get(&received, "mute");
+    let cmds: Vec<&str> = sent
+        .iter()
+        .map(|req| req["cmd"].as_str().unwrap())
+        .collect();
+    assert_eq!(cmds, ["rack_add", "mute"]);
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();
 }

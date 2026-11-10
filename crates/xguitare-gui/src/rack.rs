@@ -11,7 +11,7 @@ use xguitare_core::control::SILENCE_DB;
 
 use crate::model::{
     CLOSED_KNOB_WIDTH, ClipLatch, Command, Direction, Dragged, EAR_WIDTH, Feedback, KnobKey,
-    NO_SIGNAL, ParamRow, PeakHold, RackArea, Rgb, Snapshot, Throttle, TunerReading,
+    NO_SIGNAL, ParamRow, PeakHold, Rgb, ScreenRect, Snapshot, Throttle, TunerReading,
     autoscroll_delta, bypassed, cabinet_ir, cents_fraction, closed_unit_rows, drag_outcome,
     drop_slot, format_value, in_tune, key_step, knob_fraction, knob_param_value, module_title,
     move_target, mute_banner, palette, param_label, param_rows, peak_db, peak_text,
@@ -124,8 +124,7 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
                     commands.extend(unit_commands);
                     placed
                 });
-            let area = rack.response.rect.intersect(ui.clip_rect());
-            commands.extend(drag_and_drop(ui, &modules, &rack.inner, area));
+            commands.extend(drag_and_drop(ui, &modules, &rack.inner));
         });
     });
     commands
@@ -376,13 +375,13 @@ fn module_units(
     (commands, placed)
 }
 
-/// A unit dragged by its header or ears, or a Module tile dragged from the left panel: while the pointer is over the Rack `area`, a line in the dragged type's colour marks the gap it drops into and the Rack scrolls near the top or bottom of the view; the release sends its [`drag_outcome`].
+/// A unit dragged by its header or ears, or a Module tile dragged from the left panel: while the pointer is over the Rack's view, a line in the dragged type's colour marks the gap it drops into and the Rack scrolls near the top or bottom of the view; the release sends its [`drag_outcome`].
 fn drag_and_drop(
     ui: &mut Ui,
     modules: &[(String, Vec<ParamRow>)],
     placed: &[(Rect, Response)],
-    area: Rect,
 ) -> Option<Command> {
+    let area = ui.clip_rect();
     let dragged = placed
         .iter()
         .position(|(_, handle)| handle.dragged() || handle.drag_stopped())
@@ -424,19 +423,23 @@ fn drag_and_drop(
         return None;
     }
     let ids: Vec<String> = modules.iter().map(|(id, _)| id.clone()).collect();
-    let area = RackArea {
-        left: area.left(),
-        top: area.top(),
-        right: area.right(),
-        bottom: area.bottom(),
-    };
     drag_outcome(
         &dragged,
         pointer.map(|pos| (pos.x, pos.y)),
-        &area,
+        &screen_rect(ui.ctx().content_rect()),
+        &screen_rect(area),
         &edges,
         &ids,
     )
+}
+
+fn screen_rect(rect: Rect) -> ScreenRect {
+    ScreenRect {
+        left: rect.left(),
+        top: rect.top(),
+        right: rect.right(),
+        bottom: rect.bottom(),
+    }
 }
 
 /// In the middle of the gap above the unit at `slot`, or below the last unit.
@@ -620,7 +623,7 @@ fn grip(ui: &Ui, header: Rect) {
         Align2::CENTER_CENTER,
         GRIP,
         FontId::proportional(SMALL_TEXT_SIZE),
-        colour(palette().muted),
+        colour(palette().text),
     );
 }
 

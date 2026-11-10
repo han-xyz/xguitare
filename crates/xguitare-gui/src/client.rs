@@ -9,8 +9,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::model::{
-    Command, Link, Snapshot, bank_rows, counts_toward_spawn, failed_set, ir_names, module_types,
-    refresh_decision, refused_remove, requests_until_quit, response_text, spawn_policy,
+    Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
+    ir_names, module_types, param_rows, refresh_decision, refused_remove, requests_until_quit,
+    response_text, spawn_policy,
 };
 use serde_json::Value;
 use tracing::{info, warn};
@@ -163,36 +164,73 @@ impl Client {
         }
         let (requests, quit) = requests_until_quit(queued);
         let sent = requests.len();
-        for req in requests {
-            let response = self.request(&req);
-            if let (Request::Mute { .. }, Ok(Response::Ok(payload))) = (&req, &response) {
-                log_mute(payload);
-            }
-            if let Request::RackIr { .. } = &req {
-                log_rack_ir(&response);
-            }
-            match &req {
-                Request::SetPorts { .. } => self.ports_fetched = false,
-                Request::SetSettings { .. } => {
-                    self.settings_fetched = false;
-                    self.irs_fetched = false;
+        for outgoing in requests {
+            match outgoing {
+                Outgoing::Request(req) => {
+                    self.send(&req);
                 }
-                _ => {}
-            }
-            if let Some(param) = failed_set(&req, &response) {
-                self.snapshot.failed_set = Some((param, Instant::now()));
-            }
-            if let Some(id) = refused_remove(&req, &response) {
-                self.snapshot.refused_remove = Some((id, Instant::now()));
-            }
-            if let Some(text) = response_text(&req, response) {
-                self.snapshot.last_message = Some((text, Instant::now()));
+                Outgoing::Restore(restore) => self.restore(&restore),
             }
         }
         if quit {
             info!("quit: sent {sent} final requests");
         }
         !quit && !ui_gone
+    }
+
+    /// Sends `req` and notes its result in the snapshot; the payload of a success.
+    fn send(&mut self, req: &Request) -> Option<Value> {
+        let response = self.request(req);
+        if let (Request::Mute { .. }, Ok(Response::Ok(payload))) = (req, &response) {
+            log_mute(payload);
+        }
+        if let Request::RackIr { .. } = req {
+            log_rack_ir(&response);
+        }
+        match req {
+            Request::SetPorts { .. } => self.ports_fetched = false,
+            Request::SetSettings { .. } => {
+                self.settings_fetched = false;
+                self.irs_fetched = false;
+            }
+            _ => {}
+        }
+        if let Some(param) = failed_set(req, &response) {
+            self.snapshot.failed_set = Some((param, Instant::now()));
+        }
+        if let Some(id) = refused_remove(req, &response) {
+            self.snapshot.refused_remove = Some((id, Instant::now()));
+        }
+        let payload = match &response {
+            Ok(Response::Ok(payload)) => Some(payload.clone()),
+            _ => None,
+        };
+        if let Some(text) = response_text(req, response) {
+            self.snapshot.last_message = Some((text, Instant::now()));
+        }
+        payload
+    }
+
+    /// The follow-ups go to the id the Daemon gave the re-added Module, and only when it was added.
+    fn restore(&mut self, restore: &Restore) {
+        let present: Vec<String> = self
+            .snapshot
+            .params
+            .as_ref()
+            .map(param_rows)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        let Some(added) = self.send(&restore.add_request(&present)) else {
+            return;
+        };
+        let Some(id) = added["id"].as_str() else {
+            return;
+        };
+        for req in restore.follow_up_requests(id) {
+            self.send(&req);
+        }
     }
 
     fn poll(&mut self, now: Instant) {

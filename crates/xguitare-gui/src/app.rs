@@ -174,14 +174,23 @@ impl App {
 }
 
 impl App {
-    /// The last [`Command::RackRemove`] among `commands` becomes the footer's Undo, from the `get` payload shown when it was sent.
+    /// The last [`Command::RackRemove`] among `commands` becomes the footer's Undo, from the `get` payload shown when it was sent; a `load` or a Bank kind change drops it, even of the same Preset.
     fn remember_undo(&mut self, commands: &[Command], now: Instant) {
-        let Some(params) = &self.snapshot.params else {
-            return;
-        };
         for command in commands {
-            if let Command::RackRemove { id } = command {
-                self.removed = Some(RemovedUnit::new(params, id, now));
+            match command {
+                Command::RackRemove { id } => {
+                    let status = self.snapshot.status.as_ref();
+                    let removed = self
+                        .snapshot
+                        .params
+                        .as_ref()
+                        .and_then(|params| RemovedUnit::new(params, status, id, now));
+                    if removed.is_some() {
+                        self.removed = removed;
+                    }
+                }
+                Command::Load(_) | Command::SetSettings { .. } => self.removed = None,
+                _ => {}
             }
         }
     }

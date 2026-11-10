@@ -90,6 +90,8 @@ pub enum Command {
         id: String,
         ir: String,
     },
+    /// Undo of a Remove: see [`Outgoing::Restore`].
+    Restore(Restore),
     /// Sends nothing itself: the client thread fetches `ir_list` again on its next tick.
     RefreshIrs,
     SetPorts {
@@ -331,30 +333,31 @@ pub enum Dragged {
     Tile(String),
 }
 
-/// The visible part of the Rack, in screen pixels.
+/// A rectangle in screen pixels: the window, or the part of it where a released unit stays in the Rack.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RackArea {
+pub struct ScreenRect {
     pub left: f32,
     pub top: f32,
     pub right: f32,
     pub bottom: f32,
 }
 
-impl RackArea {
+impl ScreenRect {
     pub fn contains(&self, (x, y): (f32, f32)) -> bool {
         (self.left..=self.right).contains(&x) && (self.top..=self.bottom).contains(&y)
     }
 }
 
-/// The command a drag released at `pointer` sends: inside `area` a unit moves to the [`drop_slot`] and a tile is added there; outside it a unit is removed and a tile does nothing. A release outside the window (`None`) or beside the unit's own place sends nothing.
+/// The command a drag released at `pointer` sends: inside the Rack `area` a unit moves to the [`drop_slot`] and a tile is added there; elsewhere in the `window` a unit is removed and a tile does nothing. A release outside the window, or with no pointer position (`None`), or beside the unit's own place sends nothing.
 pub fn drag_outcome(
     dragged: &Dragged,
     pointer: Option<(f32, f32)>,
-    area: &RackArea,
+    window: &ScreenRect,
+    area: &ScreenRect,
     unit_edges: &[f32],
     ids: &[String],
 ) -> Option<Command> {
-    let pointer = pointer?;
+    let pointer = pointer.filter(|pointer| window.contains(*pointer))?;
     let slot = area
         .contains(pointer)
         .then(|| drop_slot(pointer.1, unit_edges));
@@ -376,68 +379,103 @@ pub fn drag_outcome(
     }
 }
 
-/// The commands that put Module `id` of a `get` payload back after its Remove: `rack_add` of its type at its position, then a `set` per Parameter, `bypass` when it was bypassed and `rack_ir` for its Cabinet IR. They address the id the Daemon gives the new Module, its type or `<type>-2`, `<type>-3`… when that is taken, which a custom id from the Preset file is not; empty when the payload has no such Module.
-pub fn undo_commands(get_payload: &Value, id: &str) -> Vec<Command> {
+/// What Undo puts back of a removed Module, from the `get` payload shown before its Remove: its type, the Module above it (`None` at the front), its Parameter values, its bypass and its Cabinet IR.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Restore {
+    pub type_name: String,
+    pub after: Option<String>,
+    pub values: Vec<(String, f64)>,
+    pub bypass: bool,
+    pub ir: Option<String>,
+}
+
+/// The [`Restore`] of Module `id`; `None` when the payload has no such Module.
+pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
     let modules = param_rows(get_payload);
-    let Some(index) = modules.iter().position(|(module, _)| module == id) else {
-        return Vec::new();
-    };
+    let index = modules.iter().position(|(module, _)| module == id)?;
     let rows = &modules[index].1;
-    let type_name = rows.first().map_or("", |row| row.module_type.as_str());
-    let is_taken = |candidate: &str| {
-        modules
+    Some(Restore {
+        type_name: rows
+            .first()
+            .map_or("", |row| row.module_type.as_str())
+            .to_string(),
+        after: index.checked_sub(1).map(|above| modules[above].0.clone()),
+        values: rows
             .iter()
-            .any(|(module, _)| module != id && module == candidate)
-    };
-    let new_id = std::iter::once(type_name.to_string())
-        .chain((2..).map(|n| format!("{type_name}-{n}")))
-        .find(|candidate| !is_taken(candidate))
-        .expect("a finite Rack leaves some suffix free");
-    let add = Command::RackAdd {
-        type_name: type_name.to_string(),
-        after: None,
-        at: Some(index),
-    };
-    let sets = rows
-        .iter()
-        .map(|row| set_command(&format!("{new_id}.{}", row.param), row.value));
-    let bypass = bypassed(get_payload, id).then(|| Command::Bypass {
-        id: new_id.clone(),
-        on: true,
-    });
-    let ir = cabinet_ir(get_payload, id).map(|ir| Command::RackIr {
-        id: new_id.clone(),
-        ir,
-    });
-    std::iter::once(add)
-        .chain(sets)
-        .chain(bypass)
-        .chain(ir)
-        .collect()
+            .map(|row| (row.param.clone(), row.value))
+            .collect(),
+        bypass: bypassed(get_payload, id),
+        ir: cabinet_ir(get_payload, id),
+    })
+}
+
+impl Restore {
+    /// The `rack_add` that puts the Module back after the Module that was above it, or at the front when that one is not among the `present` Module ids.
+    pub fn add_request(&self, present: &[String]) -> Request {
+        let after = self.after.clone().filter(|after| present.contains(after));
+        let at = after.is_none().then_some(0);
+        Request::RackAdd {
+            r#type: self.type_name.clone(),
+            after,
+            at,
+        }
+    }
+
+    /// What gives the Module the `rack_add` answered with `id` its values, its bypass and its Cabinet IR.
+    pub fn follow_up_requests(&self, id: &str) -> Vec<Request> {
+        let sets = self.values.iter().map(|(param, value)| Request::Set {
+            param: format!("{id}.{param}"),
+            value: *value,
+        });
+        let bypass = self.bypass.then(|| Request::Bypass {
+            id: id.to_string(),
+            on: true,
+        });
+        let ir = self.ir.clone().map(|ir| Request::RackIr {
+            ir,
+            id: Some(id.to_string()),
+        });
+        sets.chain(bypass).chain(ir).collect()
+    }
 }
 
 pub const UNDO_FOR: Duration = Duration::from_secs(10);
 
-/// A Module the GUI removed, with the [`undo_commands`] that put it back, offered for [`UNDO_FOR`].
+/// A Module the GUI removed, with its [`Restore`], offered for [`UNDO_FOR`] while the Preset it was removed from stays active.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemovedUnit {
     pub id: String,
-    pub undo: Vec<Command>,
+    pub restore: Restore,
+    preset: (Value, Value),
     since: Instant,
 }
 
 impl RemovedUnit {
-    pub fn new(get_payload: &Value, id: &str, now: Instant) -> RemovedUnit {
-        RemovedUnit {
+    /// `None` when `get_payload` has no Module `id`, so that there is nothing to undo.
+    pub fn new(
+        get_payload: &Value,
+        status: Option<&Value>,
+        id: &str,
+        now: Instant,
+    ) -> Option<RemovedUnit> {
+        Some(RemovedUnit {
             id: id.to_string(),
-            undo: undo_commands(get_payload, id),
+            restore: restore(get_payload, id)?,
+            preset: preset_of(status),
             since: now,
-        }
+        })
     }
 
-    pub fn is_shown(&self, now: Instant) -> bool {
-        now.saturating_duration_since(self.since) < UNDO_FOR
+    pub fn is_shown(&self, status: Option<&Value>, now: Instant) -> bool {
+        now.saturating_duration_since(self.since) < UNDO_FOR && preset_of(status) == self.preset
     }
+}
+
+/// The `status` payload's Preset name and program; nulls without a status.
+fn preset_of(status: Option<&Value>) -> (Value, Value) {
+    status.map_or((Value::Null, Value::Null), |status| {
+        (status["preset"].clone(), status["program"].clone())
+    })
 }
 
 /// The peak text's value: the largest peak seen, held for [`PEAK_HOLD_FOR`], then the current one.
@@ -819,7 +857,14 @@ pub fn counts_toward_spawn(err: &ClientError) -> bool {
     matches!(err, ClientError::NotRunning(_))
 }
 
-pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
+/// What the client thread sends for a [`Command`]: one request, or a [`Restore`]: its `rack_add`, then, only once that succeeds, its follow-ups to the id the Daemon answered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Outgoing {
+    Request(Request),
+    Restore(Restore),
+}
+
+pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
     for command in queued {
         let req = match command {
@@ -853,10 +898,14 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::SetSettings { bank_kind, ir_dir } => {
                 Request::SetSettings { bank_kind, ir_dir }
             }
+            Command::Restore(restore) => {
+                requests.push(Outgoing::Restore(restore));
+                continue;
+            }
             Command::RefreshIrs | Command::RefreshPorts => continue,
             Command::Quit => return (requests, true),
         };
-        requests.push(req);
+        requests.push(Outgoing::Request(req));
     }
     (requests, false)
 }
