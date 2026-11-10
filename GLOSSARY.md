@@ -95,3 +95,7 @@ _Avoid_: main, output bus, mix bus
 **Render**:
 An offline pass that plays a Project, or its loop region, through Master into an audio file.
 _Avoid_: export, bounce, mixdown
+
+**Metronome**:
+The beat you play along to, with the first beat of each bar accented; on its own it keeps its own tempo and meter, and with a Project open it follows the Project's tempo and meter and counts in before Recording.
+_Avoid_: click track, beat, timer
