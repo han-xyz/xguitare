@@ -200,3 +200,47 @@ fn mute_queued_after_stop_is_sent_before_the_thread_ends() {
     next_arrival(&received, "mute");
     handle.join().unwrap();
 }
+
+#[test]
+fn revision_change_fetches_ports_and_settings_again() {
+    let dir = temp_dir("refetch");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let mut statuses = 0;
+    let mut kind = "guitar";
+    let received = serve_and_record(listener, move |cmd| match cmd {
+        "status" => {
+            statuses += 1;
+            let revision = if statuses < 3 { 1 } else { 2 };
+            format!(r#"{{"ok":true,"preset":"Clean","program":0,"revision":{revision}}}"#)
+        }
+        "settings" => {
+            let payload = format!(r#"{{"ok":true,"bank_kind":"{kind}"}}"#);
+            kind = "bass";
+            payload
+        }
+        "ports" => r#"{"ok":true,"connected":{}}"#.to_string(),
+        _ => reply(cmd).to_string(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let deadline = Instant::now() + WAIT;
+    let mut ports_asked = 0;
+    while ports_asked < 2 {
+        assert!(Instant::now() < deadline, "ports asked {ports_asked} times");
+        let (cmd, _) = received.recv_timeout(WAIT).unwrap();
+        ports_asked += usize::from(cmd == "ports");
+    }
+    loop {
+        let snapshot = snapshots.recv_timeout(WAIT).unwrap();
+        if snapshot
+            .settings
+            .as_ref()
+            .is_some_and(|s| s["bank_kind"] == "bass")
+        {
+            break;
+        }
+    }
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}

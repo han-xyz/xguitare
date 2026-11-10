@@ -270,6 +270,12 @@ impl Client {
                 return;
             }
         }
+        let revision = status["revision"].as_u64().unwrap_or(0);
+        let changed = refresh_decision(self.revision, revision);
+        if changed {
+            self.ports_fetched = false;
+            self.settings_fetched = false;
+        }
         if !self.ports_fetched {
             self.snapshot.ports = self.fetch_once(&Request::Ports);
             self.ports_fetched = true;
@@ -282,9 +288,8 @@ impl Client {
             return;
         }
         self.failures = 0;
-        let revision = status["revision"].as_u64().unwrap_or(0);
         self.snapshot.status = Some(status);
-        if refresh_decision(self.revision, revision) {
+        if changed {
             self.refresh(revision);
         }
     }
