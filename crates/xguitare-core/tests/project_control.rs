@@ -1468,7 +1468,7 @@ fn metronome_request_plays_and_returns_the_new_state() {
     assert_eq!(payload["on"], false);
     assert_eq!(payload["bpm"], 97.5);
     assert!(!metronome_settings(&mut audio)[0].on);
-    assert_eq!(status(&mut state)["metronome"]["beat"], 2);
+    assert_eq!(status(&mut state)["metronome"]["beat"], 0, "0 while off");
 }
 
 #[test]
@@ -1576,6 +1576,12 @@ fn with_a_project_open_the_metronome_is_the_project_click() {
         status(&mut state)["metronome"]["on"],
         false,
         "and the click toggles it"
+    );
+    state.shared.metronome_beat.store(3, Ordering::Relaxed);
+    assert_eq!(
+        status(&mut state)["metronome"]["beat"],
+        0,
+        "a count-in with the click off"
     );
     ok(handle(
         &mut state,

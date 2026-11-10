@@ -86,7 +86,7 @@ pub(crate) fn metronome_tap(state: &mut EngineState) -> Result<Value, String> {
     Ok(json!({ "bpm": bpm }))
 }
 
-/// The `metronome` field of `status`: the Project's click, tempo and meter while one is open.
+/// The `metronome` field of `status`: the Project's click, tempo and meter while one is open; `beat` is 0 while `on` is false, also during a count-in with the click off.
 pub(crate) fn metronome_status(state: &EngineState) -> Value {
     let saved = &state.config.state.metronome;
     let (on, bpm, meter) = match open_project_state(state) {
@@ -98,7 +98,7 @@ pub(crate) fn metronome_status(state: &EngineState) -> Value {
         "bpm": bpm,
         "meter": [meter.0, meter.1],
         "volume_db": saved_volume_db(saved),
-        "beat": state.shared.metronome_beat.load(Ordering::Relaxed),
+        "beat": if on { state.shared.metronome_beat.load(Ordering::Relaxed) } else { 0 },
     })
 }
 
