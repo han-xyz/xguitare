@@ -405,6 +405,18 @@ fn closing_the_mixer_shows_the_selected_track_again() {
 }
 
 #[test]
+fn opening_the_mixer_shows_the_selected_track_rack() {
+    let closed = RackFocus {
+        mixer_open: false,
+        shown: None,
+        selected: Some(1),
+    };
+    let (_, focus) = aim_rack_commands(closed, vec![Command::ToggleMixer]);
+    assert!(focus.mixer_open);
+    assert_eq!(focus.shown, Some(MixerTarget::Track(1)));
+}
+
+#[test]
 fn rack_requests_without_a_project_name_no_rack() {
     let (commands, _) = aim_rack_commands(RackFocus::default(), vec![rack_add()]);
     assert_eq!(commands, [rack_add()]);

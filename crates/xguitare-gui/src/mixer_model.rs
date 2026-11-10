@@ -277,7 +277,10 @@ impl RackFocus {
             }
             Command::ToggleMixer => {
                 self.mixer_open = !self.mixer_open;
-                self.shown = None;
+                self.shown = self
+                    .selected
+                    .filter(|_| self.mixer_open)
+                    .map(MixerTarget::Track);
             }
             Command::ProjectNew(_)
             | Command::ProjectOpen(_)
