@@ -1,5 +1,6 @@
 pub mod app;
 pub mod client;
+pub mod metronome_model;
 mod mixer;
 pub mod mixer_model;
 pub mod model;

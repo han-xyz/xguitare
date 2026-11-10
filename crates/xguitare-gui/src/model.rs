@@ -145,6 +145,14 @@ pub enum Command {
         on: Option<bool>,
         count_in: Option<u32>,
     },
+    /// The `metronome` keys to change; `None` keeps the value.
+    Metronome {
+        on: Option<bool>,
+        bpm: Option<f64>,
+        meter: Option<(u32, u32)>,
+        volume: Option<f64>,
+    },
+    MetronomeTap,
     BusAdd,
     BusRemove(usize),
     /// The `bus_set` keys to change; `None` keeps the value.
@@ -920,6 +928,8 @@ pub enum KeyEvent {
     R,
     Home,
     End,
+    M,
+    T,
 }
 
 /// Digits and Ctrl+S act unless a text field has focus; a focused knob consumes only its own arrow, page and Home/End keys.
@@ -1001,7 +1011,9 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
         | KeyEvent::Space
         | KeyEvent::R
         | KeyEvent::Home
-        | KeyEvent::End => None,
+        | KeyEvent::End
+        | KeyEvent::M
+        | KeyEvent::T => None,
     }
 }
 
@@ -1144,6 +1156,18 @@ pub fn requests_until_quit(
             },
             Command::Tempo { bpm, meter } => Request::Tempo { bpm, meter },
             Command::Click { on, count_in } => Request::Click { on, count_in },
+            Command::Metronome {
+                on,
+                bpm,
+                meter,
+                volume,
+            } => Request::Metronome {
+                on,
+                bpm,
+                meter,
+                volume,
+            },
+            Command::MetronomeTap => Request::MetronomeTap,
             Command::BusAdd => Request::BusAdd { name: None },
             Command::BusRemove(index) => Request::BusRemove {
                 bus: BusRef::Index(index),
@@ -1523,18 +1547,20 @@ pub enum Section {
     Bank,
     Rack,
     Tuner,
+    Metronome,
     Audio,
     Settings,
     Engine,
 }
 
 /// The left panel's sections, top to bottom.
-pub const SECTIONS: [Section; 8] = [
+pub const SECTIONS: [Section; 9] = [
     Section::Project,
     Section::Preset,
     Section::Bank,
     Section::Rack,
     Section::Tuner,
+    Section::Metronome,
     Section::Audio,
     Section::Settings,
     Section::Engine,
@@ -1549,6 +1575,7 @@ impl Section {
             (Section::Bank, BankKind::Bass) => "Bass Bank",
             (Section::Rack, _) => "Rack",
             (Section::Tuner, _) => "Tuner and Mute",
+            (Section::Metronome, _) => "Metronome",
             (Section::Audio, _) => "Audio",
             (Section::Settings, _) => "Settings",
             (Section::Engine, _) => "Engine",

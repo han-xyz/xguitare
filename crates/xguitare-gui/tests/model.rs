@@ -1979,6 +1979,7 @@ fn sections_in_panel_order() {
             Section::Bank,
             Section::Rack,
             Section::Tuner,
+            Section::Metronome,
             Section::Audio,
             Section::Settings,
             Section::Engine,
@@ -1996,6 +1997,7 @@ fn sections_in_panel_order() {
             "Bass Bank",
             "Rack",
             "Tuner and Mute",
+            "Metronome",
             "Audio",
             "Settings",
             "Engine"

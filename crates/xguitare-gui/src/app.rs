@@ -15,10 +15,11 @@ use xguitare_core::control::{BusRef, TrackRef};
 use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
+use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
 use crate::mixer::{MIXER_HEIGHT, MixerView, RenderDraft, mixer_panel, render_dialog};
 use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands};
 use crate::model::{
-    ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
+    BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
     bank_rows_for_rack, forget_removed_units, key_to_command, open_units_from_string,
     open_units_to_string, palette, param_rows, peak_db, quit_commands, remember_removes,
@@ -83,6 +84,7 @@ pub struct App {
     project_view: ProjectView,
     mixer: MixerView,
     autosave_prompt: Option<AutosaveOffer>,
+    beat_light: BeatLight,
 }
 
 impl App {
@@ -180,6 +182,7 @@ impl App {
             project_view: ProjectView::default(),
             mixer: MixerView::default(),
             autosave_prompt: None,
+            beat_light: BeatLight::default(),
         }
     }
 }
@@ -345,6 +348,7 @@ impl eframe::App for App {
             {
                 forget_removed_units(&mut self.open_units, &mut self.removing, params);
             }
+            self.beat_light = beat_light(self.snapshot.status.as_ref(), snapshot.status.as_ref());
             self.snapshot = snapshot;
         }
     }
@@ -361,13 +365,9 @@ impl eframe::App for App {
             .status
             .as_ref()
             .filter(|status| project_name(Some(status)).is_some());
-        let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
-            .filter_map(|key| match project_status {
-                Some(status) => project_key_to_command(key, status, &items),
-                None => key_to_command(key, &rows),
-            })
+            .filter_map(|key| key_command(key, snapshot, &rows))
             .collect();
         commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| {
@@ -389,6 +389,7 @@ impl eframe::App for App {
             ports: &mut self.ports_draft,
             settings: &mut self.settings_draft,
             new_project: &mut self.new_project,
+            beat_light: self.beat_light,
         };
         let sidebar_frame = Frame::side_top_panel(ui.style())
             .fill(widgets::colour(palette().sidebar))
@@ -470,6 +471,21 @@ impl eframe::App for App {
     }
 }
 
+/// The Metronome's M and T first, then the Project view's keys while a Project is open, else the Preset keys.
+fn key_command(key: KeyEvent, snapshot: &Snapshot, rows: &[BankRow]) -> Option<Command> {
+    let Some(status) = &snapshot.status else {
+        return key_to_command(key, rows);
+    };
+    if let Some(command) = metronome_key_to_command(key, status) {
+        return Some(command);
+    }
+    if project_name(Some(status)).is_none() {
+        return key_to_command(key, rows);
+    }
+    let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
+    project_key_to_command(key, status, &items)
+}
+
 /// The keys [`key_active`] lets through. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
 fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
     let text_edit_focused = ui.ctx().text_edit_focused();
@@ -507,7 +523,7 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         .collect()
 }
 
-/// Digits with their modifiers; Space, R, Home and End only without one.
+/// Digits with their modifiers; Space, R, Home, End, M and T only without one.
 fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
     if let Some((digit, _)) = (1..)
         .zip(DIGIT_KEYS)
@@ -529,6 +545,8 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
         Key::R => Some(KeyEvent::R),
         Key::Home => Some(KeyEvent::Home),
         Key::End => Some(KeyEvent::End),
+        Key::M => Some(KeyEvent::M),
+        Key::T => Some(KeyEvent::T),
         _ => None,
     }
 }

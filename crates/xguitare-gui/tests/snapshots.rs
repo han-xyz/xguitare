@@ -519,6 +519,25 @@ fn gui_snapshots() {
     write_png(&mut undo, "undo-footer");
 }
 
+fn metronome_snapshot() -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    snapshot.status.as_mut().unwrap()["metronome"] = json!({
+        "on": true, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": 1,
+    });
+    snapshot
+}
+
+#[test]
+fn metronome_section_snapshot() {
+    let (mut harness, _, _dir) = harness_with(WINDOW, metronome_snapshot());
+    for title in ["Bass Bank", "Rack"] {
+        harness.get_by_label(title).click();
+        harness.run_steps(2);
+    }
+    harness.get_by_label("Beat 1");
+    write_png(&mut harness, "metronome");
+}
+
 #[test]
 fn project_snapshots() {
     write_png(&mut project_harness("playing").0, "project");
@@ -862,7 +881,13 @@ fn only_a_bank_kind_change_in_settings_drops_the_undo() {
     let (mut harness, sent, _dir) = harness();
     let from = unit_header_point(&harness, "chorus");
     drag_and_release(&mut harness, from, pos2(100.0, 400.0));
-    for title in ["Preset", "Bass Bank", "Settings"] {
+    for title in [
+        "Preset",
+        "Bass Bank",
+        "Tuner and Mute",
+        "Metronome",
+        "Settings",
+    ] {
         harness.get_by_label(title).click();
         harness.run_steps(2);
     }

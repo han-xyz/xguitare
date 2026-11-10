@@ -3,18 +3,22 @@ use std::time::Instant;
 use egui::collapsing_header::CollapsingState;
 use egui::style::ScrollStyle;
 use egui::{
-    Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragAndDrop, FontId, Frame, Grid,
-    Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role, ScrollArea, Sense,
-    Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, vec2,
+    Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragAndDrop, DragValue, FontId,
+    Frame, Grid, Id, Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, vec2,
 };
 use xguitare_core::BankKind;
 
+use crate::metronome_model::{
+    BPM_RANGE, BeatLight, METER_CHOICES, VOLUME_DB_RANGE, metronome_view,
+};
 use crate::model::{
     AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
     SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
     filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
     set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
+use crate::project::{lit_button, released_value, track_knob};
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
 use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
@@ -50,6 +54,10 @@ const NO_PROJECT: &str = "No Project open";
 const NEW_PROJECT_HINT: &str = "New Project name";
 const OPEN_PROJECT: &str = "Open a Project";
 const NO_PROJECTS: &str = "no Projects yet";
+const NO_METRONOME: &str = "no Metronome from the Daemon";
+const FOLLOWS_PROJECT: &str = "follows the Project";
+const BEAT_LIGHT_SIZE: f32 = 28.0;
+const BEAT_TEXT_SIZE: f32 = 14.0;
 const BANK_KINDS: [(BankKind, &str); 2] = [(BankKind::Guitar, "Guitar"), (BankKind::Bass, "Bass")];
 
 pub struct Tuner<'a> {
@@ -87,6 +95,7 @@ pub struct SidebarView<'a, 'b> {
     pub ports: &'a mut Option<PortSelection>,
     pub settings: &'a mut Option<SettingsDraft>,
     pub new_project: &'a mut String,
+    pub beat_light: BeatLight,
 }
 
 /// One collapsible section per [`SECTIONS`] entry, top to bottom.
@@ -207,6 +216,7 @@ fn section_body(
             .into_iter()
             .collect(),
         Section::Tuner => tuner_and_mute(ui, snapshot, view.tuner),
+        Section::Metronome => metronome_section(ui, snapshot, view.beat_light),
         Section::Audio => audio_ports(ui, snapshot, view.ports),
         Section::Settings => settings(ui, snapshot, view.settings).into_iter().collect(),
         Section::Engine => {
@@ -512,6 +522,109 @@ fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Co
         }
     });
     commands
+}
+
+/// On/Off, the beat light and Tap, then tempo and meter, then the volume; with a Project open these are the Project's tempo, meter and click.
+fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<Command> {
+    let status = snapshot.status.as_ref();
+    let Some(view) = status.and_then(metronome_view) else {
+        ui.label(muted_text(NO_METRONOME));
+        return Vec::new();
+    };
+    let change = |on, bpm, meter, volume| Command::Metronome {
+        on,
+        bpm,
+        meter,
+        volume,
+    };
+    let mut commands = Vec::new();
+    ui.horizontal(|ui| {
+        let text = if view.on { "On" } else { "Off" };
+        let switch = ui.add(lit_button(text, view.on, colour(palette().yellow)));
+        switch.widget_info(|| WidgetInfo::selected(Role::Button, true, view.on, "Metronome"));
+        if switch.clicked() {
+            commands.push(change(Some(!view.on), None, None, None));
+        }
+        paint_beat_light(ui, light);
+        if ui.add(outlined_button("Tap")).clicked() {
+            commands.push(Command::MetronomeTap);
+        }
+    });
+    ui.horizontal(|ui| {
+        let (bpm, field) = released_value(ui, Id::unique("metronome_tempo"), view.bpm, |bpm| {
+            DragValue::new(bpm)
+                .range(BPM_RANGE.0..=BPM_RANGE.1)
+                .speed(0.5)
+                .fixed_decimals(1)
+                .suffix(" bpm")
+        });
+        field.widget_info(|| WidgetInfo::labeled(Role::SpinButton, true, "Metronome tempo"));
+        if let Some(bpm) = bpm {
+            commands.push(change(None, Some(bpm), None, None));
+        }
+        let shown = |(beats, note): (u32, u32)| format!("{beats}/{note}");
+        let combo = ComboBox::from_id_salt("metronome_meter")
+            .selected_text(shown(view.meter))
+            .show_ui(ui, |ui| {
+                for meter in METER_CHOICES {
+                    if ui
+                        .add(Button::selectable(meter == view.meter, shown(meter)))
+                        .clicked()
+                    {
+                        commands.push(change(None, None, Some(meter), None));
+                    }
+                }
+            });
+        combo
+            .response
+            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Metronome meter"));
+    });
+    if let Some(volume) = track_knob(
+        ui,
+        ("Metronome", "volume"),
+        view.volume_db,
+        VOLUME_DB_RANGE,
+        " dB",
+    ) {
+        commands.push(change(None, None, None, Some(volume)));
+    }
+    if project_name(status).is_some() {
+        ui.label(muted_text(FOLLOWS_PROJECT));
+    }
+    commands
+}
+
+/// Dark while off; else the beat number, filled while the beat is new, beat 1 in yellow.
+fn paint_beat_light(ui: &mut Ui, light: BeatLight) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(BEAT_LIGHT_SIZE), Sense::hover());
+    let colours = palette();
+    let painter = ui.painter();
+    let radius = BEAT_LIGHT_SIZE / 2.0;
+    let BeatLight::Beat {
+        beat,
+        accent,
+        flash,
+    } = light
+    else {
+        painter.circle_filled(rect.center(), radius, colour(colours.led_off));
+        response.widget_info(|| WidgetInfo::labeled(Role::Label, true, "Beat off"));
+        return;
+    };
+    let lit = colour(if accent { colours.yellow } else { colours.text });
+    let (fill, text) = if flash {
+        (lit, colour(colours.ground))
+    } else {
+        (colour(colours.led_off), lit)
+    };
+    painter.circle(rect.center(), radius, fill, Stroke::new(1.0, lit));
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        beat.to_string(),
+        FontId::proportional(BEAT_TEXT_SIZE),
+        text,
+    );
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("Beat {beat}")));
 }
 
 /// Opening a picker reads the port list again, so that a device plugged in since shows.

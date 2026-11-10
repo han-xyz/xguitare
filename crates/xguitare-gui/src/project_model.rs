@@ -402,11 +402,13 @@ pub fn project_end(status: &Value, items: &[ItemBlock]) -> u64 {
         .unwrap_or_default()
 }
 
-/// Plain keys act only while no widget has focus, so that a focused knob keeps Home and End and a focused button its Space; with modifiers they act unless a text field takes typing.
+/// Plain keys act only while no widget has focus, so that a focused knob keeps Home and End and a focused button its Space; with modifiers, and M and T, they act unless a text field takes typing.
 pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) -> bool {
     match key {
         KeyEvent::Space | KeyEvent::R | KeyEvent::Home | KeyEvent::End => !widget_focused,
         KeyEvent::Digit(..)
+        | KeyEvent::M
+        | KeyEvent::T
         | KeyEvent::CtrlS
         | KeyEvent::CtrlR
         | KeyEvent::CtrlM
@@ -431,7 +433,7 @@ pub fn project_key_to_command(
         KeyEvent::CtrlS => Some(Command::ProjectSave),
         KeyEvent::CtrlM => Some(Command::ToggleMixer),
         KeyEvent::CtrlAltR => Some(Command::OpenRenderDialog),
-        KeyEvent::Digit(..) => None,
+        KeyEvent::Digit(..) | KeyEvent::M | KeyEvent::T => None,
     }
 }
 
