@@ -215,7 +215,9 @@ fn grown_block_cuts_to_fitting_incoming_and_keeps_pending() {
 
 #[test]
 fn set_bypass_fades_the_newest_rack_to_its_input() {
-    let (mut switcher, mut control) = switcher(&[6.0]);
+    let (mut switcher, mut control) = switcher(&[0.0]);
+    swap(&mut control, gain_rack(&[6.0]));
+    block(&mut switcher);
     assert!(
         control
             .commands
@@ -225,7 +227,7 @@ fn set_bypass_fades_the_newest_rack_to_its_input() {
             })
             .is_ok()
     );
-    for _ in 0..8 {
+    for _ in 0..2 * FADE.div_ceil(BLOCK) + 2 {
         block(&mut switcher);
     }
     assert_eq!(block(&mut switcher), [0.5; BLOCK]);
