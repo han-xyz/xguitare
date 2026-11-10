@@ -11,7 +11,7 @@ use crate::BankKind;
 pub(crate) const DEFAULT_IR: &str = "default-cab.wav";
 pub(crate) const BASS_IR: &str = "bass-cab.wav";
 const STAGING_SUFFIX: &str = ".xguitare-staging";
-const STARTER_PRESETS: [(&str, &str); 5] = [
+const STARTER_PRESETS: &[(&str, &str)] = &[
     ("01-clean.toml", include_str!("../bank/01-clean.toml")),
     ("02-crunch.toml", include_str!("../bank/02-crunch.toml")),
     ("03-lead.toml", include_str!("../bank/03-lead.toml")),
@@ -20,8 +20,11 @@ const STARTER_PRESETS: [(&str, &str); 5] = [
         include_str!("../bank/04-high-gain.toml"),
     ),
     ("05-bass.toml", include_str!("../bank/05-bass.toml")),
+    ("06-rock.toml", include_str!("../bank/06-rock.toml")),
+    ("07-blues.toml", include_str!("../bank/07-blues.toml")),
+    ("08-funk.toml", include_str!("../bank/08-funk.toml")),
 ];
-const BASS_PRESETS: [(&str, &str); 5] = [
+const BASS_PRESETS: &[(&str, &str)] = &[
     ("01-blues.toml", include_str!("../bank-bass/01-blues.toml")),
     ("02-funk.toml", include_str!("../bank-bass/02-funk.toml")),
     (
@@ -36,6 +39,7 @@ const BASS_PRESETS: [(&str, &str); 5] = [
         "05-primus-flange.toml",
         include_str!("../bank-bass/05-primus-flange.toml"),
     ),
+    ("06-rock.toml", include_str!("../bank-bass/06-rock.toml")),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

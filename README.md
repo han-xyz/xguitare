@@ -39,7 +39,7 @@ The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first s
 2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
-- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with five starter Presets (Clean, Crunch, Lead, High Gain, Bass) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
+- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with eight starter Presets (Clean, Crunch, Lead, High Gain, Bass, Rock, Blues, Funk) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
 - `loaded 0 Clean`: the Daemon starts on the Bank's first Preset (program 0).
 - `jack client active`: the sample rate and the buffer size the audio server actually granted.
 - `connected a -> b`: one line per port connection made from the `[ports]` config. Without a `[ports]` section and with more than one sound card, the Daemon connects nothing and warns with the candidate port names (`several capture devices; pick one in config ports.input: ...`).
@@ -136,7 +136,7 @@ bank_kind = "bass"
 
 Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `<config dir>/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
 
-The first run creates five Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module.
+The first run creates six Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module.
 
 ## CLI
 

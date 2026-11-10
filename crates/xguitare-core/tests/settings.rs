@@ -296,7 +296,7 @@ fn set_settings_bank_kind_seeds_and_loads_program_0() {
     assert_eq!(status["program"], 0);
     assert_eq!(status["revision"], 3);
     assert_eq!(state.bank.dir, bass_dir);
-    assert_eq!(state.bank.entries.len(), 5);
+    assert_eq!(state.bank.entries.len(), 6);
     let config = reloaded(&dir);
     assert_eq!(config.bank_kind, BankKind::Bass);
     assert_eq!(config.bank_dir, bass_dir);

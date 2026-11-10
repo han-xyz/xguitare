@@ -1,0 +1,44 @@
+name = "Blues"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -18
+ratio = 2
+attack = 10
+release = 120
+makeup = 2
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 25
+tone = 50
+level = -3
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 35
+master = -10
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 50
+middle = 60
+treble = 50
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 12.0
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 40
+mix = 20

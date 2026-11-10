@@ -1,0 +1,31 @@
+name = "Rock"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -20
+ratio = 4
+attack = 8
+release = 100
+makeup = 3
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 35
+master = -8
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 60
+middle = 55
+treble = 50
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = 12.0

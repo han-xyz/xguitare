@@ -26,7 +26,7 @@ fn guitar_bank_unchanged() {
     assert_eq!(
         created,
         Created {
-            presets: 5,
+            presets: 8,
             ir: true
         }
     );
@@ -43,6 +43,9 @@ fn guitar_bank_unchanged() {
             "03-lead.toml",
             "04-high-gain.toml",
             "05-bass.toml",
+            "06-rock.toml",
+            "07-blues.toml",
+            "08-funk.toml",
             "default-cab.wav"
         ]
     );
@@ -56,18 +59,30 @@ fn guitar_bank_unchanged() {
         assert!(warnings.is_empty(), "{}: {warnings:?}", preset.name);
         names.push(preset.name.as_str());
     }
-    assert_eq!(names, ["Clean", "Crunch", "Lead", "High Gain", "Bass"]);
+    assert_eq!(
+        names,
+        [
+            "Clean",
+            "Crunch",
+            "Lead",
+            "High Gain",
+            "Bass",
+            "Rock",
+            "Blues",
+            "Funk"
+        ]
+    );
 }
 
 #[test]
-fn bass_bank_seeds_five_presets_and_ir() {
+fn bass_bank_seeds_six_presets_and_ir() {
     let temp = temp_dir("bass");
     let dir = temp.0.join("bank-bass");
     let created = ensure_bank(&dir, BankKind::Bass, 48_000).unwrap();
     assert_eq!(
         created,
         Created {
-            presets: 5,
+            presets: 6,
             ir: true
         }
     );
@@ -84,6 +99,7 @@ fn bass_bank_seeds_five_presets_and_ir() {
             "03-primus-slap.toml",
             "04-primus-fuzz.toml",
             "05-primus-flange.toml",
+            "06-rock.toml",
             "bass-cab.wav"
         ]
     );
@@ -104,7 +120,8 @@ fn bass_bank_seeds_five_presets_and_ir() {
             "Funk",
             "Primus Slap",
             "Primus Fuzz",
-            "Primus Flange"
+            "Primus Flange",
+            "Rock"
         ]
     );
     let samples: Vec<f32> = hound::WavReader::open(dir.join("bass-cab.wav"))
@@ -150,7 +167,7 @@ fn interrupted_first_run_is_retried() {
     assert_eq!(
         created,
         Created {
-            presets: 5,
+            presets: 8,
             ir: true
         }
     );
@@ -167,6 +184,9 @@ fn interrupted_first_run_is_retried() {
             "03-lead.toml",
             "04-high-gain.toml",
             "05-bass.toml",
+            "06-rock.toml",
+            "07-blues.toml",
+            "08-funk.toml",
             "default-cab.wav"
         ]
     );
@@ -183,8 +203,8 @@ fn trailing_slash_bank_dir_still_creates_bank() {
     let unrelated = temp.0.join("bank.tmp");
     fs::create_dir_all(&unrelated).unwrap();
     let created = ensure_bank(&with_slash, BankKind::Guitar, 48_000).unwrap();
-    assert_eq!(created.presets, 5);
-    assert_eq!(Bank::load_dir(&dir).unwrap().entries.len(), 5);
+    assert_eq!(created.presets, 8);
+    assert_eq!(Bank::load_dir(&dir).unwrap().entries.len(), 8);
     let mut siblings: Vec<String> = fs::read_dir(&temp.0)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -212,5 +232,5 @@ fn starter_banks_build_without_warnings() {
             built += 1;
         }
     }
-    assert_eq!(built, 10);
+    assert_eq!(built, 14);
 }
