@@ -3,14 +3,11 @@ use egui::{
 };
 
 use crate::model::{
-    Band, EAR_HOLE_RADIUS, EAR_WIDTH, LADDER_SEGMENTS, METER_RED_DB, Rgb, accent_for, ear_holes,
-    knob_points, knob_value_from_drag, ladder_segments, meter_fraction, palette,
+    Band, EAR_HOLE_RADIUS, EAR_WIDTH, LADDER_SEGMENTS, Rgb, accent_for, ear_holes, knob_points,
+    knob_value_from_drag, ladder_segments, palette,
 };
 
-const METER_SIZE: Vec2 = Vec2::new(120.0, 12.0);
 const ARC_SEGMENTS: usize = 48;
-const CENTS_BAR_SIZE: Vec2 = Vec2::new(120.0, 10.0);
-const CENTS_TICK_WIDTH: f32 = 1.5;
 const CENTS_ARC_DIAMETER: f32 = 160.0;
 const CENTS_ARC_WIDTH: f32 = 4.0;
 const CENTS_NEEDLE_WIDTH: f32 = 3.0;
@@ -230,25 +227,6 @@ pub fn tune_colour(in_tune: bool) -> Color32 {
     }
 }
 
-/// `fraction` is −1..=1, filled from the centre toward its sign.
-pub fn cents_bar(ui: &mut Ui, fraction: f32, colour: Color32) {
-    let (rect, _) = ui.allocate_exact_size(CENTS_BAR_SIZE, Sense::hover());
-    let center_x = rect.center().x;
-    let end_x = center_x + rect.width() / 2.0 * fraction;
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, Color32::DARK_GRAY);
-    painter.rect_filled(
-        Rect::from_x_y_ranges(center_x.min(end_x)..=center_x.max(end_x), rect.y_range()),
-        0.0,
-        colour,
-    );
-    painter.vline(
-        center_x,
-        rect.y_range(),
-        Stroke::new(CENTS_TICK_WIDTH, Color32::WHITE),
-    );
-}
-
 /// A half circle from −50 cents at the left to +50 at the right; the needle only when `fraction` is `Some`.
 pub fn cents_arc(ui: &mut Ui, fraction: Option<f32>, colour: Color32) {
     let size = vec2(
@@ -291,26 +269,4 @@ fn arc_points(center: Pos2, radius: f32, from_deg: f32, to_deg: f32) -> Vec<Pos2
 fn point_at(center: Pos2, radius: f32, deg: f32) -> Pos2 {
     let rad = deg.to_radians();
     center + radius * vec2(rad.cos(), rad.sin())
-}
-
-pub fn meter(ui: &mut Ui, label: &str, fraction: f32) {
-    ui.label(label);
-    let (rect, _) = ui.allocate_exact_size(METER_SIZE, Sense::hover());
-    let red_from = meter_fraction(METER_RED_DB);
-    let x = |fraction: f32| rect.left() + rect.width() * fraction;
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, Color32::DARK_GRAY);
-    let green_to = fraction.min(red_from);
-    painter.rect_filled(
-        Rect::from_min_max(rect.min, pos2(x(green_to), rect.max.y)),
-        0.0,
-        Color32::GREEN,
-    );
-    if fraction > red_from {
-        painter.rect_filled(
-            Rect::from_min_max(pos2(x(red_from), rect.min.y), pos2(x(fraction), rect.max.y)),
-            0.0,
-            Color32::RED,
-        );
-    }
 }

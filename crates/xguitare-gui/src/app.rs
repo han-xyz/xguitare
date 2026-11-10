@@ -7,22 +7,22 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use egui::{
-    Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CursorIcon, Event, Frame,
+    Align, Button, CentralPanel, Checkbox, Color32, ComboBox, CursorIcon, Event, Frame, Grid,
     InnerResponse, Key, Label, Layout, Margin, Modifiers, Panel, Rect, Response, RichText,
-    ScrollArea, Sense, Stroke, TextStyle, Theme, Ui, Vec2, pos2, vec2,
+    ScrollArea, Sense, Stroke, TextEdit, Theme, Ui, Vec2, pos2, vec2,
 };
 use serde_json::Value;
 use tracing::{error, info};
-use xguitare_core::Config;
 use xguitare_core::control::SILENCE_DB;
+use xguitare_core::{BankKind, Config};
 use xguitare_gui::client::{self, TICK};
 use xguitare_gui::model::{
     BankRow, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KeyEvent, KeyModifiers, Link,
     ModuleType, ParamRow, Rgb, SET_INTERVAL, Snapshot, Throttle, TunerReading, add_command,
-    bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, in_tune, key_to_command,
-    knob_fraction, knob_param_value, link_text, move_target, open_units_from_string,
-    open_units_to_string, palette, param_rows, peak_db, peak_fraction, quit_commands,
-    rack_channels, status_line, tuner_reading, tuner_toggle, unit_suffix,
+    bank_rows, cabinet_ir, cents_fraction, cents_text, drop_index, engine_readout, filter_bank,
+    in_tune, key_to_command, knob_fraction, knob_param_value, link_text, move_target,
+    open_units_from_string, open_units_to_string, palette, param_rows, peak_db, quit_commands,
+    rack_channels, tuner_reading, tuner_toggle, unit_suffix,
 };
 use xguitare_gui::widgets::{self, KnobSize, colour};
 
@@ -53,7 +53,13 @@ const CLOSED_CHEVRON: &str = "▶";
 const DROP_LINE_WIDTH: f32 = 2.0;
 const TUNER_LABEL: &str = "Tuner";
 const TUNER_OFF: &str = "Tuner off";
-const ADD_LABEL: &str = "Add a Module to the bottom of the rack";
+const ADD_LABEL: &str = "Add a Module";
+const PRESET_NAME_SIZE: f32 = 30.0;
+const SIDEBAR_BUTTON_HEIGHT: f32 = 40.0;
+const UNSAVED: &str = "unsaved changes";
+const SAVE_AS_LABEL: &str = "Save as new";
+const SAVE_AS_HINT: &str = "New Preset name";
+const SEARCH_HINT: &str = "Search by name or number";
 const ADD_COMBO_WIDTH: f32 = 320.0;
 const NOTE_SIZE: f32 = 96.0;
 const NO_SIGNAL_SIZE: f32 = 40.0;
@@ -84,6 +90,9 @@ pub struct App {
     tuner_mute: bool,
     clips: [ClipLatch; 2],
     open_units: BTreeSet<String>,
+    bank_query: String,
+    save_as_name: Option<String>,
+    bank_heading: &'static str,
 }
 
 impl App {
@@ -102,6 +111,10 @@ impl App {
         ctx.set_theme(Theme::Dark);
         ctx.set_visuals_of(Theme::Dark, widgets::visuals());
         let tuner_mute = config.tuner_mute;
+        let bank_heading = match config.bank_kind {
+            BankKind::Guitar => "Guitar Bank",
+            BankKind::Bass => "Bass Bank",
+        };
         let (commands, snapshots, client) =
             client::spawn(config, config_path, Arc::clone(&stop), move || {
                 ctx.request_repaint()
@@ -132,6 +145,9 @@ impl App {
             tuner_mute,
             clips: [ClipLatch::default(); 2],
             open_units,
+            bank_query: String::new(),
+            save_as_name: None,
+            bank_heading,
         }
     }
 }
@@ -205,10 +221,16 @@ impl eframe::App for App {
             .filter_map(|key| key_to_command(key, &rows))
             .collect();
         commands.extend(self.throttle.tick(now));
-        Panel::bottom("status").show(ui, |ui| status_bar(ui, snapshot, &self.feedback, now));
+        Panel::bottom("status").show(ui, |ui| footer(ui, snapshot, &self.feedback, now));
+        let mut bank = BankView {
+            rows: &rows,
+            heading: self.bank_heading,
+            query: &mut self.bank_query,
+            save_as_name: &mut self.save_as_name,
+        };
         Panel::left("bank")
             .exact_size(BANK_WIDTH)
-            .show(ui, |ui| commands.extend(bank_panel(ui, &rows)));
+            .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut bank)));
         let mut knobs = Knobs {
             throttle: &mut self.throttle,
             locals: &mut self.locals,
@@ -226,10 +248,7 @@ impl eframe::App for App {
             clips: &mut self.clips,
             open_units: &mut self.open_units,
         };
-        CentralPanel::default().show(ui, |ui| {
-            commands.extend(preset_header(ui, snapshot));
-            commands.extend(rack_view(ui, snapshot, &mut view))
-        });
+        CentralPanel::default().show(ui, |ui| commands.extend(rack_view(ui, snapshot, &mut view)));
         for command in commands {
             // An Err means the client thread has ended; on_exit joins it.
             let _ = self.commands.send(command);
@@ -296,6 +315,94 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
     })
 }
 
+struct BankView<'a> {
+    rows: &'a [BankRow],
+    heading: &'static str,
+    query: &'a mut String,
+    save_as_name: &'a mut Option<String>,
+}
+
+/// The Preset, saving, the Bank heading and search at the top, the engine readout at the bottom, the Bank list between.
+fn sidebar(ui: &mut Ui, snapshot: &Snapshot, bank: &mut BankView) -> Vec<Command> {
+    preset_heading(ui, snapshot);
+    let mut commands: Vec<Command> = save_buttons(ui, bank.save_as_name).into_iter().collect();
+    ui.add_space(UNIT_MARGIN.into());
+    ui.heading(bank.heading);
+    ui.add(TextEdit::singleline(bank.query).hint_text(SEARCH_HINT));
+    Panel::bottom("engine_readout").show(ui, |ui| engine_readout_grid(ui, snapshot));
+    ScrollArea::vertical().show(ui, |ui| {
+        commands.extend(bank_panel(ui, &filter_bank(bank.rows, bank.query)))
+    });
+    commands
+}
+
+fn preset_heading(ui: &mut Ui, snapshot: &Snapshot) {
+    let status = snapshot.status.as_ref();
+    let preset = status.and_then(|status| status["preset"].as_str());
+    ui.label(
+        RichText::new(preset.unwrap_or(NO_PRESET))
+            .size(PRESET_NAME_SIZE)
+            .strong(),
+    );
+    let program = status
+        .and_then(|status| status["program"].as_u64())
+        .map(|program| format!("Program {program}"));
+    let modified = status.is_some_and(|status| status["modified"].as_bool() == Some(true));
+    let line: Vec<String> = program
+        .into_iter()
+        .chain(modified.then(|| UNSAVED.to_string()))
+        .collect();
+    if !line.is_empty() {
+        ui.label(muted_text(line.join(", ")));
+    }
+}
+
+/// `Save as new` opens a name field; `Save` beside it sends the name, so that the Daemon's error for an empty or taken name reaches the footer.
+fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Command> {
+    let button_size = vec2(
+        (ui.available_width() - ui.spacing().item_spacing.x) / 2.0,
+        SIDEBAR_BUTTON_HEIGHT,
+    );
+    let mut command = None;
+    ui.horizontal(|ui| {
+        if ui.add(Button::new("Save").min_size(button_size)).clicked() {
+            command = Some(Command::Save);
+        }
+        if ui
+            .add(Button::new(SAVE_AS_LABEL).min_size(button_size))
+            .clicked()
+        {
+            *save_as_name = save_as_name.is_none().then(String::new);
+        }
+    });
+    let Some(name) = save_as_name else {
+        return command;
+    };
+    let field = ui.add(TextEdit::singleline(name).hint_text(SAVE_AS_HINT));
+    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+    let (confirm, cancel) = ui
+        .horizontal(|ui| (ui.button("Save").clicked(), ui.button("Cancel").clicked()))
+        .inner;
+    if entered || confirm {
+        command = Some(Command::SaveAs(name.trim().to_string()));
+        *save_as_name = None;
+    } else if cancel {
+        *save_as_name = None;
+    }
+    command
+}
+
+fn engine_readout_grid(ui: &mut Ui, snapshot: &Snapshot) {
+    let rows = engine_readout(snapshot.status.as_ref());
+    Grid::new("engine_readout_rows").show(ui, |ui| {
+        for (label, value) in rows {
+            ui.label(muted_text(label));
+            ui.label(value);
+            ui.end_row();
+        }
+    });
+}
+
 fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     let mut clicked = None;
     for row in rows {
@@ -344,19 +451,6 @@ impl Tuner<'_> {
         *self.muted_by_us = muted_by_us;
         command
     }
-}
-
-fn preset_header(ui: &mut Ui, snapshot: &Snapshot) -> Option<Command> {
-    let preset = snapshot
-        .status
-        .as_ref()
-        .and_then(|status| status["preset"].as_str());
-    ui.horizontal(|ui| {
-        let save = ui.button("Save").clicked();
-        ui.label(preset.unwrap_or(NO_PRESET));
-        save.then_some(Command::Save)
-    })
-    .inner
 }
 
 struct RackView<'a, 'b> {
@@ -842,32 +936,13 @@ fn value_text(value: f64, row: &ParamRow) -> String {
     }
 }
 
-fn status_bar(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instant) {
+fn footer(ui: &mut Ui, snapshot: &Snapshot, feedback: &Feedback, now: Instant) {
     ui.horizontal(|ui| {
-        ui.label(link_text(&snapshot.link, now));
+        if snapshot.link != Link::Connected {
+            ui.label(link_text(&snapshot.link, now));
+        }
         if let Some(text) = feedback.text(now) {
-            ui.separator();
             ui.label(text);
         }
-        if let Some(status) = &snapshot.status {
-            ui.separator();
-            ui.label(status_line(status));
-            ui.separator();
-            widgets::meter(ui, "in", peak_fraction(status, "input_peak_db"));
-            widgets::meter(ui, "out", peak_fraction(status, "output_peak_db"));
-        }
-        if let Some(reading) = snapshot.tuner.as_ref().and_then(tuner_reading) {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                tuner_strip(ui, &reading)
-            });
-        }
     });
-}
-
-/// Laid out right to left: the bar at the window's edge, the text before it.
-fn tuner_strip(ui: &mut Ui, reading: &TunerReading) {
-    let colour = widgets::tune_colour(in_tune(reading.cents));
-    widgets::cents_bar(ui, cents_fraction(reading.cents), colour);
-    let text = format!("{}  {}", reading.note, cents_text(reading.cents));
-    ui.label(RichText::new(text).text_style(TextStyle::Monospace));
 }

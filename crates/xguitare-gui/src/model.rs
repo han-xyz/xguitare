@@ -57,6 +57,8 @@ pub enum Command {
         value: f64,
     },
     Save,
+    /// Saves the live Rack as a new Preset with this name.
+    SaveAs(String),
     RackAdd {
         type_name: String,
         after: Option<String>,
@@ -453,6 +455,19 @@ pub fn bank_rows(list_payload: &Value) -> (Vec<BankRow>, usize) {
     (rows, skipped)
 }
 
+/// The rows whose name contains `query` in any case or whose program number is `query`; every row for a blank query.
+pub fn filter_bank(rows: &[BankRow], query: &str) -> Vec<BankRow> {
+    let query = query.trim().to_lowercase();
+    rows.iter()
+        .filter(|row| {
+            query.is_empty()
+                || row.name.to_lowercase().contains(&query)
+                || row.program.to_string() == query
+        })
+        .cloned()
+        .collect()
+}
+
 pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
     match key {
         KeyEvent::CtrlS => Some(Command::Save),
@@ -486,6 +501,7 @@ pub fn requests_until_quit(queued: Vec<Command>) -> (Vec<Request>, bool) {
             Command::Load(preset) => Request::Load { preset },
             Command::Set { param, value } => Request::Set { param, value },
             Command::Save => Request::Save { name: None },
+            Command::SaveAs(name) => Request::Save { name: Some(name) },
             Command::RackAdd {
                 type_name,
                 after,
@@ -589,6 +605,33 @@ pub fn status_line(status: &Value) -> String {
         status["callback_last_us"],
         status["callback_max_us"],
     )
+}
+
+/// How long one buffer of `buffer` frames lasts at `rate` Hz.
+pub fn latency_ms(buffer: u64, rate: u64) -> f64 {
+    buffer as f64 * 1000.0 / rate as f64
+}
+
+/// The sidebar's label and value rows for a `status` payload; only the Daemon row without one.
+pub fn engine_readout(status: Option<&Value>) -> Vec<(String, String)> {
+    let Some(status) = status else {
+        return vec![("Daemon".to_string(), "disconnected".to_string())];
+    };
+    let rate = status["sample_rate"].as_u64().unwrap_or_default();
+    let buffer = status["buffer_size"].as_u64().unwrap_or_default();
+    [
+        ("Rate", format!("{} kHz", rate as f64 / 1000.0)),
+        ("Buffer", format!("{buffer} frames")),
+        (
+            "Buffer latency",
+            format!("{:.1} ms", latency_ms(buffer, rate)),
+        ),
+        ("Xruns", status["xruns"].to_string()),
+        ("Daemon", "connected".to_string()),
+    ]
+    .into_iter()
+    .map(|(label, value)| (label.to_string(), value))
+    .collect()
 }
 
 pub fn link_text(link: &Link, now: Instant) -> String {

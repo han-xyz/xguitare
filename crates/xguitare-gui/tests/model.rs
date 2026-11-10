@@ -16,12 +16,13 @@ use xguitare_gui::model::{
     Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback, KeyEvent,
     KeyModifiers, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, ParamRow, Rgb, Throttle,
     TunerReading, accent_for, add_after, add_command, bank_rows, cabinet_ir, cents_fraction,
-    cents_text, counts_toward_spawn, drop_index, ear_holes, failed_set, in_tune, ir_names,
-    key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
-    knob_value_from_drag, ladder_segments, meter_fraction, module_types, move_target,
-    open_units_from_string, open_units_to_string, palette, param_rows, peak_fraction,
-    quit_commands, rack_channels, refresh_decision, requests_until_quit, response_text,
-    spawn_policy, status_line, tuner_reading, tuner_toggle, unit_suffix,
+    cents_text, counts_toward_spawn, drop_index, ear_holes, engine_readout, failed_set,
+    filter_bank, in_tune, ir_names, key_to_command, knob_angle_deg, knob_fraction,
+    knob_param_value, knob_points, knob_value_from_drag, ladder_segments, latency_ms,
+    meter_fraction, module_types, move_target, open_units_from_string, open_units_to_string,
+    palette, param_rows, peak_fraction, quit_commands, rack_channels, refresh_decision,
+    requests_until_quit, response_text, spawn_policy, status_line, tuner_reading, tuner_toggle,
+    unit_suffix,
 };
 
 struct TempDir(PathBuf);
@@ -1077,4 +1078,91 @@ fn open_units_round_trip_through_their_string() {
     let open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
     assert_eq!(open_units_from_string(&open_units_to_string(&open)), open);
     assert_eq!(open_units_from_string("not json"), BTreeSet::new());
+}
+
+fn bank_row(program: usize, name: &str) -> BankRow {
+    BankRow {
+        program,
+        name: name.to_string(),
+        active: false,
+        error: None,
+    }
+}
+
+fn filter_rows() -> Vec<BankRow> {
+    vec![
+        bank_row(0, "Clean"),
+        bank_row(1, "Crunch"),
+        bank_row(2, "High Gain"),
+        bank_row(12, "Lead"),
+    ]
+}
+
+#[test]
+fn filter_bank_matches_a_name_substring_in_any_case() {
+    let names: Vec<String> = filter_bank(&filter_rows(), "cR")
+        .into_iter()
+        .map(|row| row.name)
+        .collect();
+    assert_eq!(names, ["Crunch"]);
+    assert_eq!(
+        filter_bank(&filter_rows(), "GAIN"),
+        [bank_row(2, "High Gain")]
+    );
+}
+
+#[test]
+fn filter_bank_matches_the_program_number() {
+    assert_eq!(filter_bank(&filter_rows(), "12"), [bank_row(12, "Lead")]);
+    assert_eq!(filter_bank(&filter_rows(), " 1 "), [bank_row(1, "Crunch")]);
+}
+
+#[test]
+fn filter_bank_empty_query_keeps_every_row() {
+    assert_eq!(filter_bank(&filter_rows(), ""), filter_rows());
+    assert_eq!(filter_bank(&filter_rows(), "  "), filter_rows());
+}
+
+#[test]
+fn latency_ms_is_one_buffer() {
+    assert!((latency_ms(128, 48000) - 2.667).abs() < 0.001);
+    assert!((latency_ms(256, 44100) - 5.805).abs() < 0.001);
+}
+
+#[test]
+fn engine_readout_shows_the_engine_numbers() {
+    let status = json!({"sample_rate": 48000, "buffer_size": 128, "xruns": 3});
+    let rows: Vec<(String, String)> = [
+        ("Rate", "48 kHz"),
+        ("Buffer", "128 frames"),
+        ("Buffer latency", "2.7 ms"),
+        ("Xruns", "3"),
+        ("Daemon", "connected"),
+    ]
+    .map(|(label, value)| (label.to_string(), value.to_string()))
+    .into();
+    assert_eq!(engine_readout(Some(&status)), rows);
+    let status = json!({"sample_rate": 44100, "buffer_size": 64, "xruns": 0});
+    assert_eq!(engine_readout(Some(&status))[0].1, "44.1 kHz");
+}
+
+#[test]
+fn engine_readout_disconnected() {
+    assert_eq!(
+        engine_readout(None),
+        [("Daemon".to_string(), "disconnected".to_string())]
+    );
+}
+
+#[test]
+fn save_as_command_maps_to_request() {
+    assert_eq!(
+        requests_until_quit(vec![Command::SaveAs("Funk".to_string())]),
+        (
+            vec![Request::Save {
+                name: Some("Funk".to_string())
+            }],
+            false
+        )
+    );
 }
