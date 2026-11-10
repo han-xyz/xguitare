@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use crate::build::{build_rack, swap_rack};
 use crate::control::EngineState;
-use crate::{Bank, BankEntry};
+use crate::{Bank, BankEntry, Preset};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
@@ -47,6 +47,7 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
         }
     };
     state.revision += 1;
+    let written = take_saved(state, &changed);
     let mut actions = vec![Action::Reindex];
     let Some(active_file) = state.active.as_ref().map(|(file, _)| file.clone()) else {
         return actions;
@@ -55,7 +56,7 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
         return actions;
     }
     match state.bank.position(&active_file) {
-        Some(program) => actions.extend(reload(state, program)),
+        Some(program) => actions.extend(reload(state, program, written.get(&active_file))),
         None => actions.push(Action::Warn(format!(
             "active preset file {} removed; still running",
             active_file.display()
@@ -64,7 +65,21 @@ pub fn apply(state: &mut EngineState, changed: &[PathBuf]) -> Vec<Action> {
     actions
 }
 
-fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
+/// Removes the `save` records of the changed files, except for a file that does not parse yet, which may still be being written.
+fn take_saved(state: &mut EngineState, changed: &[&PathBuf]) -> HashMap<PathBuf, Preset> {
+    let bank = &state.bank;
+    state
+        .saved
+        .extract_if(|file, _| {
+            changed.iter().any(|path| same_file(path, file))
+                && !bank.position(file).is_some_and(|program| {
+                    matches!(bank.entries[program], BankEntry::Invalid { .. })
+                })
+        })
+        .collect()
+}
+
+fn reload(state: &mut EngineState, program: usize, written: Option<&Preset>) -> Vec<Action> {
     let preset = match &state.bank.entries[program] {
         BankEntry::Invalid { file, error } => {
             return vec![Action::LogAndKeep {
@@ -74,11 +89,7 @@ fn reload(state: &mut EngineState, program: usize) -> Vec<Action> {
         }
         BankEntry::Valid { preset, .. } => preset.clone(),
     };
-    let own_write = state
-        .saved
-        .remove(state.bank.entries[program].file())
-        .as_ref()
-        == Some(&preset);
+    let own_write = written == Some(&preset);
     if own_write
         || state
             .active

@@ -106,7 +106,7 @@ pub struct EngineState {
     /// Whether the live Rack has changed since the active Preset was loaded, reloaded or saved.
     pub modified: bool,
     pub peaks: PeakMeters,
-    /// The Preset `save` last wrote to each file, until the Bank watcher sees that file change.
+    /// The Preset `save` last wrote to each file, until the Bank watcher sees that file change or a `load`.
     pub saved: HashMap<PathBuf, Preset>,
 }
 
@@ -405,6 +405,7 @@ fn load(
     let payload = json!({"program": program, "name": preset.name});
     install_preset(state, file, preset, warnings)?;
     state.modified = false;
+    state.saved.clear();
     Ok(payload)
 }
 

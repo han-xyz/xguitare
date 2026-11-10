@@ -279,11 +279,21 @@ fn own_save_keeps_later_live_change() {
         };
         assert!(matches!(handle(&mut state, rack_move).0, Response::Ok(_)));
         assert_eq!(
-            apply(&mut state, &[saved]),
+            apply(&mut state, std::slice::from_ref(&saved)),
             [Action::Reindex, Action::Nothing]
         );
         assert_eq!(module_ids(&state), ["gain", "gate"], "{test}");
         assert!(state.modified, "{test}");
+        let text = fs::read_to_string(&saved).unwrap();
+        fs::write(&saved, text).unwrap();
+        assert!(
+            matches!(
+                &apply(&mut state, &[saved])[..],
+                [Action::Reindex, Action::Reload { .. }]
+            ),
+            "{test}"
+        );
+        assert_eq!(module_ids(&state), ["gate", "gain"], "{test}");
     }
 }
 
@@ -301,6 +311,48 @@ fn outside_edit_after_save_reloads() {
         [Action::Reindex, Action::Reload { program: 0 }]
     );
     assert_eq!(active_level(&state), 2.0);
+}
+
+#[test]
+fn record_of_inactive_file_does_not_hide_outside_edit() {
+    let (mut state, _audio) = state("stale-record");
+    let file = active_file(&state);
+    let load = |preset: &str| Request::Load {
+        preset: preset.to_string(),
+    };
+    let set = Request::Set {
+        param: "gain.level".to_string(),
+        value: -6.0,
+    };
+    assert!(matches!(handle(&mut state, set).0, Response::Ok(_)));
+    assert!(matches!(
+        handle(&mut state, Request::Save { name: None }).0,
+        Response::Ok(_)
+    ));
+    let saved_text = fs::read_to_string(&file).unwrap();
+    assert!(matches!(
+        handle(&mut state, load("Loud")).0,
+        Response::Ok(_)
+    ));
+    assert_eq!(
+        apply(&mut state, std::slice::from_ref(&file)),
+        [Action::Reindex]
+    );
+    fs::write(&file, CLEAN.replace("level = -3", "level = 2")).unwrap();
+    assert_eq!(
+        apply(&mut state, std::slice::from_ref(&file)),
+        [Action::Reindex]
+    );
+    assert!(matches!(
+        handle(&mut state, load("Clean")).0,
+        Response::Ok(_)
+    ));
+    fs::write(&file, saved_text).unwrap();
+    assert_eq!(
+        apply(&mut state, &[file]),
+        [Action::Reindex, Action::Reload { program: 0 }]
+    );
+    assert_eq!(active_level(&state), -6.0);
 }
 
 fn empty_config(dir: &Path) -> Config {

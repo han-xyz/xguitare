@@ -1639,6 +1639,11 @@ fn write_new_falls_back_when_hard_links_fail() {
             "{errno}"
         );
     }
+    let denied = dir.0.join("09-denied.toml");
+    let refuse = |_: &Path, _: &Path| Err(io::Error::from_raw_os_error(13));
+    let err = write_new(&denied, "name = \"New\"\n", refuse).unwrap_err();
+    assert_eq!(err.raw_os_error(), Some(13));
+    assert!(!denied.exists());
     let taken = dir.0.join("01-clean.toml");
     let before = fs::read_to_string(&taken).unwrap();
     let refuse = |_: &Path, _: &Path| Err(io::Error::from_raw_os_error(95));
