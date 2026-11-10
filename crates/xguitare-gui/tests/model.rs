@@ -28,6 +28,7 @@ use xguitare_gui::model::{
     shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
     typed_value, unit_suffix,
 };
+use xguitare_gui::model::{CLOSED_KNOB_WIDTH, closed_unit_rows};
 
 struct TempDir(PathBuf);
 
@@ -1597,4 +1598,14 @@ fn ports_and_settings_commands_become_requests() {
             false
         )
     );
+}
+
+#[test]
+fn closed_unit_wraps_knobs_that_do_not_fit() {
+    assert_eq!(closed_unit_rows(5, 6.0 * CLOSED_KNOB_WIDTH), 1);
+    assert_eq!(closed_unit_rows(5, 5.0 * CLOSED_KNOB_WIDTH), 1);
+    assert_eq!(closed_unit_rows(5, 3.5 * CLOSED_KNOB_WIDTH), 2);
+    assert_eq!(closed_unit_rows(7, 3.0 * CLOSED_KNOB_WIDTH), 3);
+    assert_eq!(closed_unit_rows(3, 10.0), 3);
+    assert_eq!(closed_unit_rows(0, 500.0), 1);
 }

@@ -883,6 +883,15 @@ pub fn unit_suffix(unit: &str) -> &'static str {
     }
 }
 
+/// The width one small knob takes in a closed unit, with its label, its value field and the gap after it.
+pub const CLOSED_KNOB_WIDTH: f32 = 114.0;
+
+/// Rows of small knobs a closed unit of `knob_count` Parameters needs in `width`: as many per row as fit, at least one per row and one row.
+pub fn closed_unit_rows(knob_count: usize, width: f32) -> usize {
+    let per_row = ((width / CLOSED_KNOB_WIDTH).floor() as usize).max(1);
+    knob_count.div_ceil(per_row).max(1)
+}
+
 const KILO: f64 = 1000.0;
 const RATIO_PARAM: &str = "ratio";
 

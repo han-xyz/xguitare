@@ -10,7 +10,8 @@ use xguitare_core::Config;
 use xguitare_gui::app::App;
 
 const APP_NAME: &str = "xguitare";
-const WINDOW_SIZE: [f32; 2] = [960.0, 640.0];
+const WINDOW_SIZE: [f32; 2] = [1280.0, 800.0];
+const MIN_WINDOW_SIZE: [f32; 2] = [1024.0, 640.0];
 
 #[derive(Parser)]
 #[command(
@@ -52,7 +53,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
-            .with_inner_size(WINDOW_SIZE),
+            .with_inner_size(WINDOW_SIZE)
+            .with_min_inner_size(MIN_WINDOW_SIZE),
         ..Default::default()
     };
     eframe::run_native(

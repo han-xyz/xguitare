@@ -9,11 +9,11 @@ use egui::{
 use xguitare_core::control::SILENCE_DB;
 
 use crate::model::{
-    ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KnobKey, NO_SIGNAL, ParamRow, PeakHold,
-    Rgb, Snapshot, Throttle, TunerReading, autoscroll_delta, cabinet_ir, cents_fraction,
-    drop_index, format_value, in_tune, key_step, knob_fraction, knob_param_value, move_target,
-    palette, param_label, param_rows, peak_db, peak_text, tuner_header_text, tuner_reading,
-    typed_text, typed_value,
+    CLOSED_KNOB_WIDTH, ClipLatch, Command, Direction, EAR_WIDTH, Feedback, KnobKey, NO_SIGNAL,
+    ParamRow, PeakHold, Rgb, Snapshot, Throttle, TunerReading, autoscroll_delta, cabinet_ir,
+    cents_fraction, closed_unit_rows, drop_index, format_value, in_tune, key_step, knob_fraction,
+    knob_param_value, move_target, palette, param_label, param_rows, peak_db, peak_text,
+    tuner_header_text, tuner_reading, typed_text, typed_value,
 };
 use crate::widgets::{self, KnobSize, colour};
 
@@ -46,6 +46,10 @@ const NO_SIGNAL_SIZE: f32 = 40.0;
 const VALUE_FIELD_WIDTH: f32 = 64.0;
 const LARGE_KNOB_COLUMN_WIDTH: f32 = 84.0;
 const SMALL_KNOB_TOP: f32 = 4.0;
+const FOCUS_PENDING: &str = "focus pending";
+const CHEVRON_WIDTH: f32 = 20.0;
+const KNOB_FIELD_GAP: f32 = 8.0;
+const HEADER_ITEMS_AROUND_KNOBS: usize = 4;
 const KNOB_KEYS: [(Key, KnobKey); 6] = [
     (Key::ArrowUp, KnobKey::Up),
     (Key::ArrowDown, KnobKey::Down),
@@ -132,18 +136,26 @@ fn rack_unit<R>(
     InnerResponse::new(inner, response)
 }
 
-/// The unit's top row, as tall as a closed unit's content, items centred in it.
+/// The unit's top row, items centred in it: one closed unit's content tall, or all of a closed unit's knob rows.
 fn unit_header<R>(
     ui: &mut Ui,
     sense: Sense,
+    height: f32,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> InnerResponse<R> {
-    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), HEADER_HEIGHT));
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), height));
     let header = UiBuilder::new()
         .max_rect(rect)
         .layout(Layout::left_to_right(Align::Center))
         .sense(sense);
     ui.scope_builder(header, content)
+}
+
+/// What a closed unit in `ui` leaves its knobs: the unit's width less its margins and the fixed header items around the knobs.
+fn closed_knobs_width(ui: &Ui) -> f32 {
+    let gaps = HEADER_ITEMS_AROUND_KNOBS as f32 * ui.spacing().item_spacing.x;
+    let fixed = LAMP_SLOT + UNIT_NAME_WIDTH + CHEVRON_WIDTH + MOVE_BUTTONS_WIDTH + gaps;
+    (ui.available_width() - 2.0 * f32::from(UNIT_SIDE_MARGIN) - fixed).max(0.0)
 }
 
 fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
@@ -210,7 +222,7 @@ fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) {
     };
     let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
     rack_unit(ui, "Tuner unit", fill, height, |ui| {
-        unit_header(ui, Sense::hover(), |ui| {
+        unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
             unit_lamp(ui, colour(palette().green), open);
             unit_name(ui, TUNER_LABEL);
             ui.label(RichText::new(tuner_header_text(reading.as_ref())).strong());
@@ -324,23 +336,32 @@ fn module_unit(
     let open = open_units.contains(module);
     let type_name = unit.rows.first().map_or("", |row| row.module_type.as_str());
     let accent = widgets::accent(type_name);
-    let (fill, height) = if open {
-        (palette().unit_open, OPEN_UNIT_HEIGHT)
+    let knobs_width = closed_knobs_width(ui);
+    let rows = closed_unit_rows(unit.rows.len(), knobs_width) as f32;
+    let (fill, height, header_height) = if open {
+        (palette().unit_open, OPEN_UNIT_HEIGHT, HEADER_HEIGHT)
     } else {
-        (palette().unit, UNIT_HEIGHT)
+        let height = UNIT_HEIGHT * rows;
+        (
+            palette().unit,
+            height,
+            height - 2.0 * f32::from(UNIT_MARGIN),
+        )
     };
     let mut toggled = false;
     let inner = rack_unit(ui, &format!("{module} unit"), fill, height, |ui| {
         let mut commands = Vec::new();
-        let header = unit_header(ui, Sense::click(), |ui| {
+        let header = unit_header(ui, Sense::click(), header_height, |ui| {
             unit_lamp(ui, accent, true);
             unit_name(ui, &module_label(module, unit.rows));
             let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
-            toggled |= ui.small_button(chevron).clicked();
-            let knobs_width = (ui.available_width() - MOVE_BUTTONS_WIDTH).max(0.0);
-            let row = Layout::left_to_right(Align::Min);
-            ui.allocate_ui_with_layout(vec2(knobs_width, HEADER_HEIGHT), row, |ui| {
-                ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
+            let chevron = Button::new(chevron)
+                .small()
+                .min_size(vec2(CHEVRON_WIDTH, 0.0));
+            toggled |= ui.add(chevron).clicked();
+            let rows = Layout::left_to_right(Align::Min).with_main_wrap(true);
+            ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
+                ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
                 if !open {
                     commands.extend(param_knobs(ui, unit.rows, KnobSize::Small, accent, knobs));
                 }
@@ -481,7 +502,7 @@ fn param_knob(
         let knob = widgets::rack_knob(ui, size, fraction, accent);
         let ctrl = ui.input(|input| input.modifiers.ctrl);
         if knob.response.secondary_clicked() || (knob.response.clicked() && ctrl) {
-            ui.memory_mut(|memory| memory.request_focus(field_id));
+            ui.data_mut(|data| data.insert_temp(field_id_pending(field_id), true));
         }
         let keys = if knob.response.has_focus() {
             knob_keys(ui)
@@ -501,7 +522,10 @@ fn param_knob(
     };
     let (value, released, typed) = match size {
         KnobSize::Small => {
-            ui.horizontal_top(|ui| {
+            let group = Layout::left_to_right(Align::Min);
+            ui.allocate_ui_with_layout(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT), group, |ui| {
+                ui.set_min_size(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT));
+                ui.spacing_mut().item_spacing = vec2(KNOB_FIELD_GAP, UNIT_GAP);
                 let (value, released, now) = ui
                     .vertical(|ui| {
                         ui.add_space(SMALL_KNOB_TOP);
@@ -544,6 +568,10 @@ fn param_knob(
     knobs.throttle.on_drag(&row.address, value, knobs.now)
 }
 
+fn field_id_pending(field_id: Id) -> Id {
+    field_id.with(FOCUS_PENDING)
+}
+
 fn knob_keys(ui: &mut Ui) -> Vec<KnobKey> {
     ui.input_mut(|input| {
         KNOB_KEYS
@@ -555,7 +583,7 @@ fn knob_keys(ui: &mut Ui) -> Vec<KnobKey> {
     })
 }
 
-/// Shows the formatted value; while focused it holds the bare number to edit. Enter returns the typed number; Esc or a click elsewhere drops the edit, and text that is no number also puts a footer message.
+/// Shows the formatted value; while focused it holds the bare number to edit. A focus asked for by a click on the knob waits for a frame without a click, which would take the focus away again. Enter returns the typed number; Esc or a click elsewhere drops the edit, and text that is no number also puts a footer message.
 fn value_field(
     ui: &mut Ui,
     id: Id,
@@ -573,6 +601,15 @@ fn value_field(
                 .desired_width(VALUE_FIELD_WIDTH),
         )
         .labelled_by(label);
+    let pending = field_id_pending(id);
+    let clicking = ui.input(|input| input.pointer.any_pressed() || input.pointer.any_click());
+    if !clicking
+        && ui
+            .data_mut(|data| data.remove_temp::<bool>(pending))
+            .is_some()
+    {
+        edit.request_focus();
+    }
     if edit.has_focus() {
         let text = if editing.is_some() {
             text

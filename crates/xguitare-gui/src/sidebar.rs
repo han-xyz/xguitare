@@ -179,7 +179,6 @@ fn add_module(ui: &mut Ui, snapshot: &Snapshot, add: &mut AddDraft) -> Option<Co
                 let selected = chosen == Some(module_type);
                 if ui.selectable_label(selected, module_type.label()).clicked() {
                     add.type_name = Some(module_type.type_name.clone());
-                    add.place = None;
                 }
             }
         })

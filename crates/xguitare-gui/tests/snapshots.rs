@@ -14,6 +14,7 @@ use xguitare_gui::app::App;
 use xguitare_gui::model::{Command, Link, ModuleType, Snapshot};
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
+const MIN_WINDOW: Vec2 = Vec2::new(1024.0, 640.0);
 const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
 const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
 const RIGHT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR";
@@ -168,10 +169,14 @@ fn write_png(harness: &mut Harness<App>, name: &str) {
 }
 
 fn harness() -> (Harness<'static, App>, Receiver<Command>) {
+    harness_sized(WINDOW)
+}
+
+fn harness_sized(size: Vec2) -> (Harness<'static, App>, Receiver<Command>) {
     let config = bass_config();
     let (commands, sent) = mpsc::channel();
     let mut harness = Harness::builder()
-        .with_size(WINDOW)
+        .with_size(size)
         .with_context_setup(|ctx| ctx.add_font_provider(Arc::new(SystemFontProvider::new())))
         .wgpu()
         .build_eframe(move |cc| App::with_snapshot(cc, &config, funk_snapshot(), commands));
@@ -238,6 +243,8 @@ fn gui_snapshots() {
     let (mut editing, _) = harness();
     edit_value(&mut editing, "Threshold", "-30");
     write_png(&mut editing, "value-editing");
+
+    write_png(&mut harness_sized(MIN_WINDOW).0, "minimum-window");
 }
 
 #[test]
@@ -248,6 +255,45 @@ fn units_have_fixed_heights() {
     open_unit(&mut harness, 0);
     assert_eq!(unit_height(&harness, "compressor unit"), 190.0);
     assert_eq!(unit_height(&harness, "preamp unit"), 64.0);
+}
+
+#[test]
+fn closed_units_wrap_their_knobs_in_the_minimum_window() {
+    let (harness, _) = harness_sized(MIN_WINDOW);
+    assert_eq!(unit_height(&harness, "compressor unit"), 128.0);
+    assert_eq!(unit_height(&harness, "tonestack unit"), 64.0);
+    for param in ["Threshold", "Ratio", "Attack", "Release", "Makeup"] {
+        let field = harness.get_by_role_and_label(Role::TextInput, param).rect();
+        let unit = harness.get_by_label("compressor unit").rect();
+        assert!(
+            unit.contains_rect(field),
+            "{param} field {field:?} outside {unit:?}"
+        );
+    }
+}
+
+#[test]
+fn right_click_on_a_knob_focuses_its_value_field() {
+    let (mut harness, _) = harness();
+    let field = harness
+        .get_by_role_and_label(Role::TextInput, "Threshold")
+        .rect();
+    let knob = egui::pos2(field.left() - 25.0, field.top() - 4.0);
+    harness.event(egui::Event::PointerMoved(knob));
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: knob,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(1);
+    }
+    harness.run_steps(2);
+    let field = harness.get_by_role_and_label(Role::TextInput, "Threshold");
+    assert!(field.is_focused());
+    assert_eq!(field.value().as_deref(), Some("\u{2212}24"));
 }
 
 #[test]
@@ -341,5 +387,28 @@ fn audio_and_settings_apply() {
                 ir_dir: None,
             },
         ]
+    );
+}
+
+#[test]
+fn place_chosen_before_the_type_is_kept() {
+    let (mut harness, sent) = harness();
+    harness.get_by_label("Place").click();
+    harness.run_steps(2);
+    harness.get_by_label("at the front").click();
+    harness.run_steps(2);
+    harness.get_by_label("Add Module").click();
+    harness.run_steps(2);
+    harness.get_by_label("gate (mono)").click();
+    harness.run_steps(2);
+    harness.get_by_label("Add").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::RackAdd {
+            type_name: "gate".to_string(),
+            after: None,
+            at: Some(0),
+        }]
     );
 }
