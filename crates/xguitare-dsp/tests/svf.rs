@@ -120,3 +120,12 @@ fn bounded_under_audio_rate_cutoff_modulation() {
         );
     }
 }
+
+#[test]
+fn unity_band_pass_peaks_at_zero_db_at_cutoff() {
+    for q in [0.5, 3.0, 12.0] {
+        let coefficients = SvfCoefficients::band_pass_unity(CUTOFF, q, SAMPLE_RATE);
+        let at_cutoff = measured_db(&coefficients, CUTOFF);
+        assert!(at_cutoff.abs() < 0.5, "q {q}: {at_cutoff} dB at cutoff");
+    }
+}

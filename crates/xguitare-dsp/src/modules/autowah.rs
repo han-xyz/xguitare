@@ -180,7 +180,7 @@ impl Autowah {
         let q = self.q.next_value();
         match self.values[MODE] as usize {
             LOW_PASS => SvfCoefficients::low_pass(cutoff, q, self.sample_rate),
-            BAND_PASS => SvfCoefficients::band_pass(cutoff, q, self.sample_rate),
+            BAND_PASS => SvfCoefficients::band_pass_unity(cutoff, q, self.sample_rate),
             _ => SvfCoefficients::high_pass(cutoff, q, self.sample_rate),
         }
     }

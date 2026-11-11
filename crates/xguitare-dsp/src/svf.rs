@@ -25,6 +25,13 @@ impl SvfCoefficients {
         SvfCoefficients::new(g, 1.0 / q, (0.0, 1.0, 0.0))
     }
 
+    /// The band-pass scaled to 0 dB at the cutoff for any `q`.
+    pub fn band_pass_unity(cutoff_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
+        let g = prewarp(cutoff_hz, sample_rate);
+        let k = 1.0 / q;
+        SvfCoefficients::new(g, k, (0.0, k, 0.0))
+    }
+
     pub fn high_pass(cutoff_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
         let g = prewarp(cutoff_hz, sample_rate);
         let k = 1.0 / q;
