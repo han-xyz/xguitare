@@ -214,7 +214,7 @@ Response:
 | `params[].unit` | `"dB"`, `"ms"`, `"Hz"`, `"%"`, or `""` for a plain number. |
 | `params[].min`, `params[].max` | The Parameter's range. |
 | `params[].default` | The value a new Module of this type starts with. |
-| `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`, `cabinet.low_cut`, `cabinet.high_cut`); `set` and the Module round other values. |
+| `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`, `cabinet.low_cut`, `cabinet.high_cut`, and every choice Parameter, such as `autowah.mode`); `set` and the Module round other values. |
 | `params[].labels` | The names of a choice Parameter's values, `["lp","bp","hp"]` for `autowah.mode`: value `n` means `labels[n]`, from 0 to `max`. `[]` for a plain number. `set` and Presets take the number. |
 | `params[].bypass` | Whether the Module is bypassed (see `bypass`); the same on every entry of one Module. |
 | `params[].ir` | Cabinet entries only: the Module's Cabinet IR name, as in the Preset's `ir` (`null` when it has none). Other Modules' entries have no `ir` key. |
