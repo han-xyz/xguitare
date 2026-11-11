@@ -1,0 +1,37 @@
+name = "Modern Grind"
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 35
+mid1_freq = 250
+mid1_gain = -3
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 70
+drive = 65
+level = -3
+bass = 3
+bass_freq = 1
+mid = 2
+mid_freq = 1
+treble = 2
+presence = 60
+crossover = 150
+
+[[module]]
+type = "limiter"
+[module.params]
+input = 0
+ceiling = -1
+release = 100
+lookahead = 1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -13.0

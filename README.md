@@ -154,7 +154,7 @@ bank_kind = "bass"
 
 Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `<config dir>/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
 
-The first run creates six Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module.
+The first run creates eight Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock, Envelope Funk, Modern Grind) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module, Envelope Funk `autowah` and `eq`, Modern Grind `eq`, `blend` and `limiter`. In a Preset's Rack the `limiter` is a mono Module and sits before the cabinet, so the cabinet's `level` sets the final peak (Modern Grind's is −13 dB); a limiter that is truly the last Module belongs on a Bus or the Master, which are stereo.
 
 ## CLI
 

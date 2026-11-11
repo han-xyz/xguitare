@@ -11,6 +11,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - `blend` Module, a bass DI blend drive: below `crossover` the signal stays clean, above it `presence` and `drive` clip it at `level`; `blend` mixes the clean input with that, and `bass` (40 or 80 Hz), `mid` (500 or 1000 Hz) and `treble` shape the result, also at `blend` 0.
 - `limiter` Module, a peak limiter for the end of a Rack, a Bus or the Master: `input` drives it, the output never exceeds `ceiling`, `release` sets the recovery and `lookahead` (0–5 ms) delays the sound so a peak is caught before it passes; on a Bus or the Master both sides share one gain.
 - `shaper` Module, a transient shaper: `attack` raises or lowers the start of each note and `sustain` what follows, with no threshold, plus `output` and `mix`; on a Bus or the Master both sides share one gain.
+- Bass starter Presets Envelope Funk (compressor, `autowah`, `eq`, cabinet) and Modern Grind (`eq`, `blend`, `limiter`, cabinet); an existing bass Bank is not touched.
 - GUI: the `eq` unit (`EQ`) shows its response curve, a small one when closed and, when open, a plot with a dot per band over four band columns of knobs.
 - GUI: a choice Parameter is a row of buttons in an open unit and a chip with the current choice in a closed one (a click on a two-way chip switches it); an open unit grows to hold its knobs, which wrap to another row between groups of Parameters.
 - Choice Parameters: the Control API `modules` and `get` entries carry `labels` (`["lp","bp","hp"]`; `[]` for a plain number) and `xguitare modules` prints them, `mode (lp|bp|hp)`. Presets and `set` keep the number.
@@ -22,7 +23,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - `status` shows `disk_overflows`, `count_in_remaining`, `loaded_audio_bytes`, `project_warning` and, while a Project is open, its transport, position, tempo, loop, click and Tracks; `settings` and `set_settings` take `projects_dir`.
 - The Control API `items` request and CLI `project items` list each Track's Items; `track_select` selects a Track.
 - The GUI turns into a Project view while a Project is open: transport bar, Track rows, a timeline with the Items, loop region and playhead, and the selected Track's Rack.
-- First run creates 8 guitar and 6 bass starter Presets (Rock, Blues, Funk; bass Rock); existing Banks are not touched.
+- First run creates 8 guitar and 8 bass starter Presets (Rock, Blues, Funk; bass Rock); existing Banks are not touched.
 - `get` and `get <module>` end each Module's lines with `<id>.bypass = yes|no`.
 - The Daemon follows a sample-rate change of the audio server: it rebuilds the Rack (Cabinet IRs resampled) and the Tuner at the new rate, logs `sample rate changed: 48000 -> 96000`, and `status` shows the new `sample_rate`.
 - `get` on a cabinet ends with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none).

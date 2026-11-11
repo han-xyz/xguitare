@@ -1,0 +1,39 @@
+name = "Envelope Funk"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -24
+ratio = 4
+attack = 5
+release = 80
+makeup = 3
+
+[[module]]
+type = "autowah"
+[module.params]
+mode = 1
+direction = 0
+sensitivity = 6
+attack = 5
+decay = 150
+freq_low = 250
+freq_high = 2000
+q = 4
+dry = 40
+wet = 100
+
+[[module]]
+type = "eq"
+[module.params]
+low_gain = 2
+mid1_freq = 400
+mid1_gain = -2
+high_cut = 8000
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = 12.0

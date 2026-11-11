@@ -75,14 +75,14 @@ fn guitar_bank_unchanged() {
 }
 
 #[test]
-fn bass_bank_seeds_six_presets_and_ir() {
+fn bass_bank_seeds_eight_presets_and_ir() {
     let temp = temp_dir("bass");
     let dir = temp.0.join("bank-bass");
     let created = ensure_bank(&dir, BankKind::Bass, 48_000).unwrap();
     assert_eq!(
         created,
         Created {
-            presets: 6,
+            presets: 8,
             ir: true
         }
     );
@@ -100,18 +100,27 @@ fn bass_bank_seeds_six_presets_and_ir() {
             "04-primus-fuzz.toml",
             "05-primus-flange.toml",
             "06-rock.toml",
+            "07-envelope-funk.toml",
+            "08-modern-grind.toml",
             "bass-cab.wav"
         ]
     );
     let bank = Bank::load_dir(&dir).unwrap();
     let mut names = Vec::new();
+    let mut rack_types = Vec::new();
     for entry in &bank.entries {
         let BankEntry::Valid { preset, .. } = entry else {
             panic!("invalid bass preset: {entry:?}");
         };
-        let (_, warnings) = preset.build(48_000.0, 128, &dir, &dir, 100.0).unwrap();
+        let (rack, warnings) = preset.build(48_000.0, 128, &dir, &dir, 100.0).unwrap();
         assert!(warnings.is_empty(), "{}: {warnings:?}", preset.name);
         names.push(preset.name.as_str());
+        let types: Vec<&str> = rack
+            .modules()
+            .iter()
+            .map(|(_, module)| module.spec().type_name)
+            .collect();
+        rack_types.push(types);
     }
     assert_eq!(
         names,
@@ -121,8 +130,20 @@ fn bass_bank_seeds_six_presets_and_ir() {
             "Primus Slap",
             "Primus Fuzz",
             "Primus Flange",
-            "Rock"
+            "Rock",
+            "Envelope Funk",
+            "Modern Grind"
         ]
+    );
+    assert_eq!(
+        rack_types[6],
+        ["compressor", "autowah", "eq", "cabinet"],
+        "Envelope Funk"
+    );
+    assert_eq!(
+        rack_types[7],
+        ["eq", "blend", "limiter", "cabinet"],
+        "Modern Grind"
     );
     let samples: Vec<f32> = hound::WavReader::open(dir.join("bass-cab.wav"))
         .unwrap()
@@ -232,5 +253,5 @@ fn starter_banks_build_without_warnings() {
             built += 1;
         }
     }
-    assert_eq!(built, 14);
+    assert_eq!(built, 16);
 }

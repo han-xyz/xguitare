@@ -40,6 +40,14 @@ const BASS_PRESETS: &[(&str, &str)] = &[
         include_str!("../bank-bass/05-primus-flange.toml"),
     ),
     ("06-rock.toml", include_str!("../bank-bass/06-rock.toml")),
+    (
+        "07-envelope-funk.toml",
+        include_str!("../bank-bass/07-envelope-funk.toml"),
+    ),
+    (
+        "08-modern-grind.toml",
+        include_str!("../bank-bass/08-modern-grind.toml"),
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
