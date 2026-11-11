@@ -2182,6 +2182,7 @@ fn module_title_is_sentence_case_with_a_differing_type() {
         ("Low drive".to_string(), Some("drive"))
     );
     assert_eq!(module_title("amp", ""), ("Amp".to_string(), None));
+    assert_eq!(module_title("eq", "eq"), ("EQ".to_string(), None));
 }
 
 fn choice_row(param: &str, labels: &[&str], value: f64) -> ParamRow {

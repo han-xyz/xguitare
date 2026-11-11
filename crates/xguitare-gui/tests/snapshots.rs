@@ -672,6 +672,132 @@ fn closed_chips_switch_two_choices_and_open_for_more() {
     assert_eq!(sent_now(&sent), []);
 }
 
+const EQ_SPEC: [(&str, f64, f64, f64, &str); 13] = [
+    ("low_cut", 10.0, 300.0, 10.0, "Hz"),
+    ("low_freq", 20.0, 500.0, 100.0, "Hz"),
+    ("low_gain", -15.0, 15.0, 0.0, "dB"),
+    ("mid1_freq", 40.0, 5000.0, 400.0, "Hz"),
+    ("mid1_gain", -15.0, 15.0, 0.0, "dB"),
+    ("mid1_q", 0.3, 10.0, 0.707, ""),
+    ("mid2_freq", 200.0, 10000.0, 2500.0, "Hz"),
+    ("mid2_gain", -15.0, 15.0, 0.0, "dB"),
+    ("mid2_q", 0.3, 10.0, 0.707, ""),
+    ("high_freq", 1000.0, 20000.0, 8000.0, "Hz"),
+    ("high_gain", -15.0, 15.0, 0.0, "dB"),
+    ("high_cut", 1000.0, 20000.0, 20000.0, "Hz"),
+    ("output", -12.0, 12.0, 0.0, "dB"),
+];
+
+/// The Funk Rack with an eq before the preamp, its Parameters at `values` and the rest at their defaults.
+fn eq_snapshot(values: &[(&str, f64)]) -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    let eq = EQ_SPEC.map(|(name, min, max, default, unit)| {
+        let value = values
+            .iter()
+            .find(|(param, _)| *param == name)
+            .map_or(default, |(_, value)| *value);
+        param("eq", name, value, (min, max, default, unit, false))
+    });
+    let params = snapshot.params.as_mut().unwrap()["params"]
+        .as_array_mut()
+        .unwrap();
+    let before_preamp = params
+        .iter()
+        .position(|param| param["module"] == "preamp")
+        .unwrap();
+    params.splice(before_preamp..before_preamp, eq);
+    snapshot
+}
+
+/// Blueprint frame 3.
+const EQ_EXAMPLE: [(&str, f64); 5] = [
+    ("low_cut", 40.0),
+    ("low_gain", 4.0),
+    ("mid1_gain", -3.0),
+    ("mid2_gain", 2.0),
+    ("high_cut", 12_000.0),
+];
+const EQ_CLOSED_INDEX: usize = 1;
+/// More than the footer below the Rack's view.
+const FOOTER_ALLOWANCE: f32 = 60.0;
+
+/// Scrolls the eq unit to the top of the Rack's view when the window cuts its bottom off, then hovers the knob left of the value field named `field`.
+fn hover_knob_of(harness: &mut Harness<App>, window: Vec2, field: &str) {
+    let unit = harness.get_by_label("eq unit").rect();
+    if unit.bottom() > window.y - FOOTER_ALLOWANCE {
+        harness.event(Event::PointerMoved(unit.center()));
+        harness.event(Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, -unit.top()),
+            phase: TouchPhase::Move,
+            source: MouseWheelSource::Unknown,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(20);
+    }
+    let field = harness.get_by_role_and_label(Role::TextInput, field).rect();
+    let knob = pos2(field.left() - 25.0, field.top());
+    harness.hover_at(knob);
+    harness.run_steps(2);
+}
+
+#[test]
+fn eq_snapshots() {
+    for (size, name) in [
+        (DEFAULT_WINDOW, "eq-open-1280x800"),
+        (MIN_WINDOW, "eq-open-1024x640"),
+    ] {
+        let (mut open, _, _dir) = harness_with(size, eq_snapshot(&EQ_EXAMPLE));
+        open_unit(&mut open, EQ_CLOSED_INDEX);
+        hover_knob_of(&mut open, size, "Mid 1 freq");
+        write_png(&mut open, name);
+    }
+    let (mut defaults, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&[]));
+    open_unit(&mut defaults, EQ_CLOSED_INDEX);
+    write_png(&mut defaults, "eq-defaults");
+    let (mut closed, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&EQ_EXAMPLE));
+    write_png(&mut closed, "eq-closed");
+}
+
+#[test]
+fn open_eq_holds_its_curve_and_band_knobs() {
+    for size in [DEFAULT_WINDOW, MIN_WINDOW, WINDOW] {
+        let (mut harness, _, _dir) = harness_with(size, eq_snapshot(&EQ_EXAMPLE));
+        open_unit(&mut harness, EQ_CLOSED_INDEX);
+        let unit = harness.get_by_label("eq unit").rect();
+        let curve = harness.get_by_role(Role::Image).rect();
+        assert!(unit.contains_rect(curve), "curve outside at {size:?}");
+        let next_unit = unit_top(&harness, "preamp");
+        let fields: Vec<_> = harness
+            .get_all_by_role(Role::TextInput)
+            .map(|field| field.rect())
+            .filter(|field| unit.x_range().contains(field.center().x))
+            .filter(|field| field.top() >= unit.top() && field.top() < next_unit)
+            .collect();
+        assert_eq!(fields.len(), 13, "at {size:?}");
+        for field in fields {
+            assert!(
+                unit.contains_rect(field),
+                "{field:?} outside {unit:?} at {size:?}"
+            );
+        }
+        harness.get_by_role_and_label(Role::TextInput, "Mid 1 freq");
+        harness.get_by_label("EQ");
+    }
+}
+
+#[test]
+fn closed_eq_shows_a_named_mini_curve_on_one_row() {
+    let (harness, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&EQ_EXAMPLE));
+    let curve = harness.get_by_role_and_label(
+        Role::Image,
+        "EQ curve: Low cut 40 Hz; Low 4 dB at 100 Hz; Mid 1 −3 dB at 400 Hz, Q 0.7; \
+         Mid 2 2 dB at 2.5 kHz, Q 0.7; High 0 dB at 8 kHz; High cut 12 kHz; Output 0 dB",
+    );
+    assert_eq!(curve.rect().size(), Vec2::new(160.0, 36.0));
+    assert_eq!(unit_height(&harness, "eq unit"), 64.0);
+}
+
 fn metronome_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
     snapshot.status.as_mut().unwrap()["metronome"] = json!({

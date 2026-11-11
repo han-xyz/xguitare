@@ -3,12 +3,18 @@ use std::time::Instant;
 
 use egui::{
     Align, Align2, Button, Color32, ComboBox, CursorIcon, DragAndDrop, FontId, FontSelection,
-    Frame, Id, InnerResponse, Key, Label, Layout, Margin, Modifiers, Rect, Response, RichText,
-    Role, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo,
-    WidgetText, pos2, vec2,
+    Frame, Id, InnerResponse, Key, Label, Layout, Margin, Modifiers, Painter, Rect, Response,
+    RichText, Role, ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
+    WidgetInfo, WidgetText, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 
+use crate::eq_model::{
+    EQ, EQ_AXIS_LABEL_HEIGHT, EQ_BAND_TITLE_HEIGHT, EQ_CURVE_POINTS, EQ_MINI_HEIGHT,
+    EQ_MINI_POINTS, EQ_MINI_WIDTH, EQ_PLOT_HEIGHT, EQ_SECTION_GAP, EqBand, EqDot, eq_bands,
+    eq_curve, eq_curve_name, eq_dot_of_param, eq_dots, eq_open_height,
+};
+use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged, EAR_WIDTH,
     Feedback, KnobKey, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, Rgb,
@@ -19,6 +25,7 @@ use crate::model::{
     param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
     unit_style,
 };
+use crate::project_model::sample_rate;
 use crate::widgets::{self, KnobSize, colour};
 
 const NO_IR: &str = "none";
@@ -380,6 +387,10 @@ fn module_units(
                     current: cabinet_ir(params, module),
                     irs: &snapshot.irs,
                 }),
+            sample_rate: snapshot
+                .status
+                .as_ref()
+                .map(|status| sample_rate(status) as f32),
         };
         let (unit_commands, rect, handle) = module_unit(ui, &unit, knobs, open_units);
         commands.extend(unit_commands);
@@ -476,6 +487,8 @@ struct ModuleUnit<'a> {
     bypassed: bool,
     place: (usize, usize),
     ir_choice: Option<IrChoice<'a>>,
+    /// The Daemon's rate; `None` while it is disconnected.
+    sample_rate: Option<f32>,
 }
 
 /// The unit's commands, its rect, and the drag response of its header and its two ears.
@@ -494,15 +507,22 @@ fn module_unit(
     let type_name = unit.rows.first().map_or("", |row| row.module_type.as_str());
     let accent = widgets::accent(type_name);
     let style = unit_style(unit.bypassed);
+    let is_eq = type_name == EQ;
     let knobs_width = closed_knobs_width(ui);
-    let rows = closed_unit_rows(unit.rows.len(), knobs_width) as f32;
-    let open_rows = open_knob_rows(type_name, unit.rows.len(), open_knobs_width(ui));
+    let rows = if is_eq {
+        1.0
+    } else {
+        closed_unit_rows(unit.rows.len(), knobs_width) as f32
+    };
+    let open_width = open_knobs_width(ui);
+    let open_rows = open_knob_rows(type_name, unit.rows.len(), open_width);
+    let open_height = if is_eq {
+        eq_open_height(&eq_bands(unit.rows))
+    } else {
+        open_unit_height(open_rows.len())
+    };
     let (fill, height, header_height) = if open {
-        (
-            palette().unit_open,
-            open_unit_height(open_rows.len()),
-            HEADER_HEIGHT,
-        )
+        (palette().unit_open, open_height, HEADER_HEIGHT)
     } else {
         let height = UNIT_HEIGHT * rows;
         (
@@ -540,7 +560,9 @@ fn module_unit(
             ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
                 ui.multiply_opacity(style.opacity);
-                if !open {
+                if !open && is_eq {
+                    eq_mini(ui, unit, accent, knobs);
+                } else if !open {
                     let (closed_commands, asked) = closed_params(ui, unit.rows, accent, knobs);
                     commands.extend(closed_commands);
                     open_asked = asked;
@@ -558,7 +580,11 @@ fn module_unit(
             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                 ui.scope(|ui| {
                     ui.multiply_opacity(style.opacity);
-                    commands.extend(open_params(ui, unit.rows, &open_rows, accent, knobs));
+                    if is_eq {
+                        commands.extend(eq_editor(ui, unit, open_width, accent, knobs));
+                    } else {
+                        commands.extend(open_params(ui, unit.rows, &open_rows, accent, knobs));
+                    }
                 });
                 ui.with_layout(Layout::top_down(Align::Max), |ui| {
                     if let Some(ir_choice) = &unit.ir_choice {
@@ -727,6 +753,131 @@ fn open_params(
     commands
 }
 
+/// The 0 dB line of a bypassed unit's eq plot stays at full strength while the rest dims.
+fn eq_painters(ui: &Ui) -> (Painter, Painter) {
+    let painter = ui.painter().clone();
+    let mut zero_line = painter.clone();
+    zero_line.set_opacity(1.0);
+    (painter, zero_line)
+}
+
+/// A closed eq's curve in place of its knobs; a click on it opens the unit like a click on the header.
+fn eq_mini(ui: &mut Ui, unit: &ModuleUnit, accent: Color32, knobs: &Knobs) {
+    let shown: Vec<ParamRow> = unit.rows.iter().map(|row| shown_row(row, knobs)).collect();
+    let (slot, _) = ui.allocate_exact_size(vec2(EQ_MINI_WIDTH, HEADER_HEIGHT), Sense::hover());
+    let rect = Rect::from_center_size(slot.center(), vec2(EQ_MINI_WIDTH, EQ_MINI_HEIGHT));
+    let response = ui.interact(rect, Id::unique(("eq mini", unit.module)), Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Image, true, eq_curve_name(&shown)));
+    let curve = unit
+        .sample_rate
+        .map(|rate| eq_curve(&shown, rate, EQ_MINI_POINTS));
+    let (painter, zero_line) = eq_painters(ui);
+    let painters = EqPainters {
+        painter: &painter,
+        zero_line: &zero_line,
+    };
+    paint_mini(&painters, rect, curve.as_deref(), accent);
+}
+
+/// An open eq: the response curve over four band columns of small knobs; the dot of the band whose knob is hovered, dragged or focused is ringed.
+fn eq_editor(
+    ui: &mut Ui,
+    unit: &ModuleUnit,
+    width: f32,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let mut active = None;
+    let area = ui
+        .vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.add_space(EQ_SECTION_GAP);
+            let plot_size = vec2(width, EQ_PLOT_HEIGHT + EQ_AXIS_LABEL_HEIGHT);
+            let (area, _) = ui.allocate_exact_size(plot_size, Sense::hover());
+            ui.add_space(EQ_SECTION_GAP);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for band in eq_bands(unit.rows) {
+                    let (band_commands, in_use) =
+                        eq_band_column(ui, unit.rows, &band, accent, knobs);
+                    commands.extend(band_commands);
+                    active = active.or(in_use);
+                }
+            });
+            area
+        })
+        .inner;
+    let shown: Vec<ParamRow> = unit.rows.iter().map(|row| shown_row(row, knobs)).collect();
+    let plot = ui.interact(area, Id::unique(("eq plot", unit.module)), Sense::hover());
+    plot.widget_info(|| WidgetInfo::labeled(Role::Image, true, eq_curve_name(&shown)));
+    let curve = unit.sample_rate.map(|rate| {
+        (
+            eq_curve(&shown, rate, EQ_CURVE_POINTS),
+            eq_dots(&shown, rate, active),
+        )
+    });
+    let (painter, zero_line) = eq_painters(ui);
+    let painters = EqPainters {
+        painter: &painter,
+        zero_line: &zero_line,
+    };
+    let lines = curve
+        .as_ref()
+        .map(|(curve, dots)| PlotLines { curve, dots });
+    paint_plot(&painters, area, lines, accent);
+    commands
+}
+
+/// A band's title over its small knobs; also the band's dot when one of its knobs is in use.
+fn eq_band_column(
+    ui: &mut Ui,
+    rows: &[ParamRow],
+    band: &EqBand,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> (Vec<Command>, Option<EqDot>) {
+    let mut commands = Vec::new();
+    let mut active = None;
+    ui.vertical(|ui| {
+        ui.set_width(CLOSED_KNOB_WIDTH);
+        ui.spacing_mut().item_spacing.y = UNIT_GAP;
+        let (title, _) = ui.allocate_exact_size(
+            vec2(CLOSED_KNOB_WIDTH, EQ_BAND_TITLE_HEIGHT),
+            Sense::hover(),
+        );
+        let colours = palette();
+        ui.painter().text(
+            title.left_center(),
+            Align2::LEFT_CENTER,
+            band.title,
+            FontId::proportional(SMALL_TEXT_SIZE),
+            colour(colours.text),
+        );
+        ui.painter().hline(
+            title.left()..=title.right() - KNOB_FIELD_GAP,
+            title.bottom(),
+            Stroke::new(1.0, colour(colours.edge_light)),
+        );
+        for knob in &band.knobs {
+            let row = &rows[knob.index];
+            let (command, in_use) = param_knob_named(
+                ui,
+                row,
+                (knob.label, knob.name),
+                KnobSize::Small,
+                accent,
+                knobs,
+            );
+            commands.extend(command);
+            if in_use {
+                active = eq_dot_of_param(&row.param);
+            }
+        }
+    });
+    (commands, active)
+}
+
 /// The row as shown: its value, or the one sent last while the Daemon has not answered it yet.
 fn shown_row(row: &ParamRow, knobs: &Knobs) -> ParamRow {
     let held = knobs.throttle.hold_local(&row.address, knobs.revision);
@@ -857,11 +1008,6 @@ fn choice_chip(
     }
 }
 
-/// A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click focuses the knob's value field.
-#[allow(
-    clippy::float_cmp,
-    reason = "an untouched knob returns the exact value it was shown"
-)]
 fn param_knob(
     ui: &mut Ui,
     row: &ParamRow,
@@ -869,6 +1015,23 @@ fn param_knob(
     accent: Color32,
     knobs: &mut Knobs,
 ) -> Option<Command> {
+    let label = param_label(&row.param);
+    param_knob_named(ui, row, (&label, &label), size, accent, knobs).0
+}
+
+/// A knob showing `label` whose value field is named `name`; also whether the knob is hovered, dragged or focused. A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click focuses the knob's value field.
+#[allow(
+    clippy::float_cmp,
+    reason = "an untouched knob returns the exact value it was shown"
+)]
+fn param_knob_named(
+    ui: &mut Ui,
+    row: &ParamRow,
+    (label, name): (&str, &str),
+    size: KnobSize,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> (Option<Command>, bool) {
     let held = knobs.throttle.hold_local(&row.address, knobs.revision);
     let shown = match knobs.locals.get(&row.address) {
         Some(local) if held => *local,
@@ -876,9 +1039,16 @@ fn param_knob(
     };
     let fraction = knob_fraction(shown as f32, row.min as f32, row.max as f32);
     let field_id = Id::unique(("value", &row.address));
-    let label = muted_text(param_label(&row.param));
-    let knob_and_field = |ui: &mut Ui, knobs: &mut Knobs| {
+    let label = muted_text(label);
+    let name_label = |ui: &mut Ui, label: RichText| {
+        let response = ui.label(label);
+        response.widget_info(|| WidgetInfo::labeled(Role::Label, true, name));
+        response
+    };
+    let mut in_use = false;
+    let mut knob_and_field = |ui: &mut Ui, knobs: &mut Knobs| {
         let knob = widgets::rack_knob(ui, size, fraction, accent);
+        in_use = knob.response.hovered() || knob.response.dragged() || knob.response.has_focus();
         let ctrl = ui.input(|input| input.modifiers.ctrl);
         if knob.response.secondary_clicked() || (knob.response.clicked() && ctrl) {
             ui.data_mut(|data| data.insert_temp(field_id_pending(field_id), true));
@@ -913,7 +1083,7 @@ fn param_knob(
                     .inner;
                 let typed = ui
                     .vertical(|ui| {
-                        let label = ui.label(label);
+                        let label = name_label(ui, label);
                         let field = (field_id, VALUE_FIELD_WIDTH);
                         value_field(ui, field, label.id, row, value, (knobs.feedback, now))
                     })
@@ -925,7 +1095,7 @@ fn param_knob(
         KnobSize::Large => {
             let column = Layout::top_down(Align::Center);
             ui.allocate_ui_with_layout(vec2(LARGE_KNOB_COLUMN_WIDTH, 0.0), column, |ui| {
-                let label = ui.label(label);
+                let label = name_label(ui, label);
                 let (value, released, now) = knob_and_field(ui, knobs);
                 let field = (field_id, KnobSize::Large.diameter());
                 let typed = value_field(ui, field, label.id, row, value, (knobs.feedback, now));
@@ -936,17 +1106,19 @@ fn param_knob(
     };
     if let Some(value) = typed.or(released.then_some(value)) {
         knobs.locals.insert(row.address.clone(), value);
-        return Some(
-            knobs
-                .throttle
-                .on_release(&row.address, value, knobs.revision),
-        );
+        let command = knobs
+            .throttle
+            .on_release(&row.address, value, knobs.revision);
+        return (Some(command), in_use);
     }
     if value == shown {
-        return None;
+        return (None, in_use);
     }
     knobs.locals.insert(row.address.clone(), value);
-    knobs.throttle.on_drag(&row.address, value, knobs.now)
+    (
+        knobs.throttle.on_drag(&row.address, value, knobs.now),
+        in_use,
+    )
 }
 
 fn field_id_pending(field_id: Id) -> Id {

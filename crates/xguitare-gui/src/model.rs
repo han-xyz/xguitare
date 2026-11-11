@@ -1640,10 +1640,17 @@ pub fn param_label(param: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A unit's name: the Module id in sentence case, and its type when the two differ.
+/// Module ids shown other than in sentence case.
+const DISPLAY_NAMES: [(&str, &str); 1] = [("eq", "EQ")];
+
+/// A unit's name: the Module id in sentence case (`eq` reads `EQ`), and its type when the two differ.
 pub fn module_title<'a>(module: &str, type_name: &'a str) -> (String, Option<&'a str>) {
     let differs = !type_name.is_empty() && type_name != module;
-    (param_label(module), differs.then_some(type_name))
+    let name = DISPLAY_NAMES
+        .iter()
+        .find(|(id, _)| *id == module)
+        .map_or_else(|| param_label(module), |(_, name)| (*name).to_string());
+    (name, differs.then_some(type_name))
 }
 
 /// The value as a knob shows it: one decimal at most, none on a whole value, a Unicode minus, `kHz` from 1000 Hz, a ratio as `6 : 1`.
