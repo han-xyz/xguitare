@@ -803,6 +803,7 @@ pub fn accent_for(type_name: &str) -> (u8, u8, u8) {
         "flanger" => (50, 200, 220),
         "autowah" => (195, 240, 60),
         "eq" => (240, 108, 154),
+        "blend" => (108, 240, 194),
         _ => NEUTRAL_ACCENT,
     }
 }
@@ -1506,6 +1507,7 @@ const STACKED_CHOICES: usize = 2;
 fn param_groups(type_name: &str) -> &'static [usize] {
     match type_name {
         "autowah" => &[2, 3, 3, 2],
+        "blend" => &[3, 4, 3],
         _ => &[],
     }
 }

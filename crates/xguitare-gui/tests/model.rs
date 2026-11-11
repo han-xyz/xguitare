@@ -721,7 +721,7 @@ fn rack_channels_by_module_type() {
 #[test]
 fn module_types_from_payload() {
     let types = module_types(&registry_modules("module-types"));
-    assert_eq!(types.len(), 14);
+    assert_eq!(types.len(), 15);
     let channels = |type_name: &str| {
         types
             .iter()
@@ -732,6 +732,7 @@ fn module_types_from_payload() {
     assert_eq!(channels("fuzz"), Some("mono"));
     assert_eq!(channels("autowah"), Some("mono"));
     assert_eq!(channels("eq"), Some("mono"));
+    assert_eq!(channels("blend"), Some("mono"));
     assert_eq!(channels("cabinet"), Some("mono_to_stereo"));
     assert_eq!(channels("reverb"), Some("stereo"));
     let cabinet = types.iter().find(|t| t.type_name == "cabinet").unwrap();
@@ -2307,6 +2308,16 @@ fn open_knobs_wrap_between_autowah_groups() {
     assert_eq!(rows(5.0), [5, 5]);
     assert_eq!(rows(4.0), [2, 3, 3, 2]);
     assert_eq!(rows(2.5), [2, 2, 1, 2, 1, 2]);
+}
+
+#[test]
+fn open_knobs_wrap_between_blend_groups() {
+    let rows = |width_in_knobs: f32| open_knob_rows("blend", 10, width_in_knobs * OPEN_KNOB_PITCH);
+    assert_eq!(rows(10.0), [10]);
+    assert_eq!(rows(9.5), [7, 3]);
+    assert_eq!(rows(7.0), [7, 3]);
+    assert_eq!(rows(5.0), [3, 4, 3]);
+    assert_eq!(rows(3.5), [3, 3, 1, 3]);
 }
 
 #[test]

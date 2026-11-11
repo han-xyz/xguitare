@@ -519,9 +519,9 @@ fn gui_snapshots() {
     write_png(&mut undo, "undo-footer");
 }
 
-fn choice(name: &str, value: f64, labels: &[&str]) -> Value {
+fn choice(module: &str, name: &str, value: f64, labels: &[&str]) -> Value {
     let mut entry = param(
-        "autowah",
+        module,
         name,
         value,
         (0.0, (labels.len() - 1) as f64, 0.0, "", true),
@@ -534,8 +534,8 @@ fn choice(name: &str, value: f64, labels: &[&str]) -> Value {
 fn autowah_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
     let autowah = [
-        choice("mode", 1.0, &["lp", "bp", "hp"]),
-        choice("direction", 0.0, &["up", "down"]),
+        choice("autowah", "mode", 1.0, &["lp", "bp", "hp"]),
+        choice("autowah", "direction", 0.0, &["up", "down"]),
         param(
             "autowah",
             "sensitivity",
@@ -670,6 +670,43 @@ fn closed_chips_switch_two_choices_and_open_for_more() {
     harness.run_steps(2);
     assert_eq!(harness.query_all_by_label("▼").count(), 1);
     assert_eq!(sent_now(&sent), []);
+}
+
+/// The Funk Rack with a blend after the compressor, at its defaults.
+fn blend_snapshot() -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    let blend = [
+        param("blend", "blend", 100.0, (0.0, 100.0, 100.0, "%", false)),
+        param("blend", "drive", 40.0, (0.0, 100.0, 40.0, "%", false)),
+        param("blend", "level", 0.0, (-24.0, 12.0, 0.0, "dB", false)),
+        param("blend", "bass", 0.0, (-12.0, 12.0, 0.0, "dB", false)),
+        choice("blend", "bass_freq", 1.0, &["40 Hz", "80 Hz"]),
+        param("blend", "mid", 0.0, (-12.0, 12.0, 0.0, "dB", false)),
+        choice("blend", "mid_freq", 0.0, &["500 Hz", "1000 Hz"]),
+        param("blend", "treble", 0.0, (-12.0, 12.0, 0.0, "dB", false)),
+        param("blend", "presence", 50.0, (0.0, 100.0, 50.0, "%", false)),
+        param("blend", "crossover", 20.0, (20.0, 400.0, 20.0, "Hz", false)),
+    ];
+    let params = snapshot.params.as_mut().unwrap()["params"]
+        .as_array_mut()
+        .unwrap();
+    let after_compressor = params
+        .iter()
+        .position(|param| param["module"] == "preamp")
+        .unwrap();
+    params.splice(after_compressor..after_compressor, blend);
+    snapshot
+}
+
+const BLEND_CLOSED_INDEX: usize = 1;
+
+#[test]
+fn blend_snapshots() {
+    let (mut open, _, _dir) = harness_with(DEFAULT_WINDOW, blend_snapshot());
+    open_unit(&mut open, BLEND_CLOSED_INDEX);
+    write_png(&mut open, "blend-open-1280x800");
+    let (mut closed, _, _dir) = harness_with(DEFAULT_WINDOW, blend_snapshot());
+    write_png(&mut closed, "blend-closed");
 }
 
 const EQ_SPEC: [(&str, f64, f64, f64, &str); 13] = [
