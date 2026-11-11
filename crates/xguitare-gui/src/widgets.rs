@@ -23,6 +23,7 @@ const RACK_KNOB_POINTER_WIDTH: f32 = 0.075;
 const RACK_KNOB_ARC_WIDTH: f32 = 0.05;
 const FOCUS_RING_GAP: f32 = 2.0;
 const FOCUS_RING_WIDTH: f32 = 1.5;
+const CHOICE_TEXT_SIZE: f32 = 13.0;
 const LAMP_RADIUS: f32 = 5.0;
 const LAMP_GLOW_RADIUS: f32 = 9.0;
 const LAMP_GLOW_ALPHA: f32 = 0.3;
@@ -425,4 +426,55 @@ fn arc_points(center: Pos2, radius: f32, from_deg: f32, to_deg: f32) -> Vec<Pos2
 fn point_at(center: Pos2, radius: f32, deg: f32) -> Pos2 {
     let rad = deg.to_radians();
     center + radius * vec2(rad.cos(), rad.sin())
+}
+
+/// One choice of a choice Parameter, at `rect`: lit in the Module's accent with dark text, unlit as muted text in a 1 px edge. The caller gives it its accessible name and role.
+pub fn choice_button(
+    ui: &mut Ui,
+    rect: Rect,
+    id: egui::Id,
+    (text, lit): (&str, bool),
+    accent: Color32,
+) -> Response {
+    let response = ui.interact(rect, id, Sense::click());
+    if response.has_focus() {
+        let arrows_stay = EventFilter {
+            horizontal_arrows: true,
+            vertical_arrows: true,
+            ..EventFilter::default()
+        };
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, arrows_stay));
+    }
+    let colours = palette();
+    let painter = ui.painter();
+    let (fill, text_colour) = if lit {
+        (accent, colour(colours.knob_body))
+    } else {
+        (Color32::TRANSPARENT, colour(colours.muted))
+    };
+    painter.rect_filled(rect, CORNER_RADIUS, fill);
+    if !lit {
+        painter.rect_stroke(
+            rect.shrink(0.5),
+            CORNER_RADIUS,
+            Stroke::new(1.0, colour(colours.ear_edge)),
+            StrokeKind::Inside,
+        );
+    }
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(CHOICE_TEXT_SIZE),
+        text_colour,
+    );
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect.expand(FOCUS_RING_GAP),
+            CORNER_RADIUS,
+            Stroke::new(FOCUS_RING_WIDTH, colour(colours.text)),
+            StrokeKind::Outside,
+        );
+    }
+    response
 }

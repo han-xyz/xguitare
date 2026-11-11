@@ -35,6 +35,10 @@ use xguitare_gui::model::{
     closed_unit_rows, drag_outcome, drop_slot, module_title, mute_banner, palette_place, restore,
     shown_undo, unit_style,
 };
+use xguitare_gui::model::{
+    ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
+    choice_buttons, choice_step, open_knob_rows, open_unit_height,
+};
 
 struct TempDir(PathBuf);
 
@@ -355,6 +359,7 @@ fn param_rows_in_rack_order_with_units() {
             default,
             unit: unit.to_string(),
             integer,
+            labels: Vec::new(),
         }
     };
     assert_eq!(
@@ -1614,6 +1619,7 @@ fn knob_row(min: f64, max: f64, default: f64, integer: bool) -> ParamRow {
         default,
         unit: String::new(),
         integer,
+        labels: Vec::new(),
     }
 }
 
@@ -2175,4 +2181,145 @@ fn module_title_is_sentence_case_with_a_differing_type() {
         ("Low drive".to_string(), Some("drive"))
     );
     assert_eq!(module_title("amp", ""), ("Amp".to_string(), None));
+}
+
+fn choice_row(param: &str, labels: &[&str], value: f64) -> ParamRow {
+    ParamRow {
+        address: format!("autowah.{param}"),
+        module: "autowah".to_string(),
+        module_type: "autowah".to_string(),
+        param: param.to_string(),
+        value,
+        min: 0.0,
+        max: (labels.len() - 1) as f64,
+        default: 0.0,
+        unit: String::new(),
+        integer: true,
+        labels: labels.iter().map(ToString::to_string).collect(),
+    }
+}
+
+#[test]
+fn param_rows_carry_labels() {
+    let get = json!({"params": [
+        {"module": "autowah", "type": "autowah", "param": "mode", "value": 1.0, "unit": "", "min": 0.0, "max": 2.0, "default": 0.0, "integer": true, "labels": ["lp", "bp", "hp"]},
+        {"module": "autowah", "type": "autowah", "param": "q", "value": 3.0, "unit": "", "min": 0.5, "max": 12.0, "default": 3.0, "integer": false, "labels": []},
+    ]});
+    let rows = &param_rows(&get)[0].1;
+    assert_eq!(rows[0].labels, ["lp", "bp", "hp"]);
+    assert_eq!(rows[1].labels, Vec::<String>::new());
+}
+
+#[test]
+fn three_choices_sit_side_by_side_in_the_column() {
+    let buttons = choice_buttons(&choice_row("mode", &["lp", "bp", "hp"], 1.0), 84.0);
+    assert_eq!(
+        buttons,
+        [
+            ChoiceButton {
+                text: "LP".to_string(),
+                accessible_name: "Mode, LP".to_string(),
+                lit: false,
+                value: 0.0,
+                cell: (0.0, 0.0, 28.0, 32.0),
+            },
+            ChoiceButton {
+                text: "BP".to_string(),
+                accessible_name: "Mode, BP, selected".to_string(),
+                lit: true,
+                value: 1.0,
+                cell: (28.0, 0.0, 28.0, 32.0),
+            },
+            ChoiceButton {
+                text: "HP".to_string(),
+                accessible_name: "Mode, HP".to_string(),
+                lit: false,
+                value: 2.0,
+                cell: (56.0, 0.0, 28.0, 32.0),
+            },
+        ]
+    );
+}
+
+#[test]
+fn two_choices_stack_full_width() {
+    let buttons = choice_buttons(&choice_row("direction", &["up", "down"], 0.0), 84.0);
+    let summary: Vec<_> = buttons
+        .iter()
+        .map(|b| (b.text.as_str(), b.accessible_name.as_str(), b.lit, b.cell))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (
+                "Up",
+                "Direction, Up, selected",
+                true,
+                (0.0, 0.0, 84.0, 32.0)
+            ),
+            ("Down", "Direction, Down", false, (0.0, 36.0, 84.0, 32.0)),
+        ]
+    );
+    let hertz = choice_buttons(&choice_row("bass_freq", &["40 Hz", "80 Hz"], 1.0), 84.0);
+    assert_eq!(hertz[1].text, "80 Hz");
+    assert_eq!(hertz[1].accessible_name, "Bass freq, 80 Hz, selected");
+}
+
+#[test]
+fn arrow_keys_move_within_the_choices_and_stop_at_the_ends() {
+    let row = choice_row("mode", &["lp", "bp", "hp"], 1.0);
+    assert_eq!(choice_step(&row, ChoiceKey::Next), 2.0);
+    assert_eq!(choice_step(&row, ChoiceKey::Previous), 0.0);
+    let last = choice_row("mode", &["lp", "bp", "hp"], 2.0);
+    assert_eq!(choice_step(&last, ChoiceKey::Next), 2.0);
+    let first = choice_row("mode", &["lp", "bp", "hp"], 0.0);
+    assert_eq!(choice_step(&first, ChoiceKey::Previous), 0.0);
+}
+
+#[test]
+fn closed_chip_toggles_two_choices_and_opens_for_three() {
+    assert_eq!(
+        chip_click(&choice_row("direction", &["up", "down"], 0.0)),
+        ChipClick::Set(1.0)
+    );
+    assert_eq!(
+        chip_click(&choice_row("direction", &["up", "down"], 1.0)),
+        ChipClick::Set(0.0)
+    );
+    assert_eq!(
+        chip_click(&choice_row("mode", &["lp", "bp", "hp"], 1.0)),
+        ChipClick::Open
+    );
+}
+
+#[test]
+fn open_knobs_wrap_between_autowah_groups() {
+    let rows =
+        |width_in_knobs: f32| open_knob_rows("autowah", 10, width_in_knobs * OPEN_KNOB_PITCH);
+    assert_eq!(rows(10.0), [10]);
+    assert_eq!(rows(9.5), [8, 2]);
+    assert_eq!(rows(7.0), [5, 5]);
+    assert_eq!(rows(5.0), [5, 5]);
+    assert_eq!(rows(4.0), [2, 3, 3, 2]);
+    assert_eq!(rows(2.5), [2, 2, 1, 2, 1, 2]);
+}
+
+#[test]
+fn other_types_are_one_group_that_wraps_where_full() {
+    assert_eq!(open_knob_rows("compressor", 5, 10.0 * OPEN_KNOB_PITCH), [5]);
+    assert_eq!(
+        open_knob_rows("compressor", 5, 3.0 * OPEN_KNOB_PITCH),
+        [3, 2]
+    );
+    assert_eq!(open_knob_rows("cabinet", 3, 0.0), [1, 1, 1]);
+    assert_eq!(open_knob_rows("gain", 0, 500.0), Vec::<usize>::new());
+}
+
+#[test]
+fn open_unit_grows_by_a_row_per_extra_row() {
+    assert_eq!(open_unit_height(0), OPEN_UNIT_HEIGHT);
+    assert_eq!(open_unit_height(1), OPEN_UNIT_HEIGHT);
+    let one_more = open_unit_height(2) - OPEN_UNIT_HEIGHT;
+    assert!(one_more > 100.0, "{one_more}");
+    assert_eq!(open_unit_height(3) - open_unit_height(2), one_more);
 }

@@ -801,7 +801,7 @@ pub fn accent_for(type_name: &str) -> (u8, u8, u8) {
         "reverb" => (150, 90, 210),
         "chorus" => (70, 180, 80),
         "flanger" => (50, 200, 220),
-        "autowah" => (225, 85, 200),
+        "autowah" => (195, 240, 60),
         _ => NEUTRAL_ACCENT,
     }
 }
@@ -1435,6 +1435,8 @@ pub struct ParamRow {
     pub default: f64,
     pub unit: String,
     pub integer: bool,
+    /// A choice Parameter's names for its values 0, 1, …; empty for a plain number.
+    pub labels: Vec<String>,
 }
 
 /// Groups the `get` payload's `params` per Module, keeping Rack order.
@@ -1454,6 +1456,12 @@ pub fn param_rows(get_payload: &Value) -> Vec<(String, Vec<ParamRow>)> {
             default: param["default"].as_f64().unwrap_or_default(),
             unit: param["unit"].as_str().unwrap_or_default().to_string(),
             integer: param["integer"].as_bool().unwrap_or_default(),
+            labels: param["labels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|label| label.as_str().map(ToString::to_string))
+                .collect(),
         };
         match modules.last_mut() {
             Some((id, rows)) if *id == module => rows.push(row),
@@ -1480,6 +1488,142 @@ pub const CLOSED_KNOB_WIDTH: f32 = 114.0;
 pub fn closed_unit_rows(knob_count: usize, width: f32) -> usize {
     let per_row = ((width / CLOSED_KNOB_WIDTH).floor() as usize).max(1);
     knob_count.div_ceil(per_row).max(1)
+}
+
+/// The height of an open unit with one row of large knobs, and the least any open unit has.
+pub const OPEN_UNIT_HEIGHT: f32 = 190.0;
+/// One large knob column with its label and value field, and the gap after it.
+pub const OPEN_KNOB_PITCH: f32 = 92.0;
+const OPEN_ROW_HEIGHT: f32 = 126.0;
+const OPEN_ROW_GAP: f32 = 8.0;
+const CHOICE_HEIGHT: f32 = 32.0;
+const CHOICE_GAP: f32 = 4.0;
+/// Up to this many choices stack in the column; more sit side by side.
+const STACKED_CHOICES: usize = 2;
+
+/// The Parameter groups an open unit of `type_name` keeps on one row, as counts in spec order; a type not listed is one group.
+fn param_groups(type_name: &str) -> &'static [usize] {
+    match type_name {
+        "autowah" => &[2, 3, 3, 2],
+        _ => &[],
+    }
+}
+
+/// Large knobs per row of an open unit `width` wide: whole groups while they fit, a new row before a group that does not; a group wider than a row fills rows of its own.
+pub fn open_knob_rows(type_name: &str, knob_count: usize, width: f32) -> Vec<usize> {
+    let per_row = ((width / OPEN_KNOB_PITCH).floor() as usize).max(1);
+    let listed: usize = param_groups(type_name).iter().sum();
+    let groups: Vec<usize> = if listed == knob_count {
+        param_groups(type_name).to_vec()
+    } else {
+        vec![knob_count]
+    };
+    let mut rows = Vec::new();
+    let mut current = 0;
+    for group in groups.into_iter().filter(|&group| group > 0) {
+        if current + group > per_row && current > 0 {
+            rows.push(current);
+            current = 0;
+        }
+        let mut left = group;
+        while current + left > per_row {
+            rows.push(per_row);
+            left -= per_row;
+        }
+        current += left;
+    }
+    if current > 0 {
+        rows.push(current);
+    }
+    rows
+}
+
+pub fn open_unit_height(rows: usize) -> f32 {
+    OPEN_UNIT_HEIGHT + rows.saturating_sub(1) as f32 * (OPEN_ROW_HEIGHT + OPEN_ROW_GAP)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChoiceButton {
+    pub text: String,
+    pub accessible_name: String,
+    pub lit: bool,
+    pub value: f64,
+    /// Left, top, width and height within the knob column.
+    pub cell: (f32, f32, f32, f32),
+}
+
+/// One button per label, filling a column `column_width` wide: two stack, more sit side by side.
+pub fn choice_buttons(row: &ParamRow, column_width: f32) -> Vec<ChoiceButton> {
+    let count = row.labels.len();
+    let lit = chosen_index(row);
+    let param = param_label(&row.param);
+    row.labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let text = choice_text(label);
+            let cell = if count <= STACKED_CHOICES {
+                let top = index as f32 * (CHOICE_HEIGHT + CHOICE_GAP);
+                (0.0, top, column_width, CHOICE_HEIGHT)
+            } else {
+                let width = column_width / count as f32;
+                (index as f32 * width, 0.0, width, CHOICE_HEIGHT)
+            };
+            let selected = if index == lit { ", selected" } else { "" };
+            ChoiceButton {
+                accessible_name: format!("{param}, {text}{selected}"),
+                text,
+                lit: index == lit,
+                value: index as f64,
+                cell,
+            }
+        })
+        .collect()
+}
+
+/// Labels that are abbreviations, shown in capitals.
+const ABBREVIATED_LABELS: [&str; 3] = ["lp", "bp", "hp"];
+
+/// A label as the GUI shows it: an abbreviation in capitals (`lp` reads `LP`), anything else with a capital first letter (`up` reads `Up`).
+pub fn choice_text(label: &str) -> String {
+    if ABBREVIATED_LABELS.contains(&label) {
+        return label.to_uppercase();
+    }
+    param_label(label)
+}
+
+fn chosen_index(row: &ParamRow) -> usize {
+    (row.value.round().max(0.0) as usize).min(row.labels.len().saturating_sub(1))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChoiceKey {
+    Previous,
+    Next,
+}
+
+/// The value an arrow key moves a choice to; it stops at the first and the last.
+pub fn choice_step(row: &ParamRow, key: ChoiceKey) -> f64 {
+    let index = chosen_index(row);
+    let moved = match key {
+        ChoiceKey::Previous => index.saturating_sub(1),
+        ChoiceKey::Next => (index + 1).min(row.labels.len().saturating_sub(1)),
+    };
+    moved as f64
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChipClick {
+    Set(f64),
+    Open,
+}
+
+/// A click on a closed unit's chip: two choices switch to the other one, more open the unit.
+pub fn chip_click(row: &ParamRow) -> ChipClick {
+    if row.labels.len() == STACKED_CHOICES {
+        return ChipClick::Set((1 - chosen_index(row).min(1)) as f64);
+    }
+    ChipClick::Open
 }
 
 const KILO: f64 = 1000.0;

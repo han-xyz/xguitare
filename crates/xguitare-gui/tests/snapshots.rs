@@ -519,6 +519,159 @@ fn gui_snapshots() {
     write_png(&mut undo, "undo-footer");
 }
 
+fn choice(name: &str, value: f64, labels: &[&str]) -> Value {
+    let mut entry = param(
+        "autowah",
+        name,
+        value,
+        (0.0, (labels.len() - 1) as f64, 0.0, "", true),
+    );
+    entry["labels"] = json!(labels);
+    entry
+}
+
+/// The Funk Rack with an autowah after the compressor: band-pass, sweeping up.
+fn autowah_snapshot() -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    let autowah = [
+        choice("mode", 1.0, &["lp", "bp", "hp"]),
+        choice("direction", 0.0, &["up", "down"]),
+        param(
+            "autowah",
+            "sensitivity",
+            0.0,
+            (-24.0, 36.0, 0.0, "dB", false),
+        ),
+        param("autowah", "attack", 5.0, (0.5, 50.0, 5.0, "ms", false)),
+        param(
+            "autowah",
+            "decay",
+            150.0,
+            (20.0, 1000.0, 150.0, "ms", false),
+        ),
+        param(
+            "autowah",
+            "freq_low",
+            200.0,
+            (80.0, 800.0, 200.0, "Hz", false),
+        ),
+        param(
+            "autowah",
+            "freq_high",
+            2500.0,
+            (400.0, 4000.0, 2500.0, "Hz", false),
+        ),
+        param("autowah", "q", 3.0, (0.5, 12.0, 3.0, "", false)),
+        param("autowah", "dry", 50.0, (0.0, 100.0, 50.0, "%", false)),
+        param("autowah", "wet", 100.0, (0.0, 100.0, 100.0, "%", false)),
+    ];
+    let params = snapshot.params.as_mut().unwrap()["params"]
+        .as_array_mut()
+        .unwrap();
+    let after_compressor = params
+        .iter()
+        .position(|param| param["module"] == "preamp")
+        .unwrap();
+    params.splice(after_compressor..after_compressor, autowah);
+    snapshot
+}
+
+const AUTOWAH_CLOSED_INDEX: usize = 1;
+
+#[test]
+fn autowah_snapshots() {
+    for (size, name) in [
+        (DEFAULT_WINDOW, "autowah-open-1280x800"),
+        (MIN_WINDOW, "autowah-open-1024x640"),
+    ] {
+        let (mut open, _, _dir) = harness_with(size, autowah_snapshot());
+        open_unit(&mut open, AUTOWAH_CLOSED_INDEX);
+        write_png(&mut open, name);
+    }
+    let (mut closed, _, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
+    write_png(&mut closed, "autowah-closed");
+}
+
+#[test]
+fn open_autowah_grows_to_hold_its_wrapped_rows() {
+    for size in [DEFAULT_WINDOW, MIN_WINDOW, WINDOW] {
+        let (mut harness, _, _dir) = harness_with(size, autowah_snapshot());
+        open_unit(&mut harness, AUTOWAH_CLOSED_INDEX);
+        let unit = harness.get_by_label("autowah unit").rect();
+        let next_unit = unit_top(&harness, "preamp");
+        let fields: Vec<_> = harness
+            .get_all_by_role(Role::TextInput)
+            .map(|field| field.rect())
+            .filter(|field| unit.x_range().contains(field.center().x))
+            .filter(|field| field.top() >= unit.top() && field.top() < next_unit)
+            .collect();
+        assert_eq!(fields.len(), 8, "at {size:?}");
+        for field in fields {
+            assert!(
+                unit.contains_rect(field),
+                "{field:?} outside {unit:?} at {size:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn choice_buttons_send_the_choice() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
+    open_unit(&mut harness, AUTOWAH_CLOSED_INDEX);
+    harness
+        .get_by_role_and_label(Role::RadioButton, "Mode, HP")
+        .click();
+    harness.run_steps(2);
+    harness
+        .get_by_role_and_label(Role::RadioButton, "Direction, Up, selected")
+        .focus();
+    harness.run_steps(2);
+    harness.key_press(Key::ArrowDown);
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::Set {
+                param: "autowah.mode".to_string(),
+                value: 2.0,
+            },
+            Command::Set {
+                param: "autowah.direction".to_string(),
+                value: 1.0,
+            },
+        ]
+    );
+    assert!(
+        harness
+            .get_by_role_and_label(Role::RadioButton, "Direction, Down, selected")
+            .is_focused()
+    );
+}
+
+#[test]
+fn closed_chips_switch_two_choices_and_open_for_more() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
+    harness
+        .get_by_role_and_label(Role::Button, "Direction, Up")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Set {
+            param: "autowah.direction".to_string(),
+            value: 1.0,
+        }]
+    );
+    assert_eq!(harness.query_all_by_label("▼").count(), 0);
+    harness
+        .get_by_role_and_label(Role::Button, "Mode, BP")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_label("▼").count(), 1);
+    assert_eq!(sent_now(&sent), []);
+}
+
 fn metronome_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
     snapshot.status.as_mut().unwrap()["metronome"] = json!({

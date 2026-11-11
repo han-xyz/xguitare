@@ -10,12 +10,14 @@ use egui::{
 use xguitare_core::control::SILENCE_DB;
 
 use crate::model::{
-    CLOSED_KNOB_WIDTH, ClipLatch, Command, Direction, Dragged, EAR_WIDTH, Feedback, KnobKey,
-    NO_SIGNAL, ParamRow, PeakHold, Rgb, ScreenRect, Snapshot, Throttle, TunerReading,
-    autoscroll_delta, bypassed, cabinet_ir, cents_fraction, closed_unit_rows, drag_outcome,
-    drop_slot, format_value, in_tune, key_step, knob_fraction, knob_param_value, module_title,
-    move_target, mute_banner, palette, param_label, param_rows, peak_db, peak_text,
-    tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
+    CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged, EAR_WIDTH,
+    Feedback, KnobKey, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, Rgb,
+    ScreenRect, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed, cabinet_ir,
+    cents_fraction, chip_click, choice_buttons, choice_step, choice_text, closed_unit_rows,
+    drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_param_value,
+    module_title, move_target, mute_banner, open_knob_rows, open_unit_height, palette, param_label,
+    param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
+    unit_style,
 };
 use crate::widgets::{self, KnobSize, colour};
 
@@ -27,7 +29,6 @@ const UNIT_GAP: f32 = 4.0;
 pub const UNIT_MARGIN: i8 = 8;
 const UNIT_SIDE_MARGIN: i8 = EAR_WIDTH as i8 + HEADER_GAP as i8;
 const UNIT_HEIGHT: f32 = 64.0;
-const OPEN_UNIT_HEIGHT: f32 = 190.0;
 const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const UNIT_NAME_WIDTH: f32 = 120.0;
@@ -71,6 +72,13 @@ const HEADER_FIXED_ITEMS: [f32; 5] = [
     STRIPE_WIDTH,
     CHEVRON_WIDTH,
     MOVE_BUTTONS_WIDTH,
+];
+const CHIP_SIZE: Vec2 = Vec2::new(56.0, 24.0);
+const CHOICE_KEYS: [(Key, ChoiceKey); 4] = [
+    (Key::ArrowLeft, ChoiceKey::Previous),
+    (Key::ArrowUp, ChoiceKey::Previous),
+    (Key::ArrowRight, ChoiceKey::Next),
+    (Key::ArrowDown, ChoiceKey::Next),
 ];
 const KNOB_KEYS: [(Key, KnobKey); 6] = [
     (Key::ArrowUp, KnobKey::Up),
@@ -207,6 +215,12 @@ fn closed_knobs_width(ui: &Ui) -> f32 {
         .map(|width| width + HEADER_GAP)
         .sum();
     (ui.available_width() - 2.0 * f32::from(UNIT_SIDE_MARGIN) - fixed).max(0.0)
+}
+
+/// What an open unit in `ui` leaves its knob rows: the unit's width less its margins and the column of ↑/↓ and Remove at its right.
+fn open_knobs_width(ui: &Ui) -> f32 {
+    let side_column = MOVE_BUTTONS_WIDTH + HEADER_GAP;
+    (ui.available_width() - 2.0 * f32::from(UNIT_SIDE_MARGIN) - side_column).max(0.0)
 }
 
 fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
@@ -482,8 +496,13 @@ fn module_unit(
     let style = unit_style(unit.bypassed);
     let knobs_width = closed_knobs_width(ui);
     let rows = closed_unit_rows(unit.rows.len(), knobs_width) as f32;
+    let open_rows = open_knob_rows(type_name, unit.rows.len(), open_knobs_width(ui));
     let (fill, height, header_height) = if open {
-        (palette().unit_open, OPEN_UNIT_HEIGHT, HEADER_HEIGHT)
+        (
+            palette().unit_open,
+            open_unit_height(open_rows.len()),
+            HEADER_HEIGHT,
+        )
     } else {
         let height = UNIT_HEIGHT * rows;
         (
@@ -493,6 +512,7 @@ fn module_unit(
         )
     };
     let mut toggled = false;
+    let mut open_asked = false;
     let mut header_drag = None;
     let inner = rack_unit(ui, &format!("{module} unit"), fill, height, |ui| {
         let mut commands = Vec::new();
@@ -521,7 +541,9 @@ fn module_unit(
                 ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
                 ui.multiply_opacity(style.opacity);
                 if !open {
-                    commands.extend(param_knobs(ui, unit.rows, KnobSize::Small, accent, knobs));
+                    let (closed_commands, asked) = closed_params(ui, unit.rows, accent, knobs);
+                    commands.extend(closed_commands);
+                    open_asked = asked;
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -536,7 +558,7 @@ fn module_unit(
             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                 ui.scope(|ui| {
                     ui.multiply_opacity(style.opacity);
-                    commands.extend(param_knobs(ui, unit.rows, KnobSize::Large, accent, knobs));
+                    commands.extend(open_params(ui, unit.rows, &open_rows, accent, knobs));
                 });
                 ui.with_layout(Layout::top_down(Align::Max), |ui| {
                     if let Some(ir_choice) = &unit.ir_choice {
@@ -558,7 +580,7 @@ fn module_unit(
         }
         commands
     });
-    if toggled && !open_units.remove(module) {
+    if (toggled || open_asked) && !open_units.remove(module) {
         open_units.insert(module.to_string());
     }
     let rect = inner.response.rect;
@@ -652,16 +674,187 @@ fn move_buttons(ui: &mut Ui, module: &str, (index, len): (usize, usize)) -> Opti
     clicked
 }
 
-fn param_knobs(
+/// Small knobs, and a chip for each choice Parameter; also whether a chip asked to open the unit.
+fn closed_params(
     ui: &mut Ui,
     rows: &[ParamRow],
-    size: KnobSize,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> (Vec<Command>, bool) {
+    let mut open_asked = false;
+    let commands = rows
+        .iter()
+        .filter_map(|row| {
+            if row.labels.is_empty() {
+                return param_knob(ui, row, KnobSize::Small, accent, knobs);
+            }
+            let (command, asked) = choice_chip(ui, row, accent, knobs);
+            open_asked |= asked;
+            command
+        })
+        .collect();
+    (commands, open_asked)
+}
+
+/// Large knobs and choice columns in rows of `per_row` counts.
+fn open_params(
+    ui: &mut Ui,
+    rows: &[ParamRow],
+    per_row: &[usize],
     accent: Color32,
     knobs: &mut Knobs,
 ) -> Vec<Command> {
-    rows.iter()
-        .filter_map(|row| param_knob(ui, row, size, accent, knobs))
-        .collect()
+    let mut commands = Vec::new();
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = f32::from(UNIT_MARGIN);
+        let mut rest = rows;
+        for &count in per_row {
+            let (row_params, after) = rest.split_at(count.min(rest.len()));
+            rest = after;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = OPEN_KNOB_PITCH - LARGE_KNOB_COLUMN_WIDTH;
+                for row in row_params {
+                    let command = if row.labels.is_empty() {
+                        param_knob(ui, row, KnobSize::Large, accent, knobs)
+                    } else {
+                        choice_column(ui, row, accent, knobs)
+                    };
+                    commands.extend(command);
+                }
+            });
+        }
+    });
+    commands
+}
+
+/// The row as shown: its value, or the one sent last while the Daemon has not answered it yet.
+fn shown_row(row: &ParamRow, knobs: &Knobs) -> ParamRow {
+    let held = knobs.throttle.hold_local(&row.address, knobs.revision);
+    let value = match knobs.locals.get(&row.address) {
+        Some(local) if held => *local,
+        _ => row.value,
+    };
+    ParamRow {
+        value,
+        ..row.clone()
+    }
+}
+
+fn send_choice(row: &ParamRow, value: f64, knobs: &mut Knobs) -> Command {
+    knobs.locals.insert(row.address.clone(), value);
+    knobs
+        .throttle
+        .on_release(&row.address, value, knobs.revision)
+}
+
+/// A choice Parameter in an open unit: its label over one button per choice, filling a knob column; a click or an arrow key on a focused button sends the choice.
+fn choice_column(
+    ui: &mut Ui,
+    row: &ParamRow,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> Option<Command> {
+    let shown = shown_row(row, knobs);
+    let buttons = choice_buttons(&shown, LARGE_KNOB_COLUMN_WIDTH);
+    let height = buttons
+        .iter()
+        .map(|button| button.cell.1 + button.cell.3)
+        .fold(0.0, f32::max);
+    let column = Layout::top_down(Align::Center);
+    ui.allocate_ui_with_layout(vec2(LARGE_KNOB_COLUMN_WIDTH, 0.0), column, |ui| {
+        ui.label(muted_text(param_label(&row.param)));
+        let (area, _) =
+            ui.allocate_exact_size(vec2(LARGE_KNOB_COLUMN_WIDTH, height), Sense::hover());
+        let id = |index: usize| Id::unique(("choice", &row.address, index));
+        let mut chosen = None;
+        let mut focused = false;
+        for (index, button) in buttons.iter().enumerate() {
+            let (left, top, width, height) = button.cell;
+            let rect = Rect::from_min_size(area.min + vec2(left, top), vec2(width, height));
+            let label = (button.text.as_str(), button.lit);
+            let response = widgets::choice_button(ui, rect, id(index), label, accent);
+            response.widget_info(|| {
+                WidgetInfo::selected(Role::RadioButton, true, button.lit, &button.accessible_name)
+            });
+            if response.clicked() {
+                chosen = Some(button.value);
+            }
+            focused |= response.has_focus();
+        }
+        if focused {
+            let keys = choice_keys(ui);
+            let stepped = keys
+                .into_iter()
+                .fold(shown.clone(), |row, key| ParamRow {
+                    value: choice_step(&row, key),
+                    ..row
+                })
+                .value;
+            if keys_moved(stepped, shown.value) {
+                ui.memory_mut(|memory| memory.request_focus(id(stepped as usize)));
+                chosen = Some(stepped);
+            }
+        }
+        chosen
+            .filter(|&value| keys_moved(value, shown.value))
+            .map(|value| send_choice(row, value, knobs))
+    })
+    .inner
+}
+
+fn keys_moved(value: f64, shown: f64) -> bool {
+    (value - shown).abs() > f64::EPSILON
+}
+
+fn choice_keys(ui: &mut Ui) -> Vec<ChoiceKey> {
+    ui.input_mut(|input| {
+        CHOICE_KEYS
+            .iter()
+            .flat_map(|&(key, choice_key)| {
+                std::iter::repeat_n(
+                    choice_key,
+                    input.count_and_consume_key(Modifiers::NONE, key),
+                )
+            })
+            .collect()
+    })
+}
+
+/// A choice Parameter in a closed unit: its label over a chip with the chosen label; a click switches two choices or asks to open the unit.
+fn choice_chip(
+    ui: &mut Ui,
+    row: &ParamRow,
+    accent: Color32,
+    knobs: &mut Knobs,
+) -> (Option<Command>, bool) {
+    let shown = shown_row(row, knobs);
+    let lit = shown.value.round().max(0.0) as usize;
+    let text = shown
+        .labels
+        .get(lit)
+        .map(|label| choice_text(label))
+        .unwrap_or_default();
+    let name = format!("{}, {text}", param_label(&row.param));
+    let group = Layout::top_down(Align::Min);
+    let clicked = ui
+        .allocate_ui_with_layout(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT), group, |ui| {
+            ui.set_min_size(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT));
+            ui.spacing_mut().item_spacing.y = UNIT_GAP;
+            ui.label(muted_text(param_label(&row.param)));
+            let (rect, _) = ui.allocate_exact_size(CHIP_SIZE, Sense::hover());
+            let id = Id::unique(("chip", &row.address));
+            let chip = widgets::choice_button(ui, rect, id, (&text, true), accent);
+            chip.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+            chip.clicked()
+        })
+        .inner;
+    if !clicked {
+        return (None, false);
+    }
+    match chip_click(&shown) {
+        ChipClick::Set(value) => (Some(send_choice(row, value, knobs)), false),
+        ChipClick::Open => (None, true),
+    }
 }
 
 /// A double-click reset, a key on the focused knob and a typed value are final values, like a release. Ctrl+click or a right-click focuses the knob's value field.
