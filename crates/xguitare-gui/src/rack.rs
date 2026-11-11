@@ -1048,6 +1048,8 @@ fn param_knob_named(
     let mut in_use = false;
     let mut knob_and_field = |ui: &mut Ui, knobs: &mut Knobs| {
         let knob = widgets::rack_knob(ui, size, fraction, accent);
+        knob.response
+            .widget_info(|| WidgetInfo::slider(true, shown, name));
         in_use = knob.response.hovered() || knob.response.dragged() || knob.response.has_focus();
         let ctrl = ui.input(|input| input.modifiers.ctrl);
         if knob.response.secondary_clicked() || (knob.response.clicked() && ctrl) {

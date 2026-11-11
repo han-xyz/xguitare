@@ -23,7 +23,7 @@ const FILTERS: usize = 6;
 const CUT_Q: f32 = FRAC_1_SQRT_2;
 const SHELF_Q: f32 = FRAC_1_SQRT_2;
 /// Filter frequencies stop below Nyquist, so a 20 kHz cut stays stable at low sample rates.
-const MAX_FREQ_PER_RATE: f32 = 0.45;
+pub const MAX_FREQ_PER_RATE: f32 = 0.45;
 
 pub static SPEC: ModuleSpec = ModuleSpec {
     type_name: "eq",
@@ -215,7 +215,7 @@ impl Eq {
     fn advance_smoothers(&mut self) -> bool {
         let mut moved = false;
         for (smoother, last) in self.smoothers.iter_mut().zip(&mut self.smoothed) {
-            let value = smoother.next_value();
+            let value = smoother.next_value_settling();
             if value.to_bits() != last.to_bits() {
                 *last = value;
                 moved = true;

@@ -1,6 +1,8 @@
 use crate::modules::one_pole_coeff;
 
 pub const SMOOTHING_SECONDS: f32 = 0.005;
+/// How near its target, relative to the target or to 1 when the target is smaller, a settling smoother lands on it.
+pub const SETTLE_TOLERANCE: f32 = 1e-4;
 
 /// One-pole 5 ms Parameter smoother; `prepare` with the rate at which `next_value` is called.
 pub struct Smoother {
@@ -37,6 +39,15 @@ impl Smoother {
 
     pub fn next_value(&mut self) -> f32 {
         self.current = self.target + self.coeff * (self.current - self.target);
+        self.current
+    }
+
+    /// `next_value`, landing exactly on the target once within `SETTLE_TOLERANCE` of it, so that a settled value stops changing.
+    pub fn next_value_settling(&mut self) -> f32 {
+        let value = self.next_value();
+        if (value - self.target).abs() <= SETTLE_TOLERANCE * self.target.abs().max(1.0) {
+            self.current = self.target;
+        }
         self.current
     }
 

@@ -1629,6 +1629,8 @@ pub fn chip_click(row: &ParamRow) -> ChipClick {
 
 const KILO: f64 = 1000.0;
 const RATIO_PARAM: &str = "ratio";
+const Q_PARAM: &str = "q";
+const Q_SUFFIX: &str = "_q";
 
 /// A Parameter name in sentence case: `low_cut` reads `Low cut`.
 pub fn param_label(param: &str) -> String {
@@ -1653,8 +1655,11 @@ pub fn module_title<'a>(module: &str, type_name: &'a str) -> (String, Option<&'a
     (name, differs.then_some(type_name))
 }
 
-/// The value as a knob shows it: one decimal at most, none on a whole value, a Unicode minus, `kHz` from 1000 Hz, a ratio as `6 : 1`.
+/// The value as a knob shows it: one decimal at most (two for a filter Q), none on a whole value, a Unicode minus, `kHz` from 1000 Hz, a ratio as `6 : 1`.
 pub fn format_value(spec: &ParamRow, value: f64) -> String {
+    if spec.param == Q_PARAM || spec.param.ends_with(Q_SUFFIX) {
+        return hundredths_text(value);
+    }
     if spec.param == RATIO_PARAM {
         return format!("{} : 1", number_text(value));
     }
@@ -1679,6 +1684,13 @@ pub fn typed_text(spec: &ParamRow, value: f64) -> String {
 /// The footer message `error: '<text>' is not a number` when `text` does not parse.
 pub fn typed_value(text: &str) -> Result<f64, String> {
     parse_typed_value(text).ok_or_else(|| format!("error: '{}' is not a number", text.trim()))
+}
+
+/// Two decimals at most, trailing zeros dropped: `0.71`, `2.5`, `3`.
+fn hundredths_text(value: f64) -> String {
+    let text = format!("{:.2}", (value * 100.0).round() / 100.0);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    text.replace('-', "\u{2212}")
 }
 
 fn number_text(value: f64) -> String {

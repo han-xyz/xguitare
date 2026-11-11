@@ -35,6 +35,7 @@ pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
 pub use state::{Banks, SavedMetronome, SavedState};
 pub use xguitare_dsp::eq_response_db;
+pub use xguitare_dsp::modules::eq::MAX_FREQ_PER_RATE as EQ_MAX_FREQ_PER_RATE;
 
 fn line_col(text: &str, offset: usize) -> (usize, usize) {
     let before = &text[..offset.min(text.len())];

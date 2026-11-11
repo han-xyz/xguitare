@@ -1,7 +1,7 @@
 mod common;
 
 use common::{BLOCK, SAMPLE_RATE};
-use xguitare_dsp::smooth::SMOOTHING_SECONDS;
+use xguitare_dsp::smooth::{SMOOTHING_SECONDS, Smoother};
 use xguitare_dsp::{AudioBuffers, Gain, Module};
 
 const FRAMES: usize = 4800;
@@ -56,5 +56,20 @@ fn parameter_step_ramps_monotonic_bounded_to_target() {
             ((settled - to) / step).abs() < 1e-4,
             "{from_db}->{to_db}: {settled} after ten time constants"
         );
+    }
+}
+
+#[test]
+fn settling_smoother_lands_on_its_target_within_a_bounded_time() {
+    const SETTLE_BOUND: usize = 4_000;
+    for (from, to) in [(12.0, 0.0), (-15.0, 15.0), (20_000.0, 1_000.0), (0.3, 10.0)] {
+        let mut smoother = Smoother::new(from);
+        smoother.prepare(SAMPLE_RATE);
+        smoother.set_target(to);
+        let landed = (0..SETTLE_BOUND)
+            .position(|_| smoother.next_value_settling().to_bits() == to.to_bits())
+            .unwrap_or_else(|| panic!("{from} -> {to} still moving"));
+        assert!(landed > 100, "{from} -> {to} landed after {landed}");
+        assert!((0..100).all(|_| smoother.next_value_settling().to_bits() == to.to_bits()));
     }
 }

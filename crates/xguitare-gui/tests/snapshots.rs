@@ -749,7 +749,7 @@ fn eq_snapshots() {
     ] {
         let (mut open, _, _dir) = harness_with(size, eq_snapshot(&EQ_EXAMPLE));
         open_unit(&mut open, EQ_CLOSED_INDEX);
-        hover_knob_of(&mut open, size, "Mid 1 freq");
+        hover_knob_of(&mut open, size, "Mid 1 Freq");
         write_png(&mut open, name);
     }
     let (mut defaults, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&[]));
@@ -781,7 +781,10 @@ fn open_eq_holds_its_curve_and_band_knobs() {
                 "{field:?} outside {unit:?} at {size:?}"
             );
         }
-        harness.get_by_role_and_label(Role::TextInput, "Mid 1 freq");
+        harness.get_by_role_and_label(Role::TextInput, "Mid 1 Freq");
+        harness.get_by_role_and_label(Role::Slider, "Mid 1 Freq");
+        harness.get_by_role_and_label(Role::Slider, "Mid 2 Q");
+        harness.get_by_role_and_label(Role::Slider, "Threshold");
         harness.get_by_label("EQ");
     }
 }
@@ -791,8 +794,8 @@ fn closed_eq_shows_a_named_mini_curve_on_one_row() {
     let (harness, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&EQ_EXAMPLE));
     let curve = harness.get_by_role_and_label(
         Role::Image,
-        "EQ curve: Low cut 40 Hz; Low 4 dB at 100 Hz; Mid 1 −3 dB at 400 Hz, Q 0.7; \
-         Mid 2 2 dB at 2.5 kHz, Q 0.7; High 0 dB at 8 kHz; High cut 12 kHz; Output 0 dB",
+        "EQ curve: Low cut 40 Hz; Low 4 dB at 100 Hz; Mid 1 −3 dB at 400 Hz, Q 0.71; \
+         Mid 2 2 dB at 2.5 kHz, Q 0.71; High 0 dB at 8 kHz; High cut 12 kHz; Output 0 dB",
     );
     assert_eq!(curve.rect().size(), Vec2::new(160.0, 36.0));
     assert_eq!(unit_height(&harness, "eq unit"), 64.0);

@@ -68,6 +68,22 @@ fn curve_points_are_log_spaced_from_10_hz_to_20_khz() {
 }
 
 #[test]
+fn curve_stops_where_the_module_clamps_its_filters() {
+    let rate = 32_000.0;
+    let curve = eq_curve(&eq_rows(&[]), rate, POINTS);
+    let last = curve.last().unwrap();
+    assert!((last.freq_hz - 0.45 * rate).abs() < 1e-1, "{last:?}");
+    assert!((last.x - eq_x(0.45 * rate)).abs() < 1e-5);
+    assert!(
+        curve
+            .iter()
+            .all(|point| point.y.is_finite() && point.clip == Clip::None)
+    );
+    let high_cut = eq_dots(&eq_rows(&[]), rate, None).pop().unwrap();
+    assert!((high_cut.y - 0.5).abs() < 0.1, "{high_cut:?}");
+}
+
+#[test]
 fn defaults_draw_a_flat_line_in_the_middle() {
     let curve = eq_curve(&eq_rows(&[]), RATE, POINTS);
     let middle = curve
@@ -203,7 +219,7 @@ fn band_columns_group_the_knobs() {
         ]
     );
     let names: Vec<&str> = bands[1].knobs.iter().map(|knob| knob.name).collect();
-    assert_eq!(names, ["Mid 1 freq", "Mid 1 gain", "Mid 1 Q"]);
+    assert_eq!(names, ["Mid 1 Freq", "Mid 1 Gain", "Mid 1 Q"]);
 }
 
 #[test]
@@ -219,7 +235,7 @@ fn open_eq_grows_with_its_longest_band_column() {
 fn plot_name_lists_the_band_values() {
     assert_eq!(
         eq_curve_name(&frame_three()),
-        "EQ curve: Low cut 40 Hz; Low 4 dB at 100 Hz; Mid 1 −3 dB at 400 Hz, Q 0.7; \
-         Mid 2 2 dB at 2.5 kHz, Q 0.7; High 0 dB at 8 kHz; High cut 12 kHz; Output 0 dB"
+        "EQ curve: Low cut 40 Hz; Low 4 dB at 100 Hz; Mid 1 −3 dB at 400 Hz, Q 0.71; \
+         Mid 2 2 dB at 2.5 kHz, Q 0.71; High 0 dB at 8 kHz; High cut 12 kHz; Output 0 dB"
     );
 }

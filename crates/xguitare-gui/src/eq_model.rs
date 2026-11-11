@@ -1,4 +1,4 @@
-use xguitare_core::eq_response_db;
+use xguitare_core::{EQ_MAX_FREQ_PER_RATE, eq_response_db};
 
 use crate::model::{ParamRow, format_value};
 
@@ -103,31 +103,31 @@ const BANDS: BandTable = [
         "Low",
         &[
             ("low_cut", "Low cut", "Low cut"),
-            ("low_freq", "Freq", "Low freq"),
-            ("low_gain", "Gain", "Low gain"),
+            ("low_freq", "Freq", "Low Freq"),
+            ("low_gain", "Gain", "Low Gain"),
         ],
     ),
     (
         "Mid 1",
         &[
-            ("mid1_freq", "Freq", "Mid 1 freq"),
-            ("mid1_gain", "Gain", "Mid 1 gain"),
+            ("mid1_freq", "Freq", "Mid 1 Freq"),
+            ("mid1_gain", "Gain", "Mid 1 Gain"),
             ("mid1_q", "Q", "Mid 1 Q"),
         ],
     ),
     (
         "Mid 2",
         &[
-            ("mid2_freq", "Freq", "Mid 2 freq"),
-            ("mid2_gain", "Gain", "Mid 2 gain"),
+            ("mid2_freq", "Freq", "Mid 2 Freq"),
+            ("mid2_gain", "Gain", "Mid 2 Gain"),
             ("mid2_q", "Q", "Mid 2 Q"),
         ],
     ),
     (
         "High",
         &[
-            ("high_freq", "Freq", "High freq"),
-            ("high_gain", "Gain", "High gain"),
+            ("high_freq", "Freq", "High Freq"),
+            ("high_gain", "Gain", "High Gain"),
             ("high_cut", "High cut", "High cut"),
             ("output", "Output", "Output"),
         ],
@@ -146,14 +146,20 @@ fn values(rows: &[ParamRow]) -> Vec<f32> {
     rows.iter().map(|row| row.value as f32).collect()
 }
 
-/// `count` points of the eq's response, Output included, log-spaced from 10 Hz to 20 kHz; `rows` are the eq's Parameters in spec order.
+/// The highest frequency the curve shows: 20 kHz, or lower where the Module clamps its filters at a low sample rate.
+fn plotted_max_hz(sample_rate: f32) -> f32 {
+    EQ_MAX_HZ.min(EQ_MAX_FREQ_PER_RATE * sample_rate)
+}
+
+/// `count` points of the eq's response, Output included, log-spaced from 10 Hz to 20 kHz or the Module's clamp below it; `rows` are the eq's Parameters in spec order.
 pub fn eq_curve(rows: &[ParamRow], sample_rate: f32, count: usize) -> Vec<CurvePoint> {
     let values = values(rows);
+    let top = plotted_max_hz(sample_rate);
     let last = count.saturating_sub(1).max(1) as f32;
     (0..count)
         .map(|index| {
-            let x = index as f32 / last;
-            let freq_hz = EQ_MIN_HZ * (EQ_MAX_HZ / EQ_MIN_HZ).powf(x);
+            let freq_hz = EQ_MIN_HZ * (top / EQ_MIN_HZ).powf(index as f32 / last);
+            let x = eq_x(freq_hz);
             let db = eq_response_db(&values, freq_hz, sample_rate);
             let clip = if db > EQ_RANGE_DB {
                 Clip::Above
@@ -182,7 +188,11 @@ pub fn eq_dots(rows: &[ParamRow], sample_rate: f32, active: Option<EqDot>) -> Ve
             Some(DotPoint {
                 dot,
                 x: eq_x(freq),
-                y: eq_y(eq_response_db(&values, freq, sample_rate)),
+                y: eq_y(eq_response_db(
+                    &values,
+                    freq.min(plotted_max_hz(sample_rate)),
+                    sample_rate,
+                )),
                 half: freq <= EQ_MIN_HZ || freq >= EQ_MAX_HZ,
                 ringed: active == Some(dot),
             })

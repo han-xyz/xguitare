@@ -1943,6 +1943,9 @@ fn format_value_like_the_mockup() {
         (spec("bias", "", false), -0.25, "\u{2212}0.3"),
         (spec("bias", "", false), -0.04, "0"),
         (spec("stages", "", true), 2.0, "2"),
+        (spec("q", "", false), 3.0, "3"),
+        (spec("mid1_q", "", false), 0.707, "0.71"),
+        (spec("mid2_q", "", false), 2.5, "2.5"),
     ];
     for (row, value, expected) in cases {
         assert_eq!(format_value(&row, value), expected, "{} {value}", row.param);
