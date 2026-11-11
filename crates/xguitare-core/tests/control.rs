@@ -376,7 +376,7 @@ fn set_without_preset() {
 #[test]
 fn get_all_and_one() {
     let (mut state, _audio, _dir) = state("get");
-    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "default": 0.0, "integer": false, "bypass": false});
+    let expected = json!({"module": "gain", "type": "gain", "param": "level", "value": -3.0, "unit": "dB", "min": -60.0, "max": 20.0, "default": 0.0, "integer": false, "labels": [], "bypass": false});
     let all = ok(handle(
         &mut state,
         Request::Get {
@@ -468,6 +468,49 @@ fn get_carries_integer() {
             ("stages", true)
         ]
     );
+}
+
+#[test]
+fn labelled_param_carries_labels_and_clamps() {
+    let (mut state, _audio, dir) = state("labels");
+    fs::write(
+        dir.0.join("04-wah.toml"),
+        "name = \"Wah\"\n[[module]]\ntype = \"autowah\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&dir.0).unwrap();
+    ok(handle(
+        &mut state,
+        Request::Load {
+            preset: "Wah".to_string(),
+            track: None,
+            bus: None,
+            master: false,
+        },
+    ));
+    let mode = ok(handle(
+        &mut state,
+        Request::Get {
+            param: Some("autowah.mode".to_string()),
+            track: None,
+            bus: None,
+            master: false,
+        },
+    ));
+    assert_eq!(mode["params"][0]["labels"], json!(["lp", "bp", "hp"]));
+    assert_eq!(
+        ok(handle(&mut state, set("autowah.mode", 5.0))),
+        json!({"param": "autowah.mode", "value": 2.0, "clamped": true})
+    );
+    let modules = ok(handle(&mut state, Request::Modules));
+    let autowah = modules["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["type"] == "autowah")
+        .unwrap();
+    assert_eq!(autowah["params"][1]["name"], "direction");
+    assert_eq!(autowah["params"][1]["labels"], json!(["up", "down"]));
 }
 
 #[test]
@@ -1048,7 +1091,7 @@ fn modules_lists_registry() {
     assert_eq!(stages["integer"], true);
     assert_eq!(
         by_type("gain")["params"],
-        json!([{"name": "level", "min": -60.0, "max": 20.0, "default": 0.0, "unit": "dB", "integer": false}])
+        json!([{"name": "level", "min": -60.0, "max": 20.0, "default": 0.0, "unit": "dB", "integer": false, "labels": []}])
     );
 }
 

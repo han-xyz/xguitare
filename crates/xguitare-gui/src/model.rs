@@ -801,6 +801,7 @@ pub fn accent_for(type_name: &str) -> (u8, u8, u8) {
         "reverb" => (150, 90, 210),
         "chorus" => (70, 180, 80),
         "flanger" => (50, 200, 220),
+        "autowah" => (225, 85, 200),
         _ => NEUTRAL_ACCENT,
     }
 }

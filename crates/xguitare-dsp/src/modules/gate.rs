@@ -18,6 +18,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: -60.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "attack",
@@ -26,6 +27,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 1.0,
             unit: Unit::Ms,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "release",
@@ -34,6 +36,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 100.0,
             unit: Unit::Ms,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "hysteresis",
@@ -42,6 +45,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 6.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
     ],
 };

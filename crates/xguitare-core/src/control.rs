@@ -1230,6 +1230,7 @@ fn modules() -> Value {
                         "default": shortest_f64(p.default),
                         "unit": unit_text(p.unit),
                         "integer": p.integer,
+                        "labels": p.labels,
                     })
                 })
                 .collect();
@@ -1666,6 +1667,7 @@ fn param_json(module: &PresetModule, param: usize) -> Value {
         "max": shortest_f64(spec.max),
         "default": shortest_f64(spec.default),
         "integer": spec.integer,
+        "labels": spec.labels,
         "bypass": module.bypass,
     });
     if module.type_name == CABINET_TYPE {

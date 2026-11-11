@@ -201,7 +201,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"params":[{"bypass":false,"default":40.0,"integer":false,"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
+{"ok":true,"params":[{"bypass":false,"default":40.0,"integer":false,"labels":[],"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
 ```
 
 | Key | Value |
@@ -215,6 +215,7 @@ Response:
 | `params[].min`, `params[].max` | The Parameter's range. |
 | `params[].default` | The value a new Module of this type starts with. |
 | `params[].integer` | `true` when the Parameter takes whole numbers only (`preamp.stages`, `delay.pingpong`, `cabinet.low_cut`, `cabinet.high_cut`); `set` and the Module round other values. |
+| `params[].labels` | The names of a choice Parameter's values, `["lp","bp","hp"]` for `autowah.mode`: value `n` means `labels[n]`, from 0 to `max`. `[]` for a plain number. `set` and Presets take the number. |
 | `params[].bypass` | Whether the Module is bypassed (see `bypass`); the same on every entry of one Module. |
 | `params[].ir` | Cabinet entries only: the Module's Cabinet IR name, as in the Preset's `ir` (`null` when it has none). Other Modules' entries have no `ir` key. |
 
@@ -290,14 +291,14 @@ Request:
 Response (shortened to two types):
 
 ```json
-{"ok":true,"modules":[{"channels":"mono","params":[{"default":0.0,"integer":false,"max":20.0,"min":-60.0,"name":"level","unit":"dB"}],"type":"gain"},{"channels":"mono_to_stereo","params":[{"default":0.0,"integer":false,"max":20.0,"min":-20.0,"name":"level","unit":"dB"},{"default":20.0,"integer":true,"max":300.0,"min":20.0,"name":"low_cut","unit":"Hz"},{"default":20000.0,"integer":true,"max":20000.0,"min":2000.0,"name":"high_cut","unit":"Hz"}],"type":"cabinet"}]}
+{"ok":true,"modules":[{"channels":"mono","params":[{"default":0.0,"integer":false,"labels":[],"max":20.0,"min":-60.0,"name":"level","unit":"dB"}],"type":"gain"},{"channels":"mono_to_stereo","params":[{"default":0.0,"integer":false,"labels":[],"max":20.0,"min":-20.0,"name":"level","unit":"dB"},{"default":20.0,"integer":true,"labels":[],"max":300.0,"min":20.0,"name":"low_cut","unit":"Hz"},{"default":20000.0,"integer":true,"labels":[],"max":20000.0,"min":2000.0,"name":"high_cut","unit":"Hz"}],"type":"cabinet"}]}
 ```
 
 | Key | Value |
 | --- | --- |
 | `modules[].type` | The Module type, as written in a Preset's `type`. |
 | `modules[].channels` | `"mono"` (before the cabinet), `"stereo"` (after it) or `"mono_to_stereo"` (the cabinet). |
-| `modules[].params` | The Parameters in order, each with `name`, `min`, `max`, `default`, `unit` (as in `get`) and `integer`. |
+| `modules[].params` | The Parameters in order, each with `name`, `min`, `max`, `default`, `unit`, `integer` and `labels` (as in `get`). |
 
 Errors: none besides the transport errors.
 

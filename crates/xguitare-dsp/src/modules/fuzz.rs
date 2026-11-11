@@ -26,6 +26,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 60.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "tone",
@@ -34,6 +35,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 50.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "level",
@@ -42,6 +44,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 0.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
     ],
 };

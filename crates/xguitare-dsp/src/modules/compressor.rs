@@ -20,6 +20,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: -20.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "ratio",
@@ -28,6 +29,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 4.0,
             unit: Unit::Linear,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "attack",
@@ -36,6 +38,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 10.0,
             unit: Unit::Ms,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "release",
@@ -44,6 +47,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 100.0,
             unit: Unit::Ms,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "makeup",
@@ -52,6 +56,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 0.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
     ],
 };

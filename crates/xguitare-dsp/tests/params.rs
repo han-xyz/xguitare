@@ -1,5 +1,8 @@
 use xguitare_dsp::modules::cabinet::Cabinet;
-use xguitare_dsp::{Delay, Drive, Gain, Gate, Module, Preamp, Reverb, Tonestack};
+use xguitare_dsp::{
+    Autowah, Chorus, Compressor, Delay, Drive, Flanger, Fuzz, Gain, Gate, Module, Preamp, Reverb,
+    Tonestack, Unit,
+};
 
 #[test]
 fn integer_params_are_stages_and_pingpong() {
@@ -32,4 +35,43 @@ fn integer_params_are_stages_and_pingpong() {
             "delay.pingpong"
         ]
     );
+}
+
+#[test]
+fn labelled_params_count_their_labels_from_zero() {
+    let modules: Vec<Box<dyn Module>> = vec![
+        Box::new(Gate::new()),
+        Box::new(Compressor::new()),
+        Box::new(Drive::new()),
+        Box::new(Fuzz::new()),
+        Box::new(Gain::new()),
+        Box::new(Preamp::new()),
+        Box::new(Tonestack::new()),
+        Box::new(Cabinet::new(None)),
+        Box::new(Delay::new()),
+        Box::new(Chorus::new()),
+        Box::new(Flanger::new()),
+        Box::new(Reverb::new()),
+        Box::new(Autowah::new()),
+    ];
+    let labelled = modules
+        .iter()
+        .flat_map(|module| module.spec().params)
+        .filter(|param| !param.labels.is_empty());
+    for param in labelled {
+        assert!(param.integer, "{} is not integer", param.name);
+        assert_eq!(param.min, 0.0, "{} min", param.name);
+        assert_eq!(
+            param.max,
+            (param.labels.len() - 1) as f32,
+            "{} max",
+            param.name
+        );
+        assert_eq!(param.unit, Unit::Linear, "{} unit", param.name);
+        assert!(
+            param.default.fract() == 0.0 && param.default <= param.max,
+            "{} default",
+            param.name
+        );
+    }
 }

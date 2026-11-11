@@ -7,9 +7,11 @@ mod rack;
 pub mod resample;
 pub mod smooth;
 mod stereo_rack;
+pub mod svf;
 pub mod synth_ir;
 pub mod tuner;
 
+pub use modules::autowah::Autowah;
 pub use modules::chorus::Chorus;
 pub use modules::compressor::Compressor;
 pub use modules::delay::Delay;
@@ -48,6 +50,8 @@ pub struct ParamSpec {
     pub default: f32,
     pub unit: Unit,
     pub integer: bool,
+    /// Names for the values of a choice Parameter: value `n` means `labels[n]`; empty for a plain number.
+    pub labels: &'static [&'static str],
 }
 
 #[derive(Debug)]

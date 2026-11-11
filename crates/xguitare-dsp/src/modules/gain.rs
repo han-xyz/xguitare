@@ -14,6 +14,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
         default: 0.0,
         unit: Unit::Db,
         integer: false,
+        labels: &[],
     }],
 };
 

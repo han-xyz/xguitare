@@ -118,12 +118,13 @@ mix = 10
 - `bypass = true` on a `[[module]]` starts that Module bypassed: it passes its input through unchanged and keeps its Parameters. Omitted means `false`. `xguitare bypass <id> on|off` switches it live, and `save` writes it.
 - `cabinet` needs `ir`: the name of a Cabinet IR, a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo). The name is looked up under the IR directory (config `ir_dir`, default the Bank directory) and, when no file of that name is there, under the Bank directory. Only the first `ir_max_ms` of the file is read, and an IR with a NaN or infinite sample is refused. It must be a relative name: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. Every IR is normalised to unit energy on load (a stereo IR to unit energy per channel on average, so it plays as loud in total as a mono IR), so IRs sit at one loudness and `level` balances the cabinet against the rest. `xguitare ir list` shows the names in the IR directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
 
-Modules and Parameters (`min..max default unit`):
+Modules and Parameters (`min..max default unit`). A choice Parameter lists its choices instead of a range (`mode` lp|bp|hp): a Preset and `set` take the choice's number, counted from 0, so `mode = 1` is bp.
 
 | Module | Parameters |
 | --- | --- |
 | `gate` | `threshold` −90..0 −60 dB, `attack` 0.1..50 1 ms, `release` 5..1000 100 ms, `hysteresis` 0..20 6 dB |
 | `compressor` | `threshold` −60..0 −20 dB, `ratio` 1..20 4, `attack` 0.1..100 10 ms, `release` 10..1000 100 ms, `makeup` 0..24 0 dB |
+| `autowah` | `mode` lp\|bp\|hp 0, `direction` up\|down 0, `sensitivity` −24..36 0 dB, `attack` 0.5..50 5 ms, `decay` 20..1000 150 ms, `freq_low` 80..800 200 Hz, `freq_high` 400..4000 2500 Hz, `q` 0.5..12 3, `dry` 0..100 50 %, `wet` 0..100 100 % |
 | `drive` | `drive` 0..100 50 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `preamp` | `gain` 0..100 40 %, `bias` −1..1 0, `master` −60..0 −12 dB, `stages` 1..4 3 |
@@ -239,7 +240,7 @@ $ xguitare save --as "My Lead Tone"
 saved /home/you/.config/xguitare/bank/04-my-lead-tone.toml
 ```
 
-`modules` lists the Module types with their channels and Parameters; `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, preamp, tonestack, cabinet, reverb):
+`modules` lists the Module types with their channels and Parameters, a choice Parameter with its choices (`mode (lp|bp|hp)`); `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, preamp, tonestack, cabinet, reverb):
 
 ```console
 $ xguitare modules

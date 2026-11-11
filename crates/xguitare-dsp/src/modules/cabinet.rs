@@ -22,6 +22,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 0.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "low_cut",
@@ -30,6 +31,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 20.0,
             unit: Unit::Hz,
             integer: true,
+            labels: &[],
         },
         ParamSpec {
             name: "high_cut",
@@ -38,6 +40,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 20000.0,
             unit: Unit::Hz,
             integer: true,
+            labels: &[],
         },
     ],
 };

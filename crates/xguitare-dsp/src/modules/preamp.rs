@@ -25,6 +25,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 40.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "bias",
@@ -33,6 +34,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 0.0,
             unit: Unit::Linear,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "master",
@@ -41,6 +43,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: -12.0,
             unit: Unit::Db,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "stages",
@@ -49,6 +52,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 3.0,
             unit: Unit::Linear,
             integer: true,
+            labels: &[],
         },
     ],
 };

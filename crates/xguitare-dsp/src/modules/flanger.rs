@@ -22,6 +22,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 0.3,
             unit: Unit::Hz,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "depth",
@@ -30,6 +31,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 60.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "feedback",
@@ -38,6 +40,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 50.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "mix",
@@ -46,6 +49,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 50.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
     ],
 };

@@ -893,9 +893,7 @@ fn render_list(payload: &Value) -> String {
 fn render_modules(payload: &Value) -> String {
     let mut lines = String::new();
     for module in items(&payload["modules"]) {
-        let params: Vec<String> = items(&module["params"])
-            .map(|param| text(&param["name"]))
-            .collect();
+        let params: Vec<String> = items(&module["params"]).map(param_name).collect();
         let _ = writeln!(
             lines,
             "{:<12}{:<16}{}",
@@ -905,6 +903,15 @@ fn render_modules(payload: &Value) -> String {
         );
     }
     lines
+}
+
+/// A choice Parameter's name is followed by its labels: `mode (lp|bp|hp)`.
+fn param_name(param: &Value) -> String {
+    let labels: Vec<String> = items(&param["labels"]).map(text).collect();
+    if labels.is_empty() {
+        return text(&param["name"]);
+    }
+    format!("{} ({})", text(&param["name"]), labels.join("|"))
 }
 
 fn items(value: &Value) -> impl Iterator<Item = &Value> {

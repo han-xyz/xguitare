@@ -1,9 +1,10 @@
 use xguitare_dsp::modules::{
-    cabinet, chorus, compressor, delay, drive, flanger, fuzz, gain, gate, preamp, reverb, tonestack,
+    autowah, cabinet, chorus, compressor, delay, drive, flanger, fuzz, gain, gate, preamp, reverb,
+    tonestack,
 };
 use xguitare_dsp::{
-    Chorus, Compressor, Delay, Drive, Flanger, Fuzz, Gain, Gate, Module, ModuleSpec, Preamp,
-    Reverb, Tonestack,
+    Autowah, Chorus, Compressor, Delay, Drive, Flanger, Fuzz, Gain, Gate, Module, ModuleSpec,
+    Preamp, Reverb, Tonestack,
 };
 
 struct Entry {
@@ -23,6 +24,10 @@ static ENTRIES: &[Entry] = &[
     Entry {
         spec: &compressor::SPEC,
         construct: Some(|| Box::new(Compressor::new())),
+    },
+    Entry {
+        spec: &autowah::SPEC,
+        construct: Some(|| Box::new(Autowah::new())),
     },
     Entry {
         spec: &drive::SPEC,

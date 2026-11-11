@@ -21,6 +21,7 @@ fn specs_equal_constructed_module_specs() {
             "gain",
             "gate",
             "compressor",
+            "autowah",
             "drive",
             "fuzz",
             "preamp",

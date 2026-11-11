@@ -363,13 +363,13 @@ fn modules_prints_types() {
     let out = cli(
         &["modules"],
         reply(
-            r#"{"ok":true,"modules":[{"type":"gain","channels":"mono","params":[{"name":"level","min":-60.0,"max":20.0,"default":0.0,"unit":"dB","integer":false}]},{"type":"cabinet","channels":"mono_to_stereo","params":[]},{"type":"delay","channels":"stereo","params":[{"name":"time"},{"name":"feedback"},{"name":"mix"}]}]}"#,
+            r#"{"ok":true,"modules":[{"type":"gain","channels":"mono","params":[{"name":"level","min":-60.0,"max":20.0,"default":0.0,"unit":"dB","integer":false}]},{"type":"cabinet","channels":"mono_to_stereo","params":[]},{"type":"delay","channels":"stereo","params":[{"name":"time"},{"name":"feedback"},{"name":"mix"}]},{"type":"autowah","channels":"mono","params":[{"name":"mode","labels":["lp","bp","hp"]},{"name":"direction","labels":["up","down"]},{"name":"q","labels":[]}]}]}"#,
         ),
     );
     assert_eq!(out.requests, [Request::Modules]);
     assert_eq!(
         out.stdout,
-        "gain        mono            level\ncabinet     mono_to_stereo  \ndelay       stereo          time,feedback,mix\n"
+        "gain        mono            level\ncabinet     mono_to_stereo  \ndelay       stereo          time,feedback,mix\nautowah     mono            mode (lp|bp|hp),direction (up|down),q\n"
     );
     assert_eq!(out.code, 0);
 }

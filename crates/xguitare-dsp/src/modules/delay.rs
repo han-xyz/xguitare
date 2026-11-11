@@ -19,6 +19,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 400.0,
             unit: Unit::Ms,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "feedback",
@@ -27,6 +28,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 35.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "mix",
@@ -35,6 +37,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 25.0,
             unit: Unit::Percent,
             integer: false,
+            labels: &[],
         },
         ParamSpec {
             name: "pingpong",
@@ -43,6 +46,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
             default: 0.0,
             unit: Unit::Linear,
             integer: true,
+            labels: &[],
         },
     ],
 };
