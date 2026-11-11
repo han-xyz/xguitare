@@ -3,8 +3,8 @@ use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{
-    Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Module,
-    Preamp, Rack, Reverb, StereoRack, StereoSlot, Tonestack,
+    Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Limiter,
+    Module, Preamp, Rack, Reverb, Shaper, StereoRack, StereoSlot, Tonestack,
 };
 
 #[cfg(debug_assertions)]
@@ -58,6 +58,22 @@ fn compressor_does_not_allocate() {
     assert_rack_does_not_allocate(
         Box::new(Compressor::new()),
         &[(0, -30.0), (1, 8.0), (2, 2.0), (3, 200.0), (4, 6.0)],
+    );
+}
+
+#[test]
+fn limiter_does_not_allocate() {
+    assert_rack_does_not_allocate(
+        Box::new(Limiter::new()),
+        &[(0, 18.0), (1, -6.0), (2, 20.0), (3, 5.0)],
+    );
+}
+
+#[test]
+fn shaper_does_not_allocate() {
+    assert_rack_does_not_allocate(
+        Box::new(Shaper::new()),
+        &[(0, 12.0), (1, -12.0), (2, 6.0), (3, 50.0)],
     );
 }
 
@@ -337,6 +353,14 @@ fn stereo_rack_does_not_allocate() {
             StereoSlot::Linked(Box::new(Compressor::new())),
         ),
         (
+            "shaper".to_string(),
+            StereoSlot::Linked(Box::new(Shaper::new())),
+        ),
+        (
+            "limiter".to_string(),
+            StereoSlot::Linked(Box::new(Limiter::new())),
+        ),
+        (
             "reverb".to_string(),
             StereoSlot::Stereo(Box::new(Reverb::new())),
         ),
@@ -359,7 +383,7 @@ fn stereo_rack_does_not_allocate() {
         }
         for round in 0..100 {
             let on = round % 10 < 5;
-            for idx in 0..3 {
+            for idx in 0..param_counts.len() {
                 rack.set_bypass(idx, on);
             }
             rack.process(&in_l, &in_r, &mut left, &mut right);

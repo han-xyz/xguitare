@@ -10,8 +10,10 @@ pub mod flanger;
 pub mod fuzz;
 pub mod gain;
 pub mod gate;
+pub mod limiter;
 pub mod preamp;
 pub mod reverb;
+pub mod shaper;
 pub mod tonestack;
 
 fn db_to_linear(db: f32) -> f32 {

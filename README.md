@@ -118,12 +118,13 @@ mix = 10
 - `bypass = true` on a `[[module]]` starts that Module bypassed: it passes its input through unchanged and keeps its Parameters. Omitted means `false`. `xguitare bypass <id> on|off` switches it live, and `save` writes it.
 - `cabinet` needs `ir`: the name of a Cabinet IR, a WAV file (16/24/32-bit PCM or 32-bit float, mono or stereo). The name is looked up under the IR directory (config `ir_dir`, default the Bank directory) and, when no file of that name is there, under the Bank directory. Only the first `ir_max_ms` of the file is read, and an IR with a NaN or infinite sample is refused. It must be a relative name: no absolute path, no `..` or `.`, so `irs/cab.wav` works and `../cab.wav` is an error. Every IR is normalised to unit energy on load (a stereo IR to unit energy per channel on average, so it plays as loud in total as a mono IR), so IRs sit at one loudness and `level` balances the cabinet against the rest. `xguitare ir list` shows the names in the IR directory. The cabinet turns the mono signal into stereo, so a Rack has at most one cabinet, `delay`, `chorus`, `flanger` and `reverb` come after it and every other Module before it.
 
-Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks at 0 dB at its cutoff whatever `q`; lp and hp keep a resonant peak, up to about +22 dB at `q` 12, so lower `wet` or `q` when they get loud. A choice Parameter lists its choices instead of a range (`mode` lp|bp|hp): a Preset and `set` take the choice's number, counted from 0, so `mode = 1` is bp. `blend` runs its whole input, the clean part included, through 4x oversampling: it adds about 0.5 ms of delay (22.5 samples at 48 kHz), which is not reported as latency, and rolls off slightly above 15 kHz (−1.7 dB at 20 kHz).
+Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks at 0 dB at its cutoff whatever `q`; lp and hp keep a resonant peak, up to about +22 dB at `q` 12, so lower `wet` or `q` when they get loud. A choice Parameter lists its choices instead of a range (`mode` lp|bp|hp): a Preset and `set` take the choice's number, counted from 0, so `mode = 1` is bp. `blend` runs its whole input, the clean part included, through 4x oversampling: it adds about 0.5 ms of delay (22.5 samples at 48 kHz), which is not reported as latency, and rolls off slightly above 15 kHz (−1.7 dB at 20 kHz). `limiter` delays the sound by `lookahead` ms so that it can lower the gain before a peak arrives; that delay is not counted in recording latency compensation. Its output never goes above `ceiling`. `shaper` raises or lowers the start of each note (`attack`) and what follows it (`sustain`) whatever the input level; at `attack` 0 and `sustain` 0 it leaves the sound unchanged.
 
 | Module | Parameters |
 | --- | --- |
 | `gate` | `threshold` −90..0 −60 dB, `attack` 0.1..50 1 ms, `release` 5..1000 100 ms, `hysteresis` 0..20 6 dB |
 | `compressor` | `threshold` −60..0 −20 dB, `ratio` 1..20 4, `attack` 0.1..100 10 ms, `release` 10..1000 100 ms, `makeup` 0..24 0 dB |
+| `shaper` | `attack` −15..15 0 dB, `sustain` −24..24 0 dB, `output` −12..12 0 dB, `mix` 0..100 100 % |
 | `autowah` | `mode` lp\|bp\|hp 0, `direction` up\|down 0, `sensitivity` −24..36 0 dB, `attack` 0.5..50 5 ms, `decay` 20..1000 150 ms, `freq_low` 80..800 200 Hz, `freq_high` 400..4000 2500 Hz, `q` 0.5..12 3, `dry` 0..100 50 %, `wet` 0..100 100 % |
 | `drive` | `drive` 0..100 50 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
@@ -131,6 +132,7 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `preamp` | `gain` 0..100 40 %, `bias` −1..1 0, `master` −60..0 −12 dB, `stages` 1..4 3 |
 | `tonestack` | `bass`, `middle`, `treble` 0..100 50 % |
 | `eq` | `low_cut` 10..300 10 Hz, `low_freq` 20..500 100 Hz, `low_gain` −15..15 0 dB, `mid1_freq` 40..5000 400 Hz, `mid1_gain` −15..15 0 dB, `mid1_q` 0.3..10 0.707, `mid2_freq` 200..10000 2500 Hz, `mid2_gain` −15..15 0 dB, `mid2_q` 0.3..10 0.707, `high_freq` 1000..20000 8000 Hz, `high_gain` −15..15 0 dB, `high_cut` 1000..20000 20000 Hz, `output` −12..12 0 dB |
+| `limiter` | `input` 0..18 0 dB, `ceiling` −12..0 −1 dB, `release` 10..1000 100 ms, `lookahead` 0..5 1 ms |
 | `cabinet` | `level` −20..20 0 dB, `low_cut` 20..300 20 Hz, `high_cut` 2000..20000 20000 Hz |
 | `delay` | `time` 10..2000 400 ms, `feedback` 0..95 35 %, `mix` 0..100 25 %, `pingpong` 0..1 0 |
 | `chorus` | `rate` 0.1..5 1 Hz, `depth` 0..100 50 %, `mix` 0..100 40 % |
