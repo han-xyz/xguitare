@@ -8,6 +8,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 - `autowah` Module, an envelope filter for bass and guitar: the input's envelope sweeps a low-, band- or high-pass filter between `freq_low` and `freq_high`, up or down, with `sensitivity`, `attack`, `decay`, `q`, `dry` and `wet`.
 - `eq` Module, a parametric equaliser: 12 dB/oct `low_cut` and `high_cut`, a low and a high shelf, two bells with their own `q`, and `output`.
+- `blend` Module, a bass DI blend drive: below `crossover` the signal stays clean, above it `presence` and `drive` clip it at `level`; `blend` mixes the clean input with that, and `bass` (40 or 80 Hz), `mid` (500 or 1000 Hz) and `treble` shape the result, also at `blend` 0.
 - GUI: the `eq` unit (`EQ`) shows its response curve, a small one when closed and, when open, a plot with a dot per band over four band columns of knobs.
 - GUI: a choice Parameter is a row of buttons in an open unit and a chip with the current choice in a closed one (a click on a two-way chip switches it); an open unit grows to hold its knobs, which wrap to another row between groups of Parameters.
 - Choice Parameters: the Control API `modules` and `get` entries carry `labels` (`["lp","bp","hp"]`; `[]` for a plain number) and `xguitare modules` prints them, `mode (lp|bp|hp)`. Presets and `set` keep the number.

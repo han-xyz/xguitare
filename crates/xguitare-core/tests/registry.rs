@@ -24,6 +24,7 @@ fn specs_equal_constructed_module_specs() {
             "autowah",
             "drive",
             "fuzz",
+            "blend",
             "preamp",
             "tonestack",
             "eq",

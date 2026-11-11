@@ -1,4 +1,5 @@
 pub mod autowah;
+pub mod blend;
 pub mod cabinet;
 pub mod chorus;
 pub mod compressor;

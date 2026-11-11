@@ -12,6 +12,7 @@ pub mod synth_ir;
 pub mod tuner;
 
 pub use modules::autowah::Autowah;
+pub use modules::blend::Blend;
 pub use modules::chorus::Chorus;
 pub use modules::compressor::Compressor;
 pub use modules::delay::Delay;
