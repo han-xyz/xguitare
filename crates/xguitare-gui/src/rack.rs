@@ -834,7 +834,7 @@ fn choice_chip(
         .get(lit)
         .map(|label| choice_text(label))
         .unwrap_or_default();
-    let name = format!("{}, {text}", param_label(&row.param));
+    let name = format!("{}, {text}, selected", param_label(&row.param));
     let group = Layout::top_down(Align::Min);
     let clicked = ui
         .allocate_ui_with_layout(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT), group, |ui| {

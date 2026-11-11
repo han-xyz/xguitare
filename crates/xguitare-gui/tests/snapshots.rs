@@ -653,7 +653,7 @@ fn choice_buttons_send_the_choice() {
 fn closed_chips_switch_two_choices_and_open_for_more() {
     let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
     harness
-        .get_by_role_and_label(Role::Button, "Direction, Up")
+        .get_by_role_and_label(Role::Button, "Direction, Up, selected")
         .click();
     harness.run_steps(2);
     assert_eq!(
@@ -665,7 +665,7 @@ fn closed_chips_switch_two_choices_and_open_for_more() {
     );
     assert_eq!(harness.query_all_by_label("▼").count(), 0);
     harness
-        .get_by_role_and_label(Role::Button, "Mode, BP")
+        .get_by_role_and_label(Role::Button, "Mode, BP, selected")
         .click();
     harness.run_steps(2);
     assert_eq!(harness.query_all_by_label("▼").count(), 1);
