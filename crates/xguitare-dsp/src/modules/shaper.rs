@@ -1,5 +1,6 @@
 use super::{db_to_linear, one_pole_coeff};
 use crate::smooth::Smoother;
+use crate::window_peak::WindowPeak;
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const ATTACK: usize = 0;
@@ -9,6 +10,8 @@ const MIX: usize = 3;
 const FAST_SECONDS: f32 = 0.001;
 const SLOW_SECONDS: f32 = 0.040;
 const RELEASE_SECONDS: f32 = 0.150;
+/// Half a period at 20 Hz: every window of a steady note holds a crest, so the envelopes see a steady level, not each half cycle.
+const HOLD_SECONDS: f32 = 0.025;
 /// An envelope difference of this many dB applies the full `attack` or `sustain` gain; a smaller one a proportional part.
 const FULL_DIFFERENCE_DB: f32 = 6.0;
 const LEVEL_FLOOR: f32 = 1e-9;
@@ -81,7 +84,7 @@ fn level_db(level: f32) -> f32 {
     20.0 * level.max(LEVEL_FLOOR).log10()
 }
 
-/// A transient shaper after the SPL method: `attack` follows the gap between a fast envelope and a slow-rising one, `sustain` the gap between that fast envelope, which holds peaks for the release time, and a follower that falls with the signal; gaps in dB do not depend on the input level.
+/// A transient shaper after the SPL method, detecting on the input's peak over the last 25 ms: `attack` follows the gap between a fast envelope and a slow-rising one, `sustain` the gap between that fast envelope, which holds peaks for the release time, and a follower that falls with the signal; gaps in dB do not depend on the input level.
 pub struct Shaper {
     values: [f32; 4],
     attack: Smoother,
@@ -91,6 +94,8 @@ pub struct Shaper {
     peak: Envelope,
     slow: Envelope,
     follower: Envelope,
+    hold: WindowPeak,
+    hold_frames: usize,
     gain_coeff: f32,
     gain_db: f32,
 }
@@ -112,6 +117,8 @@ impl Shaper {
             peak: idle,
             slow: idle,
             follower: idle,
+            hold: WindowPeak::new(0),
+            hold_frames: 0,
             gain_coeff: 0.0,
             gain_db: 0.0,
         };
@@ -123,6 +130,7 @@ impl Shaper {
         for envelope in [&mut self.peak, &mut self.slow, &mut self.follower] {
             envelope.value = 0.0;
         }
+        self.hold.clear();
         self.gain_db = 0.0;
     }
 
@@ -132,7 +140,8 @@ impl Shaper {
         let sustain = self.sustain.next_value();
         let output = db_to_linear(self.output.next_value());
         let mix = self.mix.next_value();
-        let level = frame.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+        let rectified = frame.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+        let level = self.hold.push(rectified, self.hold_frames);
         let peak_level = self.peak.next(level);
         let peak = level_db(peak_level);
         let onset = peak - level_db(self.slow.next(peak_level));
@@ -189,6 +198,8 @@ impl Module for Shaper {
             fall: slow,
             value: 0.0,
         };
+        self.hold_frames = (HOLD_SECONDS * sample_rate).ceil() as usize;
+        self.hold = WindowPeak::new(self.hold_frames + 1);
         self.gain_coeff = fast;
         self.clear();
     }

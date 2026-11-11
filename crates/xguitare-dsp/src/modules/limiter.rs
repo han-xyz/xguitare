@@ -1,5 +1,6 @@
 use super::{db_to_linear, one_pole_coeff};
 use crate::smooth::Smoother;
+use crate::window_peak::WindowPeak;
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const INPUT: usize = 0;
@@ -51,7 +52,7 @@ pub static SPEC: ModuleSpec = ModuleSpec {
     ],
 };
 
-/// A brickwall limiter: the audio is delayed by `lookahead` while a peak detector over that window lowers the gain before a peak leaves the delay; a final clamp holds every sample at the ceiling.
+/// A brickwall limiter: the audio is delayed by `lookahead` while a peak detector over that window sets the gain a peak needs; the gain glides there across the delay, reaching it as the peak leaves, and a final clamp holds every sample at the ceiling.
 pub struct Limiter {
     values: [f32; 4],
     sample_rate: f32,
@@ -63,6 +64,7 @@ pub struct Limiter {
     write: usize,
     window: WindowPeak,
     envelope: f32,
+    glide: GainGlide,
 }
 
 impl Limiter {
@@ -79,6 +81,7 @@ impl Limiter {
             write: 0,
             window: WindowPeak::new(0),
             envelope: 0.0,
+            glide: GainGlide::new(0),
         };
         limiter.prepare(DEFAULT_SAMPLE_RATE, 0);
         limiter
@@ -99,6 +102,7 @@ impl Limiter {
         self.write = 0;
         self.window.clear();
         self.envelope = 0.0;
+        self.glide.clear();
     }
 
     /// Takes the detector level of the frame just written to the delay; returns the gain and ceiling for the frame leaving it, its read offset and the fraction toward the next older sample.
@@ -111,11 +115,12 @@ impl Limiter {
             .push(level, window)
             .max(self.envelope * self.release_coeff);
         let ceiling = db_to_linear(self.ceiling.next_value());
-        let gain = if self.envelope > ceiling {
+        let target = if self.envelope > ceiling {
             ceiling / self.envelope
         } else {
             1.0
         };
+        let gain = self.glide.push(target, window + 1);
         (gain, ceiling, whole as usize, delay - whole)
     }
 
@@ -154,6 +159,7 @@ impl Module for Limiter {
         let max_delay = (SPEC.params[LOOKAHEAD].max / 1000.0 * sample_rate).ceil() as usize;
         self.lines = [vec![0.0; max_delay + 2], vec![0.0; max_delay + 2]];
         self.window = WindowPeak::new(max_delay + 2);
+        self.glide = GainGlide::new(max_delay + 2);
         self.delay.set_target(self.delay_samples());
         self.delay.snap();
         self.update_release();
@@ -208,46 +214,51 @@ impl Module for Limiter {
     }
 }
 
-/// The largest level among the last `window + 1` pushed, as a monotonic queue in a fixed ring.
-struct WindowPeak {
-    entries: Vec<(usize, f32)>,
-    head: usize,
+/// The mean of the last `len` gains, kept as a running sum of their shortfalls below 1. Over a window peak held for `len` frames it falls in even steps to a peak's gain by the frame the peak leaves the delay; with no shortfall in the window it is exactly 1.
+struct GainGlide {
+    shortfalls: Vec<f32>,
+    write: usize,
     len: usize,
-    count: usize,
+    sum: f32,
+    short: usize,
 }
 
-impl WindowPeak {
-    fn new(capacity: usize) -> WindowPeak {
-        WindowPeak {
-            entries: vec![(0, 0.0); capacity.max(1)],
-            head: 0,
+impl GainGlide {
+    fn new(capacity: usize) -> GainGlide {
+        GainGlide {
+            shortfalls: vec![0.0; capacity.max(1)],
+            write: 0,
             len: 0,
-            count: 0,
+            sum: 0.0,
+            short: 0,
         }
     }
 
     fn clear(&mut self) {
-        self.head = 0;
+        self.shortfalls.fill(0.0);
+        self.write = 0;
         self.len = 0;
-        self.count = 0;
+        self.sum = 0.0;
+        self.short = 0;
     }
 
-    fn slot(&self, offset: usize) -> usize {
-        (self.head + offset) % self.entries.len()
-    }
-
-    fn push(&mut self, level: f32, window: usize) -> f32 {
-        while self.len > 0 && self.entries[self.slot(self.len - 1)].1 <= level {
-            self.len -= 1;
-        }
-        while self.len > 0 && self.entries[self.head].0 + window < self.count {
-            self.head = self.slot(1);
-            self.len -= 1;
-        }
-        let tail = self.slot(self.len);
-        self.entries[tail] = (self.count, level);
+    fn push(&mut self, gain: f32, len: usize) -> f32 {
+        let capacity = self.shortfalls.len();
+        let shortfall = 1.0 - gain;
+        self.shortfalls[self.write] = shortfall;
+        self.write = (self.write + 1) % capacity;
+        self.sum += shortfall;
+        self.short += usize::from(shortfall > 0.0);
         self.len += 1;
-        self.count = self.count.wrapping_add(1);
-        self.entries[self.head].1
+        while self.len > len {
+            let oldest = self.shortfalls[(self.write + capacity - self.len) % capacity];
+            self.sum -= oldest;
+            self.short -= usize::from(oldest > 0.0);
+            self.len -= 1;
+        }
+        if self.short == 0 {
+            self.sum = 0.0;
+        }
+        1.0 - self.sum / self.len as f32
     }
 }

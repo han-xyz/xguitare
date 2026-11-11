@@ -10,6 +10,7 @@ mod stereo_rack;
 pub mod svf;
 pub mod synth_ir;
 pub mod tuner;
+mod window_peak;
 
 pub use modules::autowah::Autowah;
 pub use modules::blend::Blend;

@@ -114,21 +114,31 @@ fn gain_recovers_to_90_percent_within_the_release_time() {
     }
 }
 
+/// With 1 ms lookahead the gain glides down across the delay, no faster than an even ramp over it, and reaches ceiling / peak as the peak leaves.
 #[test]
 fn a_peak_is_limited_before_it_leaves_the_delay() {
     let ceiling = linear(-1.0);
-    let mut input = vec![0.1; frames(50.0)];
+    let steady = 0.1;
+    let peak_level = 4.0;
+    let mut input = vec![steady; frames(50.0)];
     let peak_at = frames(20.0);
-    input[peak_at] = 4.0;
+    input[peak_at] = peak_level;
     let mut limiter = prepared(Limiter::new(), &[]);
     let output = run(&mut limiter, &input);
-    let leaves = peak_at + frames(1.0);
+    let delay = frames(1.0);
+    let leaves = peak_at + delay;
     assert!(
         (output[leaves] - ceiling).abs() < 1e-6,
         "{}",
         output[leaves]
     );
-    assert!(output[leaves - 1] < 0.1 * ceiling / 4.0 + 1e-6);
+    let gains: Vec<f32> = output[delay..leaves].iter().map(|s| s / steady).collect();
+    let ramp_step = (1.0 - ceiling / peak_level) / (delay + 1) as f32;
+    let step = largest_step(&gains);
+    assert!(
+        step <= ramp_step + 1e-6,
+        "gain step {step}, ramp {ramp_step}"
+    );
 }
 
 fn run_stereo_rack(rack: &mut StereoRack, in_l: &[f32], in_r: &[f32]) -> (Vec<f32>, Vec<f32>) {

@@ -3,7 +3,8 @@ mod common;
 use std::ops::Range;
 
 use common::{
-    BLOCK, SAMPLE_RATE, db, frames, full_scale_sine_then_noise, noise, peak, prepared, rms, sine,
+    BLOCK, SAMPLE_RATE, bin_mag, db, frames, full_scale_sine_then_noise, noise, peak, prepared,
+    rms, sine,
 };
 use xguitare_dsp::{AudioBuffers, Module, Shaper, StereoRack, StereoSlot};
 
@@ -130,19 +131,9 @@ fn mix_and_output_scale_the_shaped_signal() {
     }
 }
 
-#[test]
-fn linked_applies_one_gain_to_both_sides() {
-    let mut rack = StereoRack::new(vec![(
-        "shaper".to_string(),
-        StereoSlot::Linked(Box::new(prepared(
-            Shaper::new(),
-            &[(ATTACK, 12.0), (SUSTAIN, -12.0)],
-        ))),
-    )])
-    .expect("valid layout");
+fn run_stereo_slot(slot: StereoSlot, in_l: &[f32], in_r: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let mut rack = StereoRack::new(vec![("shaper".to_string(), slot)]).expect("valid layout");
     rack.prepare(SAMPLE_RATE, BLOCK);
-    let in_l = pluck(-6.0);
-    let in_r: Vec<f32> = in_l.iter().map(|s| s * 0.1).collect();
     let mut out_l = vec![0.0; in_l.len()];
     let mut out_r = vec![0.0; in_r.len()];
     for (((l, r), ol), or) in in_l
@@ -153,17 +144,63 @@ fn linked_applies_one_gain_to_both_sides() {
     {
         rack.process(l, r, ol, or);
     }
-    let lift = db(peak(&out_l[onset()]) / peak(&in_l[onset()]));
-    assert!(lift > 3.0, "onset gain {lift} dB");
-    for n in frames(ONSET_MS)..in_l.len() {
-        if in_r[n].abs() < 1e-3 {
-            continue;
+    (out_l, out_r)
+}
+
+/// The largest difference between the left and right gain where both sides carry signal, and the left onset's gain in dB.
+fn largest_side_gain_gap(slot: StereoSlot) -> (f32, f32) {
+    let in_l = pluck(-6.0);
+    let mut in_r = vec![0.0; frames(100.0)];
+    in_r.extend(pluck(-12.0));
+    in_r.truncate(in_l.len());
+    let (out_l, out_r) = run_stereo_slot(slot, &in_l, &in_r);
+    let gap = (frames(ONSET_MS + 100.0)..in_l.len())
+        .filter(|&n| in_l[n].abs() > 1e-3 && in_r[n].abs() > 1e-3)
+        .map(|n| (out_l[n] / in_l[n] - out_r[n] / in_r[n]).abs())
+        .fold(0.0, f32::max);
+    (gap, db(peak(&out_l[onset()]) / peak(&in_l[onset()])))
+}
+
+/// The right side's note starts 100 ms after the left's: one gain for both sides only when the slot is linked.
+#[test]
+fn linked_applies_one_gain_to_both_sides() {
+    let settings = [(ATTACK, 12.0), (SUSTAIN, -12.0)];
+    let (linked, lift) = largest_side_gain_gap(StereoSlot::Linked(Box::new(prepared(
+        Shaper::new(),
+        &settings,
+    ))));
+    assert!(linked < 1e-3, "linked gap {linked}");
+    assert!(lift > 3.0, "linked onset gain {lift} dB");
+    let (doubled, _) = largest_side_gain_gap(StereoSlot::Doubled(
+        Box::new(prepared(Shaper::new(), &settings)),
+        Box::new(prepared(Shaper::new(), &settings)),
+    ));
+    assert!(doubled > 0.5, "unlinked gap {doubled}");
+}
+
+/// A steady note gives a steady gain: at the extremes the harmonics stay 50 dB under the fundamental, down to low E.
+#[test]
+fn steady_notes_are_not_distorted() {
+    for period in [1_165_usize, 436] {
+        let freq = SAMPLE_RATE / period as f32;
+        let input = sine(0.3, freq, SAMPLE_RATE, frames(1_000.0) + 40 * period);
+        for settings in [
+            [(ATTACK, 15.0)],
+            [(ATTACK, -15.0)],
+            [(SUSTAIN, 24.0)],
+            [(SUSTAIN, -24.0)],
+        ] {
+            let output = run(&mut prepared(Shaper::new(), &settings), &input);
+            let settled = &output[frames(1_000.0)..];
+            let fundamental = bin_mag(settled, freq, SAMPLE_RATE);
+            for harmonic in 2..=5 {
+                let level = db(bin_mag(settled, freq * harmonic as f32, SAMPLE_RATE) / fundamental);
+                assert!(
+                    level < -50.0,
+                    "{freq} Hz {settings:?}: harmonic {harmonic} at {level} dB"
+                );
+            }
         }
-        let (gain_l, gain_r) = (out_l[n] / in_l[n], out_r[n] / in_r[n]);
-        assert!(
-            (gain_l - gain_r).abs() < 1e-3,
-            "left {gain_l} right {gain_r} at {n}"
-        );
     }
 }
 
@@ -227,6 +264,37 @@ fn every_parameter_jump_is_smoothed() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The difference a jump makes against the output at `from`, and the difference the settled output at `to` makes, over 10 ms after the jump.
+fn jump_steps(input: &[f32], idx: usize, from: f32, to: f32, jump_at: usize) -> (f32, f32) {
+    let at = |value: f32| run(&mut prepared(Shaper::new(), &[(idx, value)]), input);
+    let (before, after) = (at(from), at(to));
+    let mut module = prepared(Shaper::new(), &[(idx, from)]);
+    let mut jumped = run(&mut module, &input[..jump_at]);
+    module.set_param(idx, to);
+    jumped.extend(run(&mut module, &input[jump_at..]));
+    let window = jump_at - 1..jump_at + frames(10.0);
+    let change: Vec<f32> = window.clone().map(|n| jumped[n] - before[n]).collect();
+    let full: Vec<f32> = window.map(|n| after[n] - before[n]).collect();
+    (largest_step(&change), largest_step(&full))
+}
+
+/// Jumps where the Parameter acts fully, `attack` 2 ms into a note and `sustain` in its decaying tail: the Parameter's Smoother keeps the change's steps well under those of switching the whole note to the new value (about 0.4 of them; without it about 1.0).
+#[test]
+fn attack_and_sustain_jumps_are_smoothed_where_they_act() {
+    let input = pluck(-6.0);
+    let cases = [
+        ("attack", ATTACK, -15.0, 15.0, frames(ONSET_MS + 2.0)),
+        ("sustain", SUSTAIN, -24.0, 24.0, frames(ONSET_MS + 400.0)),
+    ];
+    for (name, idx, from, to, jump_at) in cases {
+        let (change, full) = jump_steps(&input, idx, from, to, jump_at);
+        assert!(
+            change < 0.7 * full,
+            "{name}: largest step of the change {change}, of the settled change {full}"
+        );
+    }
 }
 
 #[test]
