@@ -255,3 +255,73 @@ fn starter_banks_build_without_warnings() {
     }
     assert_eq!(built, 16);
 }
+
+fn plucked_bass(sample_rate: f32, seconds: f32, rms_db: f32) -> Vec<f32> {
+    const NOTES_HZ: [f32; 4] = [41.2, 55.0, 73.4, 98.0];
+    const PLUCK_SECONDS: f32 = 0.5;
+    let frames = (sample_rate * seconds) as usize;
+    let mut signal: Vec<f32> = (0..frames)
+        .map(|n| {
+            let t = n as f32 / sample_rate;
+            let pluck = (t / PLUCK_SECONDS) as usize;
+            let since = t - pluck as f32 * PLUCK_SECONDS;
+            let freq = NOTES_HZ[pluck % NOTES_HZ.len()];
+            let tone: f32 = (1..=8)
+                .map(|k| (std::f32::consts::TAU * freq * k as f32 * since).sin() / k as f32)
+                .sum();
+            tone * (-since * 4.0).exp()
+        })
+        .collect();
+    let rms = (signal.iter().map(|x| x * x).sum::<f32>() / frames as f32).sqrt();
+    let scale = 10f32.powf(rms_db / 20.0) / rms;
+    for x in &mut signal {
+        *x *= scale;
+    }
+    signal
+}
+
+fn output_rms_db(preset: &xguitare_core::Preset, dir: &std::path::Path, input: &[f32]) -> f32 {
+    const BLOCK: usize = 128;
+    let (mut rack, _) = preset.build(48_000.0, BLOCK, dir, dir, 100.0).unwrap();
+    let mut sum = 0.0f64;
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    for block in input.as_chunks::<BLOCK>().0 {
+        rack.process(block, &mut left, &mut right);
+        sum += left
+            .iter()
+            .chain(&right)
+            .map(|x| f64::from(x * x))
+            .sum::<f64>();
+    }
+    let frames = input.len() / BLOCK * BLOCK;
+    (10.0 * (sum / (2 * frames) as f64).log10()) as f32
+}
+
+#[test]
+fn new_bass_presets_play_as_loud_as_funk() {
+    let temp = temp_dir("loudness");
+    let dir = temp.0.join("bank-bass");
+    ensure_bank(&dir, BankKind::Bass, 48_000).unwrap();
+    let bank = Bank::load_dir(&dir).unwrap();
+    let input = plucked_bass(48_000.0, 4.0, -18.0);
+    let rms_of = |name: &str| {
+        let preset = bank
+            .entries
+            .iter()
+            .find_map(|entry| match entry {
+                BankEntry::Valid { preset, .. } if preset.name == name => Some(preset),
+                _ => None,
+            })
+            .unwrap();
+        output_rms_db(preset, &dir, &input)
+    };
+    let funk = rms_of("Funk");
+    for name in ["Envelope Funk", "Modern Grind"] {
+        let rms = rms_of(name);
+        assert!(
+            (rms - funk).abs() <= 2.0,
+            "{name}: {rms:.1} dB, Funk {funk:.1} dB"
+        );
+    }
+}
