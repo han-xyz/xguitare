@@ -804,6 +804,8 @@ pub fn accent_for(type_name: &str) -> (u8, u8, u8) {
         "autowah" => (195, 240, 60),
         "eq" => (240, 108, 154),
         "blend" => (108, 240, 194),
+        "limiter" => (108, 174, 240),
+        "shaper" => (240, 128, 108),
         _ => NEUTRAL_ACCENT,
     }
 }

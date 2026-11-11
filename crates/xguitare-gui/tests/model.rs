@@ -721,7 +721,7 @@ fn rack_channels_by_module_type() {
 #[test]
 fn module_types_from_payload() {
     let types = module_types(&registry_modules("module-types"));
-    assert_eq!(types.len(), 15);
+    assert_eq!(types.len(), 17);
     let channels = |type_name: &str| {
         types
             .iter()
@@ -733,6 +733,8 @@ fn module_types_from_payload() {
     assert_eq!(channels("autowah"), Some("mono"));
     assert_eq!(channels("eq"), Some("mono"));
     assert_eq!(channels("blend"), Some("mono"));
+    assert_eq!(channels("limiter"), Some("mono"));
+    assert_eq!(channels("shaper"), Some("mono"));
     assert_eq!(channels("cabinet"), Some("mono_to_stereo"));
     assert_eq!(channels("reverb"), Some("stereo"));
     let cabinet = types.iter().find(|t| t.type_name == "cabinet").unwrap();

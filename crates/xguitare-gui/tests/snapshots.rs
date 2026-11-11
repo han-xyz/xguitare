@@ -709,6 +709,52 @@ fn blend_snapshots() {
     write_png(&mut closed, "blend-closed");
 }
 
+/// The Funk Rack with `module` spliced in before the first Parameter of `before`.
+fn with_module(module: Vec<Value>, before: &str) -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    let params = snapshot.params.as_mut().unwrap()["params"]
+        .as_array_mut()
+        .unwrap();
+    let at = params
+        .iter()
+        .position(|param| param["module"] == before)
+        .unwrap();
+    params.splice(at..at, module);
+    snapshot
+}
+
+#[test]
+fn limiter_closed_snapshot() {
+    let limiter = vec![
+        param("limiter", "input", 6.0, (0.0, 18.0, 0.0, "dB", false)),
+        param("limiter", "ceiling", -1.0, (-12.0, 0.0, -1.0, "dB", false)),
+        param(
+            "limiter",
+            "release",
+            100.0,
+            (10.0, 1000.0, 100.0, "ms", false),
+        ),
+        param("limiter", "lookahead", 1.0, (0.0, 5.0, 1.0, "ms", false)),
+    ];
+    let (mut closed, _, _dir) = harness_with(DEFAULT_WINDOW, with_module(limiter, "cabinet"));
+    write_png(&mut closed, "limiter-closed");
+}
+
+const SHAPER_CLOSED_INDEX: usize = 1;
+
+#[test]
+fn shaper_open_snapshot() {
+    let shaper = vec![
+        param("shaper", "attack", 6.0, (-15.0, 15.0, 0.0, "dB", false)),
+        param("shaper", "sustain", -4.0, (-24.0, 24.0, 0.0, "dB", false)),
+        param("shaper", "output", 0.0, (-12.0, 12.0, 0.0, "dB", false)),
+        param("shaper", "mix", 100.0, (0.0, 100.0, 100.0, "%", false)),
+    ];
+    let (mut open, _, _dir) = harness_with(DEFAULT_WINDOW, with_module(shaper, "preamp"));
+    open_unit(&mut open, SHAPER_CLOSED_INDEX);
+    write_png(&mut open, "shaper-open");
+}
+
 const EQ_SPEC: [(&str, f64, f64, f64, &str); 13] = [
     ("low_cut", 10.0, 300.0, 10.0, "Hz"),
     ("low_freq", 20.0, 500.0, 100.0, "Hz"),
