@@ -5,6 +5,8 @@ use std::f32::consts::PI;
 /// One response of the filter: the output is `m0·input + m1·band + m2·low`.
 #[derive(Clone, Copy, Debug)]
 pub struct SvfCoefficients {
+    g: f32,
+    k: f32,
     a1: f32,
     a2: f32,
     a3: f32,
@@ -59,10 +61,27 @@ impl SvfCoefficients {
         SvfCoefficients::new(g, k, (a * a, k * (1.0 - a) * a, 1.0 - a * a))
     }
 
+    /// The filter's gain at `freq_hz` in dB, from its transfer function rather than by running it.
+    pub fn gain_db(&self, freq_hz: f32, sample_rate: f32) -> f32 {
+        let w = f64::from(prewarp(freq_hz, sample_rate)) / f64::from(self.g);
+        let (k, m0, m1, m2) = (
+            f64::from(self.k),
+            f64::from(self.m0),
+            f64::from(self.m1),
+            f64::from(self.m2),
+        );
+        let (den_re, den_im) = (1.0 - w * w, k * w);
+        let (num_re, num_im) = (m0 * den_re + m2, m0 * den_im + m1 * w);
+        (10.0 * ((num_re * num_re + num_im * num_im) / (den_re * den_re + den_im * den_im)).log10())
+            as f32
+    }
+
     fn new(g: f32, k: f32, (m0, m1, m2): (f32, f32, f32)) -> SvfCoefficients {
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
         SvfCoefficients {
+            g,
+            k,
             a1,
             a2,
             a3: g * a2,

@@ -4,6 +4,7 @@ pub mod chorus;
 pub mod compressor;
 pub mod delay;
 pub mod drive;
+pub mod eq;
 pub mod flanger;
 pub mod fuzz;
 pub mod gain;

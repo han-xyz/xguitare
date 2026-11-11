@@ -26,6 +26,7 @@ fn specs_equal_constructed_module_specs() {
             "fuzz",
             "preamp",
             "tonestack",
+            "eq",
             "cabinet",
             "delay",
             "chorus",

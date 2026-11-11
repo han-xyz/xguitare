@@ -16,6 +16,7 @@ pub use modules::chorus::Chorus;
 pub use modules::compressor::Compressor;
 pub use modules::delay::Delay;
 pub use modules::drive::Drive;
+pub use modules::eq::{Eq, eq_response_db};
 pub use modules::flanger::Flanger;
 pub use modules::fuzz::Fuzz;
 pub use modules::gain::Gain;

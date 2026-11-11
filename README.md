@@ -129,6 +129,7 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `preamp` | `gain` 0..100 40 %, `bias` −1..1 0, `master` −60..0 −12 dB, `stages` 1..4 3 |
 | `tonestack` | `bass`, `middle`, `treble` 0..100 50 % |
+| `eq` | `low_cut` 10..300 10 Hz, `low_freq` 20..500 100 Hz, `low_gain` −15..15 0 dB, `mid1_freq` 40..5000 400 Hz, `mid1_gain` −15..15 0 dB, `mid1_q` 0.3..10 0.707, `mid2_freq` 200..10000 2500 Hz, `mid2_gain` −15..15 0 dB, `mid2_q` 0.3..10 0.707, `high_freq` 1000..20000 8000 Hz, `high_gain` −15..15 0 dB, `high_cut` 1000..20000 20000 Hz, `output` −12..12 0 dB |
 | `cabinet` | `level` −20..20 0 dB, `low_cut` 20..300 20 Hz, `high_cut` 2000..20000 20000 Hz |
 | `delay` | `time` 10..2000 400 ms, `feedback` 0..95 35 %, `mix` 0..100 25 %, `pingpong` 0..1 0 |
 | `chorus` | `rate` 0.1..5 1 Hz, `depth` 0..100 50 %, `mix` 0..100 40 % |

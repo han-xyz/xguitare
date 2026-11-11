@@ -3,7 +3,7 @@ use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{
-    Autowah, Chorus, Compressor, Delay, Drive, Flanger, Fuzz, Gain, Gate, Module, Preamp, Rack,
+    Autowah, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Module, Preamp, Rack,
     Reverb, StereoRack, StereoSlot, Tonestack,
 };
 
@@ -76,6 +76,28 @@ fn autowah_does_not_allocate() {
             (7, 8.0),
             (8, 20.0),
             (9, 80.0),
+        ],
+    );
+}
+
+#[test]
+fn eq_does_not_allocate() {
+    assert_rack_does_not_allocate(
+        Box::new(Eq::new()),
+        &[
+            (0, 40.0),
+            (1, 150.0),
+            (2, 6.0),
+            (3, 500.0),
+            (4, -6.0),
+            (5, 3.0),
+            (6, 3000.0),
+            (7, 4.0),
+            (8, 1.5),
+            (9, 6000.0),
+            (10, -3.0),
+            (11, 12000.0),
+            (12, 2.0),
         ],
     );
 }
