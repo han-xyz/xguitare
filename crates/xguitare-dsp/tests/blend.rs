@@ -67,7 +67,7 @@ const FLAT_FREQS: [f32; 9] = [
 ];
 
 #[test]
-fn blend_zero_is_the_clean_path_at_unity_whatever_the_driven_path() {
+fn blend_zero_is_magnitude_flat_whatever_the_driven_path() {
     for driven in [
         vec![],
         vec![(DRIVE, 100.0), (LEVEL, 12.0), (PRESENCE, 100.0)],
@@ -80,6 +80,24 @@ fn blend_zero_is_the_clean_path_at_unity_whatever_the_driven_path() {
                 0.1,
                 &format!("{driven:?} at {freq} Hz"),
             );
+        }
+    }
+}
+
+#[test]
+fn every_blend_is_flat_with_a_linear_driven_path() {
+    let freqs = [20.0, 40.0, 80.0, 150.0, 300.0, 1_000.0, 5_000.0, 15_000.0];
+    for crossover in [20.0, 150.0, 400.0] {
+        for blend in [0.0, 50.0, 100.0] {
+            let settings = with(&LINEAR_WET, &[(CROSSOVER, crossover), (BLEND, blend)]);
+            for freq in freqs {
+                assert_near(
+                    measured_db(&settings, freq),
+                    0.0,
+                    0.5,
+                    &format!("crossover {crossover} Hz, blend {blend} % at {freq} Hz"),
+                );
+            }
         }
     }
 }
@@ -236,27 +254,54 @@ fn finite_under_full_scale_at_the_extremes() {
     }
 }
 
+fn largest_curvature(samples: &[f32]) -> f32 {
+    samples
+        .windows(3)
+        .fold(0.0_f32, |m, w| m.max((w[0] - 2.0 * w[1] + w[2]).abs()))
+}
+
+/// Name, base settings, Parameter, from, to, input amplitude, input frequency.
+type JumpCase<'a> = (&'a str, &'a [(usize, f32)], usize, f32, f32, f32, f32);
+
+/// A jump lands on a peak of the input sine; an unsmoothed jump bends the output there far more than the settled output at the new value ever bends.
 #[test]
-fn parameter_jump_is_smoothed() {
-    let jump_at = SETTLE + SAMPLE_RATE as usize / 50 / 4;
-    let input = sine(0.5, 50.0, SAMPLE_RATE, jump_at + BLOCK * 20);
-    for (idx, from, to) in [
-        (BLEND, 0.0, 100.0),
-        (LEVEL, -24.0, 12.0),
-        (BASS, -12.0, 12.0),
-        (TREBLE, -12.0, 12.0),
-        (CROSSOVER, 20.0, 400.0),
-    ] {
-        let settings = with(&LINEAR_WET, &[(idx, from)]);
-        let mut module = prepared(Blend::new(), &settings);
-        let mut output = run(&mut module, &input[..jump_at]).split_off(jump_at - 1);
+fn every_parameter_jump_is_smoothed() {
+    let clipping = [(DRIVE, 100.0), (CROSSOVER, 20.0)];
+    let linear = [(DRIVE, 0.0), (CROSSOVER, 20.0)];
+    let half_drive = [(DRIVE, 50.0)];
+    let cases: [JumpCase; 8] = [
+        ("blend", &clipping, BLEND, 0.0, 100.0, 0.5, 50.0),
+        ("drive", &linear, DRIVE, 0.0, 100.0, 0.05, 50.0),
+        ("level", &linear, LEVEL, -24.0, 12.0, 0.5, 50.0),
+        ("bass", &[(BASS_FREQ, 1.0)], BASS, -12.0, 12.0, 0.5, 50.0),
+        ("mid", &linear, MID, -12.0, 12.0, 0.2, 500.0),
+        ("treble", &linear, TREBLE, -12.0, 12.0, 0.2, 1_500.0),
+        ("presence", &linear, PRESENCE, 0.0, 100.0, 0.2, 2_500.0),
+        ("crossover", &half_drive, CROSSOVER, 20.0, 400.0, 0.5, 50.0),
+    ];
+    let mut failures = Vec::new();
+    for (name, base, idx, from, to, amplitude, freq) in cases {
+        let period = SAMPLE_RATE / freq;
+        let jump_at = ((SETTLE as f32 / period).round() * period + period / 4.0) as usize;
+        let input = sine(amplitude, freq, SAMPLE_RATE, jump_at + BLOCK * 20);
+        let window = jump_at - 2..jump_at + 96;
+
+        let mut module = prepared(Blend::new(), &with(base, &[(idx, from)]));
+        let mut jumped = run(&mut module, &input[..jump_at]);
         module.set_param(idx, to);
-        output.extend(run(&mut module, &input[jump_at..]));
-        let largest_step = output
-            .windows(2)
-            .fold(0.0_f32, |m, pair| m.max((pair[1] - pair[0]).abs()));
-        assert!(largest_step < 0.05, "param {idx}: step {largest_step}");
+        jumped.extend(run(&mut module, &input[jump_at..]));
+        let settled = run(
+            &mut prepared(Blend::new(), &with(base, &[(idx, to)])),
+            &input,
+        );
+
+        let bound = 2.0 * largest_curvature(&settled[window.clone()]) + 0.01;
+        let bend = largest_curvature(&jumped[window]);
+        if bend >= bound {
+            failures.push(format!("{name}: {bend} >= {bound}"));
+        }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 #[test]

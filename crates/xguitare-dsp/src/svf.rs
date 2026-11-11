@@ -40,6 +40,13 @@ impl SvfCoefficients {
         SvfCoefficients::new(g, k, (1.0, -k, -1.0))
     }
 
+    /// Unity gain at every frequency, with the phase of the analog `(s² − s/q + 1) / (s² + s/q + 1)`.
+    pub fn all_pass(cutoff_hz: f32, q: f32, sample_rate: f32) -> SvfCoefficients {
+        let g = prewarp(cutoff_hz, sample_rate);
+        let k = 1.0 / q;
+        SvfCoefficients::new(g, k, (1.0, -2.0 * k, 0.0))
+    }
+
     pub fn bell(cutoff_hz: f32, q: f32, gain_db: f32, sample_rate: f32) -> SvfCoefficients {
         let a = shelf_amplitude(gain_db);
         let g = prewarp(cutoff_hz, sample_rate);

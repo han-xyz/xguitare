@@ -227,7 +227,7 @@ fn choice(freqs: [f32; 2], value: f32) -> f32 {
     freqs[usize::from(value >= 0.5)]
 }
 
-/// Everything before the tone EQ, run at the oversampled rate so that the clean input, the low band and the driven high band stay time-aligned.
+/// Everything before the tone EQ, run at the oversampled rate so that the clean input, the low band and the driven high band stay time-aligned. The clean input goes through the allpass the two bands sum to, so a partial `blend` cancels nothing at `crossover`.
 struct SplitDrive {
     rate: f32,
     mix: Smoother,
@@ -239,9 +239,11 @@ struct SplitDrive {
     presence: f32,
     low_pass: SvfCoefficients,
     high_pass: SvfCoefficients,
+    all_pass: SvfCoefficients,
     presence_shelf: SvfCoefficients,
     low_band: [Svf; 2],
     high_band: [Svf; 2],
+    clean_filter: Svf,
     presence_filter: Svf,
 }
 
@@ -260,9 +262,11 @@ impl SplitDrive {
             presence,
             low_pass: SvfCoefficients::low_pass(crossover, BUTTERWORTH_Q, rate),
             high_pass: SvfCoefficients::high_pass(crossover, BUTTERWORTH_Q, rate),
+            all_pass: SvfCoefficients::all_pass(crossover, BUTTERWORTH_Q, rate),
             presence_shelf: SvfCoefficients::high_shelf(PRESENCE_HZ, SHELF_Q, presence, rate),
             low_band: Default::default(),
             high_band: Default::default(),
+            clean_filter: Svf::new(),
             presence_filter: Svf::new(),
         };
         split_drive.rebuild();
@@ -304,12 +308,14 @@ impl SplitDrive {
         for filter in self.low_band.iter_mut().chain(&mut self.high_band) {
             filter.reset();
         }
+        self.clean_filter.reset();
         self.presence_filter.reset();
     }
 
     fn rebuild(&mut self) {
         self.low_pass = SvfCoefficients::low_pass(self.crossover, BUTTERWORTH_Q, self.rate);
         self.high_pass = SvfCoefficients::high_pass(self.crossover, BUTTERWORTH_Q, self.rate);
+        self.all_pass = SvfCoefficients::all_pass(self.crossover, BUTTERWORTH_Q, self.rate);
         self.presence_shelf =
             SvfCoefficients::high_shelf(PRESENCE_HZ, SHELF_Q, self.presence, self.rate);
     }
@@ -333,7 +339,8 @@ impl SplitDrive {
         });
         let lifted = self.presence_filter.process(&self.presence_shelf, high);
         let driven = (self.clip_gain.next_value() * lifted).tanh() * self.level.next_value();
-        input + self.mix.next_value() * (low + driven - input)
+        let clean = self.clean_filter.process(&self.all_pass, input);
+        clean + self.mix.next_value() * (low + driven - clean)
     }
 }
 
