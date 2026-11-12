@@ -7,7 +7,7 @@ use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, Tran
 use xguitare_core::project::LoopRegion;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{
-    Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
+    CleanTakesView, Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
     requests_until_quit, response_message, restore, unused_takes,
 };
 use xguitare_gui::project_model::{
@@ -1888,7 +1888,9 @@ fn takes_clean_reports_the_takes_deleted_and_the_space_freed() {
             &Request::TakesClean {
                 files: vec!["takes/a.wav".to_string()],
             },
-            Ok(Response::Ok(json!({"deleted": deleted, "bytes": bytes}))),
+            Ok(Response::Ok(
+                json!({"deleted": deleted, "bytes": bytes, "failed": []}),
+            )),
         )
     };
     assert_eq!(
@@ -1900,6 +1902,26 @@ fn takes_clean_reports_the_takes_deleted_and_the_space_freed() {
         Some(Message::Notice(
             "Deleted 3 Takes, 12.3 MB freed".to_string()
         ))
+    );
+}
+
+#[test]
+fn takes_clean_names_the_first_file_it_could_not_delete() {
+    let message = response_message(
+        &Request::TakesClean {
+            files: vec!["takes/a.wav".to_string(), "takes/b\u{202e}.wav".to_string()],
+        },
+        Ok(Response::Ok(json!({"deleted": 1, "bytes": 800, "failed": [
+            {"file": "takes/b\u{202e}.wav", "error": "Permission denied (os error 13)"},
+            {"file": "takes/c.wav", "error": "not a regular file"},
+        ]}))),
+    );
+    assert_eq!(
+        message,
+        Some(Message::Error {
+            title: "Could not clean up the Takes",
+            detail: "Deleted 1 Take, 800 B freed; could not delete takes/b\\u{202e}.wav: Permission denied (os error 13), and 1 more".to_string(),
+        })
     );
 }
 
@@ -1919,22 +1941,30 @@ fn clean_takes_sends_takes_clean_and_the_refresh_sends_nothing_itself() {
 fn unused_takes_lists_names_sizes_and_the_total() {
     let reply = json!({"files": [
         {"file": "takes/guitar-2.wav", "bytes": 1_234_567},
-        {"file": "takes/bass-1.wav", "bytes": 800},
+        {"file": "takes/bass\u{202e}vaw.wav", "bytes": 800},
     ], "bytes": 1_235_367});
     let unused = unused_takes(&reply);
     assert_eq!(
         unused.files,
         [
             "takes/guitar-2.wav".to_string(),
-            "takes/bass-1.wav".to_string()
+            "takes/bass\u{202e}vaw.wav".to_string()
         ]
     );
     assert_eq!(
         unused.rows,
         [
             ("guitar-2.wav".to_string(), "1.2 MB".to_string()),
-            ("bass-1.wav".to_string(), "800 B".to_string()),
+            ("bass\\u{202e}vaw.wav".to_string(), "800 B".to_string()),
         ]
     );
     assert_eq!(unused.total, "1.2 MB");
+    assert_eq!(
+        CleanTakesView::from_reply(&Err("takes is not a directory".to_string())),
+        CleanTakesView::Failed("takes is not a directory".to_string())
+    );
+    assert_eq!(
+        CleanTakesView::from_reply(&Ok(reply)),
+        CleanTakesView::Listed(unused)
+    );
 }

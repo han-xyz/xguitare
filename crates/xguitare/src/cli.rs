@@ -10,6 +10,7 @@ use xguitare_core::control::{
     IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
 };
 
+use xguitare_core::project::shown_file_name;
 use xguitare_core::project_control::position_frame;
 use xguitare_core::render::{RenderBits, RenderRange};
 
@@ -46,7 +47,7 @@ pub fn run_cli(
     };
     let result = match cli.cmd {
         Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
-        Cmd::Takes(TakesCmd::Clean { yes }) => clean_takes(transport, yes),
+        Cmd::Takes(TakesCmd::Clean { yes }) => return clean_takes(transport, yes, out, err),
         cmd => request_for(cmd, transport).and_then(|req| match req {
             Request::Render { .. } => render_and_wait(transport, out, &req),
             req => render(&req, &request(transport, &req)?),
@@ -66,8 +67,29 @@ fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String
     }
 }
 
-/// Lists the unused Take files; with `yes`, deletes them all instead.
-fn clean_takes(transport: &mut dyn Transport, yes: bool) -> Result<String, String> {
+/// Lists the unused Take files; with `yes`, deletes them all instead and writes an `error:` line per file that could not be deleted. The exit code as [`run_cli`].
+fn clean_takes(
+    transport: &mut dyn Transport,
+    yes: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let (text, errors) = match deleted_takes(transport, yes) {
+        Ok(text_and_failures) => text_and_failures,
+        Err(message) => (String::new(), vec![message]),
+    };
+    let mut written = write!(out, "{text}");
+    for error in &errors {
+        written = written.and(writeln!(err, "error: {}", without_control_chars(error)));
+    }
+    i32::from(written.is_err() || !errors.is_empty())
+}
+
+/// The `takes clean` output, and one `could not delete <file>: <error>` per file the Daemon could not delete.
+fn deleted_takes(
+    transport: &mut dyn Transport,
+    yes: bool,
+) -> Result<(String, Vec<String>), String> {
     let unused = request(transport, &Request::TakesUnused)?;
     let files: Vec<String> = items(&unused["files"])
         .filter_map(|file| file["file"].as_str().map(str::to_string))
@@ -77,10 +99,20 @@ fn clean_takes(transport: &mut dyn Transport, yes: bool) -> Result<String, Strin
         if !yes {
             lines.push_str("nothing deleted; pass --yes to delete\n");
         }
-        return Ok(lines);
+        return Ok((lines, Vec::new()));
     }
     let req = Request::TakesClean { files };
-    render(&req, &request(transport, &req)?)
+    let payload = request(transport, &req)?;
+    let failures = items(&payload["failed"])
+        .map(|failed| {
+            format!(
+                "could not delete {}: {}",
+                shown_take_file(&failed["file"]),
+                text(&failed["error"])
+            )
+        })
+        .collect();
+    Ok((render(&req, &payload)?, failures))
 }
 
 fn watch_tuner(
@@ -638,11 +670,14 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ProjectRedo => format!("redid {}\n", text(&payload["label"])),
         Request::Items => render_items(payload)?,
         Request::TakesUnused => render_takes_unused(payload),
-        Request::TakesClean { .. } => format!(
-            "deleted {} takes, {} freed\n",
-            text(&payload["deleted"]),
-            size_text(payload["bytes"].as_u64().unwrap_or(0))
-        ),
+        Request::TakesClean { .. } => {
+            let deleted = payload["deleted"].as_u64().unwrap_or(0);
+            format!(
+                "deleted {deleted} {}, {} freed\n",
+                takes_word(deleted),
+                size_text(payload["bytes"].as_u64().unwrap_or(0))
+            )
+        }
         Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
         Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),
         Request::TrackSet { .. } => render_track(payload),
@@ -762,13 +797,22 @@ fn render_takes_unused(payload: &Value) -> String {
         let _ = writeln!(
             lines,
             "{} {}",
-            text(&file["file"]),
+            shown_take_file(&file["file"]),
             size_text(file["bytes"].as_u64().unwrap_or(0))
         );
     }
     let total = size_text(payload["bytes"].as_u64().unwrap_or(0));
-    let _ = writeln!(lines, "{count} unused takes, {total}");
+    let _ = writeln!(lines, "{count} unused {}, {total}", takes_word(count));
     lines
+}
+
+fn takes_word(count: u64) -> &'static str {
+    if count == 1 { "take" } else { "takes" }
+}
+
+/// A Take file name from the Daemon with its control characters and bidi overrides escaped.
+fn shown_take_file(file: &Value) -> String {
+    shown_file_name(file.as_str().unwrap_or("-"))
 }
 
 /// `bytes` in B, KB, MB or GB (powers of 1000), one decimal past B.

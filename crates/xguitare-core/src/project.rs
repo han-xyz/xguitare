@@ -765,6 +765,24 @@ fn is_zero(frames: &u64) -> bool {
 }
 
 /// Whether `file` is `takes/<name>.wav`: one file directly in the Project's `takes/` folder.
+/// `name` with each control character and each Unicode bidi override or isolate escaped as `escape_debug` writes it, so a file name shown to people reads as the name it is.
+pub fn shown_file_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if is_hidden_char(c) {
+                c.escape_debug().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
+/// A control character, or a bidi override or isolate (U+202A–U+202E, U+2066–U+2069), which can make shown text read as other text.
+pub(crate) fn is_hidden_char(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
 pub(crate) fn is_take_file(file: &str) -> bool {
     file.strip_prefix(TAKES_DIR)
         .and_then(|rest| rest.strip_prefix('/'))

@@ -211,7 +211,12 @@ impl Client {
         if quit {
             info!("quit: sent {sent} final requests");
         } else if queued_refresh_unused {
-            self.snapshot.unused_takes = self.send(&Request::TakesUnused);
+            let reply = match self.request(&Request::TakesUnused) {
+                Ok(Response::Ok(payload)) => Ok(payload),
+                Ok(Response::Err { error }) => Err(error),
+                Err(err) => Err(err.to_string()),
+            };
+            self.snapshot.unused_takes = Some((reply, Instant::now()));
         }
         if rack_moved && !quit {
             self.snapshot.params = self.payload(&self.rack_get());

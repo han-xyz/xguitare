@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
@@ -17,6 +18,7 @@ use xguitare_core::project_control::{
     ProjectEvent, Projects, add_finished_takes, take_project_events,
 };
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan, WritingTakes};
+use xguitare_core::takes_control::delete_take_files;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BuildWarning, Config};
 
@@ -308,7 +310,7 @@ fn takes_clean_deletes_exactly_the_named_unused_files() {
     let e = bytes(&folder, "takes/e.wav");
     assert_eq!(
         ok(clean(&mut state, &["takes/e.wav"])),
-        json!({"deleted": 1, "bytes": e})
+        json!({"deleted": 1, "bytes": e, "failed": []})
     );
     assert!(!exists(&folder, "takes/e.wav"));
     for name in ["a", "b", "c", "d", "f"] {
@@ -343,6 +345,8 @@ fn a_name_outside_takes_is_refused_and_nothing_is_deleted() {
         ("e.wav", "e.wav"),
         ("takes/e\nx.wav", "takes/e\\nx.wav"),
         ("takes/e\u{7}.wav", "takes/e\\u{7}.wav"),
+        ("takes/e\u{202e}vaw.wav", "takes/e\\u{202e}vaw.wav"),
+        ("takes/e\u{2066}.wav", "takes/e\\u{2066}.wav"),
     ] {
         assert_eq!(
             error(clean(&mut state, &["takes/f.wav", file])),
@@ -378,6 +382,9 @@ fn a_symlink_placed_after_listing_is_refused_and_its_target_untouched() {
 fn takes_must_be_a_real_directory() {
     let (mut state, _audio, _dir) = state("clean-takes-symlink");
     let (folder, _writing) = open_song(&mut state);
+    ok(handle(&mut state, Request::ItemCopy { ids: vec![1] }));
+    ok(handle(&mut state, Request::ItemDelete { ids: vec![2] }));
+    fs::write(folder.join(AUTOSAVE_FILE), "kept").unwrap();
     let real = folder.join("elsewhere");
     fs::rename(folder.join("takes"), &real).unwrap();
     std::os::unix::fs::symlink(&real, folder.join("takes")).unwrap();
@@ -390,6 +397,93 @@ fn takes_must_be_a_real_directory() {
         "takes is not a directory"
     );
     assert!(real.join("e.wav").is_file());
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(
+        (&status["undo"], &status["clipboard"]),
+        (&json!("delete Item"), &json!(1))
+    );
+    assert_eq!(
+        fs::read_to_string(folder.join(AUTOSAVE_FILE)).unwrap(),
+        "kept"
+    );
+}
+
+#[test]
+fn a_failed_save_deletes_nothing_and_keeps_undo() {
+    let (mut state, _audio, _dir) = state("clean-save-fails");
+    let (folder, _writing) = open_song(&mut state);
+    ok(handle(&mut state, Request::ItemDelete { ids: vec![2] }));
+    fs::remove_file(folder.join("project.toml")).unwrap();
+    fs::create_dir(folder.join("project.toml")).unwrap();
+    fs::write(folder.join("project.toml/in-the-way"), "").unwrap();
+    error(clean(&mut state, &["takes/c.wav", "takes/e.wav"]));
+    assert!(exists(&folder, "takes/c.wav"));
+    assert!(exists(&folder, "takes/e.wav"));
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["undo"], "delete Item");
+}
+
+#[test]
+fn a_take_that_cannot_be_deleted_is_reported_after_the_save() {
+    let (mut state, _audio, _dir) = state("clean-undeletable");
+    let (folder, _writing) = open_song(&mut state);
+    ok(handle(&mut state, Request::ItemDelete { ids: vec![2] }));
+    let takes = folder.join("takes");
+    fs::set_permissions(&takes, fs::Permissions::from_mode(0o555)).unwrap();
+    let reply = clean(&mut state, &["takes/e.wav", "takes/f.wav"]);
+    fs::set_permissions(&takes, fs::Permissions::from_mode(0o755)).unwrap();
+    let denied = "Permission denied (os error 13)";
+    assert_eq!(
+        ok(reply),
+        json!({"deleted": 0, "bytes": 0, "failed": [
+            {"file": "takes/e.wav", "error": denied},
+            {"file": "takes/f.wav", "error": denied},
+        ]})
+    );
+    assert!(exists(&folder, "takes/e.wav"));
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(status["undo"], Value::Null);
+}
+
+#[test]
+fn a_take_file_swapped_for_a_symlink_before_its_deletion_is_kept() {
+    let (_state, _audio, dir) = state("delete-recheck");
+    let takes = dir.0.join("takes");
+    fs::create_dir(&takes).unwrap();
+    write_take(&takes.join("x.wav"), 10);
+    let outside = dir.0.join("outside.wav");
+    write_take(&outside, 10);
+    std::os::unix::fs::symlink(&outside, takes.join("y.wav")).unwrap();
+    fs::create_dir(takes.join("z.wav")).unwrap();
+    let x = fs::metadata(takes.join("x.wav")).unwrap().len();
+    let files = ["takes/x.wav", "takes/y.wav", "takes/z.wav", "y.wav"].map(str::to_string);
+    assert_eq!(
+        delete_take_files(&takes, &files),
+        json!({"deleted": 1, "bytes": x, "failed": [
+            {"file": "takes/y.wav", "error": "not a regular file"},
+            {"file": "takes/z.wav", "error": "not a regular file"},
+            {"file": "y.wav", "error": "not a take file"},
+        ]})
+    );
+    assert!(!takes.join("x.wav").exists());
+    assert!(
+        fs::symlink_metadata(takes.join("y.wav"))
+            .unwrap()
+            .is_symlink()
+    );
+    assert!(outside.is_file());
+}
+
+#[test]
+fn a_take_file_with_a_bidi_control_in_its_name_is_not_listed() {
+    let (mut state, _audio, _dir) = state("bidi");
+    let (folder, _writing) = open_song(&mut state);
+    write_take(&folder.join("takes/x\u{202e}vaw.wav"), 10);
+    write_take(&folder.join("takes/y\u{2069}.wav"), 10);
+    assert_eq!(
+        unused_files(&mut state),
+        ["takes/d.wav", "takes/e.wav", "takes/f.wav"]
+    );
 }
 
 #[test]

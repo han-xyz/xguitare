@@ -17,11 +17,11 @@ use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
 use crate::mixer::{MixerView, RenderDraft, mixer_panel, render_dialog};
 use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands, shown_rack_column};
 use crate::model::{
-    BankRow, ClipLatch, Command, Feedback, HiddenFixed, KeyEvent, KeyModifiers, Link, PeakHold,
-    PortSelection, RackLayout, RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot,
-    Throttle, bank_kind, bank_rows, bank_rows_for_rack, esc_dismisses_toast, forget_removed_units,
-    key_to_command, open_units_from_string, open_units_to_string, param_rows, peak_db,
-    quit_commands, remember_removes,
+    BankRow, CleanTakesView, ClipLatch, Command, Feedback, HiddenFixed, KeyEvent, KeyModifiers,
+    Link, PeakHold, PortSelection, RackLayout, RemovedUnit, Restore, SET_INTERVAL, SettingsDraft,
+    Snapshot, Throttle, bank_kind, bank_rows, bank_rows_for_rack, esc_dismisses_toast,
+    forget_removed_units, key_to_command, open_units_from_string, open_units_to_string, param_rows,
+    peak_db, quit_commands, remember_removes,
 };
 use crate::project::{
     ProjectView, TIMELINE_HEIGHT, autosave_prompt, item_node_id, tracks_view, transport_bar,
@@ -80,10 +80,6 @@ const DIGIT_KEYS: [Key; 9] = [
     Key::Num9,
 ];
 
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "independent window flags, not states of one machine"
-)]
 pub struct App {
     commands: Sender<Command>,
     snapshots: Receiver<Snapshot>,
@@ -114,7 +110,7 @@ pub struct App {
     mixer: MixerView,
     views: ViewSwitch,
     autosave_prompt: Option<AutosaveOffer>,
-    clean_takes_open: bool,
+    clean_takes: Option<CleanTakesView>,
     beat_light: BeatLight,
 }
 
@@ -241,7 +237,7 @@ impl App {
             mixer: MixerView::default(),
             views: ViewSwitch::new(restored_view(stored_view.as_deref())),
             autosave_prompt: None,
-            clean_takes_open: false,
+            clean_takes: None,
             beat_light: BeatLight::default(),
         }
     }
@@ -335,7 +331,7 @@ impl App {
             )
         });
         if open_clean_takes {
-            self.clean_takes_open = true;
+            self.clean_takes = Some(CleanTakesView::Reading);
             commands.push(Command::RefreshUnusedTakes);
         }
         commands
@@ -413,6 +409,12 @@ impl eframe::App for App {
                 && let Some((offer, _)) = &snapshot.autosave_offer
             {
                 self.autosave_prompt = Some(offer.clone());
+            }
+            if snapshot.unused_takes != self.snapshot.unused_takes
+                && let Some((reply, _)) = &snapshot.unused_takes
+                && self.clean_takes == Some(CleanTakesView::Reading)
+            {
+                self.clean_takes = Some(CleanTakesView::from_reply(reply));
             }
             if snapshot.params != self.snapshot.params
                 && let Some(params) = &snapshot.params
@@ -508,8 +510,9 @@ impl eframe::App for App {
             self.project_view = ProjectView::new(self.project_view.snap);
             self.mixer = MixerView::default();
         }
-        let dialog_open =
-            self.mixer.render.is_some() || self.autosave_prompt.is_some() || self.clean_takes_open;
+        let dialog_open = self.mixer.render.is_some()
+            || self.autosave_prompt.is_some()
+            || self.clean_takes.is_some();
         let has_selection =
             main_view == Some(MainView::Arrange) && !self.project_view.selection.is_empty();
         if ui.input(|input| input.key_pressed(Key::Escape)) {
@@ -521,10 +524,12 @@ impl eframe::App for App {
         }
         error_toast(ui.ctx(), &mut self.feedback);
         commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
-        if self.clean_takes_open {
-            let (dialog_commands, open) = clean_takes_dialog(ui.ctx(), snapshot);
+        if let Some(view) = &self.clean_takes {
+            let (dialog_commands, open) = clean_takes_dialog(ui.ctx(), snapshot, view);
             commands.extend(dialog_commands);
-            self.clean_takes_open = open;
+            if !open {
+                self.clean_takes = None;
+            }
         }
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)

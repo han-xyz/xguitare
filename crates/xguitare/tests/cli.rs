@@ -1860,7 +1860,7 @@ fn takes_clean_yes_deletes_every_unused_take() {
         &["takes", "clean", "--yes"],
         vec![
             reply(UNUSED),
-            reply(r#"{"ok":true,"deleted":2,"bytes":1235367}"#),
+            reply(r#"{"ok":true,"deleted":2,"bytes":1235367,"failed":[]}"#),
         ],
     );
     assert_eq!(
@@ -1886,4 +1886,56 @@ fn takes_clean_yes_with_nothing_unused_sends_no_clean() {
     );
     assert_eq!(out.requests, [Request::TakesUnused]);
     assert_eq!(out.stdout, "0 unused takes, 0 B\n");
+}
+
+#[test]
+fn takes_lines_count_one_take_in_the_singular() {
+    let one = r#"{"ok":true,"files":[{"file":"takes/guitar-3.wav","bytes":800}],"bytes":800}"#;
+    let out = cli(&["takes", "unused"], reply(one));
+    assert_eq!(
+        out.stdout,
+        "takes/guitar-3.wav 800 B\n1 unused take, 800 B\n"
+    );
+    let out = item_cli(
+        &["takes", "clean", "--yes"],
+        vec![
+            reply(one),
+            reply(r#"{"ok":true,"deleted":1,"bytes":800,"failed":[]}"#),
+        ],
+    );
+    assert_eq!(out.stdout, "deleted 1 take, 800 B freed\n");
+    assert_eq!(out.code, 0);
+}
+
+#[test]
+fn takes_clean_reports_each_file_it_could_not_delete_and_fails() {
+    let out = item_cli(
+        &["takes", "clean", "--yes"],
+        vec![
+            reply(UNUSED),
+            reply(
+                r#"{"ok":true,"deleted":1,"bytes":800,"failed":[{"file":"takes/guitar-2.wav","error":"Permission denied (os error 13)"}]}"#,
+            ),
+        ],
+    );
+    assert_eq!(out.stdout, "deleted 1 take, 800 B freed\n");
+    assert_eq!(
+        out.stderr,
+        "error: could not delete takes/guitar-2.wav: Permission denied (os error 13)\n"
+    );
+    assert_eq!(out.code, 1);
+}
+
+#[test]
+fn takes_unused_escapes_hidden_characters_in_file_names() {
+    let out = cli(
+        &["takes", "unused"],
+        reply(
+            r#"{"ok":true,"files":[{"file":"takes/x\u202evaw.wav","bytes":8},{"file":"takes/y\u001b.wav","bytes":8}],"bytes":16}"#,
+        ),
+    );
+    assert_eq!(
+        out.stdout,
+        "takes/x\\u{202e}vaw.wav 8 B\ntakes/y\\u{1b}.wav 8 B\n2 unused takes, 16 B\n"
+    );
 }

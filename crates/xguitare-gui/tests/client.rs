@@ -577,8 +577,8 @@ fn a_clean_up_drops_every_cached_peak_table_and_reads_the_unused_takes() {
     commands.send(Command::RefreshUnusedTakes).unwrap();
     let unused = loop {
         assert!(Instant::now() < deadline, "no unused Takes");
-        if let Some(unused) = snapshots.recv_timeout(WAIT).unwrap().unused_takes {
-            break unused;
+        if let Some((unused, _)) = snapshots.recv_timeout(WAIT).unwrap().unused_takes {
+            break unused.unwrap();
         }
     };
     assert_eq!(unused["files"][0]["file"], "takes/b.wav");

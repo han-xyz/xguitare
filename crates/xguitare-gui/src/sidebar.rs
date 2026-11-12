@@ -14,11 +14,11 @@ use crate::metronome_model::{
 };
 use crate::metronome_model::{BeatDot, beat_dots, bpm_text};
 use crate::model::{
-    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, FixedUnit, HiddenFixed,
-    ModuleType, PortSelection, RackLayout, RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot,
-    add_command, add_place, add_places, chip_columns, engine_readout, filter_bank, param_rows,
-    port_choices, rack_channels, set_ports_command, set_settings_command, settings_draft,
-    shown_undo, tuner_toggle, unused_takes,
+    AddPlace, BankRow, CHIP_GAP, ChoiceKey, CleanTakesView, Command, Dragged, Feedback, FixedUnit,
+    HiddenFixed, ModuleType, PortSelection, RackLayout, RemovedUnit, SECTIONS, Section,
+    SettingsDraft, Snapshot, add_command, add_place, add_places, chip_columns, engine_readout,
+    filter_bank, param_rows, port_choices, rack_channels, set_ports_command, set_settings_command,
+    settings_draft, shown_undo, tuner_toggle,
 };
 use crate::project::{knob_with_reset, released_value};
 use crate::project_model::{project_name, project_rows, transport_view, undo_text};
@@ -305,28 +305,35 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
 }
 
 /// The Clean up Takes dialog over the window: the open Project's unused Take files with their sizes, the total, and `Delete n files`; `false` once it is closed (`Delete`, `Cancel`, Esc, a click outside, or the Project closing).
-pub fn clean_takes_dialog(ctx: &egui::Context, snapshot: &Snapshot) -> (Vec<Command>, bool) {
+pub fn clean_takes_dialog(
+    ctx: &egui::Context,
+    snapshot: &Snapshot,
+    view: &CleanTakesView,
+) -> (Vec<Command>, bool) {
     let mut commands = Vec::new();
     let mut open = project_name(snapshot.status.as_ref()).is_some();
     if !open {
         return (commands, false);
     }
-    let unused = snapshot.unused_takes.as_ref().map(unused_takes);
     let dialog = modal(Id::unique("clean_takes_dialog")).show(ctx, |ui| {
         ui.set_width(CLEAN_TAKES_WIDTH);
         ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
         ui.label(RichText::new("Clean up Takes").font(theme::dialog_title()));
         ui.add_space(SPACE_XS);
-        let Some(unused) = unused.filter(|unused| !unused.files.is_empty()) else {
-            let text = if snapshot.unused_takes.is_some() {
-                "No unused Takes."
-            } else {
-                "Reading the Takes\u{2026}"
-            };
-            ui.label(text);
-            ui.add_space(SPACE_S);
-            open = !ui.add(outlined_button("Close")).clicked();
-            return;
+        let unused = match view {
+            CleanTakesView::Listed(unused) if !unused.files.is_empty() => unused,
+            CleanTakesView::Listed(_) => {
+                open = note_with_close(ui, "No unused Takes.");
+                return;
+            }
+            CleanTakesView::Reading => {
+                open = note_with_close(ui, "Reading the Takes\u{2026}");
+                return;
+            }
+            CleanTakesView::Failed(error) => {
+                open = note_with_close(ui, error);
+                return;
+            }
         };
         ScrollArea::vertical()
             .max_height(CLEAN_TAKES_LIST_HEIGHT)
@@ -367,6 +374,13 @@ pub fn clean_takes_dialog(ctx: &egui::Context, snapshot: &Snapshot) -> (Vec<Comm
         open = false;
     }
     (commands, open)
+}
+
+/// The Clean up Takes dialog's `text` and `Close`; `false` once `Close` is clicked.
+fn note_with_close(ui: &mut Ui, text: &str) -> bool {
+    ui.label(text);
+    ui.add_space(SPACE_S);
+    !ui.add(outlined_button("Close")).clicked()
 }
 
 fn preset_heading(ui: &mut Ui, snapshot: &Snapshot) {

@@ -9,7 +9,7 @@ use xguitare_core::BankKind;
 use xguitare_core::control::{
     BusRef, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef, TransportAction,
 };
-use xguitare_core::project::LoopRegion;
+use xguitare_core::project::{LoopRegion, shown_file_name};
 use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
@@ -72,8 +72,8 @@ pub struct Snapshot {
     /// The error of the last `render` the Daemon refused.
     pub refused_render: Option<(String, Instant)>,
     pub autosave_offer: Option<(AutosaveOffer, Instant)>,
-    /// The last `takes_unused` reply for the open Project.
-    pub unused_takes: Option<Value>,
+    /// The last `takes_unused` reply for the open Project: its payload or its error.
+    pub unused_takes: Option<(Result<Value, String>, Instant)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2456,9 +2456,23 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
             let deleted = payload["deleted"].as_u64().unwrap_or(0);
             let takes = if deleted == 1 { "Take" } else { "Takes" };
             let freed = size_text(payload["bytes"].as_u64().unwrap_or(0));
-            return Some(Message::Notice(format!(
-                "Deleted {deleted} {takes}, {freed} freed"
-            )));
+            let notice = format!("Deleted {deleted} {takes}, {freed} freed");
+            let failed = payload["failed"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let Some(first) = failed.first() else {
+                return Some(Message::Notice(notice));
+            };
+            let more = match failed.len() - 1 {
+                0 => String::new(),
+                more => format!(", and {more} more"),
+            };
+            format!(
+                "{notice}; could not delete {}: {}{more}",
+                shown_file_name(first["file"].as_str().unwrap_or_default()),
+                first["error"].as_str().unwrap_or_default()
+            )
         }
         (_, Ok(Response::Ok(_))) => return None,
         (_, Ok(Response::Err { error })) => error,
@@ -2485,22 +2499,38 @@ pub fn unused_takes(reply: &Value) -> UnusedTakes {
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let files: Vec<String> = entries
-        .iter()
-        .filter_map(|entry| entry["file"].as_str().map(str::to_string))
-        .collect();
-    let rows = entries
+    let (files, rows) = entries
         .iter()
         .filter_map(|entry| {
             let file = entry["file"].as_str()?;
             let name = file.strip_prefix("takes/").unwrap_or(file);
-            Some((name.to_string(), size_text(entry["bytes"].as_u64()?)))
+            let row = (shown_file_name(name), size_text(entry["bytes"].as_u64()?));
+            Some((file.to_string(), row))
         })
-        .collect();
+        .unzip();
     UnusedTakes {
         files,
         rows,
         total: size_text(reply["bytes"].as_u64().unwrap_or(0)),
+    }
+}
+
+/// What the Clean up Takes dialog shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanTakesView {
+    /// Until the `takes_unused` asked for when the dialog opened answers.
+    Reading,
+    Listed(UnusedTakes),
+    /// `takes_unused` failed with this error.
+    Failed(String),
+}
+
+impl CleanTakesView {
+    pub fn from_reply(reply: &Result<Value, String>) -> Self {
+        match reply {
+            Ok(reply) => Self::Listed(unused_takes(reply)),
+            Err(error) => Self::Failed(error.clone()),
+        }
     }
 }
 
