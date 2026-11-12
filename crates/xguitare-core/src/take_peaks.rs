@@ -32,14 +32,14 @@ fn quantise(sample: f32) -> i8 {
     (sample.clamp(-1.0, 1.0) * FULL_SCALE).round() as i8
 }
 
-/// Up to `count` pairs, at most [`MAX_PEAKS_PER_REPLY`], of the loaded Take `file`'s peak table from pair `first`.
+/// Up to `count` pairs, at most [`MAX_PEAKS_PER_REPLY`], of the loaded Take `file`'s peak table from pair `first`, with the Take's frames.
 pub(crate) fn peak_page(
     state: &EngineState,
     file: &str,
     first: Option<usize>,
     count: Option<usize>,
 ) -> Result<Value, String> {
-    let table = loaded_peaks(state, file)?;
+    let (frames, table) = loaded_peaks(state, file)?;
     let total = table.len() / 2;
     let first = first.unwrap_or(0);
     let count = count
@@ -49,6 +49,7 @@ pub(crate) fn peak_page(
     let end = start.saturating_add(count).min(total);
     Ok(json!({
         "frames_per_peak": FRAMES_PER_PEAK,
+        "frames": frames,
         "total": total,
         "first": first,
         "peaks": table[start * 2..end * 2],

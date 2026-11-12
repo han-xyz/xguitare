@@ -235,7 +235,10 @@ fn project_snapshot(transport: &str) -> Snapshot {
 /// Frames between two plucked notes in the waveform fixture: one beat at 120 bpm.
 const NOTE_FRAMES: usize = 24_000;
 
-/// A peak table for each active Take of `items`, as long as the frames its Item plays: a plucked note on every beat, decaying, its loudness changing from note to note.
+/// Every this many beats the waveform fixture leaves a beat silent.
+const SILENT_EVERY: usize = 6;
+
+/// A peak table for each active Take of `items`, as long as the frames its Item plays: a plucked note on every beat, decaying, its loudness changing from note to note, and every [`SILENT_EVERY`]th beat silent.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
@@ -258,7 +261,11 @@ fn fixture_peaks(items: &Value) -> HashMap<String, Arc<[i8]>> {
                 let frame = bucket * FRAMES_PER_PEAK;
                 let note = frame / NOTE_FRAMES;
                 let seconds = (frame % NOTE_FRAMES) as f32 / 48_000.0;
-                let loudness = 0.55 + 0.4 * ((note * 7 % 5) as f32 / 4.0);
+                let loudness = if note % SILENT_EVERY == SILENT_EVERY - 1 {
+                    0.0
+                } else {
+                    0.55 + 0.4 * ((note * 7 % 5) as f32 / 4.0)
+                };
                 let level = loudness * (-seconds * 9.0).exp() * 127.0;
                 let wobble = 0.8 + 0.2 * (bucket as f32 * 0.9).sin();
                 [-(level * wobble) as i8, level as i8]

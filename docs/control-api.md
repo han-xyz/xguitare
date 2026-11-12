@@ -818,7 +818,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":192000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]},{"id":1,"name":"Bass","items":[]}]}
+{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":192000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"],"take_frames":192000}]},{"id":1,"name":"Bass","items":[]}]}
 ```
 
 | Key | Value |
@@ -831,6 +831,7 @@ Response:
 | `length` | Frames the Item plays: its own length when it has one, else the active Take's frames less `offset`. |
 | `take` | Index in `takes` of the active Take, the one that plays. |
 | `takes` | The Take files, relative to the Project folder, oldest first. |
+| `take_frames` | Frames of the active Take. |
 
 Errors: `no project open`.
 
@@ -968,7 +969,7 @@ Errors, besides those above: `clipboard is empty` before any `item_copy` in the 
 
 ## take_peaks
 
-Pages of the peak table of a Take of the open Project, for drawing its waveform: the lowest and highest sample of every 256 frames, the last partial run included, scaled to −127…127. The Daemon builds the table when the Take is loaded or finished; a Take file does not change afterwards, so a client fetches each file once.
+Pages of the peak table of a Take of the open Project, for drawing its waveform: the lowest and highest sample of every 256 frames, the last partial run included, scaled to −127…127. The Daemon builds the table when the Take is loaded or finished, and again when a new recording reuses a Take's file name; a client keeps a table for the `frames` it was fetched for and fetches it again when `items` gives that file other `take_frames`.
 
 Request:
 
@@ -981,12 +982,13 @@ Request:
 Response:
 
 ```json
-{"ok":true,"frames_per_peak":256,"total":750,"first":0,"peaks":[-3,4,-80,96,-61,70]}
+{"ok":true,"frames_per_peak":256,"frames":191872,"total":750,"first":0,"peaks":[-3,4,-80,96,-61,70]}
 ```
 
 | Key | Value |
 | --- | --- |
 | `frames_per_peak` | Frames one pair covers: 256. |
+| `frames` | The Take's frames the table was built from. |
 | `total` | Pairs in the whole table. |
 | `first` | The first pair of this page, as asked. |
 | `peaks` | `[min, max, …]`, one pair per 256 frames from `first`; empty when `first` is at or past `total`. |

@@ -1438,7 +1438,7 @@ fn items_list_each_tracks_items_and_status_counts_loaded_audio() {
             "sample_rate": 48_000,
             "tracks": [
                 {"id": ids[0].1, "name": "Guitar", "items": [
-                    {"id": 1, "position": 0, "bars_beats": "1.1", "offset": 50, "length": 50, "take": 0, "takes": ["takes/guitar-1.wav"]}
+                    {"id": 1, "position": 0, "bars_beats": "1.1", "offset": 50, "length": 50, "take": 0, "takes": ["takes/guitar-1.wav"], "take_frames": 100}
                 ]},
                 {"id": ids[1].1, "name": "Bass", "items": []}
             ]

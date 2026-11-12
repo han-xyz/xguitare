@@ -70,8 +70,8 @@ struct OpenProject {
     dir: PathBuf,
     project: Project,
     takes: HashMap<String, Arc<[f32]>>,
-    /// The peak table of each Take in `takes`, built by [`sync_peaks`].
-    peaks: HashMap<String, Vec<i8>>,
+    /// The peak table of each Take in `takes`, with the samples it was built from, kept by [`sync_peaks`].
+    peaks: HashMap<String, (Arc<[f32]>, Vec<i8>)>,
     selected: usize,
     /// Whether the last transport request was `record`; `play` and `stop` end it.
     recording: bool,
@@ -981,6 +981,7 @@ pub(crate) fn item_json(project: &Project, item: &Item) -> Value {
         "length": item.played_frames(),
         "take": item.take,
         "takes": files,
+        "take_frames": item.takes.get(item.take).map(|take| take.frames),
     })
 }
 
@@ -1372,23 +1373,30 @@ fn open(
     Ok(())
 }
 
-/// Builds the peak table of each loaded Take that has none and drops those of Takes no longer loaded.
+/// Builds the peak table of each loaded Take that has none or whose samples were replaced, and drops those of Takes no longer loaded.
 fn sync_peaks(open: &mut OpenProject) {
     let OpenProject { takes, peaks, .. } = open;
-    peaks.retain(|file, _| takes.contains_key(file));
+    peaks.retain(|file, (built_from, _)| {
+        takes
+            .get(file)
+            .is_some_and(|samples| Arc::ptr_eq(samples, built_from))
+    });
     for (file, samples) in takes.iter() {
         if !peaks.contains_key(file) {
-            peaks.insert(file.clone(), peak_table(samples));
+            peaks.insert(file.clone(), (Arc::clone(samples), peak_table(samples)));
         }
     }
 }
 
-/// The peak table of the open Project's loaded Take `file`.
-pub(crate) fn loaded_peaks<'a>(state: &'a EngineState, file: &str) -> Result<&'a [i8], String> {
+/// The open Project's loaded Take `file`: its frames and its peak table.
+pub(crate) fn loaded_peaks<'a>(
+    state: &'a EngineState,
+    file: &str,
+) -> Result<(usize, &'a [i8]), String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
     open.peaks
         .get(file)
-        .map(Vec::as_slice)
+        .map(|(samples, table)| (samples.len(), table.as_slice()))
         .ok_or_else(|| format!("no such take: {file}"))
 }
 

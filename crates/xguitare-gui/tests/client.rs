@@ -385,26 +385,30 @@ fn serve_requests(
     received
 }
 
-/// A Project "Song" with one Item per Take file in `files`, `None` with no Project open.
-fn items_of(files: &[&str]) -> Value {
-    let items: Vec<Value> = files
+/// A Project "Song" with one Item per `(Take file, its frames)` in `takes`.
+fn items_of(takes: &[(&str, u64)]) -> Value {
+    let items: Vec<Value> = takes
         .iter()
         .enumerate()
-        .map(|(id, file)| {
-            json!({"id": id, "position": 0, "offset": 0, "length": 100, "take": 0, "takes": [file]})
+        .map(|(id, (file, frames))| {
+            json!({"id": id, "position": 0, "offset": 0, "length": 100, "take": 0, "takes": [file], "take_frames": frames})
         })
         .collect();
     json!({"ok": true, "sample_rate": 48000, "tracks": [{"id": 0, "name": "Guitar", "items": items}]})
 }
 
-/// A page of `take_peaks` for a Take of `total` pairs, each pair `[-1, 1]`.
-fn peak_page(request: &Value, total: u64) -> Value {
+/// A page of `take_peaks` for a Take of `frames`, each pair `[-1, 1]`.
+fn peak_page(request: &Value, frames: u64) -> Value {
+    let total = frames.div_ceil(256);
     let first = request["first"].as_u64().unwrap_or(0);
     let count = request["count"].as_u64().unwrap_or(16_384);
     let pairs = count.min(total.saturating_sub(first));
     let peaks: Vec<i64> = (0..pairs).flat_map(|_| [-1, 1]).collect();
-    json!({"ok": true, "frames_per_peak": 256, "total": total, "first": first, "peaks": peaks})
+    json!({"ok": true, "frames_per_peak": 256, "frames": frames, "total": total, "first": first, "peaks": peaks})
 }
+
+/// A Take of 20000 peak pairs, more than one page.
+const A_FRAMES: u64 = 20_000 * 256;
 
 #[test]
 fn peaks_are_fetched_in_pages_once_per_take_and_dropped_on_close() {
@@ -424,10 +428,10 @@ fn peaks_are_fetched_in_pages_once_per_take_and_dropped_on_close() {
                 };
                 json!({"ok": true, "preset": "Clean", "program": 0, "revision": stage + 1, "project": project})
             }
-            "items" if stage == 0 => items_of(&["takes/a.wav"]),
-            "items" => items_of(&["takes/a.wav", "takes/b.wav"]),
-            "take_peaks" if request["file"] == "takes/a.wav" => peak_page(request, 20_000),
-            "take_peaks" => peak_page(request, 3),
+            "items" if stage == 0 => items_of(&[("takes/a.wav", A_FRAMES)]),
+            "items" => items_of(&[("takes/a.wav", A_FRAMES), ("takes/b.wav", 700)]),
+            "take_peaks" if request["file"] == "takes/a.wav" => peak_page(request, A_FRAMES),
+            "take_peaks" => peak_page(request, 700),
             cmd => serde_json::from_str(reply(cmd)).unwrap(),
         }
     });
@@ -476,4 +480,62 @@ fn peaks_are_fetched_in_pages_once_per_take_and_dropped_on_close() {
             (json!("takes/b.wav"), json!(0)),
         ]
     );
+}
+
+/// The `items` Take frames of `takes/a.wav`, one entry per Revision: refused by the Daemon at the first, then a new recording under the same file name twice.
+const REUSED_FRAMES: [u64; 6] = [768, 768, 1280, 1280, 2560, 2560];
+
+#[test]
+fn a_refused_take_is_not_asked_again_and_a_reused_file_name_is_fetched_again() {
+    let dir = temp_dir("reused-peaks");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let last = REUSED_FRAMES.len() - 1;
+    let mut statuses = 0;
+    let received = serve_requests(listener, move |request| {
+        let stage = (statuses / 3).min(last);
+        let frames = REUSED_FRAMES[stage];
+        match request["cmd"].as_str().unwrap() {
+            "status" => {
+                statuses += 1;
+                json!({"ok": true, "preset": "Clean", "program": 0, "revision": stage + 1, "project": "Song"})
+            }
+            "items" => items_of(&[("takes/a.wav", frames)]),
+            "take_peaks" if stage == 0 => {
+                json!({"ok": false, "error": "no such take: takes/a.wav"})
+            }
+            "take_peaks" => peak_page(request, frames),
+            cmd => serde_json::from_str(reply(cmd)).unwrap(),
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let deadline = Instant::now() + WAIT;
+    let mut lengths_seen = Vec::new();
+    loop {
+        assert!(Instant::now() < deadline, "saw peaks {lengths_seen:?}");
+        let snapshot = snapshots.recv_timeout(WAIT).unwrap();
+        let length = snapshot
+            .peaks
+            .get("takes/a.wav")
+            .map_or(0, |peaks| peaks.len());
+        if lengths_seen.last() != Some(&length) {
+            lengths_seen.push(length);
+        }
+        let revision = snapshot
+            .status
+            .as_ref()
+            .and_then(|status| status["revision"].as_u64());
+        if revision == Some(REUSED_FRAMES.len() as u64) && snapshot.items.is_some() {
+            break;
+        }
+    }
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    assert_eq!(lengths_seen, [0, 10, 20]);
+    let asked = received
+        .try_iter()
+        .filter(|request| request["cmd"] == "take_peaks")
+        .count();
+    assert_eq!(asked, 3, "once refused, once per new recording");
 }

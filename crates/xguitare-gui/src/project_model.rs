@@ -340,6 +340,8 @@ pub struct ItemBlock {
     pub length: u64,
     /// The active Take's file, as `take_peaks` names it.
     pub file: String,
+    /// The active Take's frames; a Take recorded again under the same file has others.
+    pub take_frames: u64,
     pub take_name: String,
     /// The active Take's index among `takes`.
     pub take: usize,
@@ -459,6 +461,7 @@ fn item_block(track_id: u64, item: &Value) -> Option<ItemBlock> {
         offset: item["offset"].as_u64().unwrap_or_default(),
         length: item["length"].as_u64()?,
         file: path.to_string(),
+        take_frames: item["take_frames"].as_u64().unwrap_or_default(),
         take_name: file.strip_suffix(".wav").unwrap_or(file).to_string(),
         take,
         takes: takes.len(),

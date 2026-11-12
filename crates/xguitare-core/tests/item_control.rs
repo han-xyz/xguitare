@@ -319,8 +319,8 @@ fn item_move_shifts_every_item_by_one_clamped_delta_onto_the_top() {
     assert_eq!(
         moved,
         json!({"items": [
-            {"track": 0, "id": 1, "position": 0, "bars_beats": "1.1", "offset": 0, "length": 4800, "take": 0, "takes": ["takes/a.wav"]},
-            {"track": 0, "id": 2, "position": 2000, "bars_beats": "1.1", "offset": 0, "length": 4800, "take": 0, "takes": ["takes/b.wav"]},
+            {"track": 0, "id": 1, "position": 0, "bars_beats": "1.1", "offset": 0, "length": 4800, "take": 0, "takes": ["takes/a.wav"], "take_frames": 4800},
+            {"track": 0, "id": 2, "position": 2000, "bars_beats": "1.1", "offset": 0, "length": 4800, "take": 0, "takes": ["takes/b.wav"], "take_frames": 4800},
         ]}),
         "clamped at frame 0, the distance kept, in their stacking order"
     );
@@ -452,8 +452,8 @@ fn item_split_cuts_inside_items_and_keeps_every_take_on_both_halves() {
     assert_eq!(
         split,
         json!({"items": [
-            {"track": 0, "id": 1, "position": 1000, "bars_beats": "1.1", "offset": 0, "length": 500, "take": 1, "takes": ["takes/a.wav", "takes/b.wav"]},
-            {"track": 0, "id": 4, "position": 1500, "bars_beats": "1.1", "offset": 500, "length": 4300, "take": 1, "takes": ["takes/a.wav", "takes/b.wav"]},
+            {"track": 0, "id": 1, "position": 1000, "bars_beats": "1.1", "offset": 0, "length": 500, "take": 1, "takes": ["takes/a.wav", "takes/b.wav"], "take_frames": 4800},
+            {"track": 0, "id": 4, "position": 1500, "bars_beats": "1.1", "offset": 500, "length": 4300, "take": 1, "takes": ["takes/a.wav", "takes/b.wav"], "take_frames": 4800},
         ]})
     );
     assert_eq!(

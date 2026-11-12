@@ -6,7 +6,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Added
 
-- Waveforms: the GUI draws each Item's waveform, for the part of its active Take it plays, on its plate in the Track's colour. Control API `take_peaks` pages a Take's peak table (min and max per 256 frames, up to 16384 pairs a reply); `status` Tracks carry their `id`.
+- Waveforms: the GUI draws each Item's waveform, for the part of its active Take it plays, on its plate in the Track's colour. Control API `take_peaks` pages a Take's peak table (min and max per 256 frames, up to 16384 pairs a reply, with the Take's `frames`); `items` gives each Item's `take_frames` and `status` Tracks their `id`.
 - Duplicate, copy and paste Items: CLI `item duplicate|copy|paste` and Control API `item_duplicate`, `item_copy` and `item_paste`; copies keep their Takes, Track distance and spacing and go on top; the clipboard lives in the Daemon until the Project closes, `status` counts it in `clipboard`, and a duplicate or paste is one undo entry.
 - Project undo and redo: CLI `project undo|redo` and Control API `project_undo` and `project_redo` take back and do again the last 200 Item edits, recorded Takes and Track adds and removes of the open Project (a removed Track comes back with its Rack, mixer values and Items); `status` shows the `undo` and `redo` labels.
 - Editing Items: CLI `item list|move|trim|split|delete|take` and Control API `item_move`, `item_trim`, `item_split`, `item_delete` and `item_take`; moved Items go on top, a split keeps all Takes on both halves, and while playing the changed Tracks cross over to the edit in 5 ms without rebuilding their Racks.

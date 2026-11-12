@@ -10,7 +10,8 @@ use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle}
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::metronome::Metronome;
 use xguitare_core::project::{Item, Project, Take};
-use xguitare_core::project_control::Projects;
+use xguitare_core::project_control::{Projects, add_finished_takes};
+use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BuildWarning, Config};
 
@@ -248,4 +249,35 @@ fn take_peaks_names_its_errors() {
         error(handle(&mut state, take_peaks("takes/b.wav", None, None))),
         "no project open"
     );
+}
+
+#[test]
+fn a_take_recorded_again_under_its_file_name_gets_a_new_table() {
+    let (mut state, _audio, _dir) = state("reused");
+    open_with_takes(&mut state, &[0.5; 300], &[0.0; 10]);
+    let first = ok(handle(&mut state, take_peaks("takes/a.wav", None, None)));
+    assert_eq!(first["frames"], 300);
+    let items = ok(handle(&mut state, Request::Items));
+    let track_id = items["tracks"][0]["id"].as_u64().unwrap();
+    let folder = state.config.projects_dir.join("song");
+    write_take(&folder.join("takes/a.wav"), &[-0.25; 600]);
+    let finished = FinishedTake {
+        track_id,
+        file: "takes/a.wav".to_string(),
+        span: TakeSpan {
+            start: 48_000,
+            frames: 600,
+            loop_take: false,
+        },
+    };
+    assert_eq!(
+        add_finished_takes(&mut state, &[finished], |_| Latency::default()),
+        Vec::<String>::new()
+    );
+    let reply = ok(handle(&mut state, take_peaks("takes/a.wav", None, None)));
+    assert_eq!(
+        (reply["frames"].clone(), reply["total"].clone()),
+        (json!(600), json!(3))
+    );
+    assert_eq!(peak_values(&reply), [-32; 6]);
 }

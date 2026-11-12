@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io;
 use std::path::PathBuf;
@@ -67,6 +67,10 @@ struct Client {
     shown_rack: Option<ShownRack>,
     /// The Project the cached peak tables belong to.
     peaks_project: Option<String>,
+    /// The Take frames each cached peak table was fetched for.
+    peak_frames: HashMap<String, u64>,
+    /// The Take files and frames whose peaks the Daemon refused, not asked for again.
+    refused_peaks: HashSet<(String, u64)>,
     snapshot: Snapshot,
 }
 
@@ -91,6 +95,8 @@ impl Client {
             tuner_answered: false,
             shown_rack: None,
             peaks_project: None,
+            peak_frames: HashMap::new(),
+            refused_peaks: HashSet::new(),
             snapshot: Snapshot {
                 link: Link::Disconnected {
                     since: Instant::now(),
@@ -522,6 +528,8 @@ impl Client {
         let project = project_name(self.snapshot.status.as_ref()).map(str::to_string);
         if project != self.peaks_project {
             self.snapshot.peaks.clear();
+            self.peak_frames.clear();
+            self.refused_peaks.clear();
             self.peaks_project = project;
         }
         self.fetch_peaks();
@@ -534,7 +542,7 @@ impl Client {
         self.revision = Some(revision);
     }
 
-    /// Fetches the peak table of each active Take of the Items not yet cached; a Take whose pages do not all arrive is asked for again at the next refresh.
+    /// Fetches the peak table of each active Take of the Items not cached for its frames; a Take the Daemon refused, or whose reply names other frames, is not asked for again until its frames change, and one whose pages do not all arrive is asked for again at the next refresh.
     fn fetch_peaks(&mut self) {
         let items = self
             .snapshot
@@ -543,33 +551,59 @@ impl Client {
             .map(item_blocks)
             .unwrap_or_default();
         for item in items {
-            if self.snapshot.peaks.contains_key(&item.file) {
+            let wanted = (item.file, item.take_frames);
+            if self.peak_frames.get(&wanted.0) == Some(&wanted.1)
+                || self.refused_peaks.contains(&wanted)
+            {
                 continue;
             }
-            if let Some(table) = self.fetch_peak_table(&item.file) {
-                self.snapshot.peaks.insert(item.file, table.into());
+            match self.fetch_peak_table(&wanted.0) {
+                Ok(Some((frames, table))) if frames == wanted.1 => {
+                    self.snapshot.peaks.insert(wanted.0.clone(), table.into());
+                    self.peak_frames.insert(wanted.0, frames);
+                }
+                Ok(Some(_)) | Err(()) => {
+                    self.snapshot.peaks.remove(&wanted.0);
+                    self.peak_frames.remove(&wanted.0);
+                    self.refused_peaks.insert(wanted);
+                }
+                Ok(None) => {}
             }
         }
     }
 
-    fn fetch_peak_table(&mut self, file: &str) -> Option<Vec<i8>> {
+    /// The Take `file`'s frames and peak table, `Err` when the Daemon refuses it, `None` when a page does not arrive whole.
+    fn fetch_peak_table(&mut self, file: &str) -> Result<Option<(u64, Vec<i8>)>, ()> {
         let mut table = Vec::new();
         loop {
-            let page = self.payload(&Request::TakePeaks {
+            let request = Request::TakePeaks {
                 file: file.to_string(),
                 first: Some(table.len() / 2),
                 count: None,
-            })?;
-            let peaks = page["peaks"].as_array()?;
+            };
+            let page = match self.request(&request) {
+                Ok(Response::Ok(page)) => page,
+                Ok(Response::Err { error }) => {
+                    warn!("{request:?}: {error}");
+                    return Err(());
+                }
+                Err(_) => return Ok(None),
+            };
+            let Some(peaks) = page["peaks"].as_array() else {
+                return Ok(None);
+            };
             table.extend(
                 peaks
                     .iter()
                     .filter_map(Value::as_i64)
                     .filter_map(|peak| i8::try_from(peak).ok()),
             );
-            let total = usize::try_from(page["total"].as_u64()?).ok()?;
-            if peaks.is_empty() || table.len() / 2 >= total {
-                return Some(table);
+            let (Some(frames), Some(total)) = (page["frames"].as_u64(), page["total"].as_u64())
+            else {
+                return Ok(None);
+            };
+            if peaks.is_empty() || table.len() as u64 / 2 >= total {
+                return Ok(Some((frames, table)));
             }
         }
     }

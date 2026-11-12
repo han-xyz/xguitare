@@ -244,7 +244,11 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
             c.panel,
         ),
         pair("boundary on panel open", c.boundary, c.panel_open),
-        pair("boundary on well", c.boundary, c.well),
+        pair(
+            "boundary on well; also the loop edges, loop off, on their halo over the Takes",
+            c.boundary,
+            c.well,
+        ),
         pair("boundary on bypass panel", c.boundary, c.bypass_panel),
         pair("boundary on hover", c.boundary, c.hover),
         pair("danger on case", c.danger, c.case),
@@ -276,7 +280,11 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
             c.knob_highlight,
         ),
         pair("danger on hover", c.danger, c.hover),
-        pair("danger on well", c.danger, c.well),
+        pair(
+            "danger on well; also the playhead on its halo over the Takes",
+            c.danger,
+            c.well,
+        ),
         pair("tick and chevron on panel", c.hover_boundary, c.panel),
         pair(
             "tick and chevron on panel open",
@@ -314,7 +322,7 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
     for track in TRACK_COLOURS {
         pairs.push(pair("Track edge and pan arc on panel", track, c.panel));
         pairs.push(pair(
-            "Track swatch on panel open; also the Take top edge and waveform on its body",
+            "Track swatch on panel open; also the Take top edge, waveform and zero line on its body",
             track,
             c.panel_open,
         ));

@@ -71,6 +71,10 @@ const LOOP_ALPHA_OFF: u8 = 16;
 const SELECTED_OUTLINE: f32 = 2.0;
 const EDGE_GRAB_PX: f32 = 6.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
+/// The `well` margin each side of the playhead and the loop edges down a lane.
+const HALO_WIDTH: f32 = 1.0;
+/// The Take plate's border, inside its rect.
+const TAKE_EDGE_WIDTH: f32 = 1.0;
 const VOLUME_DB: (f64, f64) = (-60.0, 6.0);
 pub(crate) const PAN: (f64, f64) = (-1.0, 1.0);
 const NO_INPUT: &str = "no input";
@@ -542,12 +546,14 @@ impl Scene {
             colours.boundary
         };
         for frame in [self.loop_region.start, self.loop_region.end] {
-            painter.vline(
-                self.x(lane, frame),
-                lane.y_range(),
-                Stroke::new(1.0, colour(edge)),
-            );
+            paint_haloed_line(painter, self.x(lane, frame), lane, 1.0, edge);
         }
+    }
+
+    /// The playhead down a lane, haloed so that it stands out over any waveform.
+    fn paint_lane_playhead(&self, painter: &Painter, lane: Rect) {
+        let x = self.x(lane, self.playhead);
+        paint_haloed_line(painter, x, lane, PLAYHEAD_WIDTH, palette().danger);
     }
 
     fn paint_playhead(&self, painter: &Painter, rect: Rect) {
@@ -745,7 +751,8 @@ fn paint_lane(
         {
             let columns = waveform_columns(peaks, visible.frames, visible.width);
             let left = lane.left() + visible.x;
-            paint_waveform(&painter.with_clip_rect(span), span, left, &columns, track);
+            let inner = span.shrink(TAKE_EDGE_WIDTH);
+            paint_waveform(&painter.with_clip_rect(inner), inner, left, &columns, track);
         }
     }
     if row.armed
@@ -756,7 +763,17 @@ fn paint_lane(
         paint_recording_take(painter, span.intersect(lane), &name);
     }
     scene.paint_loop_edges(painter, lane);
-    scene.paint_playhead(painter, lane);
+    scene.paint_lane_playhead(painter, lane);
+}
+
+/// A vertical line `width` wide down `lane` in `ink`, over a `well` halo of [`HALO_WIDTH`] on each side, so it holds its contrast against a Track colour.
+fn paint_haloed_line(painter: &Painter, x: f32, lane: Rect, width: f32, ink: Rgb) {
+    painter.vline(
+        x,
+        lane.y_range(),
+        Stroke::new(width + 2.0 * HALO_WIDTH, colour(palette().well)),
+    );
+    painter.vline(x, lane.y_range(), Stroke::new(width, colour(ink)));
 }
 
 /// A plate on the lane: the Take body with a top edge in the Track colour and the Take's name on the body.
@@ -766,13 +783,13 @@ fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
         span,
         RADIUS_CONTROL,
         colour(colours.panel_open),
-        Stroke::new(1.0, colour(colours.take_edge)),
+        Stroke::new(TAKE_EDGE_WIDTH, colour(colours.take_edge)),
         egui::StrokeKind::Inside,
     );
     paint_plate_top(painter, span, track, &item.label());
 }
 
-/// Min/max columns in `track` from `left`, one per pixel, over the plate body below the Take's name.
+/// A zero line and min/max columns in `track` from `left`, one per pixel, over the plate body below the Take's name, so silence reads as a flat line.
 #[allow(
     clippy::cast_precision_loss,
     reason = "a column index below the window width"
@@ -782,13 +799,16 @@ fn paint_waveform(painter: &Painter, span: Rect, left: f32, columns: &[(i8, i8)]
         span.x_range(),
         span.top() + WAVE_TOP..=span.bottom() - theme::SPACE_XS,
     );
-    let centre = body.center().y;
+    let centre = body.center().y.floor();
     let scale = body.height() / 2.0 / f32::from(i8::MAX);
-    let stroke = Stroke::new(1.0, colour(track));
+    let fill = colour(track);
+    let zero = Rect::from_x_y_ranges(left..=left + columns.len() as f32, centre..=centre + 1.0);
+    painter.rect_filled(zero, 0, fill);
     for (index, &(min, max)) in columns.iter().enumerate() {
+        let x = left + index as f32;
         let top = centre - f32::from(max) * scale;
-        let bottom = (centre - f32::from(min) * scale).max(top + 1.0);
-        painter.vline(left + index as f32 + 0.5, top..=bottom, stroke);
+        let bottom = (centre + 1.0 - f32::from(min) * scale).max(top + 1.0);
+        painter.rect_filled(Rect::from_x_y_ranges(x..=x + 1.0, top..=bottom), 0, fill);
     }
 }
 
