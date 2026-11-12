@@ -6,6 +6,7 @@ mod config;
 pub mod control;
 pub mod engine;
 pub mod firstrun;
+pub mod flatten;
 mod ir;
 mod irdir;
 pub mod metronome;
