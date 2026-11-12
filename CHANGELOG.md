@@ -32,6 +32,8 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Changed
 
+- GUI: the meter bridge and the Tuner unit can be dragged to any gap of the Rack, moved with their `↑` `↓`, or hidden with `Hide` or by dragging them out (the footer offers Undo); the `Tuner` and `Meters` chips under `Add Module` show them again. Their places are kept across restarts and shared by every Rack the window shows.
+- GUI: the left panel's `Metronome` section now sits above `Add Module`, so it is in view at 1280×800.
 - GUI: new "Faceplate" look, part 1: one theme for every colour and text size, the IBM Plex fonts bundled in the binary, and a new set of seventeen Module colours, each distinct from the others and readable with dark text on it.
 - GUI: "Faceplate" look, part 2: knobs with a printed tick ring and a value arc in the Module colour, ringed lamps, hover and pressed states on every button, a white focus ring on whichever control has the keyboard focus, text fields with a lit edge while editing, and a bypassed unit drawn in grey with a `Bypassed` tag instead of faded. A group of choice buttons is now one `Tab` stop.
 - GUI: "Faceplate" look, part 3: each Rack unit is a faceplate between steel ears engraved with its Rack position and edged in its Module colour; the meter bridge has a dB scale; the Tuner unit has its own `Off`/`On` switch and a cents strip; the EQ plot sits in a recessed well beside its band columns, and a closed EQ lists its bands (`+4 @100 −3 @400`). `Remove` moved next to `↑` `↓` in an open unit.
