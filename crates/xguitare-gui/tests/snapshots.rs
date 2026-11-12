@@ -2130,6 +2130,41 @@ fn transport_bar_fits_one_row_at_1280() {
     }
 }
 
+const PERMISSION_ERROR: &str = "error: bank/funk.toml: permission denied (os error 13)";
+
+#[test]
+fn an_error_shows_as_a_toast_at_the_bottom_right_until_dismissed() {
+    let mut snapshot = funk_snapshot();
+    snapshot.last_message = Some((PERMISSION_ERROR.to_string(), std::time::Instant::now()));
+    let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, snapshot);
+    let toast = harness.get_by_label(PERMISSION_ERROR).rect();
+    assert!(
+        toast.left() > DEFAULT_WINDOW.x / 2.0 && toast.bottom() > DEFAULT_WINDOW.y / 2.0,
+        "the toast is at {toast:?}"
+    );
+    write_png(&mut harness, "error-toast");
+    click_button(&mut harness, "Dismiss");
+    assert!(harness.query_by_label(PERMISSION_ERROR).is_none());
+}
+
+#[test]
+fn a_lost_daemon_shows_its_banner_and_pauses_the_rack() {
+    let mut snapshot = funk_snapshot();
+    snapshot.link = Link::Disconnected {
+        since: std::time::Instant::now(),
+    };
+    snapshot.status = None;
+    snapshot.tuner = None;
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, snapshot);
+    harness.get_by_label_contains("Daemon disconnected");
+    write_png(&mut harness, "disconnected");
+    harness
+        .get_by_role_and_label(Role::Switch, "Compressor")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
+}
+
 const SAVED: &str = "saved bank/funk.toml";
 
 /// The footer's top, read off the [`SAVED`] notice it shows.

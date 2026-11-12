@@ -32,7 +32,7 @@ use xguitare_gui::model::{
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RemovedUnit, Restore, ScreenRect, UnitStyle,
     bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects, knob_arcs, knob_origin,
-    module_title, mute_banner, palette_place, rack_position_labels, restore, shown_undo,
+    module_title, mute_banner, palette_place, paused, rack_position_labels, restore, shown_undo,
     unit_style,
 };
 use xguitare_gui::model::{
@@ -220,26 +220,58 @@ fn refresh_decision_on_revision_change() {
 }
 
 #[test]
-fn link_text() {
+fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
     let now = Instant::now();
     let since = now.checked_sub(Duration::from_millis(12_400)).unwrap();
     assert_eq!(
-        xguitare_gui::model::link_text(&Link::Connected, now),
-        "connected"
+        xguitare_gui::model::link_banner(&Link::Connected, now),
+        None
     );
     assert_eq!(
-        xguitare_gui::model::link_text(&Link::Disconnected { since }, now),
-        "disconnected 12s"
+        xguitare_gui::model::link_banner(&Link::Disconnected { since }, now),
+        Some((
+            "Daemon disconnected",
+            "Retrying for 12 s. Controls are paused.".to_string()
+        ))
     );
     assert_eq!(
-        xguitare_gui::model::link_text(
+        xguitare_gui::model::link_banner(
             &Link::Starting {
                 since: now.checked_sub(Duration::from_secs(3)).unwrap()
             },
             now
         ),
-        "starting daemon 3s"
+        Some((
+            "Starting the Daemon",
+            "Waiting 3 s for it. Controls are paused.".to_string()
+        ))
     );
+}
+
+#[test]
+fn feedback_tells_an_error_from_a_notice_and_drops_a_dismissed_one() {
+    let now = Instant::now();
+    let mut feedback = Feedback::default();
+    feedback.show("saved bank/funk.toml".to_string(), now);
+    assert_eq!(feedback.notice(now), Some("saved bank/funk.toml"));
+    assert_eq!(feedback.error(now), None);
+    feedback.show("error: permission denied".to_string(), now);
+    assert_eq!(feedback.notice(now), None);
+    assert_eq!(feedback.error(now), Some("error: permission denied"));
+    feedback.dismiss();
+    assert_eq!(feedback.error(now), None);
+}
+
+#[test]
+fn a_paused_unit_keeps_its_state_on_the_bypass_panel() {
+    let colours = palette();
+    let active = paused(unit_style(false, true));
+    assert_eq!(active.panel, colours.bypass_panel);
+    assert_eq!(active.text, colours.bypass_text);
+    assert_eq!(active.arc, Some(colours.bypass_arc));
+    assert!(active.lamp_lit);
+    assert_eq!(active.tag, None);
+    assert_eq!(paused(unit_style(true, false)), unit_style(true, false));
 }
 
 fn starter_list() -> serde_json::Value {

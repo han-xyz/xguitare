@@ -28,7 +28,7 @@ use crate::project_model::{
     project_name, recording_from, restored_view, transport_view,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
-use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
+use crate::sidebar::{AddDraft, SidebarView, Tuner, error_toast, footer, sidebar};
 use crate::theme::{self, colour, palette};
 use crate::widgets;
 
@@ -443,6 +443,7 @@ impl eframe::App for App {
             self.project_view = ProjectView::default();
             self.mixer = MixerView::default();
         }
+        error_toast(ui.ctx(), &mut self.feedback, now);
         commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)

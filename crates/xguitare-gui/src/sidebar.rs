@@ -14,11 +14,10 @@ use crate::metronome_model::{
 };
 use crate::metronome_model::{BeatDot, beat_dots, bpm_text};
 use crate::model::{
-    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, Link, ModuleType,
-    PortSelection, RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place,
-    add_places, chip_columns, engine_readout, filter_bank, link_text, param_rows, port_choices,
-    rack_channels, set_ports_command, set_settings_command, settings_draft, shown_undo,
-    tuner_toggle,
+    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, ModuleType, PortSelection,
+    RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places,
+    chip_columns, engine_readout, filter_bank, param_rows, port_choices, rack_channels,
+    set_ports_command, set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
 use crate::project::{knob_with_reset, released_value};
 use crate::project_model::{project_name, project_rows, transport_view};
@@ -57,6 +56,18 @@ const NO_PROJECTS: &str = "no Projects yet";
 const NO_METRONOME: &str = "no Metronome from the Daemon";
 const FOLLOWS_PROJECT: &str = "follows the Project";
 const BEAT_DOT_SIZE: f32 = 10.0;
+const TOAST_WIDTH: f32 = 330.0;
+const TOAST_EDGE_WIDTH: f32 = 4.0;
+const TOAST_DOT_RADIUS: f32 = 4.0;
+const TOAST_MARGIN: Margin = Margin {
+    left: 16,
+    right: 10,
+    top: 10,
+    bottom: 10,
+};
+/// How far the toast sits from the window's right edge and above its bottom, clear of the footer.
+const TOAST_OFFSET: Vec2 = vec2(-12.0, -40.0);
+const DISMISS: &str = "Dismiss";
 const BEAT_DOT_RING_WIDTH: f32 = 1.5;
 /// How far a new beat's halo sits outside its dot.
 const BEAT_FLASH_OFFSET: f32 = 2.0;
@@ -309,6 +320,7 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
         CONTROL_HEIGHT,
     );
     let mut command = None;
+    let mut opened = false;
     ui.horizontal(|ui| {
         if ui
             .add(primary_button("Save").min_size(button_size))
@@ -321,6 +333,7 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
             .clicked()
         {
             *save_as_name = save_as_name.is_none().then(String::new);
+            opened = save_as_name.is_some();
         }
     });
     let Some(name) = save_as_name else {
@@ -329,6 +342,9 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
     let field = ui.add(text_field(
         TextEdit::singleline(name).hint_text(SAVE_AS_HINT),
     ));
+    if opened {
+        field.request_focus();
+    }
     let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
     let (confirm, cancel) = ui
         .horizontal(|ui| {
@@ -822,10 +838,7 @@ pub fn footer(
 ) -> Option<Command> {
     let mut undo = None;
     ui.horizontal(|ui| {
-        if snapshot.link != Link::Connected {
-            ui.label(link_text(&snapshot.link, now));
-        }
-        if let Some(text) = feedback.text(now) {
+        if let Some(text) = feedback.notice(now) {
             ui.label(text);
         }
         let status = snapshot.status.as_ref();
@@ -839,4 +852,67 @@ pub fn footer(
         }
     });
     undo
+}
+
+/// The error message, in the text colour on the open panel with a red edge and dot, at the bottom right of the window until it times out or `Dismiss` is pressed.
+pub fn error_toast(ctx: &egui::Context, feedback: &mut Feedback, now: Instant) {
+    let Some(text) = feedback.error(now).map(str::to_string) else {
+        return;
+    };
+    let colours = palette();
+    let mut dismissed = false;
+    egui::Area::new(Id::unique("error_toast"))
+        .anchor(Align2::RIGHT_BOTTOM, TOAST_OFFSET)
+        .order(Order::Foreground)
+        .show(ctx, |ui| {
+            let frame = Frame::new()
+                .fill(colour(colours.panel_open))
+                .stroke(Stroke::new(1.0, colour(colours.boundary)))
+                .corner_radius(RADIUS_PANEL)
+                .inner_margin(TOAST_MARGIN)
+                .show(ui, |ui| {
+                    ui.set_width(TOAST_WIDTH - TOAST_MARGIN.sum().x);
+                    ui.horizontal(|ui| {
+                        let (dot, _) = ui.allocate_exact_size(
+                            Vec2::splat(2.0 * TOAST_DOT_RADIUS),
+                            Sense::hover(),
+                        );
+                        ui.painter().circle_filled(
+                            dot.center(),
+                            TOAST_DOT_RADIUS,
+                            colour(colours.danger),
+                        );
+                        let dismiss_width = CONTROL_HEIGHT + ui.spacing().item_spacing.x;
+                        let text_width = ui.available_width() - dismiss_width;
+                        ui.allocate_ui(vec2(text_width, 0.0), |ui| {
+                            ui.set_width(text_width);
+                            ui.add(
+                                egui::Label::new(RichText::new(&text).color(colour(colours.text)))
+                                    .wrap(),
+                            );
+                        });
+                        let dismiss = ui
+                            .add(outlined_button("\u{2715}").min_size(Vec2::splat(CONTROL_HEIGHT)));
+                        dismiss.widget_info(|| WidgetInfo::labeled(Role::Button, true, DISMISS));
+                        dismissed = dismiss.clicked();
+                    });
+                });
+            let edge = Rect::from_min_size(
+                frame.response.rect.min,
+                vec2(TOAST_EDGE_WIDTH, frame.response.rect.height()),
+            );
+            ui.painter().rect_filled(
+                edge,
+                CornerRadius {
+                    nw: RADIUS_PANEL,
+                    sw: RADIUS_PANEL,
+                    ne: 0,
+                    se: 0,
+                },
+                colour(colours.danger),
+            );
+        });
+    if dismissed {
+        feedback.dismiss();
+    }
 }

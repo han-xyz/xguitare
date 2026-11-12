@@ -179,7 +179,11 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("bypass text on bypass panel", c.bypass_text, c.bypass_panel),
         pair("muted on bypass panel", c.muted, c.bypass_panel),
         pair("on accent on text", c.on_accent, c.text),
-        pair("on accent on lit", c.on_accent, c.lit),
+        pair(
+            "on accent on lit; also the Render progress percentage",
+            c.on_accent,
+            c.lit,
+        ),
         pair("on accent on danger", c.on_accent, c.danger),
         pair("on accent on go", c.on_accent, c.go),
         pair("danger text on case", c.danger_text, c.case),
@@ -194,7 +198,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
             c.panel,
         ),
         pair(
-            "lit on panel open; also the lit lamp ring and the loop edges over a Take",
+            "lit on panel open; also the lit lamp ring, the loop edges over a Take and the disconnected banner's edge and ring",
             c.lit,
             c.panel_open,
         ),
@@ -212,7 +216,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("rack position on ear edge", c.on_accent, c.ear_edge),
         pair("rack position on ear centre", c.on_accent, c.ear_centre),
         pair(
-            "lit on well; also the edit border, the cents needle, the transport's seconds and the loop edges on a lane",
+            "lit on well; also the edit border, the cents needle, the transport's seconds, the loop edges on a lane and the Render progress fill",
             c.lit,
             c.well,
         ),
@@ -246,7 +250,11 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("focus ring on panel open", c.focus_ring, c.panel_open),
         pair("focus ring on bypass panel", c.focus_ring, c.bypass_panel),
         pair("bypass arc on bypass panel", c.bypass_arc, c.bypass_panel),
-        pair("danger on panel open", c.danger, c.panel_open),
+        pair(
+            "danger on panel open; also the error toast's edge and dot",
+            c.danger,
+            c.panel_open,
+        ),
         pair("hover boundary on hover", c.hover_boundary, c.hover),
         pair("hover boundary on well", c.hover_boundary, c.well),
         pair(
@@ -501,6 +509,16 @@ pub fn cents() -> FontId {
 /// The dB marks under the meter bridge's ladders.
 pub fn scale() -> FontId {
     FontId::monospace(TEXT_LEGEND)
+}
+
+/// A dialog's title and a toast's.
+pub fn dialog_title() -> FontId {
+    FontId::new(TEXT_UNIT, family_semibold())
+}
+
+/// The Mute banner's line.
+pub fn banner() -> FontId {
+    FontId::new(TEXT_UNIT, family_medium())
 }
 
 pub fn heading() -> FontId {

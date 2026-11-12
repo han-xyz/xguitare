@@ -1,7 +1,7 @@
 use egui::{
-    Align2, Button, Color32, Context, CornerRadius, EventFilter, Id, Mesh, Painter, Pos2, Rect,
-    Response, RichText, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, Visuals, Widget,
-    WidgetInfo, pos2, vec2,
+    Align2, Button, Color32, Context, CornerRadius, EventFilter, Frame, Id, Margin, Mesh, Modal,
+    Painter, Pos2, Rect, Response, RichText, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2,
+    Visuals, Widget, WidgetInfo, pos2, vec2,
 };
 
 use crate::model::{
@@ -15,6 +15,9 @@ use crate::theme::{
 };
 
 const ARC_SEGMENTS: usize = 48;
+const DIALOG_MARGIN: Margin = Margin::symmetric(14, 12);
+const PROGRESS_HEIGHT: f32 = 22.0;
+const PROGRESS_TEXT_INSET: f32 = 8.0;
 const CENTS_ARC_DIAMETER: f32 = 160.0;
 const CENTS_ARC_WIDTH: f32 = 4.0;
 const CENTS_NEEDLE_WIDTH: f32 = 3.0;
@@ -332,6 +335,59 @@ pub fn text_field(edit: TextEdit<'_>) -> impl Widget + '_ {
         })
         .inner
     }
+}
+
+/// A dialog over the window: the open panel edged in the boundary colour, over the scrim.
+pub fn modal(id: Id) -> Modal {
+    let colours = palette();
+    Modal::new(id)
+        .frame(
+            Frame::new()
+                .fill(colour(colours.panel_open))
+                .stroke(Stroke::new(1.0, colour(colours.boundary)))
+                .corner_radius(RADIUS_PANEL)
+                .inner_margin(DIALOG_MARGIN),
+        )
+        .backdrop_color(theme::scrim())
+}
+
+/// A rounded well edged in the boundary colour, lit from the left as far as `fraction`, with the percentage in dark text on the lit part, or in the text colour on the well while the lit part is too short for it.
+pub fn progress_bar(ui: &mut Ui, fraction: f32, width: f32) -> Response {
+    let colours = palette();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, PROGRESS_HEIGHT), Sense::hover());
+    let percent = format!("{:.0}%", fraction * 100.0);
+    response.widget_info(|| {
+        let mut info = WidgetInfo::labeled(Role::ProgressIndicator, true, "Render progress");
+        info.current_text_value = Some(percent.clone());
+        info
+    });
+    let radius = PROGRESS_HEIGHT / 2.0;
+    let painter = ui.painter();
+    painter.rect_filled(rect, radius, colour(colours.well));
+    let lit = Rect::from_min_size(
+        rect.min,
+        vec2(rect.width() * fraction.clamp(0.0, 1.0), rect.height()),
+    );
+    painter.rect_filled(lit, radius, colour(colours.lit));
+    painter.rect_stroke(
+        rect,
+        radius,
+        Stroke::new(1.0, colour(colours.boundary)),
+        StrokeKind::Inside,
+    );
+    let galley = painter.layout_no_wrap(percent, theme::value(), Color32::PLACEHOLDER);
+    let fits_lit = lit.width() >= galley.size().x + 2.0 * PROGRESS_TEXT_INSET;
+    let text_colour = if fits_lit {
+        colours.on_accent
+    } else {
+        colours.text
+    };
+    let pos = pos2(
+        rect.left() + PROGRESS_TEXT_INSET,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter.galley(pos, galley, colour(text_colour));
+    response
 }
 
 /// The `Bypassed` pill beside a bypassed unit's name.

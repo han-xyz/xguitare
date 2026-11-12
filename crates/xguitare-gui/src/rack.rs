@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use egui::{
     Align, Align2, Button, Color32, ComboBox, CursorIcon, DragAndDrop, FontSelection, Frame, Id,
-    InnerResponse, Key, Label, Layout, Margin, Modifiers, Painter, Rect, Response, RichText, Role,
-    ScrollArea, Sense, Stroke, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2, WidgetInfo, WidgetText,
-    pos2, vec2,
+    InnerResponse, Key, Label, Layout, Margin, Modifiers, Painter, Pos2, Rect, Response, RichText,
+    Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
+    WidgetInfo, WidgetText, pos2, vec2,
 };
 use xguitare_core::control::SILENCE_DB;
 
@@ -17,15 +17,15 @@ use crate::eq_model::{
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CHEVRON_WIDTH, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged,
-    EAR_WIDTH, Feedback, HEADER_GAP, KnobKey, METER_FLOOR_DB, MOVE_BUTTON_GAP, MOVE_BUTTON_SIDE,
-    NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, RULE_WIDTH, ScreenRect,
-    Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH, autoscroll_delta, bypassed,
-    cabinet_ir, cents_fraction, cents_text, chip_click, choice_buttons, choice_step, choice_text,
-    closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot, format_value, in_tune, key_step,
-    knob_fraction, knob_origin, knob_param_value, module_title, move_target, mute_banner,
-    open_knob_rows, open_knobs_width, open_unit_height, param_label, param_rows, peak_db,
-    peak_text, rack_position_labels, tuner_header_text, tuner_reading, typed_text, typed_value,
-    unit_style,
+    EAR_WIDTH, Feedback, HEADER_GAP, KnobKey, Link, METER_FLOOR_DB, MOVE_BUTTON_GAP,
+    MOVE_BUTTON_SIDE, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, RULE_WIDTH,
+    ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH,
+    autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text, chip_click, choice_buttons,
+    choice_step, choice_text, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
+    format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value, link_banner,
+    module_title, move_target, mute_banner, open_knob_rows, open_knobs_width, open_unit_height,
+    param_label, param_rows, paused, peak_db, peak_text, rack_position_labels, tuner_header_text,
+    tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
@@ -43,6 +43,11 @@ const UNIT_HEIGHT: f32 = 64.0;
 const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const BANNER_HEIGHT: f32 = 40.0;
+const MUTED_ICON_SIZE: f32 = 14.0;
+const LINK_BANNER_HEIGHT: f32 = 56.0;
+const LINK_BANNER_EDGE_WIDTH: f32 = 2.0;
+const LINK_RING_RADIUS: f32 = 7.0;
+const LINK_RING_WIDTH: f32 = 1.5;
 const METER_LABEL_WIDTH: f32 = 44.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
 const METER_ROW_GAP: f32 = theme::SPACE_XS;
@@ -108,10 +113,19 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
     let mut commands = Vec::new();
     let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     let muted_by_tuner = *view.tuner.open && *view.tuner.muted_by_us;
+    let paused = snapshot.link != Link::Connected;
+    if let Some((title, detail)) = link_banner(&snapshot.link, view.knobs.now) {
+        link_banner_strip(ui, title, &detail);
+    }
     if let Some(text) = mute_banner(snapshot.status.as_ref(), muted_by_tuner) {
         mute_banner_strip(ui, &text);
     }
     ScrollArea::vertical().show(ui, |ui| {
+        if paused {
+            // Paused controls take no input but keep their colours: the paused units' own style dims them.
+            ui.visuals_mut().disabled_alpha = 1.0;
+            ui.disable();
+        }
         let width = ui.available_width().min(RACK_MAX_WIDTH);
         let left = ui.cursor().left() + (ui.available_width() - width) / 2.0;
         let column = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, f32::INFINITY));
@@ -145,14 +159,93 @@ fn mute_banner_strip(ui: &mut Ui, text: &str) {
     let rect = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, BANNER_HEIGHT));
     let response = ui.allocate_rect(rect, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, text));
+    let ink = colour(palette().on_accent);
     let painter = ui.painter();
     painter.rect_filled(rect, theme::RADIUS_CONTROL, colour(palette().danger));
+    let galley = painter.layout_no_wrap(text.to_string(), theme::banner(), ink);
+    let icon_width = MUTED_ICON_SIZE * 1.6;
+    let left = rect.center().x - (icon_width + theme::SPACE_S + galley.size().x) / 2.0;
+    paint_muted_icon(painter, pos2(left, rect.center().y), ink);
+    let text_pos = pos2(
+        left + icon_width + theme::SPACE_S,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter.galley(text_pos, galley, ink);
+}
+
+/// A speaker struck through, `MUTED_ICON_SIZE` tall, its left edge at `left`.
+fn paint_muted_icon(painter: &Painter, left: Pos2, ink: Color32) {
+    let half = MUTED_ICON_SIZE / 2.0;
+    let body = Rect::from_min_max(
+        left - vec2(0.0, half / 2.0),
+        left + vec2(half / 2.0, half / 2.0),
+    );
+    painter.rect_filled(body, 0, ink);
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            body.right_top(),
+            pos2(left.x + half * 1.2, left.y - half),
+            pos2(left.x + half * 1.2, left.y + half),
+            body.right_bottom(),
+        ],
+        ink,
+        Stroke::NONE,
+    ));
+    let cross = pos2(left.x + half * 1.3 + MUTED_ICON_SIZE * 0.15, left.y);
+    let arm = MUTED_ICON_SIZE * 0.15;
+    let stroke = Stroke::new(1.5, ink);
+    painter.line_segment(
+        [cross + vec2(0.0, -arm), cross + vec2(2.0 * arm, arm)],
+        stroke,
+    );
+    painter.line_segment(
+        [cross + vec2(0.0, arm), cross + vec2(2.0 * arm, -arm)],
+        stroke,
+    );
+}
+
+/// The open panel edged in the lit colour with a lit ring, as wide as the rack and above it: the title, and under it what the window does meanwhile.
+fn link_banner_strip(ui: &mut Ui, title: &str, detail: &str) {
+    let colours = palette();
+    let width = ui.available_width().min(RACK_MAX_WIDTH);
+    let left = ui.cursor().left() + (ui.available_width() - width) / 2.0;
+    let rect = Rect::from_min_size(
+        pos2(left, ui.cursor().top()),
+        vec2(width, LINK_BANNER_HEIGHT),
+    );
+    let response = ui.allocate_rect(rect, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, format!("{title}. {detail}")));
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        theme::RADIUS_CONTROL,
+        colour(colours.panel_open),
+        Stroke::new(LINK_BANNER_EDGE_WIDTH, colour(colours.lit)),
+        StrokeKind::Inside,
+    );
+    let ring = pos2(
+        rect.left() + theme::SPACE_L + LINK_RING_RADIUS,
+        rect.center().y,
+    );
+    painter.circle_stroke(
+        ring,
+        LINK_RING_RADIUS,
+        Stroke::new(LINK_RING_WIDTH, colour(colours.lit)),
+    );
+    let text_left = ring.x + LINK_RING_RADIUS + theme::SPACE_M;
     painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        text,
-        theme::heading(),
-        colour(palette().on_accent),
+        pos2(text_left, rect.center().y - 1.0),
+        Align2::LEFT_BOTTOM,
+        title,
+        theme::dialog_title(),
+        colour(colours.text),
+    );
+    painter.text(
+        pos2(text_left, rect.center().y + 1.0),
+        Align2::LEFT_TOP,
+        detail,
+        theme::body(),
+        colour(colours.text),
     );
 }
 
@@ -450,6 +543,7 @@ fn module_units(
                 .params
                 .as_ref()
                 .is_some_and(|params| bypassed(params, module)),
+            paused: snapshot.link != Link::Connected,
             place: (index, modules.len()),
             position,
             ir_choice: snapshot
@@ -558,6 +652,8 @@ struct ModuleUnit<'a> {
     module: &'a str,
     rows: &'a [ParamRow],
     bypassed: bool,
+    /// The Daemon is not connected: the unit shows [`paused`] and takes no input.
+    paused: bool,
     place: (usize, usize),
     /// The Rack position its ears show.
     position: &'a str,
@@ -582,6 +678,7 @@ fn module_unit(
     let type_name = unit.rows.first().map_or("", |row| row.module_type.as_str());
     let accent = widgets::accent(type_name);
     let style = unit_style(unit.bypassed, open);
+    let style = if unit.paused { paused(style) } else { style };
     let arc = style.arc.map_or(accent, colour);
     let is_eq = type_name == EQ;
     let knobs_width = closed_knobs_width(ui.available_width(), unit.bypassed);

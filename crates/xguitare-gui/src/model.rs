@@ -1305,6 +1305,17 @@ pub struct UnitStyle {
     pub tag: Option<&'static str>,
 }
 
+/// A unit while the Daemon is not connected: on the bypass panel in bypass text with grey arcs, its lamp and tag still telling its Bypass.
+pub fn paused(style: UnitStyle) -> UnitStyle {
+    let colours = palette();
+    UnitStyle {
+        panel: colours.bypass_panel,
+        text: colours.bypass_text,
+        arc: Some(colours.bypass_arc),
+        ..style
+    }
+}
+
 /// How a unit shows its Module's Bypass: a bypassed unit, open or closed, sits on the bypass panel in bypass text with grey arcs, an unlit lamp and a `Bypassed` tag.
 pub fn unit_style(bypassed: bool, open: bool) -> UnitStyle {
     let colours = palette();
@@ -1387,11 +1398,19 @@ pub fn engine_readout(status: Option<&Value>) -> Vec<(String, String)> {
     .collect()
 }
 
-pub fn link_text(link: &Link, now: Instant) -> String {
+/// The banner's title and detail while the Daemon is not connected; the client thread retries on its own.
+pub fn link_banner(link: &Link, now: Instant) -> Option<(&'static str, String)> {
+    const PAUSED: &str = "Controls are paused.";
     match link {
-        Link::Connected => "connected".to_string(),
-        Link::Disconnected { since } => format!("disconnected {}s", seconds_since(*since, now)),
-        Link::Starting { since } => format!("starting daemon {}s", seconds_since(*since, now)),
+        Link::Connected => None,
+        Link::Disconnected { since } => Some((
+            "Daemon disconnected",
+            format!("Retrying for {} s. {PAUSED}", seconds_since(*since, now)),
+        )),
+        Link::Starting { since } => Some((
+            "Starting the Daemon",
+            format!("Waiting {} s for it. {PAUSED}", seconds_since(*since, now)),
+        )),
     }
 }
 
@@ -1947,6 +1966,9 @@ fn set_command(address: &str, value: f64) -> Command {
     }
 }
 
+/// How [`response_text`] and the typed-value checks begin an error message.
+const ERROR_PREFIX: &str = "error: ";
+
 #[derive(Debug, Default)]
 pub struct Feedback {
     message: Option<(String, Instant)>,
@@ -1962,6 +1984,21 @@ impl Feedback {
             .as_ref()
             .filter(|(_, at)| now.saturating_duration_since(*at) < FEEDBACK_FOR)
             .map(|(text, _)| text.as_str())
+    }
+
+    /// The message for the footer: anything but an error.
+    pub fn notice(&self, now: Instant) -> Option<&str> {
+        self.text(now)
+            .filter(|text| !text.starts_with(ERROR_PREFIX))
+    }
+
+    /// The message for the error toast.
+    pub fn error(&self, now: Instant) -> Option<&str> {
+        self.text(now).filter(|text| text.starts_with(ERROR_PREFIX))
+    }
+
+    pub fn dismiss(&mut self) {
+        self.message = None;
     }
 }
 

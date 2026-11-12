@@ -1,5 +1,5 @@
 use egui::{
-    Align2, Color32, ComboBox, CursorIcon, DragValue, Frame, Id, Key, Margin, Modal, Painter, Rect,
+    Align2, Color32, ComboBox, CursorIcon, DragValue, Frame, Id, Key, Margin, Painter, Rect,
     Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, TextStyle, TextWrapMode, Ui,
     UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
@@ -948,20 +948,20 @@ pub(crate) fn knob_with_reset(
 /// The prompt after `project_open` found a newer autosave; `None` while open, else whether to restore.
 pub fn autosave_prompt(ctx: &egui::Context, name: &str) -> Option<bool> {
     let mut choice = None;
-    Modal::new(Id::unique("autosave_prompt")).show(ctx, |ui| {
-        Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-            ui.label(RichText::new(format!("{AUTOSAVE_PROMPT} — {name}")).strong());
-            ui.label(muted_text(
-                "It holds the changes since the Project was last saved.",
-            ));
-            ui.horizontal(|ui| {
-                if ui.add(primary_button("Restore")).clicked() {
-                    choice = Some(true);
-                }
-                if ui.add(outlined_button("Open saved")).clicked() {
-                    choice = Some(false);
-                }
-            });
+    widgets::modal(Id::unique("autosave_prompt")).show(ctx, |ui| {
+        ui.spacing_mut().interact_size.y = theme::CONTROL_HEIGHT;
+        ui.label(RichText::new(format!("{AUTOSAVE_PROMPT} — {name}")).font(theme::dialog_title()));
+        ui.label(muted_text(
+            "It holds the changes since the Project was last saved.",
+        ));
+        ui.add_space(theme::SPACE_XS);
+        ui.horizontal(|ui| {
+            if ui.add(primary_button("Restore")).clicked() {
+                choice = Some(true);
+            }
+            if ui.add(outlined_button("Open saved")).clicked() {
+                choice = Some(false);
+            }
         });
     });
     choice

@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use egui::style::ScrollStyle;
 use egui::{
-    Align, Align2, CornerRadius, DragValue, Frame, Id, Key, Label, Layout, Margin, Mesh, Modal,
-    ProgressBar, Rect, RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind,
-    TextEdit, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, CornerRadius, DragValue, Frame, Id, Key, Label, Layout, Margin, Mesh, Rect,
+    RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind, TextEdit, Ui,
+    WidgetInfo, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::SendLevel;
@@ -22,7 +22,8 @@ use crate::project::{PAN, knob_with_reset, released_value};
 use crate::project_model::{MainView, track_colour, transport_view};
 use crate::rack::muted_text;
 use crate::theme::{
-    self, CONTROL_HEIGHT, RADIUS_PANEL, SPACE_S, bus_colour, colour, master_colour, palette,
+    self, CONTROL_HEIGHT, RADIUS_PANEL, SPACE_M, SPACE_S, SPACE_XS, bus_colour, colour,
+    master_colour, palette,
 };
 use crate::widgets::{
     self, KnobSize, edged_button, outlined_button, primary_button, switched_button,
@@ -85,6 +86,8 @@ const FIXED_ROWS_HEIGHT: f32 = KIND_HEIGHT
     + SWITCH_SIZE.y
     + 7.0 * ROW_GAP;
 const DIALOG_WIDTH: f32 = 420.0;
+/// What the Render dialog's row with the progress bar leaves for `Cancel` and the gap before it.
+const PROGRESS_CANCEL_WIDTH: f32 = 72.0;
 const BITS: [(RenderBits, &str); 3] = [
     (RenderBits::Pcm24, "24"),
     (RenderBits::Pcm16, "16"),
@@ -914,66 +917,73 @@ pub fn render_dialog(
         draft.sent.as_ref(),
     );
     let running = matches!(state, RenderView::Running(_));
-    let modal = Modal::new(Id::unique("render_dialog")).show(ctx, |ui| {
-        Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-            ui.set_width(DIALOG_WIDTH);
-            ui.label(RichText::new("Render").font(theme::heading()));
-            ui.add_enabled_ui(!running, |ui| {
-                egui::Grid::new("render_fields")
-                    .num_columns(2)
-                    .spacing(vec2(12.0, 8.0))
-                    .show(ui, |ui| {
-                        ui.label("Range");
-                        ui.horizontal(|ui| {
-                            ui.radio_value(&mut draft.range, RenderRange::Project, "Project");
-                            ui.add_enabled_ui(has_loop, |ui| {
-                                ui.radio_value(&mut draft.range, RenderRange::Loop, "Loop");
-                            })
-                            .response
-                            .on_disabled_hover_text("no loop region");
-                        });
-                        ui.end_row();
-                        ui.label("Bits");
-                        ui.horizontal(|ui| {
-                            for (bits, text) in BITS {
-                                ui.radio_value(&mut draft.bits, bits, text);
-                            }
-                        });
-                        ui.end_row();
-                        let label = ui.label("Name");
-                        ui.add(widgets::text_field(
-                            TextEdit::singleline(&mut draft.name).desired_width(240.0),
-                        ))
-                        .labelled_by(label.id);
-                        ui.end_row();
+    let modal = widgets::modal(Id::unique("render_dialog")).show(ctx, |ui| {
+        ui.set_width(DIALOG_WIDTH);
+        ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
+        ui.label(RichText::new("Render").font(theme::dialog_title()));
+        ui.add_space(SPACE_XS);
+        ui.add_enabled_ui(!running, |ui| {
+            egui::Grid::new("render_fields")
+                .num_columns(2)
+                .spacing(vec2(SPACE_M, SPACE_S))
+                .show(ui, |ui| {
+                    ui.label(field_label("Range"));
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut draft.range, RenderRange::Project, "Project");
+                        ui.add_enabled_ui(has_loop, |ui| {
+                            ui.radio_value(&mut draft.range, RenderRange::Loop, "Loop");
+                        })
+                        .response
+                        .on_disabled_hover_text("no loop region");
                     });
-            });
-            ui.add_space(8.0);
-            commands.extend(render_state(ui, &state));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.add_enabled(!running, primary_button("Render")).clicked() {
-                    draft.sent = Some(RenderSent {
-                        at: Instant::now(),
-                        previous: status["render"].clone(),
+                    ui.end_row();
+                    ui.label(field_label("Bits"));
+                    ui.horizontal(|ui| {
+                        for (bits, text) in BITS {
+                            ui.radio_value(&mut draft.bits, bits, text);
+                        }
                     });
-                    let name = draft.name.trim();
-                    commands.push(Command::Render {
-                        range: draft.range,
-                        bits: draft.bits,
-                        name: (!name.is_empty()).then(|| name.to_string()),
-                    });
-                }
-                if ui.add(outlined_button("Close")).clicked() {
-                    open = false;
-                }
-            });
+                    ui.end_row();
+                    let label = ui.label(field_label("Name"));
+                    ui.add(widgets::text_field(
+                        TextEdit::singleline(&mut draft.name).desired_width(f32::INFINITY),
+                    ))
+                    .labelled_by(label.id);
+                    ui.end_row();
+                });
+        });
+        ui.add_space(SPACE_S);
+        commands.extend(render_state(ui, &state));
+        ui.add_space(SPACE_S);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!running, primary_button("Render")).clicked() {
+                draft.sent = Some(RenderSent {
+                    at: Instant::now(),
+                    previous: status["render"].clone(),
+                });
+                let name = draft.name.trim();
+                commands.push(Command::Render {
+                    range: draft.range,
+                    bits: draft.bits,
+                    name: (!name.is_empty()).then(|| name.to_string()),
+                });
+            }
+            if ui.add(outlined_button("Close")).clicked() {
+                open = false;
+            }
         });
     });
     if modal.should_close() {
         open = false;
     }
     (commands, open)
+}
+
+/// A field's name in the legend role, muted.
+fn field_label(text: &str) -> RichText {
+    RichText::new(text)
+        .font(theme::legend())
+        .color(colour(palette().muted))
 }
 
 /// The progress bar with `Cancel` while a Render runs, else how the last one ended.
@@ -988,10 +998,8 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
                     clippy::cast_possible_truncation,
                     reason = "a progress in 0..=1 fits an f32"
                 )]
-                let bar = ProgressBar::new(*progress as f32)
-                    .show_percentage()
-                    .desired_width(DIALOG_WIDTH - 90.0);
-                ui.add(bar);
+                let progress = *progress as f32;
+                widgets::progress_bar(ui, progress, DIALOG_WIDTH - PROGRESS_CANCEL_WIDTH);
                 cancel = ui.add(outlined_button("Cancel")).clicked();
             });
             cancel.then_some(Command::RenderCancel)
@@ -1001,11 +1009,7 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
             None
         }
         RenderView::Failed(error) => {
-            ui.label(
-                RichText::new(error)
-                    .color(colour(colours.danger_text))
-                    .strong(),
-            );
+            ui.label(RichText::new(format!("\u{26a0} {error}")).color(colour(colours.danger_text)));
             None
         }
         RenderView::Cancelled => {
