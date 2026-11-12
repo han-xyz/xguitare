@@ -13,7 +13,7 @@ use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::project_model::AutosaveOffer;
-use crate::theme::{Rgb, palette};
+use crate::theme::{FOCUS_RING_GAP, FOCUS_RING_WIDTH, Rgb, palette};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
@@ -297,23 +297,34 @@ pub fn knob_points(fraction: f32, radius: f32) -> KnobPoints {
     }
 }
 
-/// A knob's two arcs as start and end angles in [`knob_angle_deg`]'s degrees: the track over the whole sweep, and the value arc from the sweep's start to the value, `None` at the start.
+/// A knob's two arcs as start and end angles in [`knob_angle_deg`]'s degrees: the track over the whole sweep, and the value arc from `origin` (a fraction, see [`knob_origin`]) to the value, `None` when the value sits at the origin.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KnobArcs {
     pub track: (f32, f32),
     pub value: Option<(f32, f32)>,
 }
 
-pub fn knob_arcs(fraction: f32) -> KnobArcs {
+#[allow(
+    clippy::float_cmp,
+    reason = "a knob at its origin is shown the exact origin fraction"
+)]
+pub fn knob_arcs(fraction: f32, origin: f32) -> KnobArcs {
     let fraction = fraction.clamp(0.0, 1.0);
     KnobArcs {
         track: (knob_angle_deg(0.0), knob_angle_deg(1.0)),
-        value: (fraction > 0.0).then(|| (knob_angle_deg(0.0), knob_angle_deg(fraction))),
+        value: (fraction != origin).then(|| (knob_angle_deg(origin), knob_angle_deg(fraction))),
     }
 }
 
-pub const FOCUS_RING_GAP: f32 = 2.0;
-pub const FOCUS_RING_WIDTH: f32 = 2.0;
+/// Where a knob's value arc starts, as a fraction of its sweep: the middle for a bipolar Parameter (a range symmetric around a 0 default, such as pan), else the start.
+#[allow(clippy::float_cmp, reason = "ranges and defaults are exact constants")]
+pub fn knob_origin(min: f64, max: f64, default: f64) -> f32 {
+    if min == -max && default == 0.0 {
+        0.5
+    } else {
+        0.0
+    }
+}
 
 /// The centre lines of the dark gap band around a focused widget and of the focus ring outside it.
 pub fn focus_ring_rects(widget: ScreenRect) -> (ScreenRect, ScreenRect) {

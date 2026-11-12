@@ -185,8 +185,14 @@ fn on_accent_text_and_value_arcs_meet_their_floors() {
         let accent = accent_for(type_name);
         let text = contrast(colours.on_accent, accent);
         assert!(text >= TEXT_FLOOR, "{type_name} text {text:.2}");
-        let arc = contrast(accent, colours.panel_open);
-        assert!(arc >= BOUNDARY_FLOOR, "{type_name} arc {arc:.2}");
+        for (back, name) in [
+            (colours.panel_open, "panel open"),
+            (colours.panel, "panel"),
+            (colours.well, "well"),
+        ] {
+            let arc = contrast(accent, back);
+            assert!(arc >= BOUNDARY_FLOOR, "{type_name} arc on {name} {arc:.2}");
+        }
     }
 }
 

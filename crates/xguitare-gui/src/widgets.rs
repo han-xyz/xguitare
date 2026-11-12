@@ -5,11 +5,13 @@ use egui::{
 };
 
 use crate::model::{
-    Band, EAR_HOLE_RADIUS, EAR_WIDTH, FOCUS_RING_GAP, FOCUS_RING_WIDTH, KNOB_ARC_SWEEP_DEG,
-    LADDER_SEGMENTS, ScreenRect, ear_holes, focus_ring_rects, knob_arcs, knob_points,
-    knob_value_from_drag, ladder_segments,
+    Band, EAR_HOLE_RADIUS, EAR_WIDTH, KNOB_ARC_SWEEP_DEG, LADDER_SEGMENTS, ScreenRect, ear_holes,
+    focus_ring_rects, knob_arcs, knob_points, knob_value_from_drag, ladder_segments,
 };
-use crate::theme::{self, RADIUS_CONTROL, RADIUS_LED, accent_for, colour, palette};
+use crate::theme::{
+    self, CARET_WIDTH, EDIT_BORDER_WIDTH, FOCUS_RING_GAP, FOCUS_RING_WIDTH, RADIUS_CONTROL,
+    RADIUS_LED, RADIUS_PANEL, RADIUS_PILL, SPACE_S, accent_for, colour, palette,
+};
 
 const ARC_SEGMENTS: usize = 48;
 const CENTS_ARC_DIAMETER: f32 = 160.0;
@@ -40,9 +42,7 @@ const LAMP_RADIUS: f32 = 6.0;
 const LAMP_GAP: f32 = 2.0;
 const LAMP_RING_WIDTH: f32 = 1.0;
 const LAMP_OFF_RING_WIDTH: f32 = 1.5;
-const EDIT_BORDER_WIDTH: f32 = 2.0;
-const TAG_RADIUS: u8 = 9;
-const TAG_MARGIN: Margin = Margin::symmetric(8, 1);
+const TAG_MARGIN: Margin = Margin::symmetric(SPACE_S as i8, 0);
 const LADDER_SEGMENT_SIZE: Vec2 = Vec2::new(14.0, 10.0);
 const LADDER_GAP: f32 = 3.0;
 const BANK_ROW_HEIGHT: f32 = 40.0;
@@ -50,7 +50,6 @@ const BANK_ROW_BORDER: f32 = 3.0;
 const BANK_ROW_PADDING: f32 = 10.0;
 const BANK_NUMBER_WIDTH: f32 = 18.0;
 pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(42.0, 38.0);
-const FOOTSWITCH_RADIUS: u8 = 5;
 const FOOTSWITCH_LED_TOP: f32 = 13.0;
 const FOOTSWITCH_TEXT_BOTTOM: f32 = 4.0;
 /// Where the focus pass reads a widget's own corner radius, for a widget that is not a rounded rectangle.
@@ -100,7 +99,7 @@ pub fn visuals() -> Visuals {
     widgets.noninteractive.bg_stroke.color = colour(colours.hover);
     widgets.noninteractive.fg_stroke.color = colour(colours.muted);
     visuals.weak_text_color = Some(colour(colours.muted));
-    visuals.text_cursor.stroke = Stroke::new(EDIT_BORDER_WIDTH, colour(colours.text));
+    visuals.text_cursor.stroke = Stroke::new(CARET_WIDTH, colour(colours.text));
     for (state, edge) in [
         (&mut widgets.inactive, colours.boundary),
         (&mut widgets.hovered, colours.hover_boundary),
@@ -122,18 +121,20 @@ pub fn visuals() -> Visuals {
     widgets.inactive.weak_bg_fill = colour(colours.panel_open);
     widgets.hovered.bg_fill = colour(colours.hover);
     widgets.hovered.weak_bg_fill = colour(colours.hover);
-    widgets.active.bg_fill = colour(colours.well);
-    widgets.active.weak_bg_fill = colour(colours.well);
+    widgets.active.bg_fill = colour(colours.panel_open);
+    widgets.active.weak_bg_fill = colour(colours.panel_open);
+    widgets.active.bg_stroke.color = colour(colours.boundary);
     visuals
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ButtonKind {
     Primary,
+    Outlined,
     Warning,
 }
 
-/// A button whose fills for rest, hover and press differ from the window's: [`primary_button`] and [`warning_button`].
+/// A button with a rest, a hover and a pressed look: [`primary_button`], [`outlined_button`] and [`warning_button`]. Keyboard focus keeps the rest or hover look inside the focus ring; only a press shows the pressed one.
 pub struct StyledButton {
     button: Button<'static>,
     kind: ButtonKind,
@@ -157,24 +158,31 @@ impl Widget for StyledButton {
                 let fills = [colours.text, colours.hover_boundary, colours.muted];
                 (fills, fills)
             }
+            ButtonKind::Outlined => (
+                [colours.panel_open, colours.hover, colours.well],
+                [colours.boundary, colours.hover_boundary, colours.text],
+            ),
             ButtonKind::Warning => (
                 [colours.panel_open, colours.hover, colours.well],
                 [colours.danger; 3],
             ),
         };
         ui.scope(|ui| {
+            // egui draws a focused widget with its `active` look, so `active` gets the look the button had last frame: pressed while the pointer is down on it, else hover or rest.
+            let last = ui.ctx().read_response(ui.next_auto_id());
+            let look = match last {
+                Some(last) if last.is_pointer_button_down_on() => 2,
+                Some(last) if last.hovered() => 1,
+                _ => 0,
+            };
             let widgets = &mut ui.visuals_mut().widgets;
-            for ((state, fill), edge) in [
-                &mut widgets.inactive,
-                &mut widgets.hovered,
-                &mut widgets.active,
-            ]
-            .into_iter()
-            .zip(fills)
-            .zip(edges)
-            {
-                state.weak_bg_fill = colour(fill);
-                state.bg_stroke = Stroke::new(1.0, colour(edge));
+            for (state, look) in [
+                (&mut widgets.inactive, 0),
+                (&mut widgets.hovered, 1),
+                (&mut widgets.active, look),
+            ] {
+                state.weak_bg_fill = colour(fills[look]);
+                state.bg_stroke = Stroke::new(1.0, colour(edges[look]));
             }
             ui.add(self.button)
         })
@@ -190,9 +198,12 @@ pub fn primary_button(text: &str) -> StyledButton {
     }
 }
 
-/// The window's own button: a boundary edge, a lighter fill on hover, a dark well while pressed.
-pub fn outlined_button(text: &str) -> Button<'static> {
-    Button::new(text.to_string())
+/// The window's button look: a boundary edge, a lighter fill on hover, a dark well while pressed.
+pub fn outlined_button(text: &str) -> StyledButton {
+    StyledButton {
+        button: Button::new(text.to_string()),
+        kind: ButtonKind::Outlined,
+    }
 }
 
 /// Edged in the clip red, for an action that removes something.
@@ -231,7 +242,7 @@ pub fn tag(ui: &mut Ui, text: &str) -> Response {
     let colours = palette();
     Frame::new()
         .stroke(Stroke::new(1.0, colour(colours.boundary)))
-        .corner_radius(TAG_RADIUS)
+        .corner_radius(RADIUS_PILL)
         .inner_margin(TAG_MARGIN)
         .show(ui, |ui| {
             ui.label(
@@ -243,8 +254,11 @@ pub fn tag(ui: &mut Ui, text: &str) -> Response {
         .response
 }
 
-/// The ring around whichever widget has keyboard focus, drawn once a frame on that widget's layer: a dark gap band, then the focus-ring colour. A widget that is no rounded rectangle names its corner radius with [`focus_corner`].
+/// The ring around whichever widget has keyboard focus, drawn once a frame on that widget's layer: a dark gap band, then the focus-ring colour. A text field shows its focus with its own lit edge instead; a widget partly scrolled out of view is ringed only inside the view. A widget that is no rounded rectangle names its corner radius with [`focus_corner`].
 pub fn paint_focus_ring(ctx: &Context) {
+    if ctx.text_edit_focused() {
+        return;
+    }
     let Some(id) = ctx.memory(egui::Memory::focused) else {
         return;
     };
@@ -255,12 +269,15 @@ pub fn paint_focus_ring(ctx: &Context) {
     if !visible.is_positive() {
         return;
     }
+    let clip = if visible == response.rect {
+        visible.expand(FOCUS_RING_GAP + FOCUS_RING_WIDTH)
+    } else {
+        visible
+    };
     let corner = ctx
         .data(|data| data.get_temp::<f32>(id.with(FOCUS_CORNER)))
         .unwrap_or(f32::from(RADIUS_CONTROL));
-    let painter = ctx
-        .layer_painter(response.layer_id)
-        .with_clip_rect(visible.expand(FOCUS_RING_GAP + FOCUS_RING_WIDTH));
+    let painter = ctx.layer_painter(response.layer_id).with_clip_rect(clip);
     focus_ring(&painter, response.rect, corner);
 }
 
@@ -343,12 +360,13 @@ pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
     let (rect, response) = ui.allocate_exact_size(FOOTSWITCH_SIZE, Sense::click());
     let text = if on { "On" } else { "Off" };
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, text));
-    let (face, edge) = control_state(&response);
+    focus_corner(ui, response.id, f32::from(RADIUS_PANEL));
+    let (_, edge) = control_state(&response);
     let painter = ui.painter();
     painter.rect(
         rect,
-        FOOTSWITCH_RADIUS,
-        colour(face),
+        RADIUS_PANEL,
+        colour(colours.well),
         Stroke::new(1.0, colour(edge)),
         StrokeKind::Inside,
     );
@@ -368,11 +386,11 @@ pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
     response
 }
 
-/// Face and edge of a drawn control at rest, under the pointer and pressed.
+/// Face and edge of a drawn control at rest, under the pointer and pressed. The footswitch keeps the rest face, so that its lamp ring stays on the dark well.
 fn control_state(response: &Response) -> (theme::Rgb, theme::Rgb) {
     let colours = palette();
     if response.is_pointer_button_down_on() {
-        (colours.arc_track, colours.hover_boundary)
+        (colours.well, colours.text)
     } else if response.hovered() {
         (colours.hover, colours.hover_boundary)
     } else {
@@ -380,7 +398,13 @@ fn control_state(response: &Response) -> (theme::Rgb, theme::Rgb) {
     }
 }
 
-pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) -> RackKnob {
+/// `origin` is where the value arc starts, as a fraction of the sweep ([`crate::model::knob_origin`]).
+pub fn rack_knob(
+    ui: &mut Ui,
+    size: KnobSize,
+    (fraction, origin): (f32, f32),
+    accent: Color32,
+) -> RackKnob {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::splat(size.diameter()), Sense::click_and_drag());
     let unrounded_id = response.id;
@@ -406,7 +430,15 @@ pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) ->
         ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, arrows_stay));
     }
     focus_corner(ui, response.id, rect.width() / 2.0);
-    paint_rack_knob(ui.painter(), rect, next, accent, response.hovered());
+    let pointer = ui.visuals().text_color();
+    let colours = (accent, pointer);
+    paint_rack_knob(
+        ui.painter(),
+        rect,
+        (next, origin),
+        colours,
+        response.hovered(),
+    );
     RackKnob {
         response,
         fraction: next,
@@ -419,11 +451,17 @@ pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) ->
     clippy::similar_names,
     reason = "painter is egui's name, pointer the knob's"
 )]
-fn paint_rack_knob(painter: &Painter, rect: Rect, fraction: f32, accent: Color32, hovered: bool) {
+fn paint_rack_knob(
+    painter: &Painter,
+    rect: Rect,
+    (fraction, origin): (f32, f32),
+    (accent, pointer): (Color32, Color32),
+    hovered: bool,
+) {
     let colours = palette();
     let centre = rect.center();
     let scale = rect.width() / KNOB_DRAWING;
-    let arcs = knob_arcs(fraction);
+    let arcs = knob_arcs(fraction, origin);
     let arc_radius = KNOB_ARC_RADIUS * scale;
     let arc_stroke = |shade| Stroke::new(KNOB_ARC_WIDTH * scale, shade);
     let (from, to) = arcs.track;
@@ -464,7 +502,7 @@ fn paint_rack_knob(painter: &Painter, rect: Rect, fraction: f32, accent: Color32
             to_screen(knob_points(fraction, KNOB_POINTER_INNER * scale).pointer),
             to_screen(knob_points(fraction, KNOB_POINTER_OUTER * scale).pointer),
         ],
-        Stroke::new(KNOB_POINTER_WIDTH * scale, colour(colours.text)),
+        Stroke::new(KNOB_POINTER_WIDTH * scale, pointer),
     );
 }
 
@@ -641,7 +679,7 @@ pub fn choice_button(
         (accent, accent, colour(colours.on_accent))
     } else {
         let (face, edge) = control_state(&response);
-        (colour(face), colour(edge), colour(colours.text))
+        (colour(face), colour(edge), ui.visuals().text_color())
     };
     let painter = ui.painter();
     painter.rect(

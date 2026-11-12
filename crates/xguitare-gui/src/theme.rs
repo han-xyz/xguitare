@@ -24,8 +24,11 @@ pub struct Palette {
     pub danger_text: Rgb,
     pub go: Rgb,
     pub focus_ring: Rgb,
+    /// The edge of a control under the pointer or pressed, and a knob's printed ticks (states mockup: hover boundary).
     pub hover_boundary: Rgb,
+    /// The light side of a knob body's gradient (a2 knob).
     pub knob_highlight: Rgb,
+    /// The dark side of a knob body's gradient (a2 knob).
     pub knob_shadow: Rgb,
     pub hover: Rgb,
     pub on_accent: Rgb,
@@ -151,6 +154,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("lit on beat light", c.lit, c.arc_track),
         pair("go on panel open", c.go, c.panel_open),
         pair("bypass text on well", c.bypass_text, c.well),
+        pair("bypass text on hover", c.bypass_text, c.hover),
         pair("danger text on well", c.danger_text, c.well),
         pair("on accent on hover boundary", c.on_accent, c.hover_boundary),
         pair("on accent on muted", c.on_accent, c.muted),
@@ -181,7 +185,12 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("danger on panel open", c.danger, c.panel_open),
         pair("hover boundary on hover", c.hover_boundary, c.hover),
         pair("hover boundary on well", c.hover_boundary, c.well),
-        pair("hover boundary on pressed", c.hover_boundary, c.arc_track),
+        pair("pressed edge on well", c.text, c.well),
+        pair(
+            "bypassed pointer on knob highlight",
+            c.bypass_text,
+            c.knob_highlight,
+        ),
         pair("danger on hover", c.danger, c.hover),
         pair("danger on well", c.danger, c.well),
         pair("tick on panel", c.hover_boundary, c.panel),
@@ -212,6 +221,13 @@ pub const SPACE_XL: f32 = 24.0;
 pub const RADIUS_LED: u8 = 1;
 pub const RADIUS_CONTROL: u8 = 3;
 pub const RADIUS_PANEL: u8 = 6;
+/// Half a tag's height: a pill.
+pub const RADIUS_PILL: u8 = 9;
+
+pub const FOCUS_RING_GAP: f32 = 2.0;
+pub const FOCUS_RING_WIDTH: f32 = 2.0;
+pub const EDIT_BORDER_WIDTH: f32 = 2.0;
+pub const CARET_WIDTH: f32 = 2.0;
 
 const PLEX: &str = "plex";
 const PLEX_MEDIUM: &str = "plex-medium";

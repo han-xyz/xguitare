@@ -311,7 +311,7 @@ fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendVie
             let knob = widgets::rack_knob(
                 ui,
                 KnobSize::Strip,
-                send_fraction(send.level_db),
+                (send_fraction(send.level_db), 0.0),
                 colour(accent),
             );
             knob.response.widget_info(|| {

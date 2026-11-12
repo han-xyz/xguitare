@@ -30,10 +30,9 @@ use xguitare_gui::model::{
     tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, Dragged, FOCUS_RING_GAP, FOCUS_RING_WIDTH, KnobArcs, Outgoing, RemovedUnit,
-    Restore, ScreenRect, UnitStyle, bypassed, closed_unit_rows, drag_outcome, drop_slot,
-    focus_ring_rects, knob_arcs, module_title, mute_banner, palette_place, restore, shown_undo,
-    unit_style,
+    CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RemovedUnit, Restore, ScreenRect, UnitStyle,
+    bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects, knob_arcs, knob_origin,
+    module_title, mute_banner, palette_place, restore, shown_undo, unit_style,
 };
 use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
@@ -1083,15 +1082,31 @@ fn knob_pointer_follows_the_sweep() {
 #[test]
 fn knob_track_spans_the_sweep_and_the_value_arc_ends_at_the_value() {
     assert_eq!(
-        knob_arcs(0.5),
+        knob_arcs(0.5, 0.0),
         KnobArcs {
             track: (135.0, 405.0),
             value: Some((135.0, 270.0)),
         }
     );
-    assert_eq!(knob_arcs(1.0).value, Some((135.0, 405.0)));
-    assert_eq!(knob_arcs(0.0).value, None);
-    assert_eq!(knob_arcs(0.0).track, (135.0, 405.0));
+    assert_eq!(knob_arcs(1.0, 0.0).value, Some((135.0, 405.0)));
+    assert_eq!(knob_arcs(0.0, 0.0).value, None);
+    assert_eq!(knob_arcs(0.0, 0.0).track, (135.0, 405.0));
+}
+
+#[test]
+fn a_bipolar_knob_lights_its_arc_from_the_top() {
+    assert_eq!(knob_arcs(0.5, 0.5).value, None);
+    assert_eq!(knob_arcs(0.25, 0.5).value, Some((270.0, 202.5)));
+    assert_eq!(knob_arcs(1.0, 0.5).value, Some((270.0, 405.0)));
+}
+
+#[test]
+fn a_range_symmetric_around_a_zero_default_starts_at_the_middle() {
+    assert_eq!(knob_origin(-1.0, 1.0, 0.0), 0.5);
+    assert_eq!(knob_origin(-12.0, 12.0, 0.0), 0.5);
+    assert_eq!(knob_origin(-12.0, 12.0, 3.0), 0.0);
+    assert_eq!(knob_origin(-60.0, 6.0, 0.0), 0.0);
+    assert_eq!(knob_origin(0.0, 100.0, 50.0), 0.0);
 }
 
 #[test]
@@ -1102,28 +1117,16 @@ fn focus_ring_sits_a_gap_outside_the_widget() {
         right: 50.0,
         bottom: 40.0,
     };
-    let (gap, ring) = focus_ring_rects(widget);
-    let gap_out = FOCUS_RING_GAP / 2.0;
-    let ring_out = FOCUS_RING_GAP + FOCUS_RING_WIDTH / 2.0;
+    let rect = |left, top, right, bottom| ScreenRect {
+        left,
+        top,
+        right,
+        bottom,
+    };
     assert_eq!(
-        gap,
-        ScreenRect {
-            left: 10.0 - gap_out,
-            top: 20.0 - gap_out,
-            right: 50.0 + gap_out,
-            bottom: 40.0 + gap_out,
-        }
+        focus_ring_rects(widget),
+        (rect(9.0, 19.0, 51.0, 41.0), rect(7.0, 17.0, 53.0, 43.0))
     );
-    assert_eq!(
-        ring,
-        ScreenRect {
-            left: 10.0 - ring_out,
-            top: 20.0 - ring_out,
-            right: 50.0 + ring_out,
-            bottom: 40.0 + ring_out,
-        }
-    );
-    assert_eq!((FOCUS_RING_GAP, FOCUS_RING_WIDTH), (2.0, 2.0));
 }
 
 fn ladder_counts(db: f64, clipped: bool) -> (usize, usize, usize) {

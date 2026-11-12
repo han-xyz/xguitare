@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use crate::model::{
     Command, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB, Snapshot,
-    TrackEdit, port_choices,
+    TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text,
@@ -166,7 +166,7 @@ pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'
         .fill(lit_colour)
         .stroke(Stroke::new(1.0, lit_colour))
     } else {
-        outlined_button(text)
+        Button::new(text.to_string())
     };
     button.selected(lit).min_size(TRANSPORT_BUTTON)
 }
@@ -725,7 +725,13 @@ pub(crate) fn knob_with_reset(
     ui.vertical_centered(|ui| {
         ui.set_width(KNOB_COLUMN_WIDTH);
         let fraction = ((value - min) / (max - min)) as f32;
-        let knob = widgets::rack_knob(ui, KnobSize::Strip, fraction, colour(palette().text));
+        let origin = knob_origin(min, max, reset);
+        let knob = widgets::rack_knob(
+            ui,
+            KnobSize::Strip,
+            (fraction, origin),
+            colour(palette().text),
+        );
         knob.response
             .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("{what} {track}")));
         let field_id = knob.response.id.with("field");

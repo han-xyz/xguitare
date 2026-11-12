@@ -701,47 +701,120 @@ const FOCUS_CROP_MARGIN: f32 = 8.0;
 const FOCUS_CROP_TOP: u32 = 16;
 const FOCUS_CROP_GAP: u32 = 16;
 
-/// The focused knob, button, choice group (one choice hovered) and field side by side, as the states mockup's focus row.
+/// Whether `pixel` shows `rgb` within a few levels per channel.
+fn is_near(pixel: [u8; 4], (r, g, b): (u8, u8, u8)) -> bool {
+    [r, g, b]
+        .iter()
+        .zip(pixel)
+        .all(|(want, got)| want.abs_diff(got) <= PIXEL_TOLERANCE)
+}
+
+const PIXEL_TOLERANCE: u8 = 12;
+
+/// A keyboard-focused button keeps the fill it has at rest inside its focus ring; only a press darkens it.
+#[test]
+fn focused_buttons_keep_their_rest_fill() {
+    let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
+    let colours = palette();
+    let scale = harness.ctx.pixels_per_point();
+    for (label, rest) in [("Save as new", colours.panel_open), ("Save", colours.text)] {
+        let button = harness.get_by_role_and_label(Role::Button, label);
+        let rect = button.rect();
+        button.focus();
+        harness.run_steps(2);
+        let image = harness.render().unwrap();
+        let inside = |rect: egui::Rect| {
+            (
+                ((rect.left() + 6.0) * scale) as u32,
+                (rect.center().y * scale) as u32,
+            )
+        };
+        let (x, y) = inside(rect);
+        assert!(
+            is_near(image.get_pixel(x, y).0, rest),
+            "focused {label} is {:?}",
+            image.get_pixel(x, y).0
+        );
+    }
+    let rect = harness
+        .get_by_role_and_label(Role::Button, "Save as new")
+        .rect();
+    harness.event(Event::PointerMoved(rect.center()));
+    harness.run_steps(1);
+    pointer_button(&mut harness, rect.center(), true);
+    harness.run_steps(2);
+    let image = harness.render().unwrap();
+    let (x, y) = (
+        ((rect.left() + 6.0) * scale) as u32,
+        (rect.center().y * scale) as u32,
+    );
+    assert!(
+        is_near(image.get_pixel(x, y).0, colours.well),
+        "pressed Save as new is {:?}",
+        image.get_pixel(x, y).0
+    );
+}
+
+/// The focused knob, button, choice group (one choice hovered) and field side by side, as the states mockup's focus row; the knob, button and lit choice wear the focus ring above their top edge, the field only its lit edge.
 #[test]
 fn focus_states_snapshot() {
     let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
     open_unit(&mut harness, AUTOWAH_CLOSED_INDEX);
+    let colours = palette();
     let mut shots = Vec::new();
     let knob = harness.get_by_role_and_label(Role::Slider, "Threshold");
     let rect = knob.rect();
     knob.focus();
     harness.run_steps(2);
-    shots.push((harness.render().unwrap(), rect));
+    shots.push((harness.render().unwrap(), rect, rect, "knob"));
     let button = harness.get_by_role_and_label(Role::Button, "Save as new");
     let rect = button.rect();
     button.focus();
     harness.run_steps(2);
-    shots.push((harness.render().unwrap(), rect));
+    shots.push((harness.render().unwrap(), rect, rect, "button"));
     let lit = harness.get_by_role_and_label(Role::RadioButton, "Mode, BP");
+    let lit_rect = lit.rect();
     let hovered = harness
         .get_by_role_and_label(Role::RadioButton, "Mode, LP")
         .rect();
     let last = harness
         .get_by_role_and_label(Role::RadioButton, "Mode, HP")
         .rect();
-    let rect = lit.rect().union(hovered).union(last);
+    let rect = lit_rect.union(hovered).union(last);
     lit.focus();
     harness.event(Event::PointerMoved(hovered.center()));
     harness.run_steps(2);
-    shots.push((harness.render().unwrap(), rect));
+    shots.push((harness.render().unwrap(), rect, lit_rect, "choice"));
     let field = harness.get_by_role_and_label(Role::TextInput, "Threshold");
     let rect = field.rect();
     field.focus();
     harness.run_steps(2);
-    shots.push((harness.render().unwrap(), rect));
+    shots.push((harness.render().unwrap(), rect, rect, "field"));
     let scale = harness.ctx.pixels_per_point();
+    let at = |x: f32, y: f32| ((x * scale) as u32, (y * scale) as u32);
+    for (image, _, widget, what) in &shots {
+        let ring = (2..=4).any(|out| {
+            let (x, y) = at(widget.center().x, widget.top() - out as f32);
+            is_near(image.get_pixel(x, y).0, colours.focus_ring)
+        });
+        if *what == "field" {
+            assert!(!ring, "a focused field wears no focus ring");
+            let (x, y) = at(widget.center().x, widget.top() + 1.0);
+            assert!(
+                is_near(image.get_pixel(x, y).0, colours.lit),
+                "a focused field has a lit edge"
+            );
+        } else {
+            assert!(ring, "no focus ring above the focused {what}");
+        }
+    }
     let mut canvas = shots[0].0.clone();
     let mut case = *canvas.get_pixel(0, 0);
     let (r, g, b) = palette().case;
     case.0 = [r, g, b, 255];
     canvas.pixels_mut().for_each(|pixel| *pixel = case);
     let mut left = FOCUS_CROP_GAP;
-    for (image, rect) in &shots {
+    for (image, rect, _, _) in &shots {
         let rect = rect.expand(FOCUS_CROP_MARGIN);
         let (x0, y0) = ((rect.left() * scale) as u32, (rect.top() * scale) as u32);
         let (width, height) = (

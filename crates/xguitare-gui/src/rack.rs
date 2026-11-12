@@ -20,10 +20,10 @@ use crate::model::{
     Feedback, KnobKey, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
     ScreenRect, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed, cabinet_ir,
     cents_fraction, chip_click, choice_buttons, choice_step, choice_text, closed_unit_rows,
-    drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_param_value,
-    module_title, move_target, mute_banner, open_knob_rows, open_unit_height, param_label,
-    param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
-    unit_style,
+    drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_origin,
+    knob_param_value, module_title, move_target, mute_banner, open_knob_rows, open_unit_height,
+    param_label, param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text,
+    typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::theme::{self, Rgb, TEXT_DISPLAY, colour, palette};
@@ -41,7 +41,6 @@ const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const UNIT_NAME_WIDTH: f32 = 120.0;
 const LAMP_SLOT: f32 = 18.0;
-const TAG_ROW_HEIGHT: f32 = 18.0;
 const BANNER_HEIGHT: f32 = 40.0;
 const METER_LABEL_WIDTH: f32 = 52.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
@@ -551,7 +550,7 @@ fn module_unit(
                 let slot = vec2(UNIT_NAME_WIDTH, header_height);
                 ui.allocate_ui_with_layout(slot, Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    let name_slot = vec2(UNIT_NAME_WIDTH, header_height - TAG_ROW_HEIGHT);
+                    let name_slot = vec2(UNIT_NAME_WIDTH, header_height - theme::SPACE_L);
                     ui.allocate_ui(name_slot, |ui| unit_name(ui, &name, type_part));
                     widgets::tag(ui, tag);
                 });
@@ -1053,7 +1052,8 @@ fn param_knob_named(
     };
     let mut in_use = false;
     let mut knob_and_field = |ui: &mut Ui, knobs: &mut Knobs| {
-        let knob = widgets::rack_knob(ui, size, fraction, accent);
+        let origin = knob_origin(row.min, row.max, row.default);
+        let knob = widgets::rack_knob(ui, size, (fraction, origin), accent);
         knob.response
             .widget_info(|| WidgetInfo::slider(true, shown, name));
         in_use = knob.response.hovered() || knob.response.dragged() || knob.response.has_focus();
