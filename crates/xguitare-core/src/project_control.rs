@@ -16,6 +16,7 @@ use crate::control::{
 use crate::engine::{Command, MeterPoint, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
+use crate::item_control::CopiedItem;
 use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
@@ -84,6 +85,7 @@ struct OpenProject {
     /// Finished Takes not yet in `project` because the Engine was busy; [`add_finished_takes`] retries them.
     unplaced: Vec<FinishedTake>,
     history: History,
+    clipboard: Vec<CopiedItem>,
 }
 
 /// The open Project's Take audio, keyed by Take file.
@@ -741,15 +743,11 @@ fn restore_track(state: &mut EngineState, placed: &mut PlacedTrack) -> Result<()
 }
 
 /// `name` when no Track of `tracks` has it, else the first of `<name> 2`, `<name> 3`, … that none has.
-#[allow(
-    clippy::maybe_infinite_iter,
-    reason = "a Project has at most 16 Tracks, so some number is free"
-)]
 fn free_name(tracks: &[Track], name: &str) -> String {
     if checked_name(tracks, name, None).is_ok() {
         return name.to_string();
     }
-    (2..)
+    (2..=MAX_TRACKS + 1)
         .map(|n| format!("{name} {n}"))
         .find(|name| checked_name(tracks, name, None).is_ok())
         .expect("a Project has at most 16 Tracks, so some number is free")
@@ -1055,6 +1053,32 @@ pub(crate) fn edit_items(
     Ok(())
 }
 
+/// The Items `item_copy` last put in the open Project's clipboard; none with no Project open.
+pub(crate) fn clipboard(state: &EngineState) -> &[CopiedItem] {
+    state
+        .projects
+        .open
+        .as_ref()
+        .map_or(&[], |open| &open.clipboard)
+}
+
+pub(crate) fn fill_clipboard(state: &mut EngineState, items: Vec<CopiedItem>) {
+    open_project_mut(state).clipboard = items;
+}
+
+/// The first Take file of `items`, active or not, that is no longer in the open Project's folder.
+pub(crate) fn gone_take_file<'a>(
+    state: &EngineState,
+    items: impl IntoIterator<Item = &'a Item>,
+) -> Option<&'a str> {
+    let dir = &open_project(state).dir;
+    items
+        .into_iter()
+        .flat_map(|item| &item.takes)
+        .map(|take| take.file.as_str())
+        .find(|file| !dir.join(file).is_file())
+}
+
 /// Undoes the newest entry of the open Project's history through the path its edit took.
 pub(crate) fn project_undo(state: &mut EngineState) -> Result<Value, String> {
     let entry = history_entry(
@@ -1204,6 +1228,7 @@ pub(crate) fn status_fields(
         ] {
             fields.insert(key.to_string(), Value::Null);
         }
+        fields.insert("clipboard".to_string(), json!(0));
         fields.insert("tracks".to_string(), json!([]));
         fields.insert("buses".to_string(), json!([]));
         fields.insert("master".to_string(), Value::Null);
@@ -1259,6 +1284,7 @@ pub(crate) fn status_fields(
         ("selected", json!(open.selected)),
         ("undo", json!(open.history.undo_label())),
         ("redo", json!(open.history.redo_label())),
+        ("clipboard", json!(open.clipboard.len())),
         ("tracks", json!(tracks)),
         ("buses", buses_status(project, mix, meters)),
         ("master", master_status(project, mix, meters)),
@@ -1318,6 +1344,7 @@ fn open(
         last_autosave: Instant::now(),
         unplaced: Vec::new(),
         history: History::default(),
+        clipboard: Vec::new(),
     });
     state.revision += 1;
     Ok(())

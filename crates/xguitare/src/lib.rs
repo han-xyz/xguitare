@@ -309,6 +309,24 @@ enum ItemCmd {
     },
     /// Make Take <take> (from 1) the Item's active Take
     Take { id: u64, take: usize },
+    /// Copy Items to right after the group they make, each on its own Track
+    Duplicate {
+        #[arg(required = true)]
+        ids: Vec<u64>,
+    },
+    /// Put Items in the clipboard
+    Copy {
+        #[arg(required = true)]
+        ids: Vec<u64>,
+    },
+    /// Paste the clipboard: its first Item on --track, its start at --at; the others keep their Track distance and spacing
+    Paste {
+        /// A zero-based index or a name
+        #[arg(long)]
+        track: String,
+        #[arg(long)]
+        at: String,
+    },
 }
 
 /// A Track is named by its zero-based index or its name.

@@ -415,17 +415,24 @@ $ xguitare item take 3 1
 3 track 0 at 2.1 (frame 96000), 96000 frames, take 1/2
 $ xguitare item delete 3
 deleted 3
+$ xguitare item duplicate 7
+8 track 1 at 5.1 (frame 384000), 96000 frames, take 2/2
+$ xguitare item copy 7
+copied 7
+$ xguitare item paste --track Guitar --at 9.1
+9 track 0 at 9.1 (frame 768000), 96000 frames, take 2/2
 ```
 
 - `item list` is `project items`. An Item is named by the id it shows first.
 - A time is `<bar>.<beat>`, `<bar>` or `<seconds>s`, as for `locate`. `item move` takes `<±seconds>s` or `<±bars>[.<beats>]` counted from 0, so `+1` is one bar later, `-0.2` two beats earlier and `+1.5s` a second and a half later.
 - `item move [--track <track>] <id>… <±time>` moves the Items by one amount, cut so that none starts before the Project start, and puts them on top of their Track. `--track` (an index or a name, given before the ids) puts the first on that Track and the others keep their distance to it.
 - `item trim <id> [--start <time>] [--end <time>]` moves an Item's edges, each kept within its Take. `item split [<id>…] --at <time>` splits those Items, or the Items under that time on the selected Track, into two that keep all the Takes. `item delete <id>…` removes Items; their Take files stay. `item take <id> <n>` plays Take `n`, counted from 1.
+- `item duplicate <id>…` copies the Items to right after the group they make (from the earliest start to the latest end), each on its own Track, on top. `item copy <id>…` keeps the Items in the Daemon's clipboard until the next copy or until the Project closes; `item paste --track <track> --at <time>` places them, as often as you like, with the first one copied on that Track and the group starting at that time; the others keep their distance in Tracks and time. Items that would land on a Track that does not exist are left out (`dropped 1 Item: no Track to paste it on`). The Control API `status` counts the clipboard's Items in `clipboard`.
 - Each edit prints the Items it changed: id, Track index, start, length in frames and Take. While playing, the change is heard after a 5 ms crossfade. Items cannot be edited while recording (`cannot edit items while recording`).
 
 #### Undo
 
-`xguitare project undo` takes back the last Item edit, recorded Take, or Track add or remove, and prints what it undid (`undid move 2 Items`); `xguitare project redo` does it again (`redid move 2 Items`). The last 200 are kept while the Project is open; closing it clears them, and a new edit clears what could be redone. Mixer, Rack, tempo and loop changes are not undone this way. An undone Take keeps its file in `takes/`. `xguitare status` shows the next undo and redo (`undo: trim, redo: -`). Neither works while recording.
+`xguitare project undo` takes back the last Item edit (a duplicate or a paste too), recorded Take, or Track add or remove, and prints what it undid (`undid move 2 Items`); `xguitare project redo` does it again (`redid move 2 Items`). The last 200 are kept while the Project is open; closing it clears them, and a new edit clears what could be redone. Mixer, Rack, tempo and loop changes are not undone this way. An undone Take keeps its file in `takes/`. `xguitare status` shows the next undo and redo (`undo: trim, redo: -`). Neither works while recording.
 
 ### Mixer
 

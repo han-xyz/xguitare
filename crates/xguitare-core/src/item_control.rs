@@ -1,10 +1,21 @@
 use serde_json::{Value, json};
 
 use crate::control::{EngineState, TrackRef};
-use crate::project::Project;
-use crate::project_control::{edit_items, editable_project, item_json, resolve_track};
+use crate::project::{Item, Project};
+use crate::project_control::{
+    clipboard, current_project, edit_items, editable_project, fill_clipboard, gone_take_file,
+    item_json, resolve_track,
+};
 
 const NO_ITEMS: &str = "give at least one item";
+const CLIPBOARD_EMPTY: &str = "clipboard is empty";
+
+/// An Item in the clipboard: `item.position` counted from the start of the group copied, `track` its Track's distance from the Track of the first Item named.
+#[derive(Clone)]
+pub(crate) struct CopiedItem {
+    pub track: isize,
+    pub item: Item,
+}
 
 /// Moves the Items `ids` by one `delta`, clamped so none starts before frame 0, onto the top of their Tracks; with `track`, the first one lands on that Track and the others keep their Track distance to it.
 pub(crate) fn item_move(
@@ -184,6 +195,89 @@ pub(crate) fn item_take(state: &mut EngineState, id: u64, take: usize) -> Result
     Ok(reply)
 }
 
+/// Copies the Items `ids`, each onto the top of its own Track, so the copies start where the group of `ids` ends; the copies get new ids.
+pub(crate) fn item_duplicate(state: &mut EngineState, ids: &[u64]) -> Result<Value, String> {
+    let (project, _) = editable_project(state)?;
+    let places = sorted_places(project, ids)?;
+    let (start, end) = group_extent(project, &places);
+    let mut project = project.clone();
+    let mut copies = Vec::with_capacity(places.len());
+    for (track, index) in places {
+        let mut copy = project.tracks[track].items[index].clone();
+        copy.id = project.next_item_id;
+        project.next_item_id += 1;
+        copy.position = copy.position.saturating_add(end - start);
+        copies.push(copy.id);
+        project.tracks[track].items.push(copy);
+    }
+    let reply = changed(&project, &copies);
+    edit_items(state, project, count_label("duplicate", copies.len()))?;
+    Ok(reply)
+}
+
+/// Puts the Items `ids` in the open Project's clipboard, replacing what it held.
+pub(crate) fn item_copy(state: &mut EngineState, ids: &[u64]) -> Result<Value, String> {
+    let project = current_project(state)?;
+    let ids = distinct(ids)?;
+    let first = find(project, ids[0])?.0;
+    let places = sorted_places(project, &ids)?;
+    let (start, _) = group_extent(project, &places);
+    let copied = places
+        .into_iter()
+        .map(|(track, index)| {
+            let mut item = project.tracks[track].items[index].clone();
+            item.position -= start;
+            CopiedItem {
+                track: track.cast_signed() - first.cast_signed(),
+                item,
+            }
+        })
+        .collect();
+    fill_clipboard(state, copied);
+    Ok(json!({ "copied": ids }))
+}
+
+/// Places the clipboard onto the top of its Tracks, its first Item on `track` and the group's start at `at`; Items that would land on a Track that does not exist are left out and counted in `dropped`.
+pub(crate) fn item_paste(
+    state: &mut EngineState,
+    track: &TrackRef,
+    at: u64,
+) -> Result<Value, String> {
+    let (project, _) = editable_project(state)?;
+    let copied = clipboard(state);
+    if copied.is_empty() {
+        return Err(CLIPBOARD_EMPTY.to_string());
+    }
+    let to_first = resolve_track(project, track)?;
+    let mut project = project.clone();
+    let mut pasted = Vec::with_capacity(copied.len());
+    for entry in copied {
+        let Some(track) = to_first
+            .checked_add_signed(entry.track)
+            .filter(|&track| track < project.tracks.len())
+        else {
+            continue;
+        };
+        let mut item = entry.item.clone();
+        item.id = project.next_item_id;
+        project.next_item_id += 1;
+        item.position = item.position.saturating_add(at);
+        pasted.push((track, item));
+    }
+    if let Some(file) = gone_take_file(state, pasted.iter().map(|(_, item)| item)) {
+        return Err(format!("cannot paste: take {file} no longer exists"));
+    }
+    let dropped = copied.len() - pasted.len();
+    let ids: Vec<u64> = pasted.iter().map(|(_, item)| item.id).collect();
+    for (track, item) in pasted {
+        project.tracks[track].items.push(item);
+    }
+    let mut reply = changed(&project, &ids);
+    reply["dropped"] = json!(dropped);
+    edit_items(state, project, count_label("paste", ids.len()))?;
+    Ok(reply)
+}
+
 /// `verb Item` for one Item, `verb <n> Items` for more.
 fn count_label(verb: &str, items: usize) -> String {
     if items == 1 {
@@ -221,6 +315,28 @@ fn find(project: &Project, id: u64) -> Result<(usize, usize), String> {
                 .map(|index| (track, index))
         })
         .ok_or_else(|| format!("no such item: {id}"))
+}
+
+/// The places of the Items `ids`, as [`find`] gives them, in Track and stacking order.
+fn sorted_places(project: &Project, ids: &[u64]) -> Result<Vec<(usize, usize)>, String> {
+    let mut places = distinct(ids)?
+        .into_iter()
+        .map(|id| find(project, id))
+        .collect::<Result<Vec<_>, _>>()?;
+    places.sort_unstable();
+    Ok(places)
+}
+
+/// The earliest start and the latest end of the Items at `places`.
+fn group_extent(project: &Project, places: &[(usize, usize)]) -> (u64, u64) {
+    let items = || {
+        places
+            .iter()
+            .map(|&(track, index)| &project.tracks[track].items[index])
+    };
+    let start = items().map(|item| item.position).min().unwrap_or(0);
+    let end = items().map(Item::end).max().unwrap_or(0);
+    (start, end)
 }
 
 /// The reply of an edit: the Items `ids` of `project`, each with its Track index.

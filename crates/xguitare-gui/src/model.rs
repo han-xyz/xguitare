@@ -2432,6 +2432,9 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::ItemSplit { .. } => "Could not split the Items",
         Request::ItemDelete { .. } => "Could not delete the Items",
         Request::ItemTake { .. } => "Could not change the Take",
+        Request::ItemDuplicate { .. } => "Could not duplicate the Items",
+        Request::ItemCopy { .. } => "Could not copy the Items",
+        Request::ItemPaste { .. } => "Could not paste the Items",
     }
 }
 

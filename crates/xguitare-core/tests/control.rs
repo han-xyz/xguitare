@@ -172,6 +172,7 @@ fn status_reports_fields() {
             "selected": null,
             "undo": null,
             "redo": null,
+            "clipboard": 0,
             "tracks": [],
             "buses": [],
             "master": null,

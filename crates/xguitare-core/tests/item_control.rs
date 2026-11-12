@@ -594,3 +594,274 @@ fn a_busy_engine_leaves_the_project_and_revision_unchanged() {
         loaded
     );
 }
+
+fn item_duplicate(ids: &[u64]) -> Request {
+    Request::ItemDuplicate { ids: ids.to_vec() }
+}
+
+fn item_copy(ids: &[u64]) -> Request {
+    Request::ItemCopy { ids: ids.to_vec() }
+}
+
+fn item_paste(track: TrackRef, at: u64) -> Request {
+    Request::ItemPaste { track, at }
+}
+
+/// The `status` fields `undo` and `clipboard`.
+fn undo_and_clipboard(state: &mut EngineState) -> (Value, Value) {
+    let status = ok(handle(state, Request::Status));
+    (status["undo"].clone(), status["clipboard"].clone())
+}
+
+/// Each Item of the `items` reply as `[id, track, position]`.
+fn placed(reply: &Value) -> Vec<[u64; 3]> {
+    reply["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| ["id", "track", "position"].map(|key| item[key].as_u64().unwrap()))
+        .collect()
+}
+
+#[test]
+fn item_duplicate_copies_one_item_right_after_itself() {
+    let (mut state, _audio, _dir) = state("duplicate-one");
+    open_with(
+        &mut state,
+        vec![(
+            "Guitar",
+            vec![Item {
+                id: 1,
+                position: 1000,
+                offset: 100,
+                length: Some(2000),
+                take: 1,
+                takes: vec![
+                    Take {
+                        file: "takes/a.wav".to_string(),
+                        frames: 4800,
+                    },
+                    Take {
+                        file: "takes/b.wav".to_string(),
+                        frames: 4800,
+                    },
+                ],
+            }],
+        )],
+        &TAKES,
+    );
+    let revision = state.revision;
+    let reply = ok(handle(&mut state, item_duplicate(&[1])));
+    assert!(state.revision > revision);
+    assert_eq!(placed(&reply), [[2, 0, 3000]]);
+    let items = ok(handle(&mut state, Request::Items));
+    let [original, copy] = [0, 1].map(|index| items["tracks"][0]["items"][index].clone());
+    for key in ["offset", "length", "take", "takes"] {
+        assert_eq!(copy[key], original[key], "{key}");
+    }
+    assert_eq!(undo_and_clipboard(&mut state).0, "duplicate Item");
+}
+
+#[test]
+fn item_duplicate_places_a_group_after_its_end_keeping_tracks_and_distances() {
+    let (mut state, mut audio, _dir) = state("duplicate-group");
+    guitar_and_bass(&mut state);
+    drain_commands(&mut audio);
+    let before = layout(&mut state);
+    let reply = ok(handle(&mut state, item_duplicate(&[4, 2])));
+    assert_eq!(
+        placed(&reply),
+        [[5, 0, 10_800], [6, 1, 7800]],
+        "the group runs from 0 to 7800"
+    );
+    let after = layout(&mut state);
+    assert_eq!(
+        after,
+        [
+            vec![
+                [1, 1000, 0, 4800],
+                [2, 3000, 0, 4800],
+                [3, 20_000, 0, 4800],
+                [5, 10_800, 0, 4800]
+            ],
+            vec![[4, 0, 0, 4800], [6, 7800, 0, 4800]],
+        ]
+    );
+    assert_eq!(item_swaps(&mut audio).len(), 2);
+    assert_eq!(undo_and_clipboard(&mut state).0, "duplicate 2 Items");
+    ok(handle(&mut state, Request::ProjectUndo));
+    assert_eq!(layout(&mut state), before);
+    ok(handle(&mut state, Request::ProjectRedo));
+    assert_eq!(layout(&mut state), after);
+}
+
+#[test]
+fn item_copy_fills_the_clipboard_without_an_edit() {
+    let (mut state, _audio, _dir) = state("copy");
+    guitar_and_bass(&mut state);
+    assert_eq!(undo_and_clipboard(&mut state), (Value::Null, json!(0)));
+    let revision = state.revision;
+    assert_eq!(
+        ok(handle(&mut state, item_copy(&[2, 4, 2]))),
+        json!({"copied": [2, 4]})
+    );
+    assert_eq!(state.revision, revision);
+    assert_eq!(undo_and_clipboard(&mut state), (Value::Null, json!(2)));
+}
+
+#[test]
+fn item_paste_places_the_clipboard_on_another_track_and_time_each_time() {
+    let (mut state, _audio, _dir) = state("paste");
+    guitar_and_bass(&mut state);
+    ok(handle(&mut state, item_copy(&[4, 2])));
+    let before = layout(&mut state);
+    let revision = state.revision;
+    let reply = ok(handle(
+        &mut state,
+        item_paste(TrackRef::Name("Bass".to_string()), 40_000),
+    ));
+    assert!(state.revision > revision);
+    assert_eq!(reply["dropped"], 0);
+    assert_eq!(
+        placed(&reply),
+        [[5, 0, 43_000], [6, 1, 40_000]],
+        "Item 4, the first, lands on Bass at 40000; Item 2 keeps its 3000 frames and one Track up"
+    );
+    assert_eq!(
+        undo_and_clipboard(&mut state),
+        (json!("paste 2 Items"), json!(2))
+    );
+    let reply = ok(handle(&mut state, item_paste(TrackRef::Index(1), 40_000)));
+    assert_eq!(placed(&reply), [[7, 0, 43_000], [8, 1, 40_000]]);
+    let after = layout(&mut state);
+    assert_eq!(
+        after[0][3..],
+        [[5, 43_000, 0, 4800], [7, 43_000, 0, 4800]],
+        "on top"
+    );
+    assert_eq!(after[1][1..], [[6, 40_000, 0, 4800], [8, 40_000, 0, 4800]]);
+    ok(handle(&mut state, Request::ProjectUndo));
+    ok(handle(&mut state, Request::ProjectUndo));
+    assert_eq!(layout(&mut state), before);
+    ok(handle(&mut state, Request::ProjectRedo));
+    assert_eq!(layout(&mut state)[1].len(), 2);
+}
+
+#[test]
+fn item_paste_drops_items_whose_track_does_not_exist() {
+    let (mut state, _audio, _dir) = state("paste-drop");
+    guitar_and_bass(&mut state);
+    ok(handle(&mut state, item_copy(&[4, 2])));
+    let reply = ok(handle(&mut state, item_paste(TrackRef::Index(0), 100)));
+    assert_eq!(reply["dropped"], 1);
+    assert_eq!(
+        placed(&reply),
+        [[5, 0, 100]],
+        "Item 2 would land above Track 0"
+    );
+    assert_eq!(undo_and_clipboard(&mut state).0, "paste Item");
+    assert_eq!(
+        error(handle(
+            &mut state,
+            item_paste(TrackRef::Name("Drums".to_string()), 0)
+        )),
+        "no track 'Drums'"
+    );
+}
+
+#[test]
+fn the_clipboard_survives_edits_and_is_cleared_on_close() {
+    let (mut state, _audio, _dir) = state("clipboard-close");
+    guitar_and_bass(&mut state);
+    assert_eq!(
+        error(handle(&mut state, item_paste(TrackRef::Index(0), 0))),
+        "clipboard is empty"
+    );
+    ok(handle(&mut state, item_copy(&[2])));
+    ok(handle(&mut state, item_delete(&[2])));
+    ok(handle(&mut state, item_move(&[1], 500, None)));
+    let reply = ok(handle(&mut state, item_paste(TrackRef::Index(1), 9000)));
+    assert_eq!(placed(&reply), [[5, 1, 9000]]);
+    ok(handle(&mut state, Request::ProjectClose));
+    ok(handle(
+        &mut state,
+        Request::ProjectOpen {
+            name: "Song".to_string(),
+            restore: false,
+        },
+    ));
+    assert_eq!(undo_and_clipboard(&mut state).1, 0);
+    assert_eq!(
+        error(handle(&mut state, item_paste(TrackRef::Index(0), 0))),
+        "clipboard is empty"
+    );
+}
+
+#[test]
+fn item_paste_fails_when_a_take_file_of_the_clipboard_is_gone() {
+    let (mut state, _audio, dir) = state("paste-gone");
+    guitar_and_bass(&mut state);
+    ok(handle(&mut state, item_copy(&[1])));
+    fs::remove_file(dir.0.join("projects/song/takes/a.wav")).unwrap();
+    let before = layout(&mut state);
+    assert_eq!(
+        error(handle(&mut state, item_paste(TrackRef::Index(0), 0))),
+        "cannot paste: take takes/a.wav no longer exists"
+    );
+    assert_eq!(layout(&mut state), before);
+}
+
+#[test]
+fn duplicate_copy_and_paste_name_their_errors() {
+    let (mut state, _audio, _dir) = state("clipboard-errors");
+    for request in [
+        item_duplicate(&[1]),
+        item_copy(&[1]),
+        item_paste(TrackRef::Index(0), 0),
+    ] {
+        assert_eq!(error(handle(&mut state, request)), "no project open");
+    }
+    guitar_and_bass(&mut state);
+    for request in [item_duplicate(&[1, 9]), item_copy(&[9])] {
+        assert_eq!(error(handle(&mut state, request)), "no such item: 9");
+    }
+    for request in [item_duplicate(&[]), item_copy(&[])] {
+        assert_eq!(error(handle(&mut state, request)), "give at least one item");
+    }
+}
+
+#[test]
+fn duplicate_and_paste_are_refused_while_recording_and_copy_is_not() {
+    let (mut state, _audio, _dir) = state("clipboard-recording");
+    guitar_and_bass(&mut state);
+    ok(handle(
+        &mut state,
+        Request::TrackSet {
+            track: TrackRef::Index(1),
+            input: None,
+            volume: None,
+            pan: None,
+            mute: None,
+            solo: None,
+            arm: Some(true),
+            name: None,
+            to_master: None,
+        },
+    ));
+    ok(handle(
+        &mut state,
+        Request::Transport {
+            action: TransportAction::Record,
+            position: None,
+        },
+    ));
+    let before = layout(&mut state);
+    ok(handle(&mut state, item_copy(&[1])));
+    for request in [item_duplicate(&[1]), item_paste(TrackRef::Index(0), 0)] {
+        assert_eq!(
+            error(handle(&mut state, request)),
+            "cannot edit items while recording"
+        );
+    }
+    assert_eq!(layout(&mut state), before);
+}

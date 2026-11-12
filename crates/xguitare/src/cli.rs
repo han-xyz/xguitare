@@ -207,6 +207,12 @@ fn item_request(transport: &mut dyn Transport, cmd: ItemCmd) -> Result<Request, 
     Ok(match cmd {
         ItemCmd::List => Request::Items,
         ItemCmd::Delete { ids } => Request::ItemDelete { ids },
+        ItemCmd::Duplicate { ids } => Request::ItemDuplicate { ids },
+        ItemCmd::Copy { ids } => Request::ItemCopy { ids },
+        ItemCmd::Paste { track, at } => Request::ItemPaste {
+            at: Timing::read(transport)?.frame(&at)?,
+            track: index_or_name(track),
+        },
         ItemCmd::Take { id, take } => Request::ItemTake {
             id,
             take: take.checked_sub(1).ok_or("takes are numbered from 1")?,
@@ -647,10 +653,16 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ItemMove { .. }
         | Request::ItemTrim { .. }
         | Request::ItemSplit { .. }
-        | Request::ItemTake { .. } => render_changed_items(payload),
+        | Request::ItemTake { .. }
+        | Request::ItemDuplicate { .. } => render_changed_items(payload),
+        Request::ItemPaste { .. } => render_pasted_items(payload),
         Request::ItemDelete { .. } => {
             let ids: Vec<String> = items(&payload["deleted"]).map(text).collect();
             format!("deleted {}\n", ids.join(" "))
+        }
+        Request::ItemCopy { .. } => {
+            let ids: Vec<String> = items(&payload["copied"]).map(text).collect();
+            format!("copied {}\n", ids.join(" "))
         }
         Request::Ports
         | Request::SetPorts { .. }
@@ -712,6 +724,18 @@ fn render_items(payload: &Value) -> Result<String, String> {
 }
 
 /// One line per Item an edit changed: `<id> track <index> at <bar.beat> (frame <position>), <length> frames, take <n>/<takes>`.
+fn render_pasted_items(payload: &Value) -> String {
+    let mut lines = render_changed_items(payload);
+    match payload["dropped"].as_u64().unwrap_or(0) {
+        0 => {}
+        1 => lines.push_str("dropped 1 Item: no Track to paste it on\n"),
+        dropped => {
+            let _ = writeln!(lines, "dropped {dropped} Items: no Track to paste them on");
+        }
+    }
+    lines
+}
+
 fn render_changed_items(payload: &Value) -> String {
     let mut lines = String::new();
     for item in items(&payload["items"]) {

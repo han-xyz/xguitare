@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `project_undo`, `project_redo`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `metronome`, `metronome_tap`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `render`, `render_cancel`, `clip_reset`, `item_move`, `item_trim`, `item_split`, `item_delete`, `item_take` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `project_undo`, `project_redo`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `metronome`, `metronome_tap`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `render`, `render_cancel`, `clip_reset`, `item_move`, `item_trim`, `item_split`, `item_delete`, `item_take`, `item_duplicate`, `item_copy`, `item_paste` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -63,7 +63,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"clipboard":0,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
@@ -96,6 +96,7 @@ Response:
 | `click` | Whether the click is `on`, and `count_in` bars before recording. |
 | `selected` | Index of the selected Track. |
 | `undo`, `redo` | The label of what `project_undo` and `project_redo` would take back or do again, e.g. `move 2 Items` or `record Bass DI`; `null` when there is none. |
+| `clipboard` | How many Items `item_copy` put in the clipboard, which `item_paste` places; `0` when it is empty. |
 | `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
 | `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed, and is not given to a later Bus while the Project is open; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
 | `master` | `volume_db` (`null` when off), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
@@ -742,6 +743,8 @@ The history holds, per open Project, the last 200 of these edits, each one entry
 | `item_split` | `split` |
 | `item_delete` | `delete Item`, `delete <n> Items` |
 | `item_take` | `take <n>`, the Take counted from 1 |
+| `item_duplicate` | `duplicate Item`, `duplicate <n> Items` |
+| `item_paste` | `paste Item`, `paste <n> Items`, counting the Items placed |
 | A Take added after recording | `record <Track>` |
 | `track_add` | `add Track <name>` |
 | `track_remove` | `remove Track <name>`; undone, the Track comes back at its place with its Rack, mixer values, Sends and Items, selected if it was |
@@ -833,9 +836,9 @@ Errors: `no project open`.
 
 ## Item edits
 
-`item_move`, `item_trim`, `item_split`, `item_delete` and `item_take` change the open Project's Items, named by their `id` from `items`. Each one bumps the `status` Revision and marks the Project changed, also when nothing moved. While the transport plays, the Tracks whose Items changed cross over to the new Items in 5 ms; the Racks are not rebuilt and the playhead keeps going. Times are frames from the Project start; a client turns `<bar>.<beat>` or seconds into frames with the Project's `sample_rate` and `tempo`.
+`item_move`, `item_trim`, `item_split`, `item_delete`, `item_take`, `item_duplicate` and `item_paste` change the open Project's Items, named by their `id` from `items`. Each one bumps the `status` Revision and marks the Project changed, also when nothing moved. While the transport plays, the Tracks whose Items changed cross over to the new Items in 5 ms; the Racks are not rebuilt and the playhead keeps going. Times are frames from the Project start; a client turns `<bar>.<beat>` or seconds into frames with the Project's `sample_rate` and `tempo`.
 
-All but `item_delete` answer with the Items they changed, each as `items` lists it plus `track`, the zero-based index of its Track, so a client can follow a moved Item or both halves of a split:
+All but `item_delete` answer with the Items they changed or made, each as `items` lists it plus `track`, the zero-based index of its Track, so a client can follow a moved Item, both halves of a split or the new copies:
 
 ```json
 {"ok":true,"items":[{"track":0,"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":48000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]},{"track":0,"id":7,"position":144000,"bars_beats":"2.3","offset":48000,"length":144000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]}
@@ -916,6 +919,52 @@ Request:
 ```
 
 Errors, besides those above: `item <id> has no take <take>`; `item <id> starts past the end of take <take>` when that Take holds no frames after the Item's `offset`.
+
+## item_duplicate
+
+Copies the Items `ids` so that the copies start where the group ends: the group runs from the earliest start to the latest end of those Items, and each copy lands that many frames later, on its own Item's Track, on top. The copies keep the Takes, the active Take, `offset` and `length`, and get new ids. The reply lists the copies in Track order, and in stacking order within a Track.
+
+Request:
+
+```json
+{"cmd":"item_duplicate","ids":[3,4]}
+```
+
+## item_copy
+
+Puts the Items `ids` in the open Project's clipboard, replacing what it held: each Item with its distance in frames to the group's start (the earliest start of those Items) and its distance in Tracks to the Track of the first Item in `ids`. It is not an edit: the Project, the Revision and the undo history stay as they are, and it works while recording. The clipboard keeps the Items as they were copied, also when they are edited or deleted afterwards, until the next `item_copy` or until the Project closes. `status` `clipboard` counts its Items.
+
+Request:
+
+```json
+{"cmd":"item_copy","ids":[3,4]}
+```
+
+Response:
+
+```json
+{"ok":true,"copied":[3,4]}
+```
+
+Errors: `no project open`; `no such item: <id>`; `give at least one item`.
+
+## item_paste
+
+Places the clipboard's Items as new Items, with new ids, on top of their Tracks: the first Item copied on `track` (a zero-based index or a name), the others at their distance in Tracks to it, and the group's start at the frame `at`, the others keeping their distance to it. An Item whose Track would be before the first or after the last Track is left out; `dropped` counts them. Paste as often as you like; the clipboard stays.
+
+Request:
+
+```json
+{"cmd":"item_paste","track":"Bass","at":192000}
+```
+
+Response:
+
+```json
+{"ok":true,"items":[{"track":1,"id":9,"position":192000,"bars_beats":"3.1","offset":0,"length":48000,"take":0,"takes":["takes/bass-1.wav"]}],"dropped":1}
+```
+
+Errors, besides those above: `clipboard is empty` before any `item_copy` in the open Project; `no track '<track>'`; `cannot paste: take <file> no longer exists` when a Take file of an Item to place is gone from the Project folder (nothing is placed).
 
 ## track_add
 

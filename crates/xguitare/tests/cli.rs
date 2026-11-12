@@ -1731,6 +1731,61 @@ fn item_delete_and_take_need_no_timing() {
 }
 
 #[test]
+fn item_duplicate_and_copy_need_no_timing() {
+    let out = cli(&["item", "duplicate", "4", "9"], reply(MOVED));
+    assert_eq!(out.requests, [Request::ItemDuplicate { ids: vec![4, 9] }]);
+    assert_eq!(
+        out.stdout,
+        "4 track 1 at 1.2 (frame 24000), 96000 frames, take 1/2\n"
+    );
+    let out = cli(
+        &["item", "copy", "4", "9"],
+        reply(r#"{"ok":true,"copied":[4,9]}"#),
+    );
+    assert_eq!(out.requests, [Request::ItemCopy { ids: vec![4, 9] }]);
+    assert_eq!(out.stdout, "copied 4 9\n");
+}
+
+#[test]
+fn item_paste_sends_the_time_in_frames_and_says_what_it_dropped() {
+    let pasted = MOVED.replace(r#""ok":true,"#, r#""ok":true,"dropped":0,"#);
+    let cases: [(&[&str], &str, &str); 2] = [
+        (
+            &["item", "paste", "--track", "Bass", "--at", "2.1"],
+            &pasted,
+            "4 track 1 at 1.2 (frame 24000), 96000 frames, take 1/2\n",
+        ),
+        (
+            &["item", "paste", "--track", "Bass", "--at", "2.1"],
+            r#"{"ok":true,"items":[],"dropped":2}"#,
+            "dropped 2 Items: no Track to paste them on\n",
+        ),
+    ];
+    for (argv, answer, stdout) in cases {
+        let mut replies = timing_replies();
+        replies.push(reply(answer));
+        let out = item_cli(argv, replies);
+        assert_eq!(
+            out.requests,
+            [
+                Request::Items,
+                Request::Status,
+                Request::ItemPaste {
+                    track: TrackRef::Name("Bass".to_string()),
+                    at: 96_000
+                }
+            ]
+        );
+        assert_eq!(out.stdout, stdout);
+    }
+    let mut replies = timing_replies();
+    replies.push(reply(r#"{"ok":false,"error":"clipboard is empty"}"#));
+    let out = item_cli(&["item", "paste", "--track", "0", "--at", "1.1"], replies);
+    assert_eq!(out.stderr, "error: clipboard is empty\n");
+    assert_eq!(out.code, 1);
+}
+
+#[test]
 fn item_command_errors_are_one_line() {
     type Case<'a> = (&'a [&'a str], Vec<Result<Response, ClientError>>, &'a str);
     let cases: [Case; 7] = [

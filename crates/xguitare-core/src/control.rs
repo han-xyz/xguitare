@@ -20,7 +20,9 @@ use crate::engine::{
     take_peak,
 };
 use crate::firstrun::{BASS_IR, DEFAULT_IR, ensure_bank};
-use crate::item_control::{item_delete, item_move, item_split, item_take, item_trim};
+use crate::item_control::{
+    item_copy, item_delete, item_duplicate, item_move, item_paste, item_split, item_take, item_trim,
+};
 use crate::metronome::Metronome;
 use crate::metronome_control::{metronome, metronome_status, metronome_tap, practice_settings};
 use crate::mixer_control::{
@@ -300,6 +302,19 @@ pub enum Request {
     ItemTake {
         id: u64,
         take: usize,
+    },
+    /// Copies Items to right after the group they make, each on its own Track.
+    ItemDuplicate {
+        ids: Vec<u64>,
+    },
+    /// Puts Items in the Daemon's clipboard; not an edit.
+    ItemCopy {
+        ids: Vec<u64>,
+    },
+    /// Places the clipboard with its first Item on `track` and its start at the timeline frame `at`.
+    ItemPaste {
+        track: TrackRef,
+        at: u64,
     },
 }
 
@@ -702,6 +717,9 @@ fn handle_from(
         Request::ItemSplit { ids, at } => item_split(state, ids.as_deref(), at),
         Request::ItemDelete { ids } => item_delete(state, &ids),
         Request::ItemTake { id, take } => item_take(state, id, take),
+        Request::ItemDuplicate { ids } => item_duplicate(state, &ids),
+        Request::ItemCopy { ids } => item_copy(state, &ids),
+        Request::ItemPaste { track, at } => item_paste(state, &track, at),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
