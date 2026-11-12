@@ -3,10 +3,10 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
-    Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, SendView, ShownRack,
-    StereoPeakHold, StripFit, aim_rack_commands, default_render_name, fader_db, fader_position,
-    mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text,
-    shown_rack_column, strip_fit, strip_ladder,
+    Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, STRIP_MAX_WIDTH,
+    STRIP_MIN_WIDTH, SendView, ShownRack, StereoPeakHold, StripFit, StripRow, aim_rack_commands,
+    default_render_name, fader_db, fader_position, mixer_columns, rack_selectors, render_view,
+    send_fraction, send_level, send_text, shown_rack_column, strip_fit, strip_ladder, strip_row,
 };
 use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command};
 use xguitare_gui::project_model::{MainView, project_key_to_command};
@@ -524,10 +524,50 @@ fn fit(fader_height: f32, send_rows: usize) -> StripFit {
 fn strip_height_goes_to_the_fader_minimum_then_send_rows_then_the_fader() {
     assert_eq!(strip_fit(100.0, 2), fit(134.0, 2));
     assert_eq!(strip_fit(134.0 + 68.0, 8), fit(134.0, 2));
-    assert_eq!(strip_fit(134.0 + 68.0 + 33.0, 8), fit(167.0, 2));
+    assert_eq!(strip_fit(134.0 + 68.0 + 33.0, 8), fit(134.0, 2));
     assert_eq!(strip_fit(134.0 + 102.0, 8), fit(134.0, 3));
-    assert_eq!(strip_fit(134.0 + 272.0 + 50.0, 8), fit(184.0, 8));
+    assert_eq!(strip_fit(134.0 + 272.0 + 20.0, 8), fit(154.0, 8));
     assert_eq!(strip_fit(900.0, 8), fit(320.0, 8));
     assert_eq!(strip_fit(400.0, 1), fit(320.0, 1));
     assert_eq!(strip_fit(200.0, 0), fit(200.0, 0));
+}
+
+#[test]
+fn a_growing_mixer_never_shrinks_the_fader_or_drops_a_send_row() {
+    for buses in 0..=8 {
+        let mut last = strip_fit(0.0, buses);
+        for step in 0..=1200 {
+            let next = strip_fit(step as f32, buses);
+            assert!(
+                next.fader_height >= last.fader_height && next.send_rows >= last.send_rows,
+                "{buses} Buses at {step} px: {last:?} then {next:?}"
+            );
+            last = next;
+        }
+    }
+}
+
+#[test]
+fn whole_strips_fill_the_width_beside_master() {
+    for (width, shown) in [(927.0, 5), (671.0, 4)] {
+        let row = strip_row(width, 8.0, 10);
+        assert_eq!(row.shown, shown, "at {width} px");
+        assert!(row.width >= STRIP_MIN_WIDTH && row.width <= STRIP_MAX_WIDTH);
+        assert!((shown + 1) as f32 * (row.width + 8.0) <= width);
+    }
+    assert_eq!(
+        strip_row(390.0, 8.0, 10),
+        StripRow {
+            width: STRIP_MAX_WIDTH,
+            shown: 1
+        }
+    );
+    let wide = strip_row(3000.0, 8.0, 30);
+    assert!((wide.shown + 1) as f32 * (wide.width + 8.0) <= 3000.0);
+    assert!((wide.shown + 2) as f32 * (wide.width + 8.0) > 3000.0);
+    let few = strip_row(1568.0, 8.0, 6);
+    assert_eq!(few.width, STRIP_MAX_WIDTH);
+    assert!(few.shown >= 6);
+    let narrow = strip_row(100.0, 8.0, 10);
+    assert_eq!((narrow.shown, narrow.width), (1, STRIP_MIN_WIDTH));
 }

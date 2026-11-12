@@ -252,7 +252,6 @@ pub fn send_text(level_db: Option<f64>) -> String {
     level_db.map_or_else(|| "off".to_string(), |db| format!("{db:.1} dB"))
 }
 
-/// A strip's fader height at the least and at the most.
 pub const FADER_MIN_HEIGHT: f32 = 134.0;
 pub const FADER_MAX_HEIGHT: f32 = 320.0;
 pub const SEND_ROW_HEIGHT: f32 = 34.0;
@@ -266,7 +265,7 @@ pub struct StripFit {
     pub send_rows: usize,
 }
 
-/// How a strip spends `height`, what its fixed rows leave: the fader [`FADER_MIN_HEIGHT`] and up to [`SEND_ROWS_MIN`] Send rows first, then a Send row per Bus, then the fader the rest up to [`FADER_MAX_HEIGHT`]. Below that minimum the strip keeps it, and the mixer scrolls.
+/// How a strip spends `height`, what its fixed rows leave: the fader [`FADER_MIN_HEIGHT`] and up to [`SEND_ROWS_MIN`] Send rows first, then a Send row per Bus, then the fader the rest up to [`FADER_MAX_HEIGHT`]. The fader stays at its minimum until every Send row shows, so that a growing mixer never shrinks it. Below that minimum the strip keeps it, and the mixer scrolls.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -277,11 +276,50 @@ pub fn strip_fit(height: f32, buses: usize) -> StripFit {
         .floor()
         .max(0.0) as usize;
     let send_rows = rows_room.max(SEND_ROWS_MIN).min(buses);
-    let fader_height =
-        (height - send_rows as f32 * SEND_ROW_HEIGHT).clamp(FADER_MIN_HEIGHT, FADER_MAX_HEIGHT);
+    let fader_height = if send_rows < buses {
+        FADER_MIN_HEIGHT
+    } else {
+        (height - send_rows as f32 * SEND_ROW_HEIGHT).clamp(FADER_MIN_HEIGHT, FADER_MAX_HEIGHT)
+    };
     StripFit {
         fader_height,
         send_rows,
+    }
+}
+
+/// A strip's outer width, edge included, at the least and at the most.
+pub const STRIP_MIN_WIDTH: f32 = 125.0;
+pub const STRIP_MAX_WIDTH: f32 = 160.0;
+
+/// The strips' outer width and how many show whole beside Master.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StripRow {
+    pub width: f32,
+    pub shown: usize,
+}
+
+/// Strips as wide as fills `width`, the row of strips and Master less the rule between them, with whole strips each followed by `gap`: `strips` of them, the Add Bus slot counted, or as many as fit at least [`STRIP_MIN_WIDTH`] wide, at most [`STRIP_MAX_WIDTH`]; one strip beside Master however narrow.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "a whole count of strips, floored at 2, fits a usize and an f32"
+)]
+pub fn strip_row(width: f32, gap: f32, strips: usize) -> StripRow {
+    let most = (width / (STRIP_MIN_WIDTH + gap))
+        .floor()
+        .min(strips as f32 + 1.0)
+        .max(2.0);
+    let filling = width / most - gap;
+    let strip_width = filling.clamp(STRIP_MIN_WIDTH, STRIP_MAX_WIDTH);
+    let slots = if (STRIP_MIN_WIDTH..=STRIP_MAX_WIDTH).contains(&filling) {
+        most
+    } else {
+        (width / (strip_width + gap)).floor().max(2.0)
+    } as usize;
+    StripRow {
+        width: strip_width,
+        shown: slots - 1,
     }
 }
 

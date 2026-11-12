@@ -2120,20 +2120,46 @@ fn transport_bar_fits_one_row_at_1280() {
     }
 }
 
-/// The footer with nothing to report: the mixer's strips take the height down to it.
-const EMPTY_FOOTER_HEIGHT: f32 = 20.0;
+/// The footer's top, read off its link text: a disconnected link puts that text in the footer.
+fn footer_top(harness: &Harness<App>) -> f32 {
+    let text = harness.get_by_label_contains("disconnected").rect();
+    let margin = egui::Frame::side_top_panel(&harness.ctx.global_style()).inner_margin;
+    text.top() - f32::from(margin.top)
+}
 
 #[test]
 fn mixer_faders_and_switches_show_whole_in_the_mixer_view() {
-    for (size, snapshot) in [
-        (MIN_WINDOW, mixer_snapshot()),
-        (WINDOW, mixer_snapshot()),
-        (FULL_HD_WINDOW, mixer_snapshot()),
-        (DEFAULT_WINDOW, eight_buses_snapshot()),
+    for (size, snapshot, last_whole, fader_height) in [
+        (MIN_WINDOW, mixer_snapshot(), "Room", 240.0),
+        (WINDOW, mixer_snapshot(), "Delay", 320.0),
+        (FULL_HD_WINDOW, mixer_snapshot(), "Delay", 320.0),
+        (DEFAULT_WINDOW, mixer_snapshot(), "Delay", 320.0),
+        (DEFAULT_WINDOW, eight_buses_snapshot(), "Delay", 232.0),
     ] {
+        let mut snapshot = snapshot;
+        snapshot.link = Link::Disconnected {
+            since: std::time::Instant::now(),
+        };
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
-        let footer_top = size.y - EMPTY_FOOTER_HEIGHT;
+        let footer_top = footer_top(&harness);
+        let fader = harness.get_by_label("Volume Bass DI").rect().height();
+        assert!(
+            (fader - fader_height).abs() <= 2.0,
+            "the fader at {size:?} is {fader} px, not {fader_height}"
+        );
+        // Master's name sits its strip's margin and edge (7 px) inside its strip, which sits two gaps and the rule (17 px) right of the strips' viewport.
+        let scroll_right = harness.get_by_label("Rack of Master").rect().left() - 24.0;
+        for label in [
+            format!("Rack of {last_whole}"),
+            format!("Solo {last_whole}"),
+        ] {
+            let right = harness.get_by_label(&label).rect().right();
+            assert!(
+                right <= scroll_right,
+                "{label} at {size:?} ends at {right}, past the strips' edge at {scroll_right}"
+            );
+        }
         for name in ["Room", "Bass DI", "Bass Amp", "Click", "Master"] {
             let mut labels = vec![format!("Volume {name}"), format!("Volume {name} value")];
             if name != "Master" {

@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use egui::style::ScrollStyle;
 use egui::{
-    Align, Align2, CornerRadius, DragValue, Frame, Id, Key, Layout, Margin, Mesh, Modal,
+    Align, Align2, CornerRadius, DragValue, Frame, Id, Key, Label, Layout, Margin, Mesh, Modal,
     ProgressBar, Rect, RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind,
     TextEdit, Ui, WidgetInfo, pos2, vec2,
 };
@@ -15,7 +15,7 @@ use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
     SEND_ROW_HEIGHT, SendView, ShownRack, StereoPeakHold, StripFit, default_render_name, fader_db,
     fader_position, mixer_columns, render_view, send_fraction, send_level, send_text,
-    shown_rack_column, strip_fit, strip_ladder,
+    shown_rack_column, strip_fit, strip_ladder, strip_row,
 };
 use crate::model::{Band, Command, EAR_WIDTH, Snapshot, TrackEdit};
 use crate::project::{PAN, knob_with_reset, released_value};
@@ -28,16 +28,14 @@ use crate::widgets::{
     self, KnobSize, edged_button, outlined_button, primary_button, switched_button,
 };
 
-/// A strip's content width; its outer width adds [`STRIP_MARGIN`] and the edge at each side.
-const STRIP_WIDTH: f32 = 130.0;
 const STRIP_MARGIN: Margin = Margin {
     left: 6,
     right: 6,
     top: 4,
     bottom: 2,
 };
-const STRIP_OUTER_WIDTH: f32 =
-    STRIP_WIDTH + STRIP_MARGIN.left as f32 + STRIP_MARGIN.right as f32 + 2.0;
+/// The rule between the strips and Master.
+const RULE_WIDTH: f32 = 1.0;
 const STRIP_GAP: f32 = SPACE_S;
 /// The Track, Bus or Master colour along a strip's top.
 const STRIP_TAB_HEIGHT: f32 = 3.0;
@@ -67,7 +65,9 @@ const HOLD_WIDTH: f32 = 2.0;
 const CLIP_LED_HEIGHT: f32 = 5.0;
 const VALUE_FIELD_HEIGHT: f32 = 20.0;
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(40.0, CONTROL_HEIGHT);
-const PRE_SIZE: egui::Vec2 = egui::Vec2::new(28.0, CONTROL_HEIGHT);
+const PRE_SIZE: egui::Vec2 = egui::Vec2::new(34.0, CONTROL_HEIGHT);
+/// Between a Send's knob, readout and `pre`: narrow, so that `-12.0` fits a strip beside the Sends' scroll bar.
+const SEND_ROW_GAP: f32 = 2.0;
 const ROW_GAP: f32 = 1.0;
 /// The mixer's scroll bars stay drawn while their content overflows, beside it rather than over it, so that hidden Sends and strips show.
 const SCROLL_BAR_WIDTH: f32 = 4.0;
@@ -166,11 +166,12 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
         - FIXED_ROWS_HEIGHT;
     let fit = strip_fit(strips_height, bus_names.len());
     let height = strip_height(fit);
-    let show_column = |ui: &mut Ui, column: &MixerColumn| {
+    let show_column = |ui: &mut Ui, column: &MixerColumn, width: f32| {
         let hold = view.holds.get(&column.target).copied().unwrap_or_default();
         let shape = Shape {
             bus_names: &bus_names,
             fit,
+            width: width - STRIP_MARGIN.sum().x - 2.0,
             selected,
             open: open == Some(column.target),
             rack: ShownRack::of(status, column.target),
@@ -189,8 +190,10 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
                     ui.set_min_height(height + SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN);
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = STRIP_GAP;
-                        let scrolled_width =
-                            ui.available_width() - STRIP_OUTER_WIDTH - 2.0 * STRIP_GAP;
+                        let row_width = ui.available_width() - RULE_WIDTH;
+                        let row = strip_row(row_width, STRIP_GAP, strips.len() + 1);
+                        let shown = row.shown as f32;
+                        let scrolled_width = shown * row.width + (shown - 1.0) * STRIP_GAP;
                         ScrollArea::horizontal()
                             .id_salt("mixer")
                             .max_width(scrolled_width)
@@ -198,23 +201,25 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
                             .show(ui, |ui| {
                                 ui.horizontal_top(|ui| {
                                     for column in strips {
-                                        commands.extend(show_column(ui, column));
+                                        commands.extend(show_column(ui, column, row.width));
                                     }
-                                    if add_bus_slot(ui, height) {
+                                    if add_bus_slot(ui, vec2(row.width, height)) {
                                         commands.push(Command::BusAdd);
                                     }
                                 });
                             });
-                        let (rule, _) = ui.allocate_exact_size(vec2(1.0, height), Sense::hover());
+                        ui.add_space(row_width - (shown + 1.0) * (row.width + STRIP_GAP));
+                        let (rule, _) =
+                            ui.allocate_exact_size(vec2(RULE_WIDTH, height), Sense::hover());
                         ui.painter()
                             .rect_filled(rule, 0, colour(colours.knob_highlight));
-                        commands.extend(show_column(ui, master));
+                        commands.extend(show_column(ui, master, row.width));
                     });
                 })
                 .response
                 .rect
         });
-    let rect = face.inner;
+    let rect = face.inner.intersect(face.inner_rect);
     let painter = ui.painter();
     painter.hline(
         rect.x_range(),
@@ -246,6 +251,8 @@ fn strip_height(fit: StripFit) -> f32 {
 struct Shape<'a> {
     bus_names: &'a [String],
     fit: StripFit,
+    /// The strip's content width, inside its edge and margins.
+    width: f32,
     selected: Option<usize>,
     open: bool,
     rack: Option<ShownRack>,
@@ -284,22 +291,22 @@ fn mixer_column(
         .corner_radius(RADIUS_PANEL)
         .inner_margin(STRIP_MARGIN)
         .show(ui, |ui| {
-            ui.set_width(STRIP_WIDTH);
+            ui.set_width(shape.width);
             ui.set_min_height(strip_height(shape.fit) - STRIP_FRAME_HEIGHT);
             ui.spacing_mut().item_spacing.y = ROW_GAP;
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 kind_label(ui, column.target);
                 commands.extend(name_button(ui, column, shape));
-                ui.allocate_ui(vec2(STRIP_WIDTH, ROUTING_HEIGHT), |ui| {
+                ui.allocate_ui(vec2(shape.width, ROUTING_HEIGHT), |ui| {
                     ui.set_min_height(ROUTING_HEIGHT);
                     commands.extend(routing(ui, column));
                 });
                 let sends_height = SEND_ROW_HEIGHT * shape.fit.send_rows as f32;
-                ui.allocate_ui(vec2(STRIP_WIDTH, sends_height), |ui| {
+                ui.allocate_ui(vec2(shape.width, sends_height), |ui| {
                     ui.set_min_height(sends_height);
                     commands.extend(sends(ui, column, shape.bus_names, sends_height));
                 });
-                ui.allocate_ui(vec2(STRIP_WIDTH, PAN_HEIGHT), |ui| {
+                ui.allocate_ui(vec2(shape.width, PAN_HEIGHT), |ui| {
                     ui.set_min_height(PAN_HEIGHT);
                     commands.extend(pan_knob(ui, column));
                 });
@@ -330,7 +337,7 @@ fn mixer_column(
 }
 
 fn kind_label(ui: &mut Ui, target: MixerTarget) {
-    let row = vec2(STRIP_WIDTH, KIND_HEIGHT);
+    let row = vec2(ui.available_width(), KIND_HEIGHT);
     ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
         ui.set_min_size(row);
         ui.label(muted_text(kind_text(target)).font(theme::legend()));
@@ -351,7 +358,7 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
         .color(colour(text_colour));
     let button = outlined_button(text)
         .selected(shape.open)
-        .min_size(vec2(STRIP_WIDTH, NAME_HEIGHT))
+        .min_size(vec2(shape.width, NAME_HEIGHT))
         .truncate();
     let response = ui.add(button);
     response.widget_info(|| {
@@ -389,7 +396,7 @@ fn routing(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
         return None;
     };
     let toggle = switched_button("to Master", to_master, palette().lit)
-        .min_size(vec2(STRIP_WIDTH, ROUTING_HEIGHT));
+        .min_size(vec2(ui.available_width(), ROUTING_HEIGHT));
     let response = ui.add(toggle);
     response.widget_info(|| {
         WidgetInfo::labeled(Role::Button, true, format!("to Master {}", column.name))
@@ -433,7 +440,7 @@ fn send_row(
     let colours = palette();
     ui.allocate_ui(vec2(row_width, SEND_ROW_HEIGHT), |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
+            ui.spacing_mut().item_spacing.x = SEND_ROW_GAP;
             let accent = if send.level_db.is_some() {
                 bus_colour()
             } else {
@@ -462,14 +469,15 @@ fn send_row(
                     SendLevel::Off => None,
                 });
             let readout_width =
-                row_width - KnobSize::Strip.diameter() - PRE_SIZE.x - 2.0 * theme::SPACE_XS;
+                row_width - KnobSize::Strip.diameter() - PRE_SIZE.x - 2.0 * SEND_ROW_GAP;
             ui.allocate_ui(vec2(readout_width, SEND_ROW_HEIGHT), |ui| {
                 ui.set_width(readout_width);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.label(muted_text(bus).font(theme::legend()));
-                    let shown = dragged.unwrap_or(send.level_db);
-                    ui.label(RichText::new(send_text(shown)).font(theme::scale()));
+                    ui.add(Label::new(muted_text(bus).font(theme::legend())).truncate());
+                    let shown = send_text(dragged.unwrap_or(send.level_db));
+                    let shown = RichText::new(fitted_send_text(ui, shown)).font(theme::scale());
+                    ui.add(Label::new(shown).truncate());
                 });
             });
             let pre = switched_button("pre", send.pre, colours.lit).min_size(PRE_SIZE);
@@ -489,6 +497,19 @@ fn send_row(
         });
     });
     commands
+}
+
+/// The Send level as [`send_text`] gives it, without its ` dB` in a strip too narrow for that.
+fn fitted_send_text(ui: &Ui, text: String) -> String {
+    let width = ui
+        .painter()
+        .layout_no_wrap(text.clone(), theme::scale(), colour(palette().text))
+        .size()
+        .x;
+    if width <= ui.available_width() {
+        return text;
+    }
+    text.trim_end_matches(" dB").to_string()
 }
 
 /// The knob's position once its drag ends.
@@ -567,9 +588,10 @@ fn fader_and_meter(
     let mut commands = Vec::new();
     let meter_width = 2.0 * LADDER_WIDTH + LADDER_GAP;
     let zone_width = SCALE_WIDTH + FADER_CAP.x + meter_width + 2.0 * theme::SPACE_XS;
+    let strip_width = ui.available_width();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
-        ui.add_space((STRIP_WIDTH - zone_width) / 2.0 - theme::SPACE_XS);
+        ui.add_space((strip_width - zone_width) / 2.0 - theme::SPACE_XS);
         fader_scale(ui, height);
         commands.extend(fader(ui, column, height));
         commands.extend(stereo_meter(ui, column, hold, vec2(meter_width, height)));
@@ -774,8 +796,8 @@ fn volume_field(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
 }
 
 /// The Add Bus slot: a dashed outline as tall as a strip, its name at the top.
-fn add_bus_slot(ui: &mut Ui, height: f32) -> bool {
-    let (rect, response) = ui.allocate_exact_size(vec2(STRIP_OUTER_WIDTH, height), Sense::click());
+fn add_bus_slot(ui: &mut Ui, size: egui::Vec2) -> bool {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, "+ Add Bus"));
     let colours = palette();
     let hovered = response.hovered() || response.is_pointer_button_down_on();
@@ -820,9 +842,10 @@ fn mute_and_solo(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     let colours = palette();
     let mut mute = None;
     let mut solo = None;
+    let strip_width = ui.available_width();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
-        ui.add_space((STRIP_WIDTH - 2.0 * SWITCH_SIZE.x - theme::SPACE_XS) / 2.0 - theme::SPACE_XS);
+        ui.add_space((strip_width - 2.0 * SWITCH_SIZE.x - theme::SPACE_XS) / 2.0 - theme::SPACE_XS);
         let response = ui.add(switched_button("M", column.mute, colours.lit).min_size(SWITCH_SIZE));
         response.widget_info(|| {
             WidgetInfo::labeled(Role::Button, true, format!("Mute {}", column.name))
