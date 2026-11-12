@@ -1334,23 +1334,42 @@ fn locate_frame(project: &Project, position: &Position) -> Result<u64, String> {
 
 /// The frame a text position names, rounded; not bounded.
 fn text_frame(project: &Project, text: &str) -> Result<f64, String> {
+    position_frame(
+        text,
+        project.sample_rate,
+        project.tempo_bpm,
+        project.meter.0,
+    )
+}
+
+/// The frame of `<bar>.<beat>` or `<bar>` (both from 1, the beat within `beats_per_bar`) or `<seconds>s`, at `sample_rate` and `tempo_bpm`, rounded; not bounded.
+///
+/// # Errors
+///
+/// `position must be <bar>.<beat> or <seconds>s` for any other text, a negative time, or a bar or beat of 0 or a beat past the bar.
+pub fn position_frame(
+    text: &str,
+    sample_rate: u32,
+    tempo_bpm: f64,
+    beats_per_bar: u32,
+) -> Result<f64, String> {
     if let Some(seconds) = text.strip_suffix(SECONDS_SUFFIX) {
         let seconds: f64 = seconds.parse().map_err(|_| BAD_POSITION)?;
         if !seconds.is_finite() || seconds.is_sign_negative() {
             return Err(BAD_POSITION.to_string());
         }
-        return Ok((seconds * f64::from(project.sample_rate)).round());
+        return Ok((seconds * f64::from(sample_rate)).round());
     }
     let (bar, beat) = text.split_once('.').unwrap_or((text, "1"));
     let (Ok(bar), Ok(beat)) = (bar.parse::<u64>(), beat.parse::<u64>()) else {
         return Err(BAD_POSITION.to_string());
     };
-    let beats_per_bar = u64::from(project.meter.0);
+    let beats_per_bar = u64::from(beats_per_bar);
     if bar == 0 || beat == 0 || beat > beats_per_bar {
         return Err(BAD_POSITION.to_string());
     }
     let beat_index = (bar - 1) as f64 * beats_per_bar as f64 + (beat - 1) as f64;
-    Ok((beat_index * frames_per_beat(project)).round())
+    Ok((beat_index * (f64::from(sample_rate) * 60.0 / tempo_bpm)).round())
 }
 
 /// The last frame any Item or the loop region reaches.

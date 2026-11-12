@@ -10,15 +10,17 @@ use xguitare_core::control::{
     IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
 };
 
+use xguitare_core::project_control::position_frame;
 use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::{
-    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, MetronomeCmd, MuteState, ProjectCmd,
-    RackCmd, RenderArgs, RenderBitsArg, RenderCmd, Switch, TrackCmd, parse,
+    BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, ItemCmd, MetronomeCmd, MuteState,
+    ProjectCmd, RackCmd, RenderArgs, RenderBitsArg, RenderCmd, Switch, TrackCmd, parse,
 };
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
+const BAD_DELTA: &str = "move needs <±seconds>s or <±bars>[.<beats>]";
 
 /// What a client command needs from its surroundings besides the transport.
 pub struct CliEnv {
@@ -44,7 +46,7 @@ pub fn run_cli(
     };
     let result = match cli.cmd {
         Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
-        cmd => request_for(cmd).and_then(|req| match req {
+        cmd => request_for(cmd, transport).and_then(|req| match req {
             Request::Render { .. } => render_and_wait(transport, out, &req),
             req => render(&req, &request(transport, &req)?),
         }),
@@ -145,7 +147,108 @@ fn tuner_line(payload: &Value) -> String {
     )
 }
 
-fn request_for(cmd: Cmd) -> Result<Request, String> {
+/// The open Project's sample rate, tempo and beats per bar, which turn the times of an Item command into frames.
+struct Timing {
+    sample_rate: u32,
+    tempo_bpm: f64,
+    beats_per_bar: u32,
+}
+
+impl Timing {
+    /// Reads the sample rate from `items` and the tempo from `status`.
+    fn read(transport: &mut dyn Transport) -> Result<Timing, String> {
+        let items = request(transport, &Request::Items)?;
+        let status = request(transport, &Request::Status)?;
+        let tempo = &status["tempo"];
+        let number = |value: &Value| value.as_f64().ok_or("the status answer has no tempo");
+        Ok(Timing {
+            sample_rate: items["sample_rate"]
+                .as_u64()
+                .ok_or("the items answer has no sample_rate")? as u32,
+            tempo_bpm: number(&tempo["bpm"])?,
+            beats_per_bar: number(&tempo["meter"][0])? as u32,
+        })
+    }
+
+    fn frame(&self, time: &str) -> Result<u64, String> {
+        position_frame(time, self.sample_rate, self.tempo_bpm, self.beats_per_bar)
+            .map(|frame| frame as u64)
+    }
+
+    /// `±<seconds>s`, or `±<bars>[.<beats>]` counted from 0, in frames; no sign is later.
+    fn delta(&self, delta: &str) -> Result<i64, String> {
+        let (sign, magnitude) = match delta.strip_prefix('-') {
+            Some(rest) => (-1.0, rest),
+            None => (1.0, delta.strip_prefix('+').unwrap_or(delta)),
+        };
+        let frames = if let Some(seconds) = magnitude.strip_suffix('s') {
+            seconds
+                .parse::<f64>()
+                .ok()
+                .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+                .ok_or(BAD_DELTA)?
+                * f64::from(self.sample_rate)
+        } else {
+            let (bars, beats) = magnitude.split_once('.').unwrap_or((magnitude, "0"));
+            let (Ok(bars), Ok(beats)) = (bars.parse::<u32>(), beats.parse::<u32>()) else {
+                return Err(BAD_DELTA.to_string());
+            };
+            if beats >= self.beats_per_bar {
+                return Err(BAD_DELTA.to_string());
+            }
+            let beat_frames = f64::from(self.sample_rate) * 60.0 / self.tempo_bpm;
+            (f64::from(bars) * f64::from(self.beats_per_bar) + f64::from(beats)) * beat_frames
+        };
+        Ok((sign * frames).round() as i64)
+    }
+}
+
+fn item_request(transport: &mut dyn Transport, cmd: ItemCmd) -> Result<Request, String> {
+    Ok(match cmd {
+        ItemCmd::List => Request::Items,
+        ItemCmd::Delete { ids } => Request::ItemDelete { ids },
+        ItemCmd::Take { id, take } => Request::ItemTake {
+            id,
+            take: take.checked_sub(1).ok_or("takes are numbered from 1")?,
+        },
+        ItemCmd::Move { mut ids, track } => {
+            if ids.iter().any(|id| id == "--track") {
+                return Err("give --track before the item ids".to_string());
+            }
+            let delta = ids.pop().unwrap_or_default();
+            let ids = ids
+                .iter()
+                .map(|id| {
+                    id.parse()
+                        .map_err(|_| format!("item id '{id}' is not a number"))
+                })
+                .collect::<Result<Vec<u64>, _>>()?;
+            Request::ItemMove {
+                ids,
+                delta: Timing::read(transport)?.delta(&delta)?,
+                track: track.map(index_or_name),
+            }
+        }
+        ItemCmd::Trim { id, start, end } => {
+            if start.is_none() && end.is_none() {
+                return Err("item trim needs --start, --end or both".to_string());
+            }
+            let timing = Timing::read(transport)?;
+            Request::ItemTrim {
+                id,
+                start: start.map(|time| timing.frame(&time)).transpose()?,
+                end: end.map(|time| timing.frame(&time)).transpose()?,
+            }
+        }
+        ItemCmd::Split { ids, at } => Request::ItemSplit {
+            at: Timing::read(transport)?.frame(&at)?,
+            ids: (!ids.is_empty()).then_some(ids),
+        },
+    })
+}
+
+/// The request for `cmd`; an Item command first reads the Project's timing through `client`.
+fn request_for(cmd: Cmd, client: &mut dyn Transport) -> Result<Request, String> {
     Ok(match cmd {
         Cmd::Run => return Err("'run' starts the daemon; it is not a client command".to_string()),
         Cmd::Status => Request::Status,
@@ -201,6 +304,7 @@ fn request_for(cmd: Cmd) -> Result<Request, String> {
         },
         Cmd::Project(cmd) => project_request(cmd),
         Cmd::Track(cmd) => track_request(cmd),
+        Cmd::Item(cmd) => item_request(client, cmd)?,
         Cmd::Play => transport(TransportAction::Play, None),
         Cmd::Stop => transport(TransportAction::Stop, None),
         Cmd::Record => transport(TransportAction::Record, None),

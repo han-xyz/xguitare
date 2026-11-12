@@ -93,6 +93,9 @@ enum Cmd {
     /// Add, remove, edit or select a Track of the open Project
     #[command(subcommand, arg_required_else_help = false)]
     Track(TrackCmd),
+    /// List, move, trim, split or delete the open Project's Items, or choose an Item's Take
+    #[command(subcommand, arg_required_else_help = false)]
+    Item(ItemCmd),
     /// Start playback from the playhead
     Play,
     /// Stop playback or recording; the playhead stays
@@ -264,6 +267,44 @@ enum ProjectCmd {
     List,
     /// List the open Project's Items: Track, bar.beat, length, active Take
     Items,
+}
+
+/// An Item is named by its id from `item list`; a time is <bar>.<beat>, <bar> or <seconds>s, as for locate.
+#[derive(Subcommand)]
+enum ItemCmd {
+    /// List the Items: id, Track, bar.beat, length, active Take
+    List,
+    /// Move Items by <±seconds>s or <±bars>[.<beats>] (+1 is one bar later) onto the top; --track, given before the ids, puts the first on that Track and the others keep their Track distance
+    #[command(override_usage = "xguitare item move [--track <TRACK>] <ID>... <±TIME>")]
+    Move {
+        /// A zero-based index or a name
+        #[arg(long)]
+        track: Option<String>,
+        /// The Item ids, then the time to move by, e.g. 4 9 -1.5s
+        #[arg(num_args = 2.., required = true, allow_hyphen_values = true, value_name = "ID")]
+        ids: Vec<String>,
+    },
+    /// Move an Item's start or end to a time, each kept within its Take
+    Trim {
+        id: u64,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        end: Option<String>,
+    },
+    /// Split Items at a time; with no ids, those under it on the selected Track
+    Split {
+        ids: Vec<u64>,
+        #[arg(long)]
+        at: String,
+    },
+    /// Delete Items
+    Delete {
+        #[arg(required = true)]
+        ids: Vec<u64>,
+    },
+    /// Make Take <take> (from 1) the Item's active Take
+    Take { id: u64, take: usize },
 }
 
 /// A Track is named by its zero-based index or its name.

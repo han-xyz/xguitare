@@ -401,6 +401,28 @@ Each Track records the dry input; its Rack is applied on playback, so its sound 
 
 Where Items overlap on a Track only the one on top, the newest, is heard; the Items under it are silent where it covers them. Every Item fades in and out over 5 ms (an Item shorter than 10 ms over half its length), and where one Item cuts into another the two cross over those 5 ms, so edges do not click. Where one Item ends exactly where the next begins, the first plays on into its Take under the next one's fade-in, so a split Item sounds as before; when its Take ends right there, both fade and the level dips for those 5 ms.
 
+#### Editing Items from the CLI
+
+```console
+$ xguitare item list
+3 Guitar 2.1 4.00s take 2/2
+$ xguitare item split 3 --at 3.1
+3 track 0 at 2.1 (frame 96000), 96000 frames, take 2/2
+7 track 0 at 3.1 (frame 192000), 96000 frames, take 2/2
+$ xguitare item move --track 1 7 +1
+7 track 1 at 4.1 (frame 288000), 96000 frames, take 2/2
+$ xguitare item take 3 1
+3 track 0 at 2.1 (frame 96000), 96000 frames, take 1/2
+$ xguitare item delete 3
+deleted 3
+```
+
+- `item list` is `project items`. An Item is named by the id it shows first.
+- A time is `<bar>.<beat>`, `<bar>` or `<seconds>s`, as for `locate`. `item move` takes `<±seconds>s` or `<±bars>[.<beats>]` counted from 0, so `+1` is one bar later, `-0.2` two beats earlier and `+1.5s` a second and a half later.
+- `item move [--track <track>] <id>… <±time>` moves the Items by one amount, cut so that none starts before the Project start, and puts them on top of their Track. `--track` (an index or a name, given before the ids) puts the first on that Track and the others keep their distance to it.
+- `item trim <id> [--start <time>] [--end <time>]` moves an Item's edges, each kept within its Take. `item split [<id>…] --at <time>` splits those Items, or the Items under that time on the selected Track, into two that keep all the Takes. `item delete <id>…` removes Items; their Take files stay. `item take <id> <n>` plays Take `n`, counted from 1.
+- Each edit prints the Items it changed: id, Track index, start, length in frames and Take. While playing, the change is heard after a 5 ms crossfade. Items cannot be edited while recording (`cannot edit items while recording`).
+
 ### Mixer
 
 Each Track's sound goes, after its Rack, volume and pan, to Master (unless `to master` is off) and through a Send to each Bus. A Bus is a stereo Rack with a volume, pan, mute and solo, and goes to Master; Master is a stereo Rack with a volume, and goes to the output. The click is added after Master and does not follow its volume.
@@ -470,7 +492,7 @@ While a Project is open and changed, the Daemon writes `project.autosave.toml` e
 - When the disk falls behind, the dropped frames are counted in `status` `disk_overflows` and left out of the Take, which then plays shorter and early from that point; they are not filled with silence.
 - With the loop on, a recording that does not start at the loop start puts its first pass and the passes after the first wrap on separate Items.
 - A Take that cannot be written or loaded is only reported in the Daemon's log.
-- Only the active Take of an Item plays; choosing another Take, moving Items and editing are not in this version.
+- Items are edited from the CLI and the Control API; the GUI does not edit them yet.
 - The GUI shows Items as blocks labelled with their Take's name, without a waveform; the waveform overview comes with Item editing.
 
 ## GUI

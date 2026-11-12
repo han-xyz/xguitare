@@ -1586,3 +1586,175 @@ fn status_prints_the_metronome() {
         out.stdout
     );
 }
+
+fn item_cli(argv: &[&str], replies: Vec<Result<Response, ClientError>>) -> Outcome {
+    let env = CliEnv {
+        tuner_mute: false,
+        is_tty: false,
+        stop: Arc::new(AtomicBool::new(false)),
+    };
+    cli_with(argv, replies, &env, None)
+}
+
+/// The `items` and `status` answers an Item command reads its timing from: 48 kHz, 120 bpm in 4/4, so a beat is 24 000 frames.
+fn timing_replies() -> Vec<Result<Response, ClientError>> {
+    vec![
+        reply(r#"{"ok":true,"sample_rate":48000,"tracks":[]}"#),
+        reply(r#"{"ok":true,"tempo":{"bpm":120.0,"meter":[4,4]}}"#),
+    ]
+}
+
+const MOVED: &str = r#"{"ok":true,"items":[{"track":1,"id":4,"position":24000,"bars_beats":"1.2","offset":0,"length":96000,"take":0,"takes":["takes/a.wav","takes/b.wav"]}]}"#;
+
+#[test]
+fn item_list_prints_one_line_per_item() {
+    let out = cli(
+        &["item", "list"],
+        reply(
+            r#"{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"id":4,"position":0,"bars_beats":"1.1","offset":50,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]}]}]}"#,
+        ),
+    );
+    assert_eq!(out.requests, [Request::Items]);
+    assert_eq!(out.stdout, "4 Guitar 1.1 2.00s take 1/1\n");
+}
+
+#[test]
+fn item_move_sends_the_delta_in_frames_and_prints_the_moved_items() {
+    let cases: [(&[&str], i64, Option<TrackRef>); 3] = [
+        (
+            &["item", "move", "--track", "Bass", "4", "9", "-1.5s"],
+            -72_000,
+            Some(TrackRef::Name("Bass".to_string())),
+        ),
+        (&["item", "move", "4", "9", "+1.2"], 144_000, None),
+        (
+            &["item", "move", "--track", "1", "4", "9", "0.1"],
+            24_000,
+            Some(TrackRef::Index(1)),
+        ),
+    ];
+    for (argv, delta, track) in cases {
+        let mut replies = timing_replies();
+        replies.push(reply(MOVED));
+        let out = item_cli(argv, replies);
+        assert_eq!(out.stderr, "", "{argv:?}");
+        assert_eq!(
+            out.requests,
+            [
+                Request::Items,
+                Request::Status,
+                Request::ItemMove {
+                    ids: vec![4, 9],
+                    delta,
+                    track
+                }
+            ]
+        );
+        assert_eq!(
+            out.stdout,
+            "4 track 1 at 1.2 (frame 24000), 96000 frames, take 1/2\n"
+        );
+        assert_eq!(out.code, 0);
+    }
+}
+
+#[test]
+fn item_trim_and_split_send_times_in_frames() {
+    let cases: [(&[&str], Request); 3] = [
+        (
+            &["item", "trim", "4", "--start", "2.1", "--end", "3s"],
+            Request::ItemTrim {
+                id: 4,
+                start: Some(96_000),
+                end: Some(144_000),
+            },
+        ),
+        (
+            &["item", "split", "--at", "3.1"],
+            Request::ItemSplit {
+                ids: None,
+                at: 192_000,
+            },
+        ),
+        (
+            &["item", "split", "4", "9", "--at", "1s"],
+            Request::ItemSplit {
+                ids: Some(vec![4, 9]),
+                at: 48_000,
+            },
+        ),
+    ];
+    for (argv, edit) in cases {
+        let mut replies = timing_replies();
+        replies.push(reply(MOVED));
+        let out = item_cli(argv, replies);
+        assert_eq!(out.requests, [Request::Items, Request::Status, edit]);
+        assert_eq!(
+            out.stdout,
+            "4 track 1 at 1.2 (frame 24000), 96000 frames, take 1/2\n"
+        );
+    }
+}
+
+#[test]
+fn item_delete_and_take_need_no_timing() {
+    let out = cli(
+        &["item", "delete", "4", "9"],
+        reply(r#"{"ok":true,"deleted":[4,9]}"#),
+    );
+    assert_eq!(out.requests, [Request::ItemDelete { ids: vec![4, 9] }]);
+    assert_eq!(out.stdout, "deleted 4 9\n");
+    let out = cli(&["item", "take", "4", "2"], reply(MOVED));
+    assert_eq!(out.requests, [Request::ItemTake { id: 4, take: 1 }]);
+    assert_eq!(
+        out.stdout,
+        "4 track 1 at 1.2 (frame 24000), 96000 frames, take 1/2\n"
+    );
+}
+
+#[test]
+fn item_command_errors_are_one_line() {
+    type Case<'a> = (&'a [&'a str], Vec<Result<Response, ClientError>>, &'a str);
+    let cases: [Case; 7] = [
+        (
+            &["item", "move", "4", "-1s", "--track", "1"],
+            Vec::new(),
+            "error: give --track before the item ids\n",
+        ),
+        (
+            &["item", "move", "x", "-1s"],
+            Vec::new(),
+            "error: item id 'x' is not a number\n",
+        ),
+        (
+            &["item", "take", "4", "0"],
+            Vec::new(),
+            "error: takes are numbered from 1\n",
+        ),
+        (
+            &["item", "move", "4", "1.5x"],
+            timing_replies(),
+            "error: move needs <±seconds>s or <±bars>[.<beats>]\n",
+        ),
+        (
+            &["item", "split", "--at", "0.1"],
+            timing_replies(),
+            "error: position must be <bar>.<beat> or <seconds>s\n",
+        ),
+        (
+            &["item", "trim", "4"],
+            Vec::new(),
+            "error: item trim needs --start, --end or both\n",
+        ),
+        (
+            &["item", "move", "4", "+1s"],
+            vec![reply(r#"{"ok":false,"error":"no project open"}"#)],
+            "error: no project open\n",
+        ),
+    ];
+    for (argv, replies, stderr) in cases {
+        let out = item_cli(argv, replies);
+        assert_eq!(out.stderr, stderr, "{argv:?}");
+        assert_eq!(out.code, 1);
+    }
+}

@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `metronome`, `metronome_tap`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `render`, `render_cancel`, `clip_reset` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `metronome`, `metronome_tap`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `render`, `render_cancel`, `clip_reset`, `item_move`, `item_trim`, `item_split`, `item_delete`, `item_take` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -780,6 +780,92 @@ Response:
 | `takes` | The Take files, relative to the Project folder, oldest first. |
 
 Errors: `no project open`.
+
+## Item edits
+
+`item_move`, `item_trim`, `item_split`, `item_delete` and `item_take` change the open Project's Items, named by their `id` from `items`. Each one bumps the `status` Revision and marks the Project changed, also when nothing moved. While the transport plays, the Tracks whose Items changed cross over to the new Items in 5 ms; the Racks are not rebuilt and the playhead keeps going. Times are frames from the Project start; a client turns `<bar>.<beat>` or seconds into frames with the Project's `sample_rate` and `tempo`.
+
+All but `item_delete` answer with the Items they changed, each as `items` lists it plus `track`, the zero-based index of its Track, so a client can follow a moved Item or both halves of a split:
+
+```json
+{"ok":true,"items":[{"track":0,"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":48000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]},{"track":0,"id":7,"position":144000,"bars_beats":"2.3","offset":48000,"length":144000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]}
+```
+
+Errors every Item edit can return:
+
+| `error` | When |
+| --- | --- |
+| `no project open` | No Project is open. |
+| `cannot edit items while recording` | After `record`, until `stop` or `play`. |
+| `no such item: <id>` | No Item of the open Project has that id. |
+| `give at least one item` | `ids` is empty. |
+| `engine busy` | The audio thread's command queue has no slot for every Track that changes; nothing changed, retry. |
+| `cannot load take <file>: <reason>` | The Take that would play is not in memory and its file cannot be read. |
+| `track '<name>' item <n> ends past the last frame` | The edit would put an Item past the last frame a Project holds. |
+
+## item_move
+
+Moves the Items `ids` by `delta` frames (negative is earlier). All move by the same amount: when one would start before frame 0, the amount is cut so that the earliest starts at frame 0. The moved Items go on top of their Track (the end of its Items, in the order they were stacked), so they are heard over what they land on. With `track` (a zero-based index or a name), the first Item in `ids` moves to that Track and the others keep their distance in Tracks to it. `offset`, `length` and the Takes stay as they are.
+
+Request:
+
+```json
+{"cmd":"item_move","ids":[3,4],"delta":-48000,"track":"Bass"}
+```
+
+Errors, besides those above: `no track '<track>'`; `item <id> would move to a track that does not exist` when keeping the Track distance would put that Item before the first or after the last Track.
+
+## item_trim
+
+Moves an Item's start (`start`) or end (`end`), or both, to these timeline frames; a missing one stays. Each is clamped to what the active Take holds: the start to no earlier than where the Take's first frame lies (`position` − `offset`, and frame 0), the end to no later than where its last frame lies. Moving the start changes `position` and `offset` together, so the audio stays where it was on the timeline. The Item keeps its place in the stack.
+
+Request:
+
+```json
+{"cmd":"item_trim","id":3,"start":100000,"end":180000}
+```
+
+Errors, besides those above: `item <id> would have no frames left` when the clamped end is not after the clamped start.
+
+## item_split
+
+Splits each Item that the frame `at` falls strictly inside (after its first frame, before its end) into two at `at`. Without `ids`, the Items under `at` on the selected Track are split. Both halves keep all the Item's Takes and its active Take; the left one keeps the id, the right one gets a new id and sits just above the left one in the stack. An Item of `ids` that `at` is not inside is left as it is. The reply lists each left half followed by its right half.
+
+Request:
+
+```json
+{"cmd":"item_split","ids":[3],"at":144000}
+```
+
+Errors, besides those above: `nothing to split at <frame>` when `at` is inside none of the Items.
+
+## item_delete
+
+Removes the Items `ids`. Their Take files stay in `takes/`.
+
+Request:
+
+```json
+{"cmd":"item_delete","ids":[3,7]}
+```
+
+Response:
+
+```json
+{"ok":true,"deleted":[3,7]}
+```
+
+## item_take
+
+Makes the Take at index `take` (zero-based, as `items` `take`) the Item's active one, loading it when it is not in memory. An Item with a `length` that the new Take is too short for is cut to the frames that Take holds after the Item's `offset`.
+
+Request:
+
+```json
+{"cmd":"item_take","id":3,"take":0}
+```
+
+Errors, besides those above: `item <id> has no take <take>`; `item <id> starts past the end of take <take>` when that Take holds no frames after the Item's `offset`.
 
 ## track_add
 
