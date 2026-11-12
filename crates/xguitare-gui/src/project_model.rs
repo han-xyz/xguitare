@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ops::Range;
 
 use serde_json::Value;
@@ -169,14 +170,7 @@ pub fn grid_lines(
 ) -> Vec<GridLine> {
     let frames_per_beat = tempo.frames_per_beat(sample_rate);
     let per_bar = u64::from(tempo.beats_per_bar);
-    let beat_px = frames_per_beat / view.frames_per_px;
-    let mut step = 1;
-    if beat_px < MIN_GRID_PX {
-        step = per_bar;
-        while beat_px * (step as f64) < MIN_GRID_PX {
-            step *= 2;
-        }
-    }
+    let step = grid_step_beats(view, sample_rate, tempo);
     let last_frame = view.first_frame + f64::from(width_px) * view.frames_per_px;
     let first_beat = (view.first_frame / frames_per_beat).ceil() as u64;
     let first = first_beat.div_ceil(step) * step;
@@ -190,6 +184,26 @@ pub fn grid_lines(
             beat: u32::try_from(beat % per_bar).unwrap_or(0) + 1,
         })
         .collect()
+}
+
+/// Beats between two lines of [`grid_lines`].
+#[allow(clippy::cast_precision_loss, reason = "a beat count far below 2^52")]
+fn grid_step_beats(view: TimelineView, sample_rate: f64, tempo: Tempo) -> u64 {
+    let beat_px = tempo.frames_per_beat(sample_rate) / view.frames_per_px;
+    if beat_px >= MIN_GRID_PX {
+        return 1;
+    }
+    let mut step = u64::from(tempo.beats_per_bar);
+    while beat_px * (step as f64) < MIN_GRID_PX {
+        step *= 2;
+    }
+    step
+}
+
+/// Frames between two lines of [`grid_lines`].
+#[allow(clippy::cast_precision_loss, reason = "a beat count far below 2^52")]
+pub fn grid_step(view: TimelineView, sample_rate: f64, tempo: Tempo) -> f64 {
+    grid_step_beats(view, sample_rate, tempo) as f64 * tempo.frames_per_beat(sample_rate)
 }
 
 #[allow(
@@ -562,13 +576,22 @@ impl ViewSwitch {
     }
 }
 
-/// Plain keys act only while no widget has focus, so that a focused knob keeps Home and End and a focused button its Space; with modifiers, and M and T, they act unless a text field takes typing.
+/// Plain keys act only while no widget has focus, so that a focused knob keeps Home, End and the arrows and a focused button its Space; with modifiers, and M, T, S and Delete, they act unless a text field takes typing.
 pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) -> bool {
     match key {
-        KeyEvent::Space | KeyEvent::R | KeyEvent::Home | KeyEvent::End => !widget_focused,
+        KeyEvent::Space
+        | KeyEvent::R
+        | KeyEvent::Home
+        | KeyEvent::End
+        | KeyEvent::Left
+        | KeyEvent::Right => !widget_focused,
         KeyEvent::Digit(..)
         | KeyEvent::M
         | KeyEvent::T
+        | KeyEvent::S
+        | KeyEvent::Delete
+        | KeyEvent::CtrlZ
+        | KeyEvent::CtrlShiftZ
         | KeyEvent::CtrlS
         | KeyEvent::CtrlR
         | KeyEvent::CtrlM
@@ -600,7 +623,365 @@ pub fn project_key_to_command(
                 alt: false,
             },
         ) => MainView::of_digit(digit).map(Command::ShowView),
-        KeyEvent::Digit(..) | KeyEvent::M | KeyEvent::T => None,
+        KeyEvent::Digit(..)
+        | KeyEvent::M
+        | KeyEvent::T
+        | KeyEvent::S
+        | KeyEvent::Delete
+        | KeyEvent::CtrlZ
+        | KeyEvent::CtrlShiftZ
+        | KeyEvent::Left
+        | KeyEvent::Right => None,
+    }
+}
+
+/// The Arrange view's Item keys: S splits at the playhead the selected Items (none: the selected Track's), Delete deletes the selected Items, Ctrl+Z and Ctrl+Shift+Z undo and redo, ← and → move the selected Items by one step of the grid drawn for `timeline` (a beat without one).
+pub fn item_key_to_command(
+    key: KeyEvent,
+    status: &Value,
+    items: &[ItemBlock],
+    selection: &ItemSelection,
+    timeline: Option<TimelineView>,
+) -> Option<Command> {
+    let transport = transport_view(status)?;
+    match key {
+        KeyEvent::S => Some(Command::ItemSplit {
+            ids: (!selection.is_empty()).then(|| selection.ids()),
+            at: transport.frames,
+        }),
+        KeyEvent::Delete if !selection.is_empty() => Some(Command::ItemDelete(selection.ids())),
+        KeyEvent::CtrlZ => Some(Command::ProjectUndo),
+        KeyEvent::CtrlShiftZ => Some(Command::ProjectRedo),
+        KeyEvent::Left | KeyEvent::Right => {
+            let rate = sample_rate(status);
+            let tempo = project_tempo(status)?;
+            let step = timeline.map_or(tempo.frames_per_beat(rate), |view| {
+                grid_step(view, rate, tempo)
+            });
+            let step = if key == KeyEvent::Left { -step } else { step };
+            nudge_command(items, selection, step)
+        }
+        _ => None,
+    }
+}
+
+/// The selected Items moved by `delta` frames, cut so that the earliest starts no earlier than frame 0; `None` when that leaves nothing to move.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "frame counts far below i64::MAX"
+)]
+pub fn nudge_command(
+    items: &[ItemBlock],
+    selection: &ItemSelection,
+    delta: f64,
+) -> Option<Command> {
+    let earliest = items
+        .iter()
+        .filter(|item| selection.contains(item.id))
+        .map(|item| item.position)
+        .min()?;
+    let delta = (delta.round() as i64).max(-(earliest as i64));
+    (delta != 0).then(|| Command::ItemMove {
+        ids: selection.ids(),
+        delta,
+        track: None,
+    })
+}
+
+/// Esc clears the Item selection when it is not taken by a focused widget, a menu or a dialog, before it would close the error toast.
+pub fn esc_clears_selection(
+    (widget_focused, popup_open): (bool, bool),
+    dialog_open: bool,
+    has_selection: bool,
+) -> bool {
+    has_selection && !widget_focused && !popup_open && !dialog_open
+}
+
+/// The footer's `Undo: <label>` for the edit `status` names next for `project_undo`.
+pub fn undo_text(status: &Value) -> Option<String> {
+    status["undo"]
+        .as_str()
+        .map(|label| format!("Undo: {label}"))
+}
+
+/// An Item's accessible name: `Item <take name>, <Track>, bar <n>`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "a non-negative bar count far below u64::MAX"
+)]
+pub fn item_name(item: &ItemBlock, track: &str, sample_rate: f64, tempo: Tempo) -> String {
+    let bar = (item.position as f64 / tempo.frames_per_bar(sample_rate)).floor() as u64 + 1;
+    format!("Item {}, {track}, bar {bar}", item.take_name)
+}
+
+/// Pixels inside an Item's start and end that grab the edge rather than the body; at most a third of the Item each.
+pub const EDGE_GRAB_PX: f32 = 6.0;
+
+/// What a pointer on a lane is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemHit {
+    Body(u64),
+    StartEdge(u64),
+    EndEdge(u64),
+    Lane,
+}
+
+impl ItemHit {
+    pub fn item(self) -> Option<u64> {
+        match self {
+            ItemHit::Body(id) | ItemHit::StartEdge(id) | ItemHit::EndEdge(id) => Some(id),
+            ItemHit::Lane => None,
+        }
+    }
+}
+
+/// What lies under `x` pixels from the timeline's left edge on the lane of the Track `track_id`: the topmost Item there (the last in `items`), or the lane.
+#[allow(clippy::cast_precision_loss, reason = "frames far below 2^52")]
+pub fn hit_test(items: &[ItemBlock], track_id: u64, view: TimelineView, x: f32) -> ItemHit {
+    let span = |item: &ItemBlock| {
+        (
+            view.x_of(item.position as f64),
+            view.x_of(item.end() as f64),
+        )
+    };
+    let Some((item, (left, right))) = items
+        .iter()
+        .rev()
+        .filter(|item| item.track_id == track_id)
+        .map(|item| (item, span(item)))
+        .find(|(_, (left, right))| (*left..*right).contains(&x))
+    else {
+        return ItemHit::Lane;
+    };
+    let grab = EDGE_GRAB_PX.min((right - left) / 3.0);
+    if x < left + grab {
+        ItemHit::StartEdge(item.id)
+    } else if x >= right - grab {
+        ItemHit::EndEdge(item.id)
+    } else {
+        ItemHit::Body(item.id)
+    }
+}
+
+/// The ids of the Items on the Tracks `track_ids` that overlap the timeline `frames`, in `items` order.
+#[allow(clippy::cast_precision_loss, reason = "frames far below 2^52")]
+pub fn items_in_box(items: &[ItemBlock], track_ids: &[u64], frames: Range<f64>) -> Vec<u64> {
+    items
+        .iter()
+        .filter(|item| track_ids.contains(&item.track_id))
+        .filter(|item| (item.position as f64) < frames.end && frames.start < item.end() as f64)
+        .map(|item| item.id)
+        .collect()
+}
+
+/// The selected Items, by id.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemSelection(BTreeSet<u64>);
+
+impl ItemSelection {
+    pub fn contains(&self, id: u64) -> bool {
+        self.0.contains(&id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// In ascending order.
+    pub fn ids(&self) -> Vec<u64> {
+        self.0.iter().copied().collect()
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// A click: only `id` is selected, or with `toggle` (Ctrl) `id` goes in or out.
+    pub fn pick(&mut self, id: u64, toggle: bool) {
+        if !toggle {
+            self.0.clear();
+        }
+        if !self.0.remove(&id) || !toggle {
+            self.0.insert(id);
+        }
+    }
+
+    /// A drag starting on `id`: the selection stays when it holds `id`, else as [`ItemSelection::pick`].
+    pub fn grab(&mut self, id: u64, toggle: bool) {
+        if !self.contains(id) {
+            self.pick(id, toggle);
+        }
+    }
+
+    /// The selection becomes `ids`, or with `add` takes them in as well.
+    pub fn select_box(&mut self, ids: &[u64], add: bool) {
+        if !add {
+            self.0.clear();
+        }
+        self.0.extend(ids);
+    }
+
+    /// Keeps the ids still in `after`. With `split_at`, a split there was sent: each Item new since `before` that starts at `split_at` is selected with the Item ending there on its Track, when that one was selected or nothing was.
+    pub fn follow(&mut self, before: &[u64], after: &[ItemBlock], split_at: Option<u64>) {
+        let had_none = self.is_empty();
+        self.0.retain(|id| after.iter().any(|item| item.id == *id));
+        let Some(at) = split_at else {
+            return;
+        };
+        for right in after
+            .iter()
+            .filter(|item| item.position == at && !before.contains(&item.id))
+        {
+            let left = after.iter().find(|left| {
+                left.track_id == right.track_id && left.end() == at && before.contains(&left.id)
+            });
+            if let Some(left) = left
+                && (had_none || self.contains(left.id))
+            {
+                self.0.extend([left.id, right.id]);
+            }
+        }
+    }
+}
+
+/// A drag of the selected Items: the Item grabbed, where the pointer was pressed (a timeline frame and a Track row), and the Items moved, the grabbed one first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveDrag {
+    grabbed: u64,
+    ids: Vec<u64>,
+    grab_frame: f64,
+    grab_row: usize,
+}
+
+impl MoveDrag {
+    pub fn new(
+        grabbed: u64,
+        selection: &ItemSelection,
+        grab_frame: f64,
+        grab_row: usize,
+    ) -> MoveDrag {
+        let ids = [grabbed]
+            .into_iter()
+            .chain(selection.ids().into_iter().filter(|id| *id != grabbed))
+            .collect();
+        MoveDrag {
+            grabbed,
+            ids,
+            grab_frame,
+            grab_row,
+        }
+    }
+
+    pub fn moves(&self, id: u64) -> bool {
+        self.ids.contains(&id)
+    }
+}
+
+/// The pointer during a [`MoveDrag`]: its timeline frame, the Track row under it, whether to snap (the Snap switch, inverted while Alt is held) and whether Shift locks the Track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MovePointer {
+    pub frame: f64,
+    pub row: usize,
+    pub snap: bool,
+    pub lock_track: bool,
+}
+
+/// Where a [`MoveDrag`] would put its Items: `delta` frames and `rows` Tracks away, and the grid line the grabbed Item's start snapped to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MovePreview {
+    pub delta: i64,
+    pub rows: isize,
+    pub snap_line: Option<u64>,
+}
+
+impl MovePreview {
+    /// An Item's preview start and Track row, from its start and `row`.
+    #[allow(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap,
+        reason = "the preview keeps every moved Item at frame 0 or later and on a Track"
+    )]
+    pub fn place(&self, item: &ItemBlock, row: usize) -> (u64, usize) {
+        (
+            (item.position as i64 + self.delta) as u64,
+            (row as isize + self.rows) as usize,
+        )
+    }
+
+    /// The `item_move` to send on release; `None` when nothing moves.
+    #[allow(
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap,
+        reason = "the preview keeps the grabbed Item on a Track"
+    )]
+    pub fn command(&self, drag: &MoveDrag) -> Option<Command> {
+        if self.delta == 0 && self.rows == 0 {
+            return None;
+        }
+        Some(Command::ItemMove {
+            ids: drag.ids.clone(),
+            delta: self.delta,
+            track: (self.rows != 0).then(|| (drag.grab_row as isize + self.rows) as usize),
+        })
+    }
+}
+
+/// Where `drag` puts its Items with the pointer at `pointer`: all by one delta, the grabbed Item's start snapped to the nearest of the `grid` lines drawn when snapping, cut so that the earliest starts at frame 0 at the earliest; on the Track row under the pointer unless the Track is locked, cut so that every Item stays on one of the Tracks `track_ids` (in row order).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    reason = "frames and rows far below the limits of each type"
+)]
+pub fn move_preview(
+    drag: &MoveDrag,
+    items: &[ItemBlock],
+    track_ids: &[u64],
+    grid: &[GridLine],
+    pointer: MovePointer,
+) -> MovePreview {
+    let moved: Vec<&ItemBlock> = items.iter().filter(|item| drag.moves(item.id)).collect();
+    let Some(grabbed) = moved.iter().find(|item| item.id == drag.grabbed) else {
+        return MovePreview {
+            delta: 0,
+            rows: 0,
+            snap_line: None,
+        };
+    };
+    let start = grabbed.position as f64 + pointer.frame - drag.grab_frame;
+    let line = grid
+        .iter()
+        .map(|line| line.frame.round())
+        .filter(|_| pointer.snap)
+        .min_by(|a, b| (a - start).abs().total_cmp(&(b - start).abs()));
+    let wanted = line.unwrap_or(start).round() as i64 - grabbed.position as i64;
+    let earliest = moved.iter().map(|item| item.position).min().unwrap_or(0) as i64;
+    let delta = wanted.max(-earliest);
+    let snap_line = line
+        .map(|line| line as i64)
+        .filter(|line| *line == grabbed.position as i64 + delta)
+        .map(|line| line as u64);
+    let row_of = |item: &&ItemBlock| {
+        track_ids
+            .iter()
+            .position(|id| *id == item.track_id)
+            .unwrap_or(0) as isize
+    };
+    let lowest = moved.iter().map(row_of).min().unwrap_or(0);
+    let highest = moved.iter().map(row_of).max().unwrap_or(0);
+    let last = track_ids.len() as isize - 1;
+    let rows = if pointer.lock_track {
+        0
+    } else {
+        (pointer.row as isize - drag.grab_row as isize).clamp(-lowest, last - highest)
+    };
+    MovePreview {
+        delta,
+        rows,
+        snap_line,
     }
 }
 

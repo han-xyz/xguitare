@@ -7,12 +7,13 @@ use xguitare_gui::model::{
     requests_until_quit, response_message, restore,
 };
 use xguitare_gui::project_model::{
-    AutosaveOffer, GridLine, ItemBlock, LoopEdge, MainView, ProjectRow, Tempo, TimelineView,
-    TrackRow, TransportState, TransportView, ViewSwitch, VisibleTake, autosave_offer,
-    bars_beats_text, dragged_loop, grid_lines, item_blocks, key_active, parse_meter, project_end,
-    project_key_to_command, project_name, project_rows, project_tempo, recording_from,
-    recording_span, restored_view, snap_to_beat, still_closing, time_text, track_rows,
-    transport_view, waveform_columns,
+    AutosaveOffer, GridLine, ItemBlock, ItemHit, ItemSelection, LoopEdge, MainView, MoveDrag,
+    MovePointer, ProjectRow, Tempo, TimelineView, TrackRow, TransportState, TransportView,
+    ViewSwitch, VisibleTake, autosave_offer, bars_beats_text, dragged_loop, esc_clears_selection,
+    grid_lines, hit_test, item_blocks, item_key_to_command, item_name, items_in_box, key_active,
+    move_preview, parse_meter, project_end, project_key_to_command, project_name, project_rows,
+    project_tempo, recording_from, recording_span, restored_view, snap_to_beat, still_closing,
+    time_text, track_rows, transport_view, undo_text, waveform_columns,
 };
 
 const RATE: f64 = 48_000.0;
@@ -961,4 +962,378 @@ fn the_visible_take_frames_are_the_items_played_range_inside_the_view() {
         "the end past the right"
     );
     assert_eq!(item.visible_take(view(2048.0), 1000.0), None);
+}
+
+fn block(id: u64, track_id: u64, position: u64, length: u64) -> ItemBlock {
+    ItemBlock {
+        id,
+        track_id,
+        position,
+        offset: 0,
+        length,
+        file: format!("takes/t{id}.wav"),
+        take_frames: length,
+        take_name: format!("t{id}"),
+        take: 0,
+        takes: 1,
+    }
+}
+
+/// One beat (24 000 frames at 120 bpm) is 50 px.
+const EDIT_VIEW: TimelineView = TimelineView {
+    first_frame: 0.0,
+    frames_per_px: 480.0,
+};
+const GUITAR: u64 = 4;
+const BASS: u64 = 7;
+const TRACK_IDS: [u64; 2] = [GUITAR, BASS];
+
+/// Guitar: Item 3 at beats 2–6 under Item 5 at beats 4–5; Bass: Item 1 from 0 for ten beats.
+fn edit_items() -> Vec<ItemBlock> {
+    vec![
+        block(3, GUITAR, 48_000, 96_000),
+        block(1, BASS, 0, 240_000),
+        block(5, GUITAR, 96_000, 24_000),
+    ]
+}
+
+fn selection(ids: &[u64]) -> ItemSelection {
+    let mut selection = ItemSelection::default();
+    selection.select_box(ids, false);
+    selection
+}
+
+#[test]
+fn hit_test_finds_body_edges_lane_and_the_top_item() {
+    let items = edit_items();
+    let hit = |track, x| hit_test(&items, track, EDIT_VIEW, x);
+    assert_eq!(hit(GUITAR, 150.0), ItemHit::Body(3));
+    assert_eq!(hit(GUITAR, 102.0), ItemHit::StartEdge(3));
+    assert_eq!(hit(GUITAR, 298.0), ItemHit::EndEdge(3));
+    assert_eq!(
+        hit(GUITAR, 225.0),
+        ItemHit::Body(5),
+        "the later Item is on top"
+    );
+    assert_eq!(hit(GUITAR, 50.0), ItemHit::Lane);
+    assert_eq!(hit(GUITAR, 300.0), ItemHit::Lane, "the end is not inside");
+    assert_eq!(hit(BASS, 50.0), ItemHit::Body(1));
+}
+
+#[test]
+fn click_selects_only_this_and_ctrl_click_toggles() {
+    let mut picked = ItemSelection::default();
+    picked.pick(3, false);
+    picked.pick(1, false);
+    assert_eq!(picked.ids(), [1]);
+    picked.pick(3, true);
+    assert_eq!(picked.ids(), [1, 3]);
+    picked.pick(1, true);
+    assert_eq!(picked.ids(), [3]);
+    picked.clear();
+    assert!(picked.is_empty());
+}
+
+#[test]
+fn grabbing_a_selected_item_keeps_the_selection() {
+    let mut grabbed = selection(&[1, 3]);
+    grabbed.grab(3, false);
+    assert_eq!(grabbed.ids(), [1, 3]);
+    grabbed.grab(5, false);
+    assert_eq!(grabbed.ids(), [5]);
+    grabbed.grab(1, true);
+    assert_eq!(grabbed.ids(), [1, 5]);
+}
+
+#[test]
+fn a_box_selects_the_items_it_touches_across_tracks() {
+    let items = edit_items();
+    assert_eq!(
+        items_in_box(&items, &[GUITAR, BASS], 100_000.0..130_000.0),
+        [3, 1, 5]
+    );
+    assert_eq!(
+        items_in_box(&items, &[GUITAR], 0.0..40_000.0),
+        [] as [u64; 0]
+    );
+    assert_eq!(items_in_box(&items, &[GUITAR], 130_000.0..150_000.0), [3]);
+    let mut boxed = selection(&[5]);
+    boxed.select_box(&[3], false);
+    assert_eq!(boxed.ids(), [3]);
+    boxed.select_box(&[1], true);
+    assert_eq!(boxed.ids(), [1, 3]);
+}
+
+#[test]
+fn selection_follows_ids_and_takes_both_halves_of_a_split() {
+    let before: Vec<u64> = vec![1, 3, 5];
+    let after = vec![
+        block(3, GUITAR, 48_000, 48_000),
+        block(1, BASS, 0, 240_000),
+        block(8, GUITAR, 96_000, 48_000),
+    ];
+    let mut kept = selection(&[3, 5]);
+    kept.follow(&before, &after, None);
+    assert_eq!(kept.ids(), [3], "5 is gone");
+    let mut split = selection(&[3]);
+    split.follow(&before, &after, Some(96_000));
+    assert_eq!(split.ids(), [3, 8]);
+    let mut default_split = ItemSelection::default();
+    default_split.follow(&before, &after, Some(96_000));
+    assert_eq!(default_split.ids(), [3, 8], "the selected Track's halves");
+    let mut other = selection(&[1]);
+    other.follow(&before, &after, Some(96_000));
+    assert_eq!(other.ids(), [1], "a half of an unselected Item stays out");
+}
+
+fn pointer(frame: f64, row: usize) -> MovePointer {
+    MovePointer {
+        frame,
+        row,
+        snap: true,
+        lock_track: false,
+    }
+}
+
+#[test]
+fn a_move_snaps_the_grabbed_start_to_the_visible_grid() {
+    let items = edit_items();
+    let grid = grid_lines(EDIT_VIEW, 1000.0, RATE, FOUR_FOUR);
+    let drag = MoveDrag::new(3, &selection(&[3]), 60_000.0, 0);
+    let snapped = move_preview(&drag, &items, &TRACK_IDS, &grid, pointer(90_000.0, 0));
+    assert_eq!(
+        (snapped.delta, snapped.rows, snapped.snap_line),
+        (24_000, 0, Some(72_000))
+    );
+    let free = MovePointer {
+        snap: false,
+        ..pointer(90_000.0, 0)
+    };
+    let free = move_preview(&drag, &items, &TRACK_IDS, &grid, free);
+    assert_eq!((free.delta, free.snap_line), (30_000, None));
+    assert_eq!(
+        snapped.command(&drag),
+        Some(Command::ItemMove {
+            ids: vec![3],
+            delta: 24_000,
+            track: None
+        })
+    );
+    assert_eq!(snapped.place(&items[0], 0), (72_000, 0));
+}
+
+#[test]
+fn a_move_stops_at_frame_zero_keeping_distances_and_sends_nothing_when_still() {
+    let items = edit_items();
+    let grid = grid_lines(EDIT_VIEW, 1000.0, RATE, FOUR_FOUR);
+    let drag = MoveDrag::new(3, &selection(&[1, 3]), 60_000.0, 0);
+    let earlier = move_preview(&drag, &items, &TRACK_IDS, &grid, pointer(10_000.0, 0));
+    assert_eq!((earlier.delta, earlier.snap_line), (0, None));
+    assert_eq!(earlier.command(&drag), None);
+    let only = MoveDrag::new(3, &selection(&[3]), 60_000.0, 0);
+    let free = MovePointer {
+        snap: false,
+        ..pointer(0.0, 0)
+    };
+    let clamped = move_preview(&only, &items, &TRACK_IDS, &grid, free);
+    assert_eq!(clamped.delta, -48_000);
+}
+
+#[test]
+fn a_move_changes_track_by_the_row_under_the_pointer_unless_locked() {
+    let items = edit_items();
+    let grid = grid_lines(EDIT_VIEW, 1000.0, RATE, FOUR_FOUR);
+    let drag = MoveDrag::new(3, &selection(&[1, 3]), 60_000.0, 0);
+    let one = MoveDrag::new(3, &selection(&[3]), 60_000.0, 0);
+    let down = move_preview(&one, &items, &TRACK_IDS, &grid, pointer(60_000.0, 1));
+    assert_eq!((down.delta, down.rows), (0, 1));
+    assert_eq!(
+        down.command(&one),
+        Some(Command::ItemMove {
+            ids: vec![3],
+            delta: 0,
+            track: Some(1)
+        })
+    );
+    assert_eq!(down.place(&items[0], 0), (48_000, 1));
+    let locked = MovePointer {
+        lock_track: true,
+        ..pointer(60_000.0, 1)
+    };
+    assert_eq!(
+        move_preview(&one, &items, &TRACK_IDS, &grid, locked).rows,
+        0
+    );
+    let both = move_preview(&drag, &items, &TRACK_IDS, &grid, pointer(84_000.0, 1));
+    assert_eq!(both.rows, 0, "the Bass Item has no Track below");
+    assert_eq!(
+        both.command(&drag),
+        Some(Command::ItemMove {
+            ids: vec![3, 1],
+            delta: 24_000,
+            track: None
+        }),
+        "the grabbed Item first"
+    );
+}
+
+#[test]
+fn item_keys_split_delete_undo_redo_and_nudge() {
+    let items = edit_items();
+    let status = project_status("stopped");
+    let key = |key, ids: &[u64]| {
+        item_key_to_command(key, &status, &items, &selection(ids), Some(EDIT_VIEW))
+    };
+    assert_eq!(
+        key(KeyEvent::S, &[3]),
+        Some(Command::ItemSplit {
+            ids: Some(vec![3]),
+            at: 36_000
+        })
+    );
+    assert_eq!(
+        key(KeyEvent::S, &[]),
+        Some(Command::ItemSplit {
+            ids: None,
+            at: 36_000
+        })
+    );
+    assert_eq!(
+        key(KeyEvent::Delete, &[1, 3]),
+        Some(Command::ItemDelete(vec![1, 3]))
+    );
+    assert_eq!(key(KeyEvent::Delete, &[]), None);
+    assert_eq!(key(KeyEvent::CtrlZ, &[]), Some(Command::ProjectUndo));
+    assert_eq!(key(KeyEvent::CtrlShiftZ, &[]), Some(Command::ProjectRedo));
+    let nudge = |delta| {
+        Some(Command::ItemMove {
+            ids: vec![3],
+            delta,
+            track: None,
+        })
+    };
+    assert_eq!(key(KeyEvent::Right, &[3]), nudge(24_000));
+    assert_eq!(key(KeyEvent::Left, &[3]), nudge(-24_000));
+    assert_eq!(key(KeyEvent::Left, &[1]), None, "already at frame 0");
+    assert_eq!(key(KeyEvent::Right, &[]), None);
+    let zoomed_out = TimelineView {
+        first_frame: 0.0,
+        frames_per_px: 4_800.0,
+    };
+    assert_eq!(
+        item_key_to_command(
+            KeyEvent::Right,
+            &status,
+            &items,
+            &selection(&[3]),
+            Some(zoomed_out)
+        ),
+        nudge(96_000),
+        "one bar when beats are too close to draw"
+    );
+    let mut closed = project_status("stopped");
+    closed["project"] = json!(null);
+    assert_eq!(
+        item_key_to_command(KeyEvent::CtrlZ, &closed, &items, &selection(&[]), None),
+        None
+    );
+}
+
+#[test]
+fn item_keys_wait_only_for_a_text_field_and_arrows_for_no_focus() {
+    for key in [
+        KeyEvent::S,
+        KeyEvent::Delete,
+        KeyEvent::CtrlZ,
+        KeyEvent::CtrlShiftZ,
+    ] {
+        assert!(key_active(key, false, true), "{key:?}");
+        assert!(!key_active(key, true, true), "{key:?}");
+    }
+    for key in [KeyEvent::Left, KeyEvent::Right] {
+        assert!(key_active(key, false, false), "{key:?}");
+        assert!(!key_active(key, false, true), "{key:?}");
+    }
+    assert_eq!(
+        project_key_to_command(KeyEvent::S, &project_status("stopped"), &[]),
+        None
+    );
+}
+
+#[test]
+fn esc_clears_the_selection_before_the_toast() {
+    assert!(esc_clears_selection((false, false), false, true));
+    assert!(!esc_clears_selection((false, false), false, false));
+    assert!(!esc_clears_selection((true, false), false, true));
+    assert!(!esc_clears_selection((false, true), false, true));
+    assert!(!esc_clears_selection((false, false), true, true));
+}
+
+#[test]
+fn the_undo_label_comes_from_status() {
+    let mut status = project_status("stopped");
+    status["undo"] = json!("move 2 Items");
+    assert_eq!(undo_text(&status).as_deref(), Some("Undo: move 2 Items"));
+    status["undo"] = json!(null);
+    assert_eq!(undo_text(&status), None);
+}
+
+#[test]
+fn an_item_is_named_by_take_track_and_bar() {
+    let item = block(9, BASS, 200_000, 48_000);
+    assert_eq!(
+        item_name(&item, "Bass DI", RATE, FOUR_FOUR),
+        "Item t9, Bass DI, bar 3"
+    );
+    assert_eq!(
+        item_name(&block(2, BASS, 0, 1), "Bass DI", RATE, FOUR_FOUR),
+        "Item t2, Bass DI, bar 1"
+    );
+}
+
+#[test]
+fn item_edits_become_their_requests() {
+    let queued = vec![
+        Command::ItemMove {
+            ids: vec![3, 1],
+            delta: -24_000,
+            track: Some(1),
+        },
+        Command::ItemMove {
+            ids: vec![3],
+            delta: 24_000,
+            track: None,
+        },
+        Command::ItemSplit {
+            ids: None,
+            at: 36_000,
+        },
+        Command::ItemDelete(vec![3]),
+        Command::ProjectUndo,
+        Command::ProjectRedo,
+    ];
+    let (outgoing, _) = requests_until_quit(queued, None, None);
+    let request = |req| Outgoing::Request(req);
+    assert_eq!(
+        outgoing,
+        [
+            request(Request::ItemMove {
+                ids: vec![3, 1],
+                delta: -24_000,
+                track: Some(TrackRef::Index(1)),
+            }),
+            request(Request::ItemMove {
+                ids: vec![3],
+                delta: 24_000,
+                track: None,
+            }),
+            request(Request::ItemSplit {
+                ids: None,
+                at: 36_000,
+            }),
+            request(Request::ItemDelete { ids: vec![3] }),
+            request(Request::ProjectUndo),
+            request(Request::ProjectRedo),
+        ]
+    );
 }

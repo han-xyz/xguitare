@@ -127,6 +127,20 @@ pub enum Command {
     RestoreAutosave(String),
     ProjectSave,
     ProjectClose,
+    ProjectUndo,
+    ProjectRedo,
+    /// Moves the Items `ids` by `delta` frames; with `track`, the first of `ids` goes to that Track index and the others keep their distance in Tracks to it.
+    ItemMove {
+        ids: Vec<u64>,
+        delta: i64,
+        track: Option<usize>,
+    },
+    /// Splits at the frame `at` the Items `ids`, or without them those under `at` on the selected Track.
+    ItemSplit {
+        ids: Option<Vec<u64>>,
+        at: u64,
+    },
+    ItemDelete(Vec<u64>),
     /// Sends nothing itself: the client thread fetches `project_list` again on its next tick.
     RefreshProjects,
     TrackAdd,
@@ -1202,6 +1216,13 @@ pub enum KeyEvent {
     End,
     M,
     T,
+    S,
+    /// Delete or Backspace.
+    Delete,
+    CtrlZ,
+    CtrlShiftZ,
+    Left,
+    Right,
 }
 
 /// Digits and Ctrl+S act unless a text field has focus; a focused knob consumes only its own arrow, page and Home/End keys.
@@ -1285,7 +1306,13 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
         | KeyEvent::Home
         | KeyEvent::End
         | KeyEvent::M
-        | KeyEvent::T => None,
+        | KeyEvent::T
+        | KeyEvent::S
+        | KeyEvent::Delete
+        | KeyEvent::CtrlZ
+        | KeyEvent::CtrlShiftZ
+        | KeyEvent::Left
+        | KeyEvent::Right => None,
     }
 }
 
@@ -1404,6 +1431,15 @@ pub fn requests_until_quit(
             },
             Command::ProjectSave => Request::ProjectSave,
             Command::ProjectClose => Request::ProjectClose,
+            Command::ProjectUndo => Request::ProjectUndo,
+            Command::ProjectRedo => Request::ProjectRedo,
+            Command::ItemMove { ids, delta, track } => Request::ItemMove {
+                ids,
+                delta,
+                track: track.map(TrackRef::Index),
+            },
+            Command::ItemSplit { ids, at } => Request::ItemSplit { ids, at },
+            Command::ItemDelete(ids) => Request::ItemDelete { ids },
             Command::TrackAdd => Request::TrackAdd { name: None },
             Command::TrackSet { track, edit } => track_set_request(track, edit),
             Command::TrackSelect(index) => {
