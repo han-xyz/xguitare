@@ -8,7 +8,7 @@ use xguitare_core::project::LoopRegion;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{
     Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
-    requests_until_quit, response_message, restore,
+    requests_until_quit, response_message, restore, unused_takes,
 };
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
@@ -1879,4 +1879,62 @@ fn covered_stretches_only_count_items_above_on_the_same_track() {
     );
     assert_eq!(covered_stretches(&items, 2), Vec::<Range<u64>>::new());
     assert_eq!(covered_stretches(&items, 4), Vec::<Range<u64>>::new());
+}
+
+#[test]
+fn takes_clean_reports_the_takes_deleted_and_the_space_freed() {
+    let cleaned = |deleted: u64, bytes: u64| {
+        response_message(
+            &Request::TakesClean {
+                files: vec!["takes/a.wav".to_string()],
+            },
+            Ok(Response::Ok(json!({"deleted": deleted, "bytes": bytes}))),
+        )
+    };
+    assert_eq!(
+        cleaned(1, 800),
+        Some(Message::Notice("Deleted 1 Take, 800 B freed".to_string()))
+    );
+    assert_eq!(
+        cleaned(3, 12_345_678),
+        Some(Message::Notice(
+            "Deleted 3 Takes, 12.3 MB freed".to_string()
+        ))
+    );
+}
+
+#[test]
+fn clean_takes_sends_takes_clean_and_the_refresh_sends_nothing_itself() {
+    let files = vec!["takes/a.wav".to_string(), "takes/b.wav".to_string()];
+    let queued = vec![
+        Command::RefreshUnusedTakes,
+        Command::CleanTakes(files.clone()),
+    ];
+    let (outgoing, quit) = requests_until_quit(queued, None, None);
+    assert!(!quit);
+    assert_eq!(outgoing, [Outgoing::Request(Request::TakesClean { files })]);
+}
+
+#[test]
+fn unused_takes_lists_names_sizes_and_the_total() {
+    let reply = json!({"files": [
+        {"file": "takes/guitar-2.wav", "bytes": 1_234_567},
+        {"file": "takes/bass-1.wav", "bytes": 800},
+    ], "bytes": 1_235_367});
+    let unused = unused_takes(&reply);
+    assert_eq!(
+        unused.files,
+        [
+            "takes/guitar-2.wav".to_string(),
+            "takes/bass-1.wav".to_string()
+        ]
+    );
+    assert_eq!(
+        unused.rows,
+        [
+            ("guitar-2.wav".to_string(), "1.2 MB".to_string()),
+            ("bass-1.wav".to_string(), "800 B".to_string()),
+        ]
+    );
+    assert_eq!(unused.total, "1.2 MB");
 }

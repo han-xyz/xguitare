@@ -18,19 +18,20 @@ use crate::model::{
     ModuleType, PortSelection, RackLayout, RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot,
     add_command, add_place, add_places, chip_columns, engine_readout, filter_bank, param_rows,
     port_choices, rack_channels, set_ports_command, set_settings_command, settings_draft,
-    shown_undo, tuner_toggle,
+    shown_undo, tuner_toggle, unused_takes,
 };
 use crate::project::{knob_with_reset, released_value};
 use crate::project_model::{project_name, project_rows, transport_view, undo_text};
 use crate::rack::choice_keys;
 use crate::rack::muted_text;
 use crate::theme::{
-    self, CONTROL_HEIGHT, RADIUS_CONTROL, RADIUS_PANEL, SECTION_HEADER_HEIGHT, SPACE_S, SPACE_XS,
-    TOAST_DOT_RADIUS, TOAST_EDGE_WIDTH, TOAST_MARGIN, TOAST_OFFSET, TOAST_WIDTH, colour, palette,
+    self, CONTROL_HEIGHT, RADIUS_CONTROL, RADIUS_PANEL, SECTION_HEADER_HEIGHT, SPACE_M, SPACE_S,
+    SPACE_XS, TOAST_DOT_RADIUS, TOAST_EDGE_WIDTH, TOAST_MARGIN, TOAST_OFFSET, TOAST_WIDTH, colour,
+    palette,
 };
 use crate::widgets::{
-    accent, bank_row, choice_button, outlined_button, primary_button, switched_button, text_field,
-    toggle_switch,
+    accent, bank_row, choice_button, modal, outlined_button, primary_button, switched_button,
+    text_field, toggle_switch, warning_button,
 };
 
 /// After the footer's undo label: the key that undoes.
@@ -56,6 +57,11 @@ const NO_PROJECT: &str = "No Project open";
 const NEW_PROJECT_HINT: &str = "New Project";
 const OPEN_PROJECT: &str = "Open a Project";
 const NO_PROJECTS: &str = "no Projects yet";
+const CLEAN_UP_TAKES: &str = "Clean up Takes\u{2026}";
+const CLEAN_TAKES_WARNING: &str = "Deleting saves the Project and clears Undo.";
+const CLEAN_TAKES_WIDTH: f32 = 360.0;
+/// The list scrolls past this height.
+const CLEAN_TAKES_LIST_HEIGHT: f32 = 240.0;
 const NO_METRONOME: &str = "no Metronome from the Daemon";
 const FOLLOWS_PROJECT: &str = "follows the Project";
 const BEAT_DOT_SIZE: f32 = 10.0;
@@ -216,7 +222,7 @@ fn section_body(
     }
 }
 
-/// While a Project is open: its name, the Take audio it holds in memory, `Save` and `Close`; else a name field with `New`, and `Open` listing the Daemon's Projects, read again when the menu opens.
+/// While a Project is open: its name, the Take audio it holds in memory, `Save`, `Close` and `Clean up Takes…`; else a name field with `New`, and `Open` listing the Daemon's Projects, read again when the menu opens.
 fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> Vec<Command> {
     let button_size = vec2(
         (ui.available_width() - ui.spacing().item_spacing.x) / 2.0,
@@ -243,6 +249,11 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
                 commands.push(Command::ProjectClose);
             }
         });
+        let clean_up =
+            outlined_button(CLEAN_UP_TAKES).min_size(vec2(ui.available_width(), CONTROL_HEIGHT));
+        if ui.add(clean_up).clicked() {
+            commands.push(Command::OpenCleanTakesDialog);
+        }
         return commands;
     }
     ui.label(muted_text(NO_PROJECT));
@@ -291,6 +302,71 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
         commands.push(Command::RefreshProjects);
     }
     commands
+}
+
+/// The Clean up Takes dialog over the window: the open Project's unused Take files with their sizes, the total, and `Delete n files`; `false` once it is closed (`Delete`, `Cancel`, Esc, a click outside, or the Project closing).
+pub fn clean_takes_dialog(ctx: &egui::Context, snapshot: &Snapshot) -> (Vec<Command>, bool) {
+    let mut commands = Vec::new();
+    let mut open = project_name(snapshot.status.as_ref()).is_some();
+    if !open {
+        return (commands, false);
+    }
+    let unused = snapshot.unused_takes.as_ref().map(unused_takes);
+    let dialog = modal(Id::unique("clean_takes_dialog")).show(ctx, |ui| {
+        ui.set_width(CLEAN_TAKES_WIDTH);
+        ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
+        ui.label(RichText::new("Clean up Takes").font(theme::dialog_title()));
+        ui.add_space(SPACE_XS);
+        let Some(unused) = unused.filter(|unused| !unused.files.is_empty()) else {
+            let text = if snapshot.unused_takes.is_some() {
+                "No unused Takes."
+            } else {
+                "Reading the Takes\u{2026}"
+            };
+            ui.label(text);
+            ui.add_space(SPACE_S);
+            open = !ui.add(outlined_button("Close")).clicked();
+            return;
+        };
+        ScrollArea::vertical()
+            .max_height(CLEAN_TAKES_LIST_HEIGHT)
+            .show(ui, |ui| {
+                Grid::new("unused_takes")
+                    .num_columns(2)
+                    .spacing(vec2(SPACE_M, SPACE_XS))
+                    .show(ui, |ui| {
+                        for (name, size) in &unused.rows {
+                            ui.label(name);
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(muted_text(size));
+                            });
+                            ui.end_row();
+                        }
+                    });
+            });
+        ui.add_space(SPACE_XS);
+        let count = unused.files.len();
+        let files = if count == 1 { "file" } else { "files" };
+        ui.label(format!("{count} {files}, {}", unused.total));
+        ui.label(muted_text(CLEAN_TAKES_WARNING));
+        ui.add_space(SPACE_S);
+        ui.horizontal(|ui| {
+            if ui
+                .add(warning_button(&format!("Delete {count} {files}")))
+                .clicked()
+            {
+                commands.push(Command::CleanTakes(unused.files.clone()));
+                open = false;
+            }
+            if ui.add(outlined_button("Cancel")).clicked() {
+                open = false;
+            }
+        });
+    });
+    if dialog.should_close() {
+        open = false;
+    }
+    (commands, open)
 }
 
 fn preset_heading(ui: &mut Ui, snapshot: &Snapshot) {

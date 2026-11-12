@@ -72,6 +72,8 @@ pub struct Snapshot {
     /// The error of the last `render` the Daemon refused.
     pub refused_render: Option<(String, Instant)>,
     pub autosave_offer: Option<(AutosaveOffer, Instant)>,
+    /// The last `takes_unused` reply for the open Project.
+    pub unused_takes: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -219,6 +221,12 @@ pub enum Command {
     ToggleMixer,
     /// Kept by the window: opens the Render dialog.
     OpenRenderDialog,
+    /// Kept by the window: opens the Clean up Takes dialog, which asks for [`Command::RefreshUnusedTakes`].
+    OpenCleanTakesDialog,
+    /// Sends nothing itself: the client thread reads `takes_unused` into [`Snapshot::unused_takes`].
+    RefreshUnusedTakes,
+    /// Deletes these unused Take files.
+    CleanTakes(Vec<String>),
     Quit,
 }
 
@@ -1463,6 +1471,7 @@ pub fn requests_until_quit(
             Command::ProjectClose => Request::ProjectClose,
             Command::ProjectUndo => Request::ProjectUndo,
             Command::ProjectRedo => Request::ProjectRedo,
+            Command::CleanTakes(files) => Request::TakesClean { files },
             Command::ItemMove { ids, delta, track } => Request::ItemMove {
                 ids,
                 delta,
@@ -1575,7 +1584,9 @@ pub fn requests_until_quit(
             | Command::RefreshProjects
             | Command::ShowView(_)
             | Command::ToggleMixer
-            | Command::OpenRenderDialog => continue,
+            | Command::OpenRenderDialog
+            | Command::OpenCleanTakesDialog
+            | Command::RefreshUnusedTakes => continue,
             Command::Quit => return (requests, true),
         };
         requests.push(Outgoing::Request(req));
@@ -2441,6 +2452,14 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
                 payload["path"].as_str().unwrap_or_default()
             )));
         }
+        (Request::TakesClean { .. }, Ok(Response::Ok(payload))) => {
+            let deleted = payload["deleted"].as_u64().unwrap_or(0);
+            let takes = if deleted == 1 { "Take" } else { "Takes" };
+            let freed = size_text(payload["bytes"].as_u64().unwrap_or(0));
+            return Some(Message::Notice(format!(
+                "Deleted {deleted} {takes}, {freed} freed"
+            )));
+        }
         (_, Ok(Response::Ok(_))) => return None,
         (_, Ok(Response::Err { error })) => error,
         (_, Err(err)) => err.to_string(),
@@ -2449,6 +2468,56 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
         title: failure_title(req),
         detail,
     })
+}
+
+/// A `takes_unused` reply as the Clean up Takes dialog shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnusedTakes {
+    /// The Take files as `takes_clean` names them.
+    pub files: Vec<String>,
+    /// Each file's name in `takes/` and its size.
+    pub rows: Vec<(String, String)>,
+    pub total: String,
+}
+
+pub fn unused_takes(reply: &Value) -> UnusedTakes {
+    let entries = reply["files"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let files: Vec<String> = entries
+        .iter()
+        .filter_map(|entry| entry["file"].as_str().map(str::to_string))
+        .collect();
+    let rows = entries
+        .iter()
+        .filter_map(|entry| {
+            let file = entry["file"].as_str()?;
+            let name = file.strip_prefix("takes/").unwrap_or(file);
+            Some((name.to_string(), size_text(entry["bytes"].as_u64()?)))
+        })
+        .collect();
+    UnusedTakes {
+        files,
+        rows,
+        total: size_text(reply["bytes"].as_u64().unwrap_or(0)),
+    }
+}
+
+/// `bytes` in B, KB, MB or GB (powers of 1000), one decimal past B.
+pub fn size_text(bytes: u64) -> String {
+    const UNITS: [&str; 3] = ["KB", "MB", "GB"];
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    #[allow(clippy::cast_precision_loss, reason = "a size shown to one decimal")]
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 /// The error toast's title for a failed `req`: the action that failed.

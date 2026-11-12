@@ -32,7 +32,9 @@ use crate::project_model::{
     restored_view, transport_view,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
-use crate::sidebar::{AddDraft, SidebarView, Tuner, error_toast, footer, sidebar};
+use crate::sidebar::{
+    AddDraft, SidebarView, Tuner, clean_takes_dialog, error_toast, footer, sidebar,
+};
 use crate::theme::{self, colour, palette};
 use crate::widgets;
 
@@ -78,6 +80,10 @@ const DIGIT_KEYS: [Key; 9] = [
     Key::Num9,
 ];
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent window flags, not states of one machine"
+)]
 pub struct App {
     commands: Sender<Command>,
     snapshots: Receiver<Snapshot>,
@@ -108,6 +114,7 @@ pub struct App {
     mixer: MixerView,
     views: ViewSwitch,
     autosave_prompt: Option<AutosaveOffer>,
+    clean_takes_open: bool,
     beat_light: BeatLight,
 }
 
@@ -207,6 +214,7 @@ impl App {
                 refused_remove: None,
                 refused_render: None,
                 autosave_offer: None,
+                unused_takes: None,
             },
             stop,
             throttle: Throttle::default(),
@@ -233,6 +241,7 @@ impl App {
             mixer: MixerView::default(),
             views: ViewSwitch::new(restored_view(stored_view.as_deref())),
             autosave_prompt: None,
+            clean_takes_open: false,
             beat_light: BeatLight::default(),
         }
     }
@@ -315,12 +324,20 @@ impl App {
         if commands.contains(&Command::OpenRenderDialog) {
             self.mixer.render = Some(RenderDraft::new(&self.snapshot));
         }
+        let open_clean_takes = commands.contains(&Command::OpenCleanTakesDialog);
         commands.retain(|command| {
             !matches!(
                 command,
-                Command::ShowView(_) | Command::ToggleMixer | Command::OpenRenderDialog
+                Command::ShowView(_)
+                    | Command::ToggleMixer
+                    | Command::OpenRenderDialog
+                    | Command::OpenCleanTakesDialog
             )
         });
+        if open_clean_takes {
+            self.clean_takes_open = true;
+            commands.push(Command::RefreshUnusedTakes);
+        }
         commands
     }
 }
@@ -491,7 +508,8 @@ impl eframe::App for App {
             self.project_view = ProjectView::new(self.project_view.snap);
             self.mixer = MixerView::default();
         }
-        let dialog_open = self.mixer.render.is_some() || self.autosave_prompt.is_some();
+        let dialog_open =
+            self.mixer.render.is_some() || self.autosave_prompt.is_some() || self.clean_takes_open;
         let has_selection =
             main_view == Some(MainView::Arrange) && !self.project_view.selection.is_empty();
         if ui.input(|input| input.key_pressed(Key::Escape)) {
@@ -503,6 +521,11 @@ impl eframe::App for App {
         }
         error_toast(ui.ctx(), &mut self.feedback);
         commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
+        if self.clean_takes_open {
+            let (dialog_commands, open) = clean_takes_dialog(ui.ctx(), snapshot);
+            commands.extend(dialog_commands);
+            self.clean_takes_open = open;
+        }
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)
         {

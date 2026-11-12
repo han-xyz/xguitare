@@ -175,6 +175,7 @@ fn funk_snapshot() -> Snapshot {
         items: None,
         peaks: HashMap::new(),
         autosave_offer: None,
+        unused_takes: None,
     }
 }
 
@@ -3290,4 +3291,68 @@ fn rack_layout_snapshots() {
         }
         write_png(&mut both_hidden, name);
     }
+}
+
+fn unused_takes_snapshot(unused: Value) -> Snapshot {
+    let mut snapshot = project_snapshot("stopped");
+    snapshot.unused_takes = Some(unused);
+    snapshot
+}
+
+#[test]
+fn clean_up_takes_dialog_lists_the_unused_takes_and_deletes_them() {
+    let unused = json!({"files": [
+        {"file": "takes/guitar-3.wav", "bytes": 23_040_044},
+        {"file": "takes/guitar-4.wav", "bytes": 4_608_044},
+        {"file": "takes/bass-2.wav", "bytes": 800},
+    ], "bytes": 27_648_888});
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, unused_takes_snapshot(unused));
+    click_button(&mut harness, "Clean up Takes…");
+    harness.run_steps(2);
+    assert!(sent_now(&sent).contains(&Command::RefreshUnusedTakes));
+    for text in [
+        "guitar-3.wav",
+        "23.0 MB",
+        "bass-2.wav",
+        "800 B",
+        "3 files, 27.6 MB",
+        "Deleting saves the Project and clears Undo.",
+    ] {
+        harness.get_by_label(text);
+    }
+    write_png(&mut harness, "clean-takes-1280x800");
+    click_button(&mut harness, "Delete 3 files");
+    assert_eq!(
+        sent_now(&sent),
+        [Command::CleanTakes(vec![
+            "takes/guitar-3.wav".to_string(),
+            "takes/guitar-4.wav".to_string(),
+            "takes/bass-2.wav".to_string(),
+        ])]
+    );
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Delete 3 files")
+            .is_none()
+    );
+}
+
+#[test]
+fn clean_up_takes_dialog_says_when_nothing_is_unused() {
+    let (mut harness, sent, _dir) = harness_with(
+        DEFAULT_WINDOW,
+        unused_takes_snapshot(json!({"files": [], "bytes": 0})),
+    );
+    click_button(&mut harness, "Clean up Takes…");
+    harness.run_steps(2);
+    harness.get_by_label("No unused Takes.");
+    write_png(&mut harness, "clean-takes-empty-1280x800");
+    harness
+        .get_all_by_role_and_label(Role::Button, "Close")
+        .last()
+        .unwrap()
+        .click();
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), [Command::RefreshUnusedTakes]);
+    assert!(harness.query_by_label("No unused Takes.").is_none());
 }

@@ -117,6 +117,7 @@ impl Client {
                 refused_remove: None,
                 refused_render: None,
                 autosave_offer: None,
+                unused_takes: None,
             },
         }
     }
@@ -193,6 +194,7 @@ impl Client {
         if queued.contains(&Command::RefreshProjects) {
             self.projects_fetched = false;
         }
+        let queued_refresh_unused = queued.contains(&Command::RefreshUnusedTakes);
         let rack = self.rack_target();
         let rack_moved = self.follow_shown_rack(&queued);
         let (requests, quit) = requests_until_quit(queued, rack, self.snapshot.status.as_ref());
@@ -208,6 +210,8 @@ impl Client {
         }
         if quit {
             info!("quit: sent {sent} final requests");
+        } else if queued_refresh_unused {
+            self.snapshot.unused_takes = self.send(&Request::TakesUnused);
         }
         if rack_moved && !quit {
             self.snapshot.params = self.payload(&self.rack_get());
@@ -235,6 +239,13 @@ impl Client {
             | Request::ProjectOpen { .. }
             | Request::ProjectSave
             | Request::ProjectClose => self.projects_fetched = false,
+            // A Take file name is used again once its file is gone, maybe for a Take of the same frames.
+            Request::TakesClean { .. } if matches!(response, Ok(Response::Ok(_))) => {
+                self.snapshot.peaks.clear();
+                self.peak_frames.clear();
+                self.refused_peaks.clear();
+                self.snapshot.unused_takes = None;
+            }
             _ => {}
         }
         if let Some(param) = failed_set(req, &response) {
@@ -527,6 +538,7 @@ impl Client {
         };
         let project = project_name(self.snapshot.status.as_ref()).map(str::to_string);
         if project != self.peaks_project {
+            self.snapshot.unused_takes = None;
             self.snapshot.peaks.clear();
             self.peak_frames.clear();
             self.refused_peaks.clear();

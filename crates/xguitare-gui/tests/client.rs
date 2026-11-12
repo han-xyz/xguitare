@@ -539,3 +539,64 @@ fn a_refused_take_is_not_asked_again_and_a_reused_file_name_is_fetched_again() {
         .count();
     assert_eq!(asked, 3, "once refused, once per new recording");
 }
+
+#[test]
+fn a_clean_up_drops_every_cached_peak_table_and_reads_the_unused_takes() {
+    let dir = temp_dir("clean-peaks");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let mut revision = 1;
+    let received = serve_requests(listener, move |request| {
+        match request["cmd"].as_str().unwrap() {
+            "status" => {
+                json!({"ok": true, "preset": "Clean", "program": 0, "revision": revision, "project": "Song"})
+            }
+            "items" => items_of(&[("takes/a.wav", 768)]),
+            "take_peaks" => peak_page(request, 768),
+            "takes_unused" => {
+                json!({"ok": true, "files": [{"file": "takes/b.wav", "bytes": 10}], "bytes": 10})
+            }
+            "takes_clean" => {
+                revision += 1;
+                json!({"ok": true, "deleted": 1, "bytes": 10})
+            }
+            cmd => serde_json::from_str(reply(cmd)).unwrap(),
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let deadline = Instant::now() + WAIT;
+    while !snapshots
+        .recv_timeout(WAIT)
+        .unwrap()
+        .peaks
+        .contains_key("takes/a.wav")
+    {
+        assert!(Instant::now() < deadline, "no peaks");
+    }
+    commands.send(Command::RefreshUnusedTakes).unwrap();
+    let unused = loop {
+        assert!(Instant::now() < deadline, "no unused Takes");
+        if let Some(unused) = snapshots.recv_timeout(WAIT).unwrap().unused_takes {
+            break unused;
+        }
+    };
+    assert_eq!(unused["files"][0]["file"], "takes/b.wav");
+    commands
+        .send(Command::CleanTakes(vec!["takes/b.wav".to_string()]))
+        .unwrap();
+    let asked = |received: &Receiver<Value>| {
+        received
+            .try_iter()
+            .filter(|request| request["cmd"] == "take_peaks")
+            .count()
+    };
+    let mut peak_requests = asked(&received);
+    while peak_requests < 2 {
+        assert!(Instant::now() < deadline, "peaks not read again");
+        thread::sleep(Duration::from_millis(10));
+        peak_requests += asked(&received);
+    }
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+}
