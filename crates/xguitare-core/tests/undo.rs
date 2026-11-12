@@ -13,7 +13,8 @@ use xguitare_core::control::{
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
 use xguitare_core::metronome::{Metronome, MetronomeSettings};
 use xguitare_core::project::{Item, Project, Take};
-use xguitare_core::project_control::Projects;
+use xguitare_core::project_control::{Projects, add_finished_takes};
+use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BuildWarning, Config};
 
@@ -528,5 +529,51 @@ fn a_busy_engine_leaves_the_history_and_the_project_unchanged() {
                 | Command::SwapArrangement(_)
         )),
         "nothing reached the Engine"
+    );
+}
+
+#[test]
+fn a_recorded_take_undone_keeps_its_file_and_redone_plays_again() {
+    let (mut state, mut audio, _dir) = state("record");
+    open_song(&mut state);
+    let before = items(&mut state);
+    let keys_id = before["tracks"][2]["id"].as_u64().unwrap();
+    let file = "takes/keys-1.wav";
+    write_take(&folder(&state).join(file), &vec![0.75; 2400]);
+    let finished = FinishedTake {
+        track_id: keys_id,
+        file: file.to_string(),
+        span: TakeSpan {
+            start: 9600,
+            frames: 2400,
+            loop_take: false,
+        },
+    };
+    assert_eq!(
+        add_finished_takes(&mut state, &[finished], |_| Latency::default()),
+        Vec::<String>::new()
+    );
+    let after = items(&mut state);
+    assert_eq!(after["tracks"][2]["items"][0]["takes"], json!([file]));
+    assert_eq!(labels(&mut state), (json!("record Keys"), Value::Null));
+    drain(&mut audio);
+    assert_eq!(undo(&mut state), json!({"label": "record Keys"}));
+    assert_eq!(items(&mut state), before);
+    assert!(folder(&state).join(file).is_file(), "the Take file is kept");
+    assert_eq!(redo(&mut state), json!({"label": "record Keys"}));
+    assert_eq!(items(&mut state), after);
+    let swapped: Vec<Vec<f32>> = drain(&mut audio)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Arrangement(ArrangementCommand::SetTrackItems { track: 2, items }) => {
+                Some(items.iter().map(|span| span.samples[0]).collect())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        swapped,
+        [vec![], vec![0.75]],
+        "undone to nothing, redone to the Take"
     );
 }

@@ -137,11 +137,11 @@ pub fn take_project_events(state: &mut EngineState) -> Vec<ProjectEvent> {
     std::mem::take(&mut state.projects.events)
 }
 
-/// Adds the Takes the disk thread finished, and those an earlier call found the Engine too busy for, to the open Project, each on the Track its id names at the latency `latency` gives for that Track's index, and swaps in an Arrangement that plays them; returns one message per Take that could not be added. While the Engine is busy the Takes wait for the next call.
+/// Adds the Takes the disk thread finished, and those an earlier call found the Engine too busy for, to the open Project, each on the Track its id names at the latency `latency` gives for that Track's index, and swaps in an Arrangement that plays them, each Take one entry in the undo history; returns one message per Take that could not be added. While the Engine is busy the Takes wait for the next call.
 pub fn add_finished_takes(
     state: &mut EngineState,
     finished: &[FinishedTake],
-    latency: impl FnMut(usize) -> Latency,
+    mut latency: impl FnMut(usize) -> Latency,
 ) -> Vec<String> {
     let Some(open) = state.projects.open.as_mut() else {
         return Vec::new();
@@ -152,17 +152,44 @@ pub fn add_finished_takes(
         return Vec::new();
     }
     let mut project = open.project.clone();
-    let (added, mut failures) = add_takes(
-        &mut project,
-        &open.dir,
-        &mut open.takes,
-        &open.track_ids,
-        &takes,
-        latency,
-    );
+    let mut added = Vec::new();
+    let mut failures = Vec::new();
+    let mut entries = Vec::new();
+    for take in &takes {
+        let track = open.track_ids.iter().position(|id| *id == take.track_id);
+        let before = track.map(|track| project.tracks[track].items.clone());
+        let (files, take_failures) = add_takes(
+            &mut project,
+            &open.dir,
+            &mut open.takes,
+            &open.track_ids,
+            std::slice::from_ref(take),
+            &mut latency,
+        );
+        failures.extend(take_failures);
+        if let (Some(track), Some(before)) = (track, before)
+            && !files.is_empty()
+        {
+            let track = &project.tracks[track];
+            entries.push(Entry {
+                label: format!("record {}", track.name),
+                change: Change::Items(vec![TrackItems {
+                    track_id: take.track_id,
+                    before,
+                    after: track.items.clone(),
+                }]),
+            });
+        }
+        added.extend(files);
+    }
     let mut warnings = Vec::new();
     match swap_project(state, project, &mut warnings) {
-        Ok(()) => {}
+        Ok(()) => {
+            let history = &mut open_project_mut(state).history;
+            for entry in entries {
+                history.push(entry);
+            }
+        }
         Err(err) if err == ENGINE_BUSY => {
             takes.retain(|take| added.contains(&take.file));
             open_project_mut(state).unplaced = takes;
