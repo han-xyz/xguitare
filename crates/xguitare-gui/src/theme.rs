@@ -77,27 +77,31 @@ pub fn translucent((r, g, b): Rgb, alpha: u8) -> Color32 {
 
 pub const NEUTRAL_ACCENT: Rgb = (120, 120, 120);
 
+const MODULE_ACCENTS: [(&str, Rgb); 17] = [
+    ("gain", (0xa9, 0xaf, 0xb9)),
+    ("gate", (0x77, 0x7e, 0xad)),
+    ("drive", (0xeb, 0x82, 0x28)),
+    ("fuzz", (0xf2, 0x37, 0x35)),
+    ("preamp", (0xf0, 0xb3, 0x30)),
+    ("tonestack", (0xd6, 0xc3, 0x98)),
+    ("compressor", (0x2a, 0xa9, 0x9c)),
+    ("cabinet", (0xa5, 0x77, 0x57)),
+    ("delay", (0x03, 0x7d, 0xff)),
+    ("reverb", (0xa3, 0x61, 0xe2)),
+    ("chorus", (0x44, 0xb4, 0x4f)),
+    ("flanger", (0x24, 0xca, 0xe0)),
+    ("autowah", (0xc3, 0xf0, 0x42)),
+    ("eq", (0xf1, 0x6b, 0x9b)),
+    ("blend", (0x6c, 0xf4, 0xc7)),
+    ("limiter", (0x70, 0xb2, 0xf1)),
+    ("shaper", (0xef, 0x8a, 0x78)),
+];
+
 pub fn accent_for(type_name: &str) -> Rgb {
-    match type_name {
-        "gain" => (0xa9, 0xaf, 0xb9),
-        "gate" => (0x77, 0x7e, 0xad),
-        "drive" => (0xeb, 0x82, 0x28),
-        "fuzz" => (0xf2, 0x37, 0x35),
-        "preamp" => (0xf0, 0xb3, 0x30),
-        "tonestack" => (0xd6, 0xc3, 0x98),
-        "compressor" => (0x2a, 0xa9, 0x9c),
-        "cabinet" => (0xa5, 0x77, 0x57),
-        "delay" => (0x03, 0x7d, 0xff),
-        "reverb" => (0xa3, 0x61, 0xe2),
-        "chorus" => (0x44, 0xb4, 0x4f),
-        "flanger" => (0x24, 0xca, 0xe0),
-        "autowah" => (0xc3, 0xf0, 0x42),
-        "eq" => (0xf1, 0x6b, 0x9b),
-        "blend" => (0x6c, 0xf4, 0xc7),
-        "limiter" => (0x70, 0xb2, 0xf1),
-        "shaper" => (0xef, 0x8a, 0x78),
-        _ => NEUTRAL_ACCENT,
-    }
+    MODULE_ACCENTS
+        .iter()
+        .find(|(name, _)| *name == type_name)
+        .map_or(NEUTRAL_ACCENT, |(_, accent)| *accent)
 }
 
 /// Track colours in Track order, repeating after the last.
@@ -228,10 +232,10 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
     ]
 }
 
-/// Pure decoration: divider rules, band-title underlines, screw rings, the faceplate edge of the meter bridge and the Tuner, the knob body's gradient, the unlit LED and arc track. These mark no control and no state, so WCAG 1.4.11 sets them no floor; anything that outlines or identifies a control belongs in [`boundary_pairs`].
+/// Pure decoration: divider rules, band-title underlines, screw rings, the faceplate edge of the meter bridge and the Tuner, the knob body's gradient, the unlit LED and arc track, a bypassed unit's accent top edge. These mark no control and no state, so WCAG 1.4.11 sets them no floor; anything that outlines or identifies a control belongs in [`boundary_pairs`].
 pub fn decorative_pairs() -> Vec<ContrastPair> {
     let c = palette();
-    vec![
+    let mut pairs = vec![
         pair("header rule on panel", c.knob_highlight, c.panel),
         pair(
             "header and band title rule on panel open",
@@ -258,7 +262,15 @@ pub fn decorative_pairs() -> Vec<ContrastPair> {
         ),
         pair("arc track on panel", c.arc_track, c.panel),
         pair("arc track on panel open", c.arc_track, c.panel_open),
-    ]
+    ];
+    pairs.extend(MODULE_ACCENTS.iter().map(|(_, accent)| {
+        pair(
+            "Module accent edge on bypass panel",
+            *accent,
+            c.bypass_panel,
+        )
+    }));
+    pairs
 }
 
 pub const TEXT_LEGEND: f32 = 11.0;

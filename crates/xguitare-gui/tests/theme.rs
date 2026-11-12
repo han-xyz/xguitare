@@ -416,6 +416,20 @@ fn decorative_pairs_list_the_faint_lines_that_mark_no_control() {
 }
 
 #[test]
+fn a_bypassed_unit_keeps_its_accent_edge_as_decoration() {
+    let pairs = decorative_pairs();
+    let back = palette().bypass_panel;
+    for (type_name, accent) in ACCENTS {
+        assert!(
+            pairs
+                .iter()
+                .any(|pair| (pair.fore, pair.back) == (accent, back)),
+            "{type_name} edge on bypass panel is not declared decorative"
+        );
+    }
+}
+
+#[test]
 fn every_palette_token_is_in_a_declared_pair() {
     let c = palette();
     let tokens = [
