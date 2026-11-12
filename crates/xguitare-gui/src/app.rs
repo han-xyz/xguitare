@@ -16,20 +16,18 @@ use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
-use crate::mixer::{self, MIXER_HEIGHT, MixerView, RenderDraft, mixer_panel, render_dialog};
-use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands};
+use crate::mixer::{self, MixerView, RenderDraft, mixer_panel, render_dialog};
+use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands, shown_rack_column};
 use crate::model::{
     BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
     bank_rows_for_rack, forget_removed_units, key_to_command, open_units_from_string,
     open_units_to_string, param_rows, peak_db, quit_commands, remember_removes,
 };
-use crate::project::{
-    ProjectView, TIMELINE_HEIGHT, TIMELINE_HEIGHT_WITH_MIXER, autosave_prompt, tracks_view,
-    transport_bar,
-};
+use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
 use crate::project_model::{
-    AutosaveOffer, item_blocks, key_active, project_key_to_command, project_name, track_rows,
+    AutosaveOffer, MainView, ViewSwitch, item_blocks, key_active, project_key_to_command,
+    project_name, restored_view,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
@@ -45,13 +43,12 @@ const SIDEBAR_MARGIN: Margin = Margin {
 };
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const MIXER_MARGIN: Margin = Margin::same(8);
-const MIXER_GAP: i8 = 4;
-/// The resize line along the mixer split's lower edge, which the split's size includes.
-const SPLIT_LINE_WIDTH: f32 = 1.0;
-const MIXER_MIN_HEIGHT: f32 = 60.0;
-/// The least the split under the mixer panel leaves the Rack, which scrolls inside it.
+/// The least the split under the Tracks and timeline leaves the Rack, which scrolls inside it.
 const RACK_MIN_HEIGHT: f32 = 120.0;
+/// The Tracks and timeline's default share of the height below the transport bar, up to [`TIMELINE_HEIGHT`].
+const TIMELINE_SHARE: f32 = 0.45;
 const OPEN_UNITS_KEY: &str = "open_units";
+const VIEW_KEY: &str = "view";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -90,6 +87,7 @@ pub struct App {
     new_project: String,
     project_view: ProjectView,
     mixer: MixerView,
+    views: ViewSwitch,
     autosave_prompt: Option<AutosaveOffer>,
     beat_light: BeatLight,
 }
@@ -141,6 +139,7 @@ impl App {
             .and_then(|storage| storage.get_string(OPEN_UNITS_KEY))
             .map(|stored| open_units_from_string(&stored))
             .unwrap_or_default();
+        let stored_view = cc.storage.and_then(|storage| storage.get_string(VIEW_KEY));
         cc.egui_ctx.set_theme(Theme::Dark);
         cc.egui_ctx.set_fonts(theme::fonts());
         cc.egui_ctx
@@ -191,6 +190,7 @@ impl App {
             new_project: String::new(),
             project_view: ProjectView::default(),
             mixer: MixerView::default(),
+            views: ViewSwitch::new(restored_view(stored_view.as_deref())),
             autosave_prompt: None,
             beat_light: BeatLight::default(),
         }
@@ -262,21 +262,23 @@ impl App {
 }
 
 impl App {
-    /// Aims every Rack request at the Rack the window shows ([`aim_rack_commands`]) and takes the window's own commands out: Ctrl+M or `Mixer` opens or closes the mixer panel, Ctrl+Alt+R or `Render` opens the Render dialog.
+    /// Aims every Rack request at the Rack the window shows ([`aim_rack_commands`]) and takes the window's own commands out: the view switch, Ctrl+1, Ctrl+2, Ctrl+3 and Ctrl+M change the main view, Ctrl+Alt+R or `Render` opens the Render dialog.
     fn keep_window_commands(&mut self, commands: Vec<Command>) -> Vec<Command> {
-        let focus = RackFocus::new(
-            self.mixer.open,
-            self.mixer.rack,
-            self.snapshot.status.as_ref(),
-        );
+        let focus = RackFocus::new(self.mixer.rack, self.snapshot.status.as_ref());
         let (mut commands, focus) = aim_rack_commands(focus, commands);
-        self.mixer.open = focus.mixer_open;
         self.mixer.rack = focus.shown;
+        for command in &commands {
+            self.views.follow(command);
+        }
         if commands.contains(&Command::OpenRenderDialog) {
             self.mixer.render = Some(RenderDraft::new(&self.snapshot));
         }
-        commands
-            .retain(|command| !matches!(command, Command::ToggleMixer | Command::OpenRenderDialog));
+        commands.retain(|command| {
+            !matches!(
+                command,
+                Command::ShowView(_) | Command::ToggleMixer | Command::OpenRenderDialog
+            )
+        });
         commands
     }
 }
@@ -371,10 +373,11 @@ impl eframe::App for App {
             .as_ref()
             .map(|list| bank_rows_for_rack(bank_rows(list).0, self.mixer.shows_stereo_rack()))
             .unwrap_or_default();
-        let project_status = snapshot
+        let main_view = snapshot
             .status
             .as_ref()
-            .filter(|status| project_name(Some(status)).is_some());
+            .filter(|status| project_name(Some(status)).is_some())
+            .map(|_| self.views.shown);
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
             .filter_map(|key| key_command(key, snapshot, &rows))
@@ -408,12 +411,12 @@ impl eframe::App for App {
             .exact_size(SIDEBAR_WIDTH)
             .frame(sidebar_frame)
             .show(ui, |ui| commands.extend(sidebar(ui, snapshot, &mut panel)));
-        if project_status.is_some() {
+        if let Some(main_view) = main_view {
             let feedback = (&mut self.feedback, now);
             commands.extend(project_panels(
                 ui,
                 snapshot,
-                (&mut self.project_view, self.mixer.open),
+                (&mut self.project_view, main_view),
                 feedback,
             ));
         } else {
@@ -443,11 +446,12 @@ impl eframe::App for App {
             holds: &self.holds,
             open_units: &mut self.open_units,
         };
-        CentralPanel::default()
-            .frame(Frame::central_panel(ui.style()).inner_margin(central_margin(&self.mixer)))
+        let central = CentralPanel::default()
+            .frame(Frame::central_panel(ui.style()).inner_margin(central_margin(main_view)))
             .show(ui, |ui| {
-                commands.extend(central_view(ui, snapshot, &mut self.mixer, &mut view));
+                central_view(ui, snapshot, main_view, &mut self.mixer, &mut view)
             });
+        commands.extend(central.inner);
         widgets::paint_focus_ring(ui.ctx());
         let commands = self.keep_window_commands(commands);
         remember_removes(&mut self.removing, &commands);
@@ -464,6 +468,7 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(OPEN_UNITS_KEY, open_units_to_string(&self.open_units));
+        storage.set_string(VIEW_KEY, self.views.shown.stored().to_string());
     }
 
     fn on_exit(&mut self) {
@@ -542,7 +547,7 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
         return Some(KeyEvent::Digit(
             digit,
             KeyModifiers {
-                ctrl: modifiers.ctrl,
+                ctrl: modifiers.ctrl || modifiers.command,
                 alt: modifiers.alt,
             },
         ));
@@ -561,83 +566,65 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
     }
 }
 
-/// The transport bar, then the Tracks with their timeline, above the rack.
+/// The transport bar, then in Arrange the Tracks with their timeline above the Rack, over a split that leaves the Rack at least [`RACK_MIN_HEIGHT`].
 fn project_panels(
     ui: &mut Ui,
     snapshot: &Snapshot,
-    (view, mixer_open): (&mut ProjectView, bool),
+    (view, main_view): (&mut ProjectView, MainView),
     feedback: (&mut Feedback, Instant),
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     Panel::top("transport")
         .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
         .show(ui, |ui| {
-            commands.extend(transport_bar(ui, snapshot, mixer_open, feedback));
+            commands.extend(transport_bar(ui, snapshot, main_view, feedback));
         });
-    let (timeline_id, timeline_height) = if mixer_open {
-        ("timeline_with_mixer", TIMELINE_HEIGHT_WITH_MIXER)
-    } else {
-        ("timeline", TIMELINE_HEIGHT)
-    };
-    Panel::top(timeline_id)
+    if main_view != MainView::Arrange {
+        return commands;
+    }
+    let below = ui.available_height();
+    let max_height = (below - RACK_MIN_HEIGHT).max(0.0);
+    Panel::top("timeline")
         .resizable(true)
-        .default_size(timeline_height)
+        .default_size(TIMELINE_HEIGHT.min(below * TIMELINE_SHARE))
+        .size_range(0.0..=max_height)
         .frame(Frame::new().fill(colour(palette().case)))
         .show(ui, |ui| commands.extend(tracks_view(ui, snapshot, view)));
     commands
 }
 
-/// Narrower above and below while the mixer is open, so that its columns and the Rack fit together.
-fn central_margin(mixer: &MixerView) -> Margin {
-    if mixer.open {
+/// Narrower above and below in the mixer, so that its strips take the height.
+fn central_margin(main_view: Option<MainView>) -> Margin {
+    if main_view == Some(MainView::Mixer) {
         MIXER_MARGIN
     } else {
         RACK_MARGIN
     }
 }
 
-/// The Rack alone with no Project open; with one, the mixer panel while it is open with the Rack of the column chosen in it below, else the selected Track's Rack.
+/// The Rack alone with no Project open; with one, the mixer panel in the Mixer view, else the shown Rack ([`shown_rack_column`]) under its heading.
 fn central_view(
     ui: &mut Ui,
     snapshot: &Snapshot,
+    main_view: Option<MainView>,
     mixer: &mut MixerView,
     view: &mut RackView,
 ) -> Vec<Command> {
-    let Some(status) = snapshot
-        .status
-        .as_ref()
-        .filter(|status| project_name(Some(status)).is_some())
-    else {
+    let (Some(main_view), Some(status)) = (main_view, snapshot.status.as_ref()) else {
         return rack_view(ui, snapshot, view);
     };
-    let mut commands = Vec::new();
-    if mixer.open {
-        let max_height = (ui.available_height() - RACK_MIN_HEIGHT).max(MIXER_MIN_HEIGHT);
-        Panel::top("mixer_split")
-            .resizable(true)
-            .default_size(MIXER_HEIGHT + f32::from(MIXER_GAP) + SPLIT_LINE_WIDTH)
-            .size_range(MIXER_MIN_HEIGHT..=max_height)
-            .frame(Frame::new().inner_margin(Margin {
-                bottom: MIXER_GAP,
-                ..Margin::ZERO
-            }))
-            .show(ui, |ui| {
-                ui.spacing_mut().scroll = mixer::scroll_style();
-                ScrollArea::vertical()
-                    .id_salt("mixer_columns")
-                    .show(ui, |ui| commands.extend(mixer_panel(ui, snapshot, mixer)));
-            });
+    if main_view == MainView::Mixer {
+        ui.spacing_mut().scroll = mixer::scroll_style();
+        return ScrollArea::vertical()
+            .id_salt("mixer_columns")
+            .show(ui, |ui| mixer_panel(ui, snapshot, mixer))
+            .inner;
     }
-    let shown = if mixer.open {
-        mixer.rack.and_then(|shown| shown.column(status))
-    } else {
-        selected_index(status).map(MixerTarget::Track)
+    let Some(target) = shown_rack_column(mixer.rack, status) else {
+        return Vec::new();
     };
-    if let Some(target) = shown {
-        rack_heading(ui, status, target);
-        commands.extend(rack_view(ui, snapshot, view));
-    }
-    commands
+    rack_heading(ui, status, target);
+    rack_view(ui, snapshot, view)
 }
 
 fn open_render_dialog(
@@ -653,13 +640,6 @@ fn open_render_dialog(
         mixer.render = None;
     }
     commands
-}
-
-fn selected_index(status: &Value) -> Option<usize> {
-    track_rows(status)
-        .into_iter()
-        .find(|row| row.selected)
-        .map(|row| row.index)
 }
 
 /// Names the Track, Bus or Master whose Rack is shown.

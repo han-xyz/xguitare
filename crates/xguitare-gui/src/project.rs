@@ -8,14 +8,15 @@ use xguitare_core::project::LoopRegion;
 
 use std::time::Instant;
 
+use crate::mixer_model::ShownRack;
 use crate::model::{
     Command, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB, Snapshot,
     TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
-    GridLine, ItemBlock, LoopEdge, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text,
-    dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command, project_tempo,
-    sample_rate, snap_to_beat, time_text, track_colour, track_rows, transport_view,
+    GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
+    bars_beats_text, dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command,
+    project_tempo, sample_rate, snap_to_beat, time_text, track_colour, track_rows, transport_view,
 };
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, colour, palette, translucent};
@@ -26,10 +27,15 @@ pub const TIMELINE_HEIGHT: f32 = 360.0;
 const TRACK_ROW_HEIGHT: f32 = 72.0;
 const RULER_HEIGHT: f32 = 26.0;
 const TRANSPORT_HEIGHT: f32 = 44.0;
-const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(64.0, 32.0);
+const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(48.0, 32.0);
 const PANEL_BUTTON: egui::Vec2 = egui::Vec2::new(56.0, 32.0);
-/// The Tracks and timeline's height while the mixer panel is open below them: the ruler and three Track rows.
-pub const TIMELINE_HEIGHT_WITH_MIXER: f32 = RULER_HEIGHT + 3.0 * TRACK_ROW_HEIGHT;
+const VIEWS: [(&str, MainView); 3] = [
+    ("Rack", MainView::Rack),
+    ("Arrange", MainView::Arrange),
+    ("Mixer", MainView::Mixer),
+];
+const VIEW_SWITCH_GAP: f32 = 2.0;
+const VIEW_BUTTON: egui::Vec2 = egui::Vec2::new(0.0, 32.0);
 const NAME_WIDTH: f32 = 140.0;
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(28.0, 24.0);
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
@@ -64,11 +70,11 @@ pub struct ProjectView {
     pub loop_drag: Option<LoopDrag>,
 }
 
-/// Play, Stop, Record (a second click stops recording) with the count-in beats left, `Mixer` (lit while `mixer_open`) and `Render`, Loop, Click with its count-in in bars, tempo, meter, then the position, left to right on one row. A meter that is no `<beats>/<note>` goes to `feedback`.
+/// Play, Stop, Record (a second click stops recording) with the count-in beats left, the view switch `Rack`, `Arrange`, `Mixer` (`shown` lit) and `Render`, Loop, Click with its count-in in bars, tempo, meter, then the position, left to right on one row. A meter that is no `<beats>/<note>` goes to `feedback`.
 pub fn transport_bar(
     ui: &mut Ui,
     snapshot: &Snapshot,
-    mixer_open: bool,
+    shown: MainView,
     (feedback, now): (&mut Feedback, Instant),
 ) -> Vec<Command> {
     let mut commands = Vec::new();
@@ -113,10 +119,7 @@ pub fn transport_bar(
             );
         }
         ui.separator();
-        let mixer = lit_button("Mixer", mixer_open, colour(colours.text)).min_size(PANEL_BUTTON);
-        if ui.add(mixer).clicked() {
-            commands.push(Command::ToggleMixer);
-        }
+        commands.extend(view_switch(ui, shown));
         if ui
             .add(outlined_button("Render").min_size(PANEL_BUTTON))
             .clicked()
@@ -154,6 +157,21 @@ pub fn transport_bar(
         }
     });
     commands
+}
+
+fn view_switch(ui: &mut Ui, shown: MainView) -> Option<Command> {
+    let mut chosen = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = VIEW_SWITCH_GAP;
+        for (text, view) in VIEWS {
+            let button =
+                lit_button(text, view == shown, colour(palette().lit)).min_size(VIEW_BUTTON);
+            if ui.add(button).clicked() {
+                chosen = Some(Command::ShowView(view));
+            }
+        }
+    });
+    chosen
 }
 
 pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'static> {
@@ -531,8 +549,12 @@ fn track(
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, TRACK_ROW_HEIGHT), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Row, true, format!("Track {}", row.name)));
-    if response.clicked() && !row.selected {
-        commands.push(Command::TrackSelect(row.index));
+    if response.clicked() {
+        commands.push(if row.selected {
+            Command::ShowRack(ShownRack::Track)
+        } else {
+            Command::TrackSelect(row.index)
+        });
     }
     let colours = palette();
     let list = Rect::from_min_size(rect.min, vec2(TRACK_LIST_WIDTH, rect.height()));

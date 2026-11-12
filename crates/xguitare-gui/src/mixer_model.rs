@@ -300,10 +300,16 @@ fn selected_track(status: &Value) -> Option<usize> {
         .map(|row| row.index)
 }
 
-/// What the window knows of the Rack it shows: the mixer panel's open state and the Rack it opened, the selected Track (`None` with no Project open), and the Bus ids in column order.
+/// The column whose Rack the window shows: the one `shown` names while it is in `status`, else the selected Track's.
+pub fn shown_rack_column(shown: Option<ShownRack>, status: &Value) -> Option<MixerTarget> {
+    shown
+        .and_then(|shown| shown.column(status))
+        .or_else(|| ShownRack::Track.column(status))
+}
+
+/// What the window knows of the Rack it shows: the Rack a mixer strip named (`None` for the selected Track's), the selected Track (`None` with no Project open), and the Bus ids in column order.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RackFocus {
-    pub mixer_open: bool,
     pub shown: Option<ShownRack>,
     pub selected: Option<usize>,
     pub bus_ids: Vec<u64>,
@@ -311,15 +317,11 @@ pub struct RackFocus {
 
 impl RackFocus {
     /// The focus over `status`; a shown Rack whose Bus is gone from it is closed.
-    pub fn new(mixer_open: bool, shown: Option<ShownRack>, status: Option<&Value>) -> RackFocus {
+    pub fn new(shown: Option<ShownRack>, status: Option<&Value>) -> RackFocus {
         let Some(status) = status else {
-            return RackFocus {
-                mixer_open,
-                ..RackFocus::default()
-            };
+            return RackFocus::default();
         };
         RackFocus {
-            mixer_open,
             shown: shown.filter(|shown| shown.column(status).is_some()),
             selected: selected_track(status),
             bus_ids: entries(&status["buses"])
@@ -329,11 +331,9 @@ impl RackFocus {
         }
     }
 
-    /// The Rack that Rack requests act on: the one opened in the mixer panel while it is open, else the selected Track's.
+    /// The Rack that Rack requests act on: the one a strip named, else the selected Track's.
     pub fn target(&self) -> Option<ShownRack> {
-        self.shown
-            .filter(|_| self.mixer_open)
-            .or(self.selected.map(|_| ShownRack::Track))
+        self.shown.or(self.selected.map(|_| ShownRack::Track))
     }
 
     fn follow(&mut self, command: &Command) {
@@ -352,13 +352,6 @@ impl RackFocus {
                         self.shown = None;
                     }
                 }
-            }
-            Command::ToggleMixer => {
-                self.mixer_open = !self.mixer_open;
-                self.shown = self
-                    .selected
-                    .filter(|_| self.mixer_open)
-                    .map(|_| ShownRack::Track);
             }
             Command::ProjectNew(_)
             | Command::ProjectOpen(_)

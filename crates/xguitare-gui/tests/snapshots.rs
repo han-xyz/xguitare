@@ -28,6 +28,7 @@ use xguitare_gui::theme::palette;
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
 const MIN_WINDOW: Vec2 = Vec2::new(1024.0, 640.0);
+const FULL_HD_WINDOW: Vec2 = Vec2::new(1920.0, 1080.0);
 const CAPTURE: &str = "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO";
 const LEFT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL";
 const RIGHT: &str = "Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR";
@@ -1154,6 +1155,17 @@ fn project_snapshots() {
     let (mut recording, _, _dir) = project_harness("recording");
     write_png(&mut recording, "project-recording");
 
+    for (size, suffix) in [
+        (MIN_WINDOW, "1024x640"),
+        (DEFAULT_WINDOW, "1280x800"),
+        (FULL_HD_WINDOW, "1920x1080"),
+    ] {
+        let (mut view, _, _dir) = harness_with(size, mixer_snapshot());
+        write_png(&mut view, &format!("view-arrange-{suffix}"));
+        click_button(&mut view, "Rack");
+        write_png(&mut view, &format!("view-rack-{suffix}"));
+    }
+
     let (mut section, _, _dir) = harness();
     section.get_by_label("Open a Project").click();
     section.run_steps(2);
@@ -1234,6 +1246,31 @@ fn no_project_shows_no_transport() {
     let (harness, _, _dir) = harness();
     assert!(harness.query_by_label("▶ Play").is_none());
     assert!(harness.query_by_label("Timeline ruler").is_none());
+}
+
+#[test]
+fn a_project_opens_in_arrange_and_the_switch_and_keys_change_the_view() {
+    let (mut harness, sent, _dir) = harness_with(WINDOW, mixer_snapshot());
+    let timeline = |harness: &Harness<App>| harness.query_by_label("Timeline ruler").is_some();
+    let rack = |harness: &Harness<App>| harness.query_by_label("Bass DI — Rack").is_some();
+    let mixer = |harness: &Harness<App>| harness.query_by_label("Rack of Master").is_some();
+    assert!(timeline(&harness) && rack(&harness) && !mixer(&harness));
+    click_button(&mut harness, "Rack");
+    assert!(!timeline(&harness) && rack(&harness) && !mixer(&harness));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num3);
+    harness.run_steps(2);
+    assert!(!timeline(&harness) && !rack(&harness) && mixer(&harness));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run_steps(2);
+    assert!(!timeline(&harness) && rack(&harness) && !mixer(&harness));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    harness.run_steps(2);
+    assert!(timeline(&harness) && rack(&harness) && !mixer(&harness));
+    assert!(
+        !sent_now(&sent)
+            .iter()
+            .any(|command| matches!(command, Command::Load(_)))
+    );
 }
 
 #[test]
@@ -1948,6 +1985,7 @@ fn mixer_snapshots() {
     let (mut bus_rack, _, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
     click_button(&mut bus_rack, "Mixer");
     click_button(&mut bus_rack, "Rack of Room");
+    click_button(&mut bus_rack, "Rack");
     write_png(&mut bus_rack, "mixer-bus-rack");
 
     let (mut eight_buses, _, _dir) = harness_with(DEFAULT_WINDOW, eight_buses_snapshot());
@@ -1994,14 +2032,14 @@ fn transport_bar_fits_one_row_at_1280() {
 }
 
 #[test]
-fn mixer_faders_and_switches_show_whole_above_the_rack() {
+fn mixer_faders_and_switches_show_whole_in_the_mixer_view() {
     for (size, snapshot) in [
         (WINDOW, mixer_snapshot()),
         (DEFAULT_WINDOW, eight_buses_snapshot()),
     ] {
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
-        let rack_top = harness.get_by_label("Bass DI — Rack").rect().top();
+        let footer_top = harness.get_by_label("connected").rect().top();
         for name in ["Room", "Bass DI", "Bass Amp", "Click", "Master"] {
             let mut labels = vec![format!("Volume {name}"), format!("Volume {name} value")];
             if name != "Master" {
@@ -2011,8 +2049,8 @@ fn mixer_faders_and_switches_show_whole_above_the_rack() {
                 for node in harness.get_all_by_label(&label) {
                     let bottom = node.rect().bottom();
                     assert!(
-                        bottom < rack_top,
-                        "{label} at {size:?} ends at {bottom}, below the Rack heading at {rack_top}"
+                        bottom < footer_top,
+                        "{label} at {size:?} ends at {bottom}, below the footer at {footer_top}"
                     );
                 }
             }
@@ -2021,11 +2059,10 @@ fn mixer_faders_and_switches_show_whole_above_the_rack() {
 }
 
 #[test]
-fn dragging_the_mixer_split_resizes_the_rack() {
+fn dragging_the_arrange_split_resizes_the_rack() {
     let (mut harness, _, _dir) = harness_with(WINDOW, mixer_snapshot());
-    click_button(&mut harness, "Mixer");
     let heading = harness.get_by_label("Bass DI — Rack").rect().top();
-    let edge = pos2(700.0, heading - 4.0);
+    let edge = pos2(700.0, heading - 24.0);
     drag_and_release(&mut harness, edge, edge - Vec2::new(0.0, 100.0));
     let moved = harness.get_by_label("Bass DI — Rack").rect().top();
     assert!(
@@ -2077,14 +2114,19 @@ fn mixer_columns_send_their_commands() {
             Command::ShowRack(ShownRack::Bus(0)),
         ]
     );
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    harness.run_steps(2);
     assert!(harness.query_by_label("Room — Rack").is_some());
     click_button(&mut harness, "cabinet (mono)");
     assert_eq!(sent_now(&sent), []);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
-    assert_eq!(sent_now(&sent), [Command::ShowRack(ShownRack::Track)]);
+    assert!(harness.query_by_label("Rack of Master").is_some());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
     assert!(harness.query_by_label("Rack of Master").is_none());
-    assert!(harness.query_by_label("Bass DI — Rack").is_some());
+    assert!(harness.query_by_label("Room — Rack").is_some());
 }
 
 #[test]

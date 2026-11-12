@@ -7,11 +7,11 @@ use xguitare_gui::model::{
     response_text, restore,
 };
 use xguitare_gui::project_model::{
-    AutosaveOffer, GridLine, ItemBlock, LoopEdge, ProjectRow, Tempo, TimelineView, TrackRow,
-    TransportState, TransportView, autosave_offer, bars_beats_text, dragged_loop, grid_lines,
-    item_blocks, key_active, parse_meter, project_end, project_key_to_command, project_name,
-    project_rows, project_tempo, snap_to_beat, still_closing, time_text, track_rows,
-    transport_view,
+    AutosaveOffer, GridLine, ItemBlock, LoopEdge, MainView, ProjectRow, Tempo, TimelineView,
+    TrackRow, TransportState, TransportView, ViewSwitch, autosave_offer, bars_beats_text,
+    dragged_loop, grid_lines, item_blocks, key_active, parse_meter, project_end,
+    project_key_to_command, project_name, project_rows, project_tempo, restored_view, snap_to_beat,
+    still_closing, time_text, track_rows, transport_view,
 };
 
 const RATE: f64 = 48_000.0;
@@ -397,6 +397,85 @@ fn plain_keys_wait_for_no_focus() {
     assert!(key_active(digit, false, true));
     assert!(!key_active(KeyEvent::CtrlS, true, true));
     assert!(!key_active(digit, true, true));
+}
+
+const CTRL: KeyModifiers = KeyModifiers {
+    ctrl: true,
+    alt: false,
+};
+
+#[test]
+fn ctrl_digits_select_the_views_in_a_project() {
+    let stopped = project_status("stopped");
+    for (digit, view) in [
+        (1, MainView::Rack),
+        (2, MainView::Arrange),
+        (3, MainView::Mixer),
+    ] {
+        assert_eq!(
+            project_key_to_command(KeyEvent::Digit(digit, CTRL), &stopped, &[]),
+            Some(Command::ShowView(view))
+        );
+    }
+    assert_eq!(
+        project_key_to_command(KeyEvent::Digit(4, CTRL), &stopped, &[]),
+        None
+    );
+    let ctrl_alt = KeyModifiers {
+        ctrl: true,
+        alt: true,
+    };
+    assert_eq!(
+        project_key_to_command(KeyEvent::Digit(1, ctrl_alt), &stopped, &[]),
+        None
+    );
+    let mut closed = stopped;
+    closed["project"] = json!(null);
+    assert_eq!(
+        project_key_to_command(KeyEvent::Digit(1, CTRL), &closed, &[]),
+        None
+    );
+}
+
+#[test]
+fn view_keys_wait_while_a_text_field_has_focus() {
+    let ctrl_two = KeyEvent::Digit(2, CTRL);
+    assert!(key_active(ctrl_two, false, true));
+    assert!(!key_active(ctrl_two, true, true));
+    assert!(!key_active(KeyEvent::CtrlM, true, true));
+}
+
+#[test]
+fn ctrl_m_shows_the_mixer_and_goes_back_to_the_previous_view() {
+    for from in [MainView::Rack, MainView::Arrange] {
+        let mut views = ViewSwitch::new(from);
+        views.follow(&Command::ToggleMixer);
+        assert_eq!(views.shown, MainView::Mixer);
+        views.follow(&Command::ToggleMixer);
+        assert_eq!(views.shown, from);
+    }
+    let mut views = ViewSwitch::new(MainView::Rack);
+    views.follow(&Command::ShowView(MainView::Mixer));
+    views.follow(&Command::ShowView(MainView::Mixer));
+    assert_eq!(views.shown, MainView::Mixer);
+    views.follow(&Command::ToggleMixer);
+    assert_eq!(views.shown, MainView::Rack);
+}
+
+#[test]
+fn a_mixer_restored_from_storage_goes_back_to_arrange() {
+    let mut views = ViewSwitch::new(MainView::Mixer);
+    views.follow(&Command::ToggleMixer);
+    assert_eq!(views.shown, MainView::Arrange);
+}
+
+#[test]
+fn the_stored_view_round_trips_and_defaults_to_arrange() {
+    for view in [MainView::Rack, MainView::Arrange, MainView::Mixer] {
+        assert_eq!(restored_view(Some(view.stored())), view);
+    }
+    assert_eq!(restored_view(None), MainView::Arrange);
+    assert_eq!(restored_view(Some("timeline")), MainView::Arrange);
 }
 
 #[test]

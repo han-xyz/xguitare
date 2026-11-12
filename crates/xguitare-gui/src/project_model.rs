@@ -4,7 +4,7 @@ use xguitare_core::control::{Request, Response, SILENCE_DB, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_core::project_control::STILL_CLOSING;
 
-use crate::model::{Command, KeyEvent, shortcuts_active};
+use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
 use crate::theme::{Rgb, TRACK_COLOURS};
 
 pub fn track_colour(index: usize) -> Rgb {
@@ -393,6 +393,74 @@ pub fn project_end(status: &Value, items: &[ItemBlock]) -> u64 {
         .unwrap_or_default()
 }
 
+/// What the main area shows while a Project is open: the shown Rack alone, the Tracks and timeline over it, or the mixer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainView {
+    Rack,
+    Arrange,
+    Mixer,
+}
+
+impl MainView {
+    /// Its name in eframe storage.
+    pub fn stored(self) -> &'static str {
+        match self {
+            MainView::Rack => "rack",
+            MainView::Arrange => "arrange",
+            MainView::Mixer => "mixer",
+        }
+    }
+
+    /// The view for Ctrl+1, Ctrl+2 and Ctrl+3.
+    fn of_digit(digit: u8) -> Option<MainView> {
+        match digit {
+            1 => Some(MainView::Rack),
+            2 => Some(MainView::Arrange),
+            3 => Some(MainView::Mixer),
+            _ => None,
+        }
+    }
+}
+
+/// The view stored by [`MainView::stored`]; Arrange when none or another name is stored.
+pub fn restored_view(stored: Option<&str>) -> MainView {
+    [MainView::Rack, MainView::Arrange, MainView::Mixer]
+        .into_iter()
+        .find(|view| Some(view.stored()) == stored)
+        .unwrap_or(MainView::Arrange)
+}
+
+/// The view shown and the one before the mixer, which [`Command::ToggleMixer`] goes back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewSwitch {
+    pub shown: MainView,
+    previous: MainView,
+}
+
+impl ViewSwitch {
+    pub fn new(shown: MainView) -> ViewSwitch {
+        let previous = if shown == MainView::Mixer {
+            MainView::Arrange
+        } else {
+            shown
+        };
+        ViewSwitch { shown, previous }
+    }
+
+    pub fn follow(&mut self, command: &Command) {
+        let view = match command {
+            Command::ShowView(view) => *view,
+            Command::ToggleMixer if self.shown == MainView::Mixer => self.previous,
+            Command::ToggleMixer => MainView::Mixer,
+            _ => return,
+        };
+        if self.shown != MainView::Mixer {
+            self.previous = self.shown;
+        }
+        self.shown = view;
+    }
+}
+
 /// Plain keys act only while no widget has focus, so that a focused knob keeps Home and End and a focused button its Space; with modifiers, and M and T, they act unless a text field takes typing.
 pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) -> bool {
     match key {
@@ -407,7 +475,7 @@ pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) 
     }
 }
 
-/// Reaper's keys while a Project is open, Ctrl+M (mixer) and Ctrl+Alt+R (Render dialog) among them; the digit keys load no Preset then.
+/// Reaper's keys while a Project is open, Ctrl+1, Ctrl+2 and Ctrl+3 (the views), Ctrl+M (mixer) and Ctrl+Alt+R (Render dialog) among them; the digit keys load no Preset then.
 pub fn project_key_to_command(
     key: KeyEvent,
     status: &Value,
@@ -424,6 +492,13 @@ pub fn project_key_to_command(
         KeyEvent::CtrlS => Some(Command::ProjectSave),
         KeyEvent::CtrlM => Some(Command::ToggleMixer),
         KeyEvent::CtrlAltR => Some(Command::OpenRenderDialog),
+        KeyEvent::Digit(
+            digit,
+            KeyModifiers {
+                ctrl: true,
+                alt: false,
+            },
+        ) => MainView::of_digit(digit).map(Command::ShowView),
         KeyEvent::Digit(..) | KeyEvent::M | KeyEvent::T => None,
     }
 }

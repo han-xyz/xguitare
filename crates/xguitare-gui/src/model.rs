@@ -12,7 +12,7 @@ use xguitare_core::project::LoopRegion;
 use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
-use crate::project_model::AutosaveOffer;
+use crate::project_model::{AutosaveOffer, MainView};
 use crate::theme::{self, FOCUS_RING_GAP, FOCUS_RING_WIDTH, Rgb, palette};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
@@ -178,7 +178,9 @@ pub enum Command {
         name: Option<String>,
     },
     RenderCancel,
-    /// Kept by the window: opens or closes the mixer panel.
+    /// Kept by the window: shows one of the main views.
+    ShowView(MainView),
+    /// Kept by the window: shows the mixer, or the view before it while it shows.
     ToggleMixer,
     /// Kept by the window: opens the Render dialog.
     OpenRenderDialog,
@@ -1187,6 +1189,7 @@ pub fn requests_until_quit(
             Command::RefreshIrs
             | Command::RefreshPorts
             | Command::RefreshProjects
+            | Command::ShowView(_)
             | Command::ToggleMixer
             | Command::OpenRenderDialog => continue,
             Command::Quit => return (requests, true),

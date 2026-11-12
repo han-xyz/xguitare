@@ -5,10 +5,11 @@ use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
     Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, SendView, ShownRack,
     StereoPeakHold, aim_rack_commands, default_render_name, fader_db, fader_position,
-    mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text, strip_ladder,
+    mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text,
+    shown_rack_column, strip_ladder,
 };
 use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command};
-use xguitare_gui::project_model::project_key_to_command;
+use xguitare_gui::project_model::{MainView, project_key_to_command};
 
 fn track(name: &str, mute: bool, solo: bool, sends: &[usize]) -> Value {
     let sends: Vec<Value> = sends
@@ -366,7 +367,7 @@ fn three_tracks_and_buses(selected: usize) -> Value {
 }
 
 fn mixer_showing(shown: ShownRack, selected: usize) -> RackFocus {
-    RackFocus::new(true, Some(shown), Some(&three_tracks_and_buses(selected)))
+    RackFocus::new(Some(shown), Some(&three_tracks_and_buses(selected)))
 }
 
 #[test]
@@ -425,33 +426,51 @@ fn removing_an_earlier_bus_keeps_the_shown_bus() {
 }
 
 #[test]
-fn closing_the_mixer_shows_the_selected_track_again() {
-    let (commands, focus) = aim_rack_commands(
-        mixer_showing(ShownRack::Master, 1),
-        vec![Command::ToggleMixer],
-    );
-    assert_eq!(
-        commands,
-        [Command::ToggleMixer, Command::ShowRack(ShownRack::Track),]
-    );
-    assert!(!focus.mixer_open);
-    assert_eq!(focus.shown, None);
+fn switching_views_keeps_the_shown_rack() {
+    for switch in [
+        Command::ToggleMixer,
+        Command::ShowView(MainView::Rack),
+        Command::ShowView(MainView::Arrange),
+    ] {
+        let (commands, focus) =
+            aim_rack_commands(mixer_showing(ShownRack::Master, 1), vec![switch.clone()]);
+        assert_eq!(commands, [switch]);
+        assert_eq!(focus.shown, Some(ShownRack::Master));
+    }
 }
 
 #[test]
-fn opening_the_mixer_shows_the_selected_track_rack() {
-    let closed = RackFocus::new(false, None, Some(&three_tracks_and_buses(1)));
-    let (_, focus) = aim_rack_commands(closed, vec![Command::ToggleMixer]);
-    assert!(focus.mixer_open);
-    assert_eq!(focus.shown, Some(ShownRack::Track));
+fn the_shown_rack_is_the_selected_track_until_a_strip_names_another() {
+    let status = three_tracks_and_buses(1);
+    assert_eq!(
+        shown_rack_column(None, &status),
+        Some(MixerTarget::Track(1))
+    );
+    assert_eq!(
+        shown_rack_column(Some(ShownRack::Bus(3)), &status),
+        Some(MixerTarget::Bus(1))
+    );
+    assert_eq!(
+        shown_rack_column(Some(ShownRack::Master), &status),
+        Some(MixerTarget::Master)
+    );
+    assert_eq!(
+        shown_rack_column(Some(ShownRack::Bus(9)), &status),
+        Some(MixerTarget::Track(1))
+    );
+    let (_, focus) = aim_rack_commands(
+        RackFocus::new(None, Some(&status)),
+        vec![Command::ShowRack(ShownRack::Bus(5)), rack_add()],
+    );
+    assert_eq!(focus.target(), Some(ShownRack::Bus(5)));
 }
 
 #[test]
 fn a_bus_removed_elsewhere_closes_its_rack() {
     let status = three_tracks_and_buses(0);
-    let gone = RackFocus::new(true, Some(ShownRack::Bus(9)), Some(&status));
+    let gone = RackFocus::new(Some(ShownRack::Bus(9)), Some(&status));
     assert_eq!(gone.shown, None);
-    let kept = RackFocus::new(true, Some(ShownRack::Bus(3)), Some(&status));
+    let kept = RackFocus::new(Some(ShownRack::Bus(3)), Some(&status));
     assert_eq!(kept.shown, Some(ShownRack::Bus(3)));
 }
 
