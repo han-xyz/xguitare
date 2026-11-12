@@ -54,9 +54,13 @@ const CENTS_TICKS: usize = 21;
 const CENTS_TICK_HEIGHT: f32 = 8.0;
 const CENTS_CENTRE_TICK_HEIGHT: f32 = 20.0;
 const CENTS_STRIP_INSET: f32 = 2.0;
-const BANK_ROW_HEIGHT: f32 = 40.0;
+const BANK_ROW_HEIGHT: f32 = 28.0;
 const BANK_ROW_BORDER: f32 = 3.0;
-const BANK_ROW_PADDING: f32 = 10.0;
+const BANK_ROW_PADDING: f32 = 8.0;
+const SWITCH_SIZE: Vec2 = Vec2::new(32.0, 18.0);
+const SWITCH_TARGET: Vec2 = Vec2::new(32.0, 24.0);
+const SWITCH_THUMB_RADIUS: f32 = 6.0;
+const SWITCH_THUMB_INSET: f32 = 3.0;
 const BANK_NUMBER_WIDTH: f32 = 18.0;
 pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(FOOTSWITCH_WIDTH, 38.0);
 const FOOTSWITCH_LED_TOP: f32 = 13.0;
@@ -141,9 +145,10 @@ enum ButtonKind {
     Primary,
     Outlined,
     Warning,
+    Lit(theme::Rgb),
 }
 
-/// A button with a rest, a hover and a pressed look: [`primary_button`], [`outlined_button`] and [`warning_button`]. Keyboard focus keeps the rest or hover look inside the focus ring; only a press shows the pressed one.
+/// A button with a rest, a hover and a pressed look: [`primary_button`], [`outlined_button`], [`warning_button`] and [`switched_button`]. Keyboard focus keeps the rest or hover look inside the focus ring; only a press shows the pressed one.
 pub struct StyledButton {
     button: Button<'static>,
     kind: ButtonKind,
@@ -154,6 +159,15 @@ impl StyledButton {
     pub fn min_size(self, size: Vec2) -> Self {
         Self {
             button: self.button.min_size(size),
+            ..self
+        }
+    }
+
+    /// Marks the button as a toggle in the accessibility tree; its look stays the kind's own.
+    #[must_use]
+    pub fn selected(self, selected: bool) -> Self {
+        Self {
+            button: self.button.selected(selected),
             ..self
         }
     }
@@ -175,6 +189,7 @@ impl Widget for StyledButton {
                 [colours.panel_open, colours.hover, colours.well],
                 [colours.danger; 3],
             ),
+            ButtonKind::Lit(lit) => ([lit; 3], [lit, colours.hover_boundary, colours.text]),
         };
         ui.scope(|ui| {
             // egui draws a focused widget with its `active` look, so `active` gets the look the button had last frame: pressed while the pointer is down on it, else hover or rest.
@@ -193,6 +208,9 @@ impl Widget for StyledButton {
                 state.weak_bg_fill = colour(fills[look]);
                 state.bg_stroke = Stroke::new(1.0, colour(edges[look]));
             }
+            let selection = &mut ui.visuals_mut().selection;
+            selection.bg_fill = colour(fills[look]);
+            selection.stroke.color = colour(colours.text);
             ui.add(self.button)
         })
         .inner
@@ -221,6 +239,56 @@ pub fn warning_button(text: &str) -> StyledButton {
         button: Button::new(RichText::new(text).color(colour(palette().danger_text))),
         kind: ButtonKind::Warning,
     }
+}
+
+/// A toggle reading `text`: while `lit` filled in `lit_colour` with dark text, else an [`outlined_button`].
+pub fn switched_button(text: &str, lit: bool, lit_colour: theme::Rgb) -> StyledButton {
+    let button = if lit {
+        StyledButton {
+            button: Button::new(RichText::new(text).color(colour(palette().on_accent))),
+            kind: ButtonKind::Lit(lit_colour),
+        }
+    } else {
+        outlined_button(text)
+    };
+    button.selected(lit)
+}
+
+/// A pill switch named `name`: while on, lit with its thumb at the right; while off, a dark well with a muted thumb at the left.
+pub fn toggle_switch(ui: &mut Ui, name: &str, on: bool) -> Response {
+    let colours = palette();
+    let (rect, response) = ui.allocate_exact_size(SWITCH_TARGET, Sense::click());
+    response.widget_info(|| WidgetInfo::selected(Role::Switch, true, on, name));
+    focus_corner(ui, response.id, SWITCH_TARGET.y / 2.0);
+    let pill = Rect::from_center_size(rect.center(), SWITCH_SIZE);
+    let (_, edge) = control_state(&response);
+    let at_rest = !response.hovered() && !response.is_pointer_button_down_on();
+    let (fill, edge, thumb) = if on {
+        let edge = if at_rest { colours.lit } else { edge };
+        (colours.lit, edge, colours.on_accent)
+    } else {
+        (colours.well, edge, colours.muted)
+    };
+    let painter = ui.painter();
+    painter.rect(
+        pill,
+        RADIUS_PILL,
+        colour(fill),
+        Stroke::new(1.0, colour(edge)),
+        StrokeKind::Inside,
+    );
+    let inset = SWITCH_THUMB_INSET + SWITCH_THUMB_RADIUS;
+    let thumb_x = if on {
+        pill.right() - inset
+    } else {
+        pill.left() + inset
+    };
+    painter.circle_filled(
+        pos2(thumb_x, pill.center().y),
+        SWITCH_THUMB_RADIUS,
+        colour(thumb),
+    );
+    response
 }
 
 /// A single-line field: muted placeholder, while editing a lit edge, a caret and lit selected text in dark letters.
@@ -326,7 +394,7 @@ fn focus_ring(painter: &Painter, widget: Rect, corner: f32) {
     }
 }
 
-/// A Bank row: the program number in a muted column, then the name; the active row has an amber left border on a lighter fill. `enabled` false greys the row and takes no click.
+/// A Bank row: the program number in a muted column, then the name; the active row has an amber left bar on a lighter fill, its number in the text colour and its name in semibold. `enabled` false greys the row and takes no click.
 pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bool) -> Response {
     let colours = palette();
     let sense = if enabled {
@@ -347,14 +415,20 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
         painter.rect_filled(rect, 0, colour(colours.hover));
     }
     let number_left = rect.left() + BANK_ROW_BORDER + BANK_ROW_PADDING;
+    let number_colour = if active { colours.text } else { colours.muted };
     painter.text(
         pos2(number_left, rect.center().y),
         Align2::LEFT_CENTER,
         number,
         theme::value(),
-        colour(colours.muted),
+        colour(number_colour),
     );
     let name_colour = if enabled { colours.text } else { colours.muted };
+    let name_font = if active {
+        theme::unit_name()
+    } else {
+        theme::list_item()
+    };
     painter.text(
         pos2(
             number_left + BANK_NUMBER_WIDTH + BANK_ROW_PADDING,
@@ -362,7 +436,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
         ),
         Align2::LEFT_CENTER,
         name,
-        theme::list_item(),
+        name_font,
         colour(name_colour),
     );
     response

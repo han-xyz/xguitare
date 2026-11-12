@@ -37,7 +37,12 @@ use crate::theme::{self, colour, palette};
 use crate::widgets;
 
 const SIDEBAR_WIDTH: f32 = 260.0;
-const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
+const SIDEBAR_MARGIN: Margin = Margin {
+    left: 12,
+    right: 4,
+    top: 12,
+    bottom: 12,
+};
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const MIXER_MARGIN: Margin = Margin::same(8);
 const MIXER_GAP: i8 = 4;

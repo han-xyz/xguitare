@@ -19,10 +19,10 @@ use xguitare_gui::model::{
     KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NO_SIGNAL, ParamRow,
     PeakHold, PortChoices, PortSelection, SECTIONS, Section, SettingsDraft, Throttle, TunerReading,
     add_after, add_command, add_place, add_places, autoscroll_delta, bank_kind, bank_rows,
-    bank_rows_for_rack, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, ear_holes,
-    engine_readout, failed_set, filter_bank, forget_removed_units, format_value, in_tune, ir_names,
-    key_step, key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
-    knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
+    bank_rows_for_rack, cabinet_ir, cents_fraction, cents_text, chip_columns, counts_toward_spawn,
+    ear_holes, engine_readout, failed_set, filter_bank, forget_removed_units, format_value,
+    in_tune, ir_names, key_step, key_to_command, knob_angle_deg, knob_fraction, knob_param_value,
+    knob_points, knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
     open_units_from_string, open_units_to_string, param_label, param_rows, parse_typed_value,
     peak_db, peak_text, port_choices, quit_commands, rack_channels, refresh_decision,
     refused_remove, remember_removes, requests_until_quit, response_text, set_ports_command,
@@ -2398,4 +2398,12 @@ fn closed_units_fit_three_small_knobs_a_row_at_1024() {
         closed_unit_rows(5, closed_knobs_width(DEFAULT_WINDOW_UNIT_WIDTH, false)),
         1
     );
+}
+
+#[test]
+fn add_module_chips_take_three_columns_while_each_stays_wide_enough() {
+    assert_eq!(chip_columns(208.0), 3);
+    assert_eq!(chip_columns(188.0), 3);
+    assert_eq!(chip_columns(187.0), 2);
+    assert_eq!(chip_columns(120.0), 2);
 }

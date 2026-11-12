@@ -395,6 +395,11 @@ pub fn ear_number() -> FontId {
     FontId::monospace(TEXT_UNIT)
 }
 
+/// A left-panel section's title.
+pub fn section_title() -> FontId {
+    FontId::new(TEXT_BODY, family_semibold())
+}
+
 /// An eq band column's title.
 pub fn band_title() -> FontId {
     FontId::new(TEXT_BODY, family_semibold())

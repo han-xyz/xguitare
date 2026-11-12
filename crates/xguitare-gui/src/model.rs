@@ -1718,6 +1718,17 @@ fn number_text(value: f64) -> String {
     text.replace('-', "\u{2212}")
 }
 
+/// The gap between Add Module chips, across and down.
+pub const CHIP_GAP: f32 = 4.0;
+/// The narrowest chip that still shows `compressor`, the longest Module type, beside its accent tab.
+const MIN_CHIP_WIDTH: f32 = 60.0;
+
+/// Three columns of Add Module chips when three fit `width`, else two.
+pub fn chip_columns(width: f32) -> usize {
+    let three = (width - 2.0 * CHIP_GAP) / 3.0;
+    if three >= MIN_CHIP_WIDTH { 3 } else { 2 }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Project,

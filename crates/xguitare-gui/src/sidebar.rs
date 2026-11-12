@@ -3,9 +3,9 @@ use std::time::Instant;
 use egui::collapsing_header::CollapsingState;
 use egui::style::ScrollStyle;
 use egui::{
-    Align2, Button, ComboBox, CornerRadius, CursorIcon, DragAndDrop, DragValue, Frame, Grid, Id,
-    Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role, ScrollArea, Sense,
-    Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, vec2,
+    Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragAndDrop, DragValue, Frame,
+    Grid, Id, Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role,
+    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, pos2, vec2,
 };
 use xguitare_core::BankKind;
 
@@ -13,37 +13,38 @@ use crate::metronome_model::{
     BPM_RANGE, BeatLight, DEFAULT_VOLUME_DB, METER_CHOICES, VOLUME_DB_RANGE, metronome_view,
 };
 use crate::model::{
-    AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
-    SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
-    filter_bank, link_text, param_rows, port_choices, rack_channels, set_ports_command,
-    set_settings_command, settings_draft, shown_undo, tuner_toggle,
+    AddPlace, BankRow, CHIP_GAP, Command, Dragged, Feedback, Link, ModuleType, PortSelection,
+    RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places,
+    chip_columns, engine_readout, filter_bank, link_text, param_rows, port_choices, rack_channels,
+    set_ports_command, set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
-use crate::project::{knob_with_reset, lit_button, released_value};
+use crate::project::{knob_with_reset, released_value};
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, RADIUS_PANEL, colour, palette};
-use crate::widgets::{accent, bank_row, outlined_button, primary_button, text_field};
+use crate::widgets::{
+    accent, bank_row, outlined_button, primary_button, switched_button, text_field, toggle_switch,
+};
 
 const NO_PRESET: &str = "no preset";
 const CABINET: &str = "cabinet";
 /// The Daemon's `rack_add` error for a cabinet on a Bus or Master Rack.
 const CABINET_REFUSED: &str = "a cabinet is not allowed on a Bus or Master";
 const SIDEBAR_SPACING: Vec2 = vec2(8.0, 4.0);
-const SIDEBAR_BUTTON_HEIGHT: f32 = 40.0;
+const SIDEBAR_BUTTON_HEIGHT: f32 = 28.0;
 const SECTION_GAP: f32 = 8.0;
-const SECTION_HEADER_HEIGHT: f32 = 34.0;
-const SECTION_PADDING: i8 = 8;
-const ARROW_SIZE: f32 = 10.0;
+const SECTION_HEADER_HEIGHT: f32 = 24.0;
+const SECTION_PADDING: Margin = Margin::symmetric(12, 8);
+const ARROW_SIZE: f32 = 8.0;
 const UNSAVED: &str = "unsaved changes";
 const SAVE_AS_LABEL: &str = "Save as new";
 const SAVE_AS_HINT: &str = "New Preset name";
 const SEARCH_HINT: &str = "Search by name or number";
 const CHOOSE: &str = "choose";
 const RACK_RULES: &str = "by the Rack rules";
-const TILE_COLUMNS: usize = 2;
-const TILE_HEIGHT: f32 = 30.0;
-const TILE_SWATCH_WIDTH: f32 = 6.0;
-const TILE_TEXT_INSET: f32 = 14.0;
+const TILE_HEIGHT: f32 = 24.0;
+const TILE_TAB_WIDTH: f32 = 3.0;
+const TILE_TEXT_INSET: f32 = 8.0;
 const NO_PORTS: &str = "no port list from the Daemon";
 const NO_SETTINGS: &str = "no settings from the Daemon";
 const NO_PROJECT: &str = "No Project open";
@@ -52,7 +53,10 @@ const OPEN_PROJECT: &str = "Open a Project";
 const NO_PROJECTS: &str = "no Projects yet";
 const NO_METRONOME: &str = "no Metronome from the Daemon";
 const FOLLOWS_PROJECT: &str = "follows the Project";
-const BEAT_LIGHT_SIZE: f32 = 28.0;
+const BEAT_DOT_SIZE: f32 = 10.0;
+const BEAT_DOT_RING_WIDTH: f32 = 1.5;
+const BEAT_DOT_GAP: f32 = 4.0;
+const METER_WIDTH: f32 = 48.0;
 const BANK_KINDS: [(BankKind, &str); 2] = [(BankKind::Guitar, "Guitar"), (BankKind::Bass, "Bass")];
 
 pub struct Tuner<'a> {
@@ -126,20 +130,20 @@ fn arrow_points(centre: Pos2, open: bool) -> Vec<Pos2> {
         .collect()
 }
 
-/// A framed section: a header strip holding the title and the collapse arrow, which a click opens or closes, over the body.
+/// A panel holding its title and the collapse arrow, which a click opens or closes, over the body.
 fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mut Ui)) {
     let colours = palette();
-    let border = Stroke::new(1.0, colour(colours.hover));
     let id = ui.make_persistent_id(("section", section as u8));
     let mut state =
         CollapsingState::load_with_default_open(ui.ctx(), id, section.open_by_default());
     Frame::new()
         .fill(colour(colours.panel))
-        .stroke(border)
+        .stroke(Stroke::new(1.0, colour(colours.hover)))
         .corner_radius(RADIUS_PANEL)
-        .inner_margin(Margin::same(1))
+        .inner_margin(SECTION_PADDING)
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
+            ui.set_width(ui.available_width());
             let size = vec2(ui.available_width(), SECTION_HEADER_HEIGHT);
             let (rect, header) = ui.allocate_exact_size(size, Sense::click());
             header.widget_info(|| WidgetInfo::labeled(Role::Button, true, title));
@@ -147,45 +151,21 @@ fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mu
                 state.toggle(ui);
             }
             let open = state.is_open();
-            let inner_radius = RADIUS_PANEL - 1;
-            let corners = if open {
-                CornerRadius {
-                    nw: inner_radius,
-                    ne: inner_radius,
-                    sw: 0,
-                    se: 0,
-                }
-            } else {
-                CornerRadius::same(inner_radius)
-            };
             let painter = ui.painter();
-            painter.rect_filled(rect, corners, colour(colours.well));
-            if open {
-                painter.hline(rect.x_range(), rect.bottom(), border);
-            }
-            let padding = f32::from(SECTION_PADDING);
             painter.text(
-                rect.left_center() + vec2(padding, 0.0),
+                rect.left_center(),
                 Align2::LEFT_CENTER,
                 title,
-                theme::unit_name(),
+                theme::section_title(),
                 colour(colours.text),
             );
-            let arrow_centre = rect.right_center() - vec2(padding + ARROW_SIZE / 2.0, 0.0);
+            let arrow_centre = rect.right_center() - vec2(ARROW_SIZE / 2.0, 0.0);
             painter.add(Shape::convex_polygon(
                 arrow_points(arrow_centre, open),
                 colour(colours.muted),
                 Stroke::NONE,
             ));
-            state.show_body_unindented(ui, |ui| {
-                Frame::new()
-                    .inner_margin(Margin::same(SECTION_PADDING))
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
-                        ui.set_width(ui.available_width());
-                        body(ui);
-                    });
-            });
+            state.show_body_unindented(ui, body);
         });
 }
 
@@ -255,7 +235,7 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
     ui.label(muted_text(NO_PROJECT));
     let (field, new) = ui
         .horizontal(|ui| {
-            let label = ui.label("Name");
+            let label = ui.label(muted_text("Name"));
             let width = ui.available_width() - button_size.x / 2.0 - ui.spacing().item_spacing.x;
             let field = TextEdit::singleline(new_name)
                 .hint_text(NEW_PROJECT_HINT)
@@ -373,14 +353,15 @@ fn add_module(
     let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
     let rack = rack_channels(&modules, &snapshot.module_types);
     let width = ui.available_width();
-    ui.label("Add Module");
-    let gap = ui.spacing().item_spacing.x;
+    ui.label(muted_text("Add Module"));
+    let columns = chip_columns(width);
     let tile_size = vec2(
-        (width - gap * (TILE_COLUMNS - 1) as f32) / TILE_COLUMNS as f32,
+        (width - CHIP_GAP * (columns - 1) as f32) / columns as f32,
         TILE_HEIGHT,
     );
     let mut clicked = None;
-    for row in snapshot.module_types.chunks(TILE_COLUMNS) {
+    ui.spacing_mut().item_spacing = Vec2::splat(CHIP_GAP);
+    for row in snapshot.module_types.chunks(columns) {
         ui.horizontal(|ui| {
             for module_type in row {
                 if stereo_rack && module_type.type_name == CABINET {
@@ -395,9 +376,10 @@ fn add_module(
             }
         });
     }
+    ui.spacing_mut().item_spacing = SIDEBAR_SPACING;
     let offered = add_places(&rack);
     let chosen = add.place.clone().filter(|place| offered.contains(place));
-    let place_label = ui.label("Place");
+    let place_label = ui.label(muted_text("Place"));
     ComboBox::from_id_salt("add_place")
         .width(width)
         .selected_text(
@@ -450,10 +432,11 @@ fn module_tile(ui: &mut Ui, module_type: &ModuleType, size: Vec2) -> Response {
     response.on_hover_cursor(CursorIcon::Grab)
 }
 
+/// A dark chip in a boundary edge, lighter-edged under the pointer, with the Module accent as a tab at its left.
 fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
     let colours = palette();
-    let border = if hovered {
-        colours.text
+    let edge = if hovered {
+        colours.hover_boundary
     } else {
         colours.boundary
     };
@@ -461,22 +444,22 @@ fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
         rect,
         RADIUS_CONTROL,
         colour(colours.well),
-        Stroke::new(1.0, colour(border)),
+        Stroke::new(1.0, colour(edge)),
         StrokeKind::Inside,
     );
-    let swatch = Rect::from_min_size(rect.min, vec2(TILE_SWATCH_WIDTH, rect.height()));
-    let swatch_corners = CornerRadius {
+    let tab = Rect::from_min_size(rect.min, vec2(TILE_TAB_WIDTH, rect.height())).shrink(0.5);
+    let tab_corners = CornerRadius {
         nw: RADIUS_CONTROL,
         sw: RADIUS_CONTROL,
         ne: 0,
         se: 0,
     };
-    painter.rect_filled(swatch, swatch_corners, accent(type_name));
+    painter.rect_filled(tab, tab_corners, accent(type_name));
     painter.text(
         rect.left_center() + vec2(TILE_TEXT_INSET, 0.0),
         Align2::LEFT_CENTER,
         type_name,
-        theme::body(),
+        theme::legend(),
         colour(colours.text),
     );
 }
@@ -498,22 +481,13 @@ fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Co
     );
     let mut commands = Vec::new();
     ui.horizontal(|ui| {
-        let tuner_button = Button::new("Tuner")
-            .selected(*tuner.open)
-            .min_size(button_size);
+        let tuner_button =
+            switched_button("Tuner", *tuner.open, palette().go).min_size(button_size);
         if ui.add(tuner_button).clicked() {
             commands.extend(tuner.toggle(muted.unwrap_or_default()));
         }
         let on = muted.unwrap_or_default();
-        let mute_button = if on {
-            let red = colour(palette().danger);
-            Button::new(RichText::new("Mute").color(colour(palette().on_accent)))
-                .fill(red)
-                .stroke(Stroke::new(1.0, red))
-        } else {
-            Button::new("Mute")
-        };
-        let mute_button = mute_button.selected(on).min_size(button_size);
+        let mute_button = switched_button("Mute", on, palette().danger).min_size(button_size);
         if ui.add_enabled(muted.is_some(), mute_button).clicked() {
             if on {
                 *tuner.muted_by_us = false;
@@ -524,7 +498,7 @@ fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Co
     commands
 }
 
-/// On/Off, the beat light and Tap, then tempo and meter, then the volume; with a Project open these are the Project's tempo, meter and click.
+/// The switch, tempo and meter, then the beat dots and Tap, then the volume; with a Project open these are the Project's tempo, meter and click.
 fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<Command> {
     let status = snapshot.status.as_ref();
     let Some(view) = status.and_then(metronome_view) else {
@@ -539,31 +513,28 @@ fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<
     };
     let mut commands = Vec::new();
     ui.horizontal(|ui| {
-        let text = if view.on { "On" } else { "Off" };
-        let switch = ui.add(lit_button(text, view.on, colour(palette().lit)));
-        switch.widget_info(|| WidgetInfo::selected(Role::Button, true, view.on, "Metronome"));
-        if switch.clicked() {
+        if toggle_switch(ui, "Metronome", view.on).clicked() {
             commands.push(change(Some(!view.on), None, None, None));
         }
-        paint_beat_light(ui, light);
-        if ui.add(outlined_button("Tap")).clicked() {
-            commands.push(Command::MetronomeTap);
-        }
-    });
-    ui.horizontal(|ui| {
-        let (bpm, field) = released_value(ui, Id::unique("metronome_tempo"), view.bpm, |bpm| {
-            DragValue::new(bpm)
-                .range(BPM_RANGE.0..=BPM_RANGE.1)
-                .speed(0.5)
-                .fixed_decimals(1)
-                .suffix(" bpm")
-        });
+        let (bpm, field) = ui
+            .scope(|ui| {
+                ui.style_mut().override_font_id = Some(theme::note());
+                released_value(ui, Id::unique("metronome_tempo"), view.bpm, |bpm| {
+                    DragValue::new(bpm)
+                        .range(BPM_RANGE.0..=BPM_RANGE.1)
+                        .speed(0.5)
+                        .fixed_decimals(1)
+                })
+            })
+            .inner;
         field.widget_info(|| WidgetInfo::labeled(Role::SpinButton, true, "Metronome tempo"));
         if let Some(bpm) = bpm {
             commands.push(change(None, Some(bpm), None, None));
         }
+        ui.label(muted_text("bpm"));
         let shown = |(beats, note): (u32, u32)| format!("{beats}/{note}");
         let combo = ComboBox::from_id_salt("metronome_meter")
+            .width(METER_WIDTH)
             .selected_text(shown(view.meter))
             .show_ui(ui, |ui| {
                 for meter in METER_CHOICES {
@@ -580,7 +551,13 @@ fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<
             .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, "Metronome meter"));
     });
     ui.horizontal(|ui| {
-        ui.label("Volume");
+        paint_beat_dots(ui, view.meter.0, light);
+        if ui.add(outlined_button("Tap")).clicked() {
+            commands.push(Command::MetronomeTap);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label(muted_text("Volume"));
         if let Some(volume) = knob_with_reset(
             ui,
             ("Metronome", "volume"),
@@ -598,37 +575,51 @@ fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<
     commands
 }
 
-/// Dark while off; else the beat number, filled while the beat is new, beat 1 in yellow.
-fn paint_beat_light(ui: &mut Ui, light: BeatLight) {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(BEAT_LIGHT_SIZE), Sense::hover());
+/// One dot per beat in the bar, beat 1 ringed in the lit colour and the others in the boundary colour; the beat playing is filled, in its lit colour while the beat is new.
+fn paint_beat_dots(ui: &mut Ui, beats: u32, light: BeatLight) {
+    let gap = BEAT_DOT_GAP;
+    let width = beats as f32 * (BEAT_DOT_SIZE + gap) - gap;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, BEAT_DOT_SIZE), Sense::hover());
+    let label = match light {
+        BeatLight::Dark => "Beat off".to_string(),
+        BeatLight::Beat { beat, .. } => format!("Beat {beat}"),
+    };
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &label));
     let colours = palette();
     let painter = ui.painter();
-    let radius = BEAT_LIGHT_SIZE / 2.0;
-    let BeatLight::Beat {
-        beat,
-        accent,
-        flash,
-    } = light
-    else {
-        painter.circle_filled(rect.center(), radius, colour(colours.arc_track));
-        response.widget_info(|| WidgetInfo::labeled(Role::Label, true, "Beat off"));
-        return;
-    };
-    let lit = colour(if accent { colours.lit } else { colours.text });
-    let (fill, text) = if flash {
-        (lit, colour(colours.on_accent))
-    } else {
-        (colour(colours.arc_track), lit)
-    };
-    painter.circle(rect.center(), radius, fill, Stroke::new(1.0, lit));
-    painter.text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        beat.to_string(),
-        theme::list_item(),
-        text,
-    );
-    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("Beat {beat}")));
+    let radius = (BEAT_DOT_SIZE - BEAT_DOT_RING_WIDTH) / 2.0;
+    for beat in 1..=beats {
+        let centre = pos2(
+            rect.left() + (beat - 1) as f32 * (BEAT_DOT_SIZE + gap) + BEAT_DOT_SIZE / 2.0,
+            rect.center().y,
+        );
+        let ring = if beat == 1 {
+            colours.lit
+        } else {
+            colours.boundary
+        };
+        let lit = if beat == 1 { colours.lit } else { colours.text };
+        let fill = match light {
+            BeatLight::Beat {
+                beat: playing,
+                flash,
+                ..
+            } if playing == beat => {
+                if flash {
+                    colour(lit)
+                } else {
+                    colour(colours.arc_track)
+                }
+            }
+            _ => Color32::TRANSPARENT,
+        };
+        painter.circle(
+            centre,
+            radius,
+            fill,
+            Stroke::new(BEAT_DOT_RING_WIDTH, colour(ring)),
+        );
+    }
 }
 
 /// Opening a picker reads the port list again, so that a device plugged in since shows.
@@ -649,7 +640,7 @@ fn audio_ports(
         ("Output R", &choices.playback, &mut selection.output_right),
     ];
     for (name, ports, chosen) in pickers {
-        let label = ui.label(name);
+        let label = ui.label(muted_text(name));
         let combo = ComboBox::from_id_salt(("port", name))
             .width(ui.available_width())
             .truncate()
@@ -668,7 +659,7 @@ fn audio_ports(
     }
     let apply = set_ports_command(&selection);
     let clicked = ui
-        .add_enabled(apply.is_some(), Button::new("Apply"))
+        .add_enabled(apply.is_some(), outlined_button("Apply"))
         .clicked();
     if let Some(command) = apply.filter(|_| clicked) {
         commands.push(command);
@@ -690,25 +681,31 @@ fn settings(
     };
     let mut edited = draft.clone().unwrap_or(current.clone());
     ui.horizontal(|ui| {
-        ui.label("Bank kind");
+        ui.label(muted_text("Bank kind"));
         for (kind, name) in BANK_KINDS {
-            ui.selectable_value(&mut edited.bank_kind, kind, name);
+            let chosen = edited.bank_kind == kind;
+            if ui
+                .add(switched_button(name, chosen, palette().lit))
+                .clicked()
+            {
+                edited.bank_kind = kind;
+            }
         }
     });
     ui.horizontal(|ui| {
-        let label = ui.label("IR folder");
+        let label = ui.label(muted_text("IR folder"));
         let field = TextEdit::singleline(&mut edited.ir_dir).desired_width(ui.available_width());
         ui.add(text_field(field)).labelled_by(label.id);
     });
     ui.horizontal(|ui| {
-        let label = ui.label("Projects folder");
+        let label = ui.label(muted_text("Projects folder"));
         let field =
             TextEdit::singleline(&mut edited.projects_dir).desired_width(ui.available_width());
         ui.add(text_field(field)).labelled_by(label.id);
     });
     let apply = set_settings_command(&current, &edited);
     let clicked = ui
-        .add_enabled(apply.is_some(), Button::new("Apply"))
+        .add_enabled(apply.is_some(), outlined_button("Apply"))
         .clicked();
     if clicked {
         *draft = None;
