@@ -1831,3 +1831,59 @@ fn item_command_errors_are_one_line() {
         assert_eq!(out.code, 1);
     }
 }
+
+const UNUSED: &str = r#"{"ok":true,"files":[{"file":"takes/guitar-2.wav","bytes":1234567},{"file":"takes/guitar-3.wav","bytes":800}],"bytes":1235367}"#;
+
+#[test]
+fn takes_unused_prints_one_line_per_file_and_the_total() {
+    let out = cli(&["takes", "unused"], reply(UNUSED));
+    assert_eq!(out.requests, [Request::TakesUnused]);
+    assert_eq!(
+        out.stdout,
+        "takes/guitar-2.wav 1.2 MB\ntakes/guitar-3.wav 800 B\n2 unused takes, 1.2 MB\n"
+    );
+}
+
+#[test]
+fn takes_clean_without_yes_lists_and_deletes_nothing() {
+    let out = item_cli(&["takes", "clean"], vec![reply(UNUSED)]);
+    assert_eq!(out.requests, [Request::TakesUnused]);
+    assert_eq!(
+        out.stdout,
+        "takes/guitar-2.wav 1.2 MB\ntakes/guitar-3.wav 800 B\n2 unused takes, 1.2 MB\nnothing deleted; pass --yes to delete\n"
+    );
+}
+
+#[test]
+fn takes_clean_yes_deletes_every_unused_take() {
+    let out = item_cli(
+        &["takes", "clean", "--yes"],
+        vec![
+            reply(UNUSED),
+            reply(r#"{"ok":true,"deleted":2,"bytes":1235367}"#),
+        ],
+    );
+    assert_eq!(
+        out.requests,
+        [
+            Request::TakesUnused,
+            Request::TakesClean {
+                files: vec![
+                    "takes/guitar-2.wav".to_string(),
+                    "takes/guitar-3.wav".to_string()
+                ],
+            },
+        ]
+    );
+    assert_eq!(out.stdout, "deleted 2 takes, 1.2 MB freed\n");
+}
+
+#[test]
+fn takes_clean_yes_with_nothing_unused_sends_no_clean() {
+    let out = item_cli(
+        &["takes", "clean", "--yes"],
+        vec![reply(r#"{"ok":true,"files":[],"bytes":0}"#)],
+    );
+    assert_eq!(out.requests, [Request::TakesUnused]);
+    assert_eq!(out.stdout, "0 unused takes, 0 B\n");
+}

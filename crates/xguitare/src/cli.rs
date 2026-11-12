@@ -15,7 +15,7 @@ use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::{
     BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, ItemCmd, MetronomeCmd, MuteState,
-    ProjectCmd, RackCmd, RenderArgs, RenderBitsArg, RenderCmd, Switch, TrackCmd, parse,
+    ProjectCmd, RackCmd, RenderArgs, RenderBitsArg, RenderCmd, Switch, TakesCmd, TrackCmd, parse,
 };
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
@@ -46,6 +46,7 @@ pub fn run_cli(
     };
     let result = match cli.cmd {
         Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
+        Cmd::Takes(TakesCmd::Clean { yes }) => clean_takes(transport, yes),
         cmd => request_for(cmd, transport).and_then(|req| match req {
             Request::Render { .. } => render_and_wait(transport, out, &req),
             req => render(&req, &request(transport, &req)?),
@@ -63,6 +64,23 @@ fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String
         Response::Ok(payload) => Ok(payload),
         Response::Err { error } => Err(error),
     }
+}
+
+/// Lists the unused Take files; with `yes`, deletes them all instead.
+fn clean_takes(transport: &mut dyn Transport, yes: bool) -> Result<String, String> {
+    let unused = request(transport, &Request::TakesUnused)?;
+    let files: Vec<String> = items(&unused["files"])
+        .filter_map(|file| file["file"].as_str().map(str::to_string))
+        .collect();
+    if !yes || files.is_empty() {
+        let mut lines = render_takes_unused(&unused);
+        if !yes {
+            lines.push_str("nothing deleted; pass --yes to delete\n");
+        }
+        return Ok(lines);
+    }
+    let req = Request::TakesClean { files };
+    render(&req, &request(transport, &req)?)
 }
 
 fn watch_tuner(
@@ -311,6 +329,10 @@ fn request_for(cmd: Cmd, client: &mut dyn Transport) -> Result<Request, String> 
         Cmd::Project(cmd) => project_request(cmd),
         Cmd::Track(cmd) => track_request(cmd),
         Cmd::Item(cmd) => item_request(client, cmd)?,
+        Cmd::Takes(TakesCmd::Unused) => Request::TakesUnused,
+        Cmd::Takes(TakesCmd::Clean { .. }) => {
+            unreachable!("run_cli handles takes clean before request_for")
+        }
         Cmd::Play => transport(TransportAction::Play, None),
         Cmd::Stop => transport(TransportAction::Stop, None),
         Cmd::Record => transport(TransportAction::Record, None),

@@ -96,6 +96,9 @@ enum Cmd {
     /// List, move, trim, split or delete the open Project's Items, or choose an Item's Take
     #[command(subcommand, arg_required_else_help = false)]
     Item(ItemCmd),
+    /// List or delete the open Project's Take files that no Item uses
+    #[command(subcommand, arg_required_else_help = false)]
+    Takes(TakesCmd),
     /// Start playback from the playhead
     Play,
     /// Stop playback or recording; the playhead stays
@@ -271,6 +274,18 @@ enum ProjectCmd {
     Undo,
     /// Redo what the last undo took back
     Redo,
+}
+
+#[derive(Subcommand)]
+enum TakesCmd {
+    /// List the Take files no Item, active Take or not, and no copied Item uses, with their sizes
+    Unused,
+    /// Delete every unused Take file; saves the Project and clears Undo and the clipboard
+    Clean {
+        /// Delete; without it the files are only listed
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 /// An Item is named by its id from `item list`; a time is <bar>.<beat>, <bar> or <seconds>s, as for locate.
