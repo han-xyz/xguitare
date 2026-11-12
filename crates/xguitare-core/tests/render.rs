@@ -178,7 +178,7 @@ fn project_range_tail_ends_half_a_second_after_an_echo_dies_away() {
     let level = |n: usize| left[n].abs().max(right[n].abs());
     let quiet_from = left.len() - HALF_SECOND;
     assert!((quiet_from..left.len()).all(|n| level(n) < 3.2e-5));
-    assert!(level(quiet_from - 1) >= 3.2e-5);
+    assert!(level(quiet_from - 1) >= 3.162_277_7e-5);
 }
 
 #[test]

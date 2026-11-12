@@ -20,6 +20,19 @@ pub struct PlacedTake {
     pub samples: Arc<[f32]>,
 }
 
+impl PlacedTake {
+    /// The linear fade gain at `frame` of the `len` it plays: rising from 0 over `fade_in`, falling to `1 / fade_out` over `fade_out`.
+    pub(crate) fn gain(&self, frame: usize) -> f32 {
+        if frame < self.fade_in {
+            frame as f32 / self.fade_in as f32
+        } else if frame + self.fade_out >= self.len {
+            (self.len - frame) as f32 / self.fade_out as f32
+        } else {
+            1.0
+        }
+    }
+}
+
 /// [`ITEM_FADE`] in frames at `sample_rate`.
 pub fn item_fade_frames(sample_rate: f32) -> u64 {
     (ITEM_FADE.as_secs_f64() * f64::from(sample_rate)).round() as u64

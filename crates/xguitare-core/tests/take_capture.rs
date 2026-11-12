@@ -362,10 +362,14 @@ fn a_take_recorded_from_frame_0_starts_its_item_latency_frames_into_the_take() {
     )
     .unwrap();
     arrangement.apply(ArrangementCommand::Play);
-    let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
-    arrangement.process(&[], &mut left, &mut right);
-    assert!((left[0] - samples[256]).abs() < 1e-6, "{}", left[0]);
-    assert!((left[63] - samples[319]).abs() < 1e-6, "{}", left[63]);
+    let mut output = Vec::new();
+    for _ in 0..5 {
+        let (mut left, mut right) = ([0.0; 64], [0.0; 64]);
+        arrangement.process(&[], &mut left, &mut right);
+        output.extend_from_slice(&left);
+    }
+    assert!((output[300] - samples[556]).abs() < 1e-6, "{}", output[300]);
+    assert!((output[319] - samples[575]).abs() < 1e-6, "{}", output[319]);
 }
 
 fn empty_master() -> StereoRack {

@@ -8,6 +8,7 @@ use xguitare_dsp::smooth::Smoother;
 use xguitare_dsp::{Rack, StereoRack};
 
 use crate::engine::{MeterPoint, MixMeters, set_module_bypass, set_module_param};
+use crate::flatten::{PlacedTake, flatten, item_fade_frames};
 use crate::metronome::{Blip, DEFAULT_VOLUME_DB};
 use crate::project::{
     Bus, LoopRegion, MAX_BUSES, MAX_TRACKS, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM,
@@ -238,13 +239,6 @@ struct MasterPlayer {
     peak: [f32; 2],
     in_l: Vec<f32>,
     in_r: Vec<f32>,
-}
-
-struct PlacedTake {
-    position: u64,
-    /// The first frame of `samples` that plays, at `position`.
-    offset: usize,
-    samples: Arc<[f32]>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -773,21 +767,7 @@ impl TrackPlayer {
         sample_rate: f32,
         max_frames: usize,
     ) -> Result<TrackPlayer, TakeNotLoaded> {
-        let items = track
-            .items
-            .iter()
-            .map(|item| {
-                let file = &item.takes[item.take].file;
-                let samples = takes.get(file).ok_or_else(|| TakeNotLoaded(file.clone()))?;
-                Ok(PlacedTake {
-                    position: item.position,
-                    offset: usize::try_from(item.offset)
-                        .unwrap_or(usize::MAX)
-                        .min(samples.len()),
-                    samples: Arc::clone(samples),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let items = flatten(&track.items, takes, item_fade_frames(sample_rate))?;
         let sends = buses
             .iter()
             .map(|bus| {
@@ -892,21 +872,22 @@ impl TrackPlayer {
         }
     }
 
-    /// Adds the Items sounding over the timeline frames `playhead..playhead + run` into `source[offset..offset + run]`.
+    /// Adds the heard stretches of the Items over the timeline frames `playhead..playhead + run` into `source[offset..offset + run]`, with their fades.
     fn write_items(&mut self, playhead: u64, offset: usize, run: usize) {
         let stretch_end = playhead + run as u64;
         for item in &self.items {
-            let audible = &item.samples[item.offset..];
-            let item_end = item.position + audible.len() as u64;
             let from = item.position.max(playhead);
-            let to = item_end.min(stretch_end);
+            let to = (item.position + item.len as u64).min(stretch_end);
             if from >= to {
                 continue;
             }
-            let take = &audible[(from - item.position) as usize..(to - item.position) as usize];
+            let first = (from - item.position) as usize;
+            let last = (to - item.position) as usize;
+            let take = &item.samples[item.offset + first..item.offset + last];
             let at = offset + (from - playhead) as usize;
-            for (out, &sample) in self.source[at..at + take.len()].iter_mut().zip(take) {
-                *out += sample;
+            let out = &mut self.source[at..at + take.len()];
+            for (frame, (out, &sample)) in (first..).zip(out.iter_mut().zip(take)) {
+                *out += sample * item.gain(frame);
             }
         }
     }

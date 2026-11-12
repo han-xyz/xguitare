@@ -201,14 +201,80 @@ fn item_plays_at_its_position_and_stops_at_its_end() {
     arrangement.apply(ArrangementCommand::Play);
     let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
     for (frame, &sample) in left.iter().enumerate() {
-        let expected = if (100..150).contains(&frame) {
-            1.0
-        } else {
-            0.0
-        };
-        assert!(close(sample, expected), "frame {frame}: {sample}");
+        if !(100..150).contains(&frame) {
+            assert!(close(sample, 0.0), "frame {frame}: {sample}");
+        }
     }
+    assert!(close(left[125], 1.0), "{}", left[125]);
     assert_eq!(arrangement.playhead(), BLOCK as u64);
+}
+
+/// 5 ms at [`RATE`].
+const FADE_FRAMES: usize = 240;
+
+fn played(items: Vec<(Item, f32)>, frames: usize) -> Vec<f32> {
+    let mut t = track("t");
+    let mut takes = HashMap::new();
+    for (mut item, level) in items {
+        let file = format!("takes/t-{}.wav", t.items.len() + 1);
+        item.takes[0].file.clone_from(&file);
+        takes.insert(file, Arc::from(vec![level; item.takes[0].frames as usize]));
+        t.items.push(item);
+    }
+    let mut arrangement = arrangement(&project(vec![t]), &takes);
+    arrangement.apply(ArrangementCommand::Play);
+    run(&mut arrangement, &[&[0.0; BLOCK]], frames).0
+}
+
+#[test]
+fn an_item_edge_ramps_from_silence_over_5_ms() {
+    let left = played(vec![(item(0, "", 4800), 1.0)], 4800);
+    assert!(close(left[0], 0.0), "{}", left[0]);
+    assert!(
+        close(left[FADE_FRAMES / 2], 0.5),
+        "{}",
+        left[FADE_FRAMES / 2]
+    );
+    assert!(close(left[FADE_FRAMES], 1.0), "{}", left[FADE_FRAMES]);
+    assert!(
+        close(left[4799], 1.0 / FADE_FRAMES as f32),
+        "{}",
+        left[4799]
+    );
+}
+
+#[test]
+fn a_covered_stretch_carries_none_of_the_lower_item() {
+    let left = played(
+        vec![(item(0, "", 4800), 0.25), (item(1000, "", 2000), 0.5)],
+        4800,
+    );
+    let covered = 1000 + FADE_FRAMES..3000 - FADE_FRAMES;
+    for (&sample, frame) in left[covered.clone()].iter().zip(covered) {
+        assert!(close(sample, 0.5), "frame {frame}: {sample}");
+    }
+    assert!(close(left[500], 0.25), "{}", left[500]);
+}
+
+#[test]
+fn the_crossfade_at_a_cut_keeps_an_equal_level() {
+    let left = played(
+        vec![(item(0, "", 4800), 0.5), (item(1000, "", 2000), 0.5)],
+        4800,
+    );
+    let inside = FADE_FRAMES..4800 - FADE_FRAMES;
+    for (&sample, frame) in left[inside.clone()].iter().zip(inside) {
+        assert!(close(sample, 0.5), "frame {frame}: {sample}");
+    }
+}
+
+#[test]
+fn an_item_with_a_length_stops_at_its_end() {
+    let mut short = item(0, "", 2000);
+    short.length = Some(500);
+    let left = played(vec![(short, 1.0)], 1000);
+    assert!(close(left[250], 1.0), "{}", left[250]);
+    assert!(left[500..].iter().all(|&sample| sample == 0.0));
 }
 
 #[test]
@@ -240,33 +306,30 @@ fn armed_track_does_not_play_its_items() {
 fn loop_wraps_inside_a_block_on_the_exact_frame() {
     let mut t = track("t");
     t.items.push(item(0, "takes/t-1.wav", 1000));
-    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32).collect();
+    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32 / 1000.0).collect();
     let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(ramp))]);
     let mut p = project(vec![t]);
     p.loop_region = LoopRegion {
-        start: 10,
-        end: 110,
+        start: 300,
+        end: 410,
         on: true,
     };
     let mut arrangement = arrangement(&p, &takes);
+    arrangement.apply(ArrangementCommand::Locate(300));
     arrangement.apply(ArrangementCommand::Play);
     let (left, _) = run(&mut arrangement, &[&[0.0; BLOCK]], BLOCK);
     for (frame, &sample) in left.iter().enumerate() {
-        let expected = if frame < 110 {
-            frame
-        } else {
-            10 + (frame - 110) % 100
-        };
-        assert!(close(sample, expected as f32), "frame {frame}: {sample}");
+        let expected = (300 + frame % 110) as f32 / 1000.0;
+        assert!(close(sample, expected), "frame {frame}: {sample}");
     }
-    assert_eq!(arrangement.playhead(), 10 + (BLOCK as u64 - 110) % 100);
+    assert_eq!(arrangement.playhead(), 300 + BLOCK as u64 % 110);
 }
 
 #[test]
 fn an_empty_or_reversed_loop_keeps_the_running_loop() {
     let mut t = track("t");
     t.items.push(item(0, "takes/t-1.wav", 1000));
-    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32).collect();
+    let ramp: Vec<f32> = (0..1000).map(|frame| frame as f32 / 1000.0).collect();
     let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(ramp))]);
     let mut p = project(vec![t]);
     p.loop_region = LoopRegion {

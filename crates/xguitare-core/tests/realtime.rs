@@ -267,14 +267,38 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
                 to_master: true,
                 sends: Vec::new(),
                 modules: Vec::new(),
-                items: vec![Item {
-                    id: 0,
-                    position: 50 * idx as u64,
-                    offset: 0,
-                    length: None,
-                    take: 0,
-                    takes: vec![Take { file, frames: 1000 }],
-                }],
+                items: vec![
+                    Item {
+                        id: 3 * idx as u64,
+                        position: 50 * idx as u64,
+                        offset: 0,
+                        length: None,
+                        take: 0,
+                        takes: vec![Take {
+                            file: file.clone(),
+                            frames: 1000,
+                        }],
+                    },
+                    Item {
+                        id: 3 * idx as u64 + 1,
+                        position: 50 * idx as u64 + 300,
+                        offset: 20,
+                        length: None,
+                        take: 0,
+                        takes: vec![Take {
+                            file: file.clone(),
+                            frames: 1000,
+                        }],
+                    },
+                    Item {
+                        id: 3 * idx as u64 + 2,
+                        position: 50 * idx as u64 + 400,
+                        offset: 0,
+                        length: Some(200),
+                        take: 0,
+                        takes: vec![Take { file, frames: 1000 }],
+                    },
+                ],
             }
         })
         .collect();
@@ -291,7 +315,7 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
-        next_item_id: 1,
+        next_item_id: 48,
         tracks,
         buses: Vec::new(),
         master: Master::default(),
