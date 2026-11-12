@@ -51,6 +51,8 @@ const METER_LABEL_WIDTH: f32 = 44.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
 const METER_ROW_GAP: f32 = theme::SPACE_XS;
 const METER_ITEM_GAP: f32 = 12.0;
+/// Between the meter bridge's grip, centred on its two ladder rows, and the `Input` and `Output` labels.
+const GRIP_CLEARANCE: f32 = theme::SPACE_S;
 pub const METERS: [(&str, &str); 2] = [("Input", "input_peak_db"), ("Output", "output_peak_db")];
 const CLEAR_CLIP_HINT: &str = "Click to clear the clip lamp";
 const MOVE_BUTTON_SIZE: Vec2 = Vec2::splat(MOVE_BUTTON_SIDE);
@@ -58,7 +60,7 @@ const OPEN_CHEVRON: &str = "▼";
 const CLOSED_CHEVRON: &str = "▶";
 const DROP_LINE_WIDTH: f32 = 3.0;
 const GRIP: &str = "⠿";
-const HIDE_BUTTON_WIDTH: f32 = 48.0;
+const HIDE_BUTTON_WIDTH: f32 = 2.0 * theme::SPACE_XL;
 /// The ↑, ↓ and `Hide` buttons at the right of a fixed unit.
 const FIXED_BUTTONS_WIDTH: f32 = MOVE_BUTTONS_WIDTH + MOVE_BUTTON_GAP + HIDE_BUTTON_WIDTH;
 const VALUE_FIELD_WIDTH: f32 = 64.0;
@@ -226,10 +228,7 @@ fn fixed_unit(
 ) -> (Rect, Response, Option<FixedAction>) {
     let open = *view.tuner.open;
     let (height, header_height) = match unit {
-        FixedUnit::Meters => (
-            METER_BRIDGE_HEIGHT,
-            METER_BRIDGE_HEIGHT - 2.0 * f32::from(UNIT_MARGIN),
-        ),
+        FixedUnit::Meters => (METER_BRIDGE_HEIGHT, 2.0 * METER_ROW_HEIGHT + METER_ROW_GAP),
         FixedUnit::Tuner if open => (OPEN_UNIT_HEIGHT, HEADER_HEIGHT),
         FixedUnit::Tuner => (UNIT_HEIGHT, HEADER_HEIGHT),
     };
@@ -278,16 +277,21 @@ fn fixed_buttons(
     );
     hide.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
     let mut action = hide.clicked().then_some(FixedAction::Hide(unit));
-    for (text, direction) in [("↓", Direction::Down), ("↑", Direction::Up)] {
+    for (text, direction, way) in [("↓", Direction::Down, "down"), ("↑", Direction::Up, "up")] {
         let enabled = move_target(index, direction, len).is_some();
-        if ui
-            .add_enabled(
+        let button = ui.add_enabled(
+            enabled,
+            widgets::outlined_button(RichText::new(text).font(theme::heading()))
+                .min_size(MOVE_BUTTON_SIZE),
+        );
+        button.widget_info(|| {
+            WidgetInfo::labeled(
+                Role::Button,
                 enabled,
-                widgets::outlined_button(RichText::new(text).font(theme::heading()))
-                    .min_size(MOVE_BUTTON_SIZE),
+                format!("Move {} {way}", unit.label()),
             )
-            .clicked()
-        {
+        });
+        if button.clicked() {
             action = Some(FixedAction::Step(unit, direction));
         }
     }
@@ -531,11 +535,13 @@ fn meter_bridge(
         );
         ui.spacing_mut().item_spacing = vec2(METER_ITEM_GAP, METER_ROW_GAP);
         let row_width = ui.available_width() - FIXED_BUTTONS_WIDTH - METER_ITEM_GAP;
-        let ladder_width = row_width - METER_LABEL_WIDTH - PEAK_WIDTH - 2.0 * METER_ITEM_GAP;
+        let ladder_width =
+            row_width - GRIP_CLEARANCE - METER_LABEL_WIDTH - PEAK_WIDTH - 2.0 * METER_ITEM_GAP;
         let mut ladder_x = None;
         for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
             let row = vec2(row_width, METER_ROW_HEIGHT);
             ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+                ui.add_space(GRIP_CLEARANCE);
                 fixed_width_label(
                     ui,
                     METER_LABEL_WIDTH,
@@ -669,7 +675,7 @@ fn tuner_readout<R>(
     readout.widget_info(|| WidgetInfo::labeled(Role::Label, true, tuner_header_text(reading)));
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         let pressed = buttons(ui);
-        ui.add_space(HEADER_GAP - MOVE_BUTTON_GAP);
+        ui.add_space(theme::SPACE_XS);
         let width = ui.available_width().min(CENTS_STRIP_MAX_WIDTH);
         let (rect, _) = ui.allocate_exact_size(vec2(width, CENTS_STRIP_HEIGHT), Sense::hover());
         let fraction = reading.map(|reading| cents_fraction(reading.cents));

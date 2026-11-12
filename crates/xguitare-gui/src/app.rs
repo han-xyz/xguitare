@@ -391,16 +391,16 @@ impl eframe::App for App {
                 && let Some(params) = &snapshot.params
             {
                 forget_removed_units(&mut self.open_units, &mut self.removing, params);
-                let ids = |params: Option<&Value>| -> Vec<String> {
-                    params
-                        .map(param_rows)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|(id, _)| id)
-                        .collect()
-                };
-                self.rack_layout
-                    .follow(&ids(self.snapshot.params.as_ref()), &ids(Some(params)));
+                if let Some(previous) = &self.snapshot.params {
+                    let ids = |params: &Value| -> Vec<String> {
+                        param_rows(params).into_iter().map(|(id, _)| id).collect()
+                    };
+                    let (previous, ids) = (ids(previous), ids(params));
+                    self.rack_layout.follow(&previous, &ids);
+                    if let Some(hidden) = &mut self.hidden {
+                        hidden.follow(&previous, &ids);
+                    }
+                }
             }
             self.beat_light = beat_light(self.snapshot.status.as_ref(), snapshot.status.as_ref());
             self.snapshot = snapshot;

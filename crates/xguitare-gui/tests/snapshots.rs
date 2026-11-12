@@ -1670,6 +1670,7 @@ fn the_metronome_switch_turns_it_off() {
 
 /// Where the left panel ends above the footer in the 1280x800 window.
 const LEFT_PANEL_BOTTOM_1280X800: f32 = 780.0;
+const LEFT_PANEL_BOTTOM_1024X640: f32 = 620.0;
 
 #[test]
 fn the_metronome_shows_whole_at_1280x800_above_add_module() {
@@ -2452,25 +2453,23 @@ fn a_fixed_unit_hides_by_its_button_and_moves_by_its_arrows() {
     click_button(&mut harness, "Hide Tuner");
     assert!(harness.query_by_label_contains("Tuner unit").is_none());
     harness.get_by_label("Hid Tuner \u{2014}");
-    let meters = fixed_unit_rect(&harness, "Meters");
-    harness
-        .get_all_by_role_and_label(Role::Button, "↓")
-        .find(|button| meters.contains(button.rect().center()))
-        .unwrap()
-        .click();
-    harness.run_steps(2);
+    click_button(&mut harness, "Move Meters down");
     harness.get_by_label("Meters unit, 2 of 7");
+    click_button(&mut harness, "Move Meters up");
+    harness.get_by_label("Meters unit, 1 of 7");
     assert_eq!(sent_now(&sent), []);
 }
 
 #[test]
 fn a_hidden_fixed_unit_chip_shows_it_and_a_shown_chip_does_nothing() {
     let (mut harness, sent, _dir) = harness();
+    click_button(&mut harness, "Move Meters down");
+    harness.get_by_label("Meters unit, 2 of 8");
     let shown_chip = harness.get_by_role_and_label(Role::Button, "Show Meters");
     assert!(shown_chip.accesskit_node().is_disabled());
     shown_chip.click();
     harness.run_steps(2);
-    harness.get_by_label("Meters unit, 1 of 8");
+    harness.get_by_label("Meters unit, 2 of 8");
     click_button(&mut harness, "Hide Tuner");
     assert!(
         !harness
@@ -2494,19 +2493,6 @@ fn a_hidden_fixed_unit_chip_dragged_into_the_rack_shows_it_at_the_gap() {
     assert_eq!(sent_now(&sent), []);
 }
 
-fn scroll_left_panel(harness: &mut Harness<App>, by: f32) {
-    let panel = harness.get_by_label("Add Module").rect();
-    harness.event(Event::PointerMoved(panel.center()));
-    harness.event(Event::MouseWheel {
-        unit: MouseWheelUnit::Point,
-        delta: Vec2::new(0.0, -by),
-        phase: TouchPhase::Move,
-        source: MouseWheelSource::Unknown,
-        modifiers: Modifiers::NONE,
-    });
-    harness.run_steps(20);
-}
-
 #[test]
 fn rack_layout_snapshots() {
     let (mut between, _, _dir) = harness_sized(DEFAULT_WINDOW);
@@ -2521,13 +2507,29 @@ fn rack_layout_snapshots() {
     click_button(&mut meters_hidden, "Hide Meters");
     write_png(&mut meters_hidden, "rack-meters-hidden");
 
-    let (mut both_hidden, _, _dir) = harness_sized(DEFAULT_WINDOW);
-    click_button(&mut both_hidden, "Hide Meters");
-    click_button(&mut both_hidden, "Hide Tuner");
-    scroll_left_panel(&mut both_hidden, 400.0);
-    let chip = both_hidden
-        .get_by_role_and_label(Role::Button, "Show Tuner")
-        .rect();
-    assert!(chip.bottom() <= LEFT_PANEL_BOTTOM_1280X800, "{chip:?}");
-    write_png(&mut both_hidden, "rack-fixed-hidden");
+    for (size, snapshot, panel_bottom, name) in [
+        (
+            DEFAULT_WINDOW,
+            metronome_snapshot(),
+            LEFT_PANEL_BOTTOM_1280X800,
+            "rack-fixed-hidden",
+        ),
+        (
+            MIN_WINDOW,
+            funk_snapshot(),
+            LEFT_PANEL_BOTTOM_1024X640,
+            "rack-fixed-hidden-1024x640",
+        ),
+    ] {
+        let (mut both_hidden, _, _dir) = harness_with(size, snapshot);
+        click_button(&mut both_hidden, "Hide Meters");
+        click_button(&mut both_hidden, "Hide Tuner");
+        for label in ["Show Meters", "Show Tuner"] {
+            let chip = both_hidden
+                .get_by_role_and_label(Role::Button, label)
+                .rect();
+            assert!(chip.bottom() <= panel_bottom, "{label} at {chip:?}");
+        }
+        write_png(&mut both_hidden, name);
+    }
 }

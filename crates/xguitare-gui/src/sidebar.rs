@@ -198,9 +198,10 @@ fn section_body(
                 .collect()
         }
         Section::Rack => {
-            let command = add_module(ui, snapshot, view.add, view.stereo_rack);
             fixed_chips(ui, snapshot, view.layout);
-            command.into_iter().collect()
+            add_module(ui, snapshot, view.add, view.stereo_rack)
+                .into_iter()
+                .collect()
         }
         Section::Tuner => tuner_and_mute(ui, snapshot, view.tuner),
         Section::Metronome => metronome_section(ui, snapshot, view.beat_light),

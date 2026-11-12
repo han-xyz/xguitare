@@ -521,8 +521,8 @@ pub enum FixedUnit {
 }
 
 impl FixedUnit {
-    /// In the order of their chips in the left panel.
-    pub const ALL: [FixedUnit; 2] = [FixedUnit::Tuner, FixedUnit::Meters];
+    /// In the order of their chips in the left panel, as the Rack draws them by default.
+    pub const ALL: [FixedUnit; 2] = [FixedUnit::Meters, FixedUnit::Tuner];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -547,14 +547,6 @@ impl FixedUnit {
     }
 }
 
-/// Where a shown fixed unit sits: at the front, just before a Module id, or at the end.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Anchor {
-    Front,
-    Before(String),
-    End,
-}
-
 /// One unit of the Rack as drawn, top to bottom.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RackItem {
@@ -574,43 +566,33 @@ impl RackItem {
 /// Where the fixed units sit among the Modules of every Rack the window shows; a hidden fixed unit is absent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RackLayout {
-    /// In drawn order, which also orders fixed units sharing an anchor.
-    shown: Vec<(FixedUnit, Anchor)>,
+    /// Each shown unit with its slot, the number of Modules drawn above it; a slot past the Rack's end draws at the end. The order of the entries orders fixed units drawn in the same gap.
+    shown: Vec<(FixedUnit, usize)>,
 }
 
 impl Default for RackLayout {
     fn default() -> RackLayout {
         RackLayout {
-            shown: vec![
-                (FixedUnit::Meters, Anchor::Front),
-                (FixedUnit::Tuner, Anchor::Front),
-            ],
+            shown: vec![(FixedUnit::Meters, 0), (FixedUnit::Tuner, 0)],
         }
     }
 }
 
 impl RackLayout {
-    /// The units drawn for the Module `ids`; a fixed unit before an id not among them is drawn at the end.
+    /// The units drawn for the Module `ids`.
     pub fn order(&self, ids: &[String]) -> Vec<RackItem> {
-        let fixed_where = |sits: &dyn Fn(&Anchor) -> bool| {
+        let fixed_at = |gap: usize| {
             self.shown
                 .iter()
-                .filter(|(_, anchor)| sits(anchor))
+                .filter(move |(_, slot)| (*slot).min(ids.len()) == gap)
                 .map(|(unit, _)| RackItem::Fixed(*unit))
-                .collect::<Vec<_>>()
         };
-        let mut order = fixed_where(&|anchor| *anchor == Anchor::Front);
-        for id in ids {
-            order.extend(fixed_where(
-                &|anchor| matches!(anchor, Anchor::Before(before) if before == id),
-            ));
+        let mut order = Vec::with_capacity(ids.len() + self.shown.len());
+        for (gap, id) in ids.iter().enumerate() {
+            order.extend(fixed_at(gap));
             order.push(RackItem::Module(id.clone()));
         }
-        order.extend(fixed_where(&|anchor| match anchor {
-            Anchor::Front => false,
-            Anchor::Before(before) => !ids.contains(before),
-            Anchor::End => true,
-        }));
+        order.extend(fixed_at(ids.len()));
         order
     }
 
@@ -618,19 +600,26 @@ impl RackLayout {
         self.shown.iter().any(|(shown, _)| *shown == unit)
     }
 
-    /// Moves `unit`, or shows it when hidden, into gap `slot` of the units drawn for `ids`: 0 the front, the unit count the end.
-    pub fn place(&mut self, unit: FixedUnit, slot: usize, ids: &[String]) {
+    /// Moves `unit`, or shows it when hidden, into gap `gap` of the units drawn for `ids`: 0 the front, the unit count the end. The other fixed unit keeps its slot.
+    pub fn place(&mut self, unit: FixedUnit, gap: usize, ids: &[String]) {
         let mut order = self.order(ids);
         let item = RackItem::Fixed(unit);
-        let slot = match order.iter().position(|drawn| *drawn == item) {
+        let gap = match order.iter().position(|drawn| *drawn == item) {
             Some(from) => {
                 order.remove(from);
-                if slot > from { slot - 1 } else { slot }
+                if gap > from { gap - 1 } else { gap }
             }
-            None => slot,
+            None => gap,
         };
-        order.insert(slot.min(order.len()), item);
-        *self = RackLayout::from_order(&order);
+        let above = &order[..gap.min(order.len())];
+        let slot = above
+            .iter()
+            .filter(|drawn| drawn.module_id().is_some())
+            .count();
+        let fixed_above = above.len() - slot;
+        self.shown.retain(|(shown, _)| *shown != unit);
+        let index = fixed_above.min(self.shown.len());
+        self.shown.insert(index, (unit, slot));
     }
 
     /// Moves a shown `unit` one unit up or down past whatever is drawn next to it.
@@ -645,20 +634,20 @@ impl RackLayout {
         let Some(to) = move_target(index, direction, order.len()) else {
             return;
         };
-        let slot = match direction {
+        let gap = match direction {
             Direction::Up => to,
             Direction::Down => to + 1,
         };
-        self.place(unit, slot, ids);
+        self.place(unit, gap, ids);
     }
 
     /// `None` when `unit` is already hidden.
     pub fn hide(&mut self, unit: FixedUnit, now: Instant) -> Option<HiddenFixed> {
         let index = self.shown.iter().position(|(shown, _)| *shown == unit)?;
-        let (_, anchor) = self.shown.remove(index);
+        let (_, slot) = self.shown.remove(index);
         Some(HiddenFixed {
             unit,
-            anchor,
+            slot,
             index,
             since: now,
         })
@@ -669,25 +658,15 @@ impl RackLayout {
             return;
         }
         let index = hidden.index.min(self.shown.len());
-        self.shown
-            .insert(index, (hidden.unit, hidden.anchor.clone()));
+        self.shown.insert(index, (hidden.unit, hidden.slot));
     }
 
-    /// After the Rack's Module ids change from `previous` to `ids`: a fixed unit before an id that is gone moves before the next later Module of `previous` still there, else to the end.
+    /// After the Rack's Module ids change from `previous` to `ids`: one Module added, removed or moved shifts each slot so that its unit keeps its neighbours (a removed Module's unit goes before the next one); any other change, another Preset or another Rack, keeps the slots.
     pub fn follow(&mut self, previous: &[String], ids: &[String]) {
-        for (_, anchor) in &mut self.shown {
-            let Anchor::Before(before) = anchor else {
-                continue;
-            };
-            if ids.contains(before) {
-                continue;
+        if let Some(edit) = rack_edit(previous, ids) {
+            for (_, slot) in &mut self.shown {
+                *slot = shifted(*slot, edit);
             }
-            *anchor = previous
-                .iter()
-                .skip_while(|id| *id != before)
-                .skip(1)
-                .find(|id| ids.contains(id))
-                .map_or(Anchor::End, |id| Anchor::Before(id.clone()));
         }
     }
 
@@ -696,11 +675,7 @@ impl RackLayout {
         let entries: Vec<Value> = self
             .shown
             .iter()
-            .map(|(unit, anchor)| match anchor {
-                Anchor::Front => serde_json::json!({"unit": unit.stored(), "at": "front"}),
-                Anchor::End => serde_json::json!({"unit": unit.stored(), "at": "end"}),
-                Anchor::Before(id) => serde_json::json!({"unit": unit.stored(), "before": id}),
-            })
+            .map(|(unit, slot)| serde_json::json!({"unit": unit.stored(), "slot": slot}))
             .collect();
         Value::Array(entries).to_string()
     }
@@ -717,44 +692,62 @@ impl RackLayout {
             let unit = FixedUnit::ALL
                 .into_iter()
                 .find(|unit| entry["unit"] == unit.stored())?;
+            let slot = usize::try_from(entry["slot"].as_u64()?).ok()?;
             if layout.is_shown(unit) {
                 return None;
             }
-            let anchor = match (entry["at"].as_str(), entry["before"].as_str()) {
-                (Some("front"), None) => Anchor::Front,
-                (Some("end"), None) => Anchor::End,
-                (None, Some(id)) => Anchor::Before(id.to_string()),
-                _ => return None,
-            };
-            layout.shown.push((unit, anchor));
+            layout.shown.push((unit, slot));
         }
         Some(layout)
     }
+}
 
-    /// Each fixed unit's anchor read off its place in `order`: the front when no Module is above it, else before the next Module, else the end.
-    fn from_order(order: &[RackItem]) -> RackLayout {
-        let shown = order
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| {
-                let RackItem::Fixed(unit) = item else {
-                    return None;
-                };
-                let anchor = if order[..index]
-                    .iter()
-                    .all(|above| above.module_id().is_none())
-                {
-                    Anchor::Front
-                } else {
-                    order[index + 1..]
-                        .iter()
-                        .find_map(RackItem::module_id)
-                        .map_or(Anchor::End, Anchor::Before)
-                };
-                Some((*unit, anchor))
-            })
-            .collect();
-        RackLayout { shown }
+/// One Module added at, removed from, or moved between Rack positions.
+#[derive(Debug, Clone, Copy)]
+enum RackEdit {
+    Insert(usize),
+    Remove(usize),
+    Move(usize, usize),
+}
+
+/// The single edit that turns `previous` into `ids`; `None` for no change or anything more.
+fn rack_edit(previous: &[String], ids: &[String]) -> Option<RackEdit> {
+    let first_difference = previous
+        .iter()
+        .zip(ids)
+        .position(|(was, is)| was != is)
+        .unwrap_or(previous.len().min(ids.len()));
+    if ids.len() == previous.len() + 1 {
+        let mut added = previous.to_vec();
+        added.insert(first_difference, ids[first_difference].clone());
+        return (added == ids).then_some(RackEdit::Insert(first_difference));
+    }
+    if previous.len() == ids.len() + 1 {
+        let mut removed = previous.to_vec();
+        removed.remove(first_difference);
+        return (removed == ids).then_some(RackEdit::Remove(first_difference));
+    }
+    if previous.len() != ids.len() || previous == ids {
+        return None;
+    }
+    (0..previous.len()).find_map(|from| {
+        let mut moved = previous.to_vec();
+        let id = moved.remove(from);
+        let to = ids.iter().position(|is| *is == id)?;
+        moved.insert(to, id);
+        (moved == ids).then_some(RackEdit::Move(from, to))
+    })
+}
+
+/// A slot after `edit`: a unit keeps the Module below it, and the front stays the front.
+fn shifted(slot: usize, edit: RackEdit) -> usize {
+    match edit {
+        RackEdit::Remove(at) if slot > at => slot - 1,
+        RackEdit::Insert(at) if slot >= at && slot > 0 => slot + 1,
+        RackEdit::Move(from, to) => {
+            shifted(shifted(slot, RackEdit::Remove(from)), RackEdit::Insert(to))
+        }
+        RackEdit::Remove(_) | RackEdit::Insert(_) => slot,
     }
 }
 
@@ -762,12 +755,19 @@ impl RackLayout {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HiddenFixed {
     pub unit: FixedUnit,
-    anchor: Anchor,
+    slot: usize,
     index: usize,
     since: Instant,
 }
 
 impl HiddenFixed {
+    /// As [`RackLayout::follow`], so that Undo puts the unit back between the same Modules.
+    pub fn follow(&mut self, previous: &[String], ids: &[String]) {
+        if let Some(edit) = rack_edit(previous, ids) {
+            self.slot = shifted(self.slot, edit);
+        }
+    }
+
     pub fn is_shown(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.since) < UNDO_FOR
     }

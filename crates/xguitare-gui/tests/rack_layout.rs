@@ -83,17 +83,30 @@ fn up_and_down_step_past_the_next_unit() {
     );
 }
 
+/// The Tuner after the second Module of [`RACK`], followed through a Rack change from `RACK` to `after`.
+fn tuner_followed_to(after: &[&str]) -> Vec<String> {
+    let mut layout = tuner_before_chorus();
+    layout.follow(&ids(&RACK), &ids(after));
+    drawn(&layout, after)
+}
+
 #[test]
-fn a_fixed_unit_keeps_its_place_when_modules_are_added_or_moved() {
-    let layout = tuner_before_chorus();
+fn a_single_add_keeps_the_fixed_units_neighbours() {
     assert_eq!(
-        drawn(
-            &layout,
-            &["gate", "compressor", "preamp", "chorus", "delay"]
-        ),
+        tuner_followed_to(&["gate", "compressor", "preamp", "chorus"]),
         [
             "[meters]",
             "gate",
+            "compressor",
+            "preamp",
+            "[tuner]",
+            "chorus"
+        ]
+    );
+    assert_eq!(
+        tuner_followed_to(&["compressor", "preamp", "chorus", "delay"]),
+        [
+            "[meters]",
             "compressor",
             "preamp",
             "[tuner]",
@@ -101,26 +114,77 @@ fn a_fixed_unit_keeps_its_place_when_modules_are_added_or_moved() {
             "delay"
         ]
     );
+}
+
+#[test]
+fn a_single_remove_hands_the_fixed_unit_to_the_next_later_module() {
     assert_eq!(
-        drawn(&layout, &["compressor", "chorus", "preamp"]),
-        ["[meters]", "compressor", "[tuner]", "chorus", "preamp"]
+        tuner_followed_to(&["compressor", "chorus"]),
+        ["[meters]", "compressor", "[tuner]", "chorus"]
+    );
+    assert_eq!(
+        tuner_followed_to(&["compressor", "preamp"]),
+        ["[meters]", "compressor", "preamp", "[tuner]"]
     );
 }
 
 #[test]
-fn a_removed_module_hands_its_fixed_unit_to_the_next_later_one() {
-    let mut layout = RackLayout::default();
-    layout.place(FixedUnit::Tuner, 3, &ids(&RACK));
-    layout.follow(&ids(&RACK), &ids(&["compressor", "chorus"]));
+fn a_single_move_keeps_the_fixed_units_upper_neighbour() {
     assert_eq!(
-        drawn(&layout, &["compressor", "chorus"]),
-        ["[meters]", "compressor", "[tuner]", "chorus"]
+        tuner_followed_to(&["preamp", "chorus", "compressor"]),
+        ["[meters]", "preamp", "[tuner]", "chorus", "compressor"]
     );
-    let mut layout = tuner_before_chorus();
-    layout.follow(&ids(&RACK), &ids(&["compressor", "preamp"]));
+}
+
+#[test]
+fn a_preset_load_keeps_the_tuner_after_the_second_module() {
     assert_eq!(
-        drawn(&layout, &["compressor", "preamp", "delay"]),
-        ["[meters]", "compressor", "preamp", "delay", "[tuner]"]
+        tuner_followed_to(&["gate", "drive", "eq", "delay"]),
+        ["[meters]", "gate", "drive", "[tuner]", "eq", "delay"]
+    );
+}
+
+#[test]
+fn a_shorter_rack_clamps_and_the_longer_one_restores_the_place() {
+    let mut layout = tuner_before_chorus();
+    layout.follow(&ids(&RACK), &ids(&["reverb"]));
+    assert_eq!(
+        drawn(&layout, &["reverb"]),
+        ["[meters]", "reverb", "[tuner]"]
+    );
+    assert_eq!(drawn(&layout, &[]), ["[meters]", "[tuner]"]);
+    layout.follow(&ids(&["reverb"]), &ids(&RACK));
+    assert_eq!(drawn(&layout, &RACK), drawn(&tuner_before_chorus(), &RACK));
+}
+
+#[test]
+fn placing_one_fixed_unit_in_another_rack_leaves_the_other_where_it_was() {
+    let mut layout = RackLayout::default();
+    layout.place(FixedUnit::Meters, 5, &ids(&RACK));
+    assert_eq!(
+        drawn(&layout, &["reverb"]),
+        ["[tuner]", "reverb", "[meters]"]
+    );
+    layout.place(FixedUnit::Tuner, 2, &ids(&["reverb"]));
+    assert_eq!(
+        drawn(&layout, &["reverb"]),
+        ["reverb", "[tuner]", "[meters]"]
+    );
+    assert_eq!(
+        drawn(&layout, &RACK),
+        ["compressor", "[tuner]", "preamp", "chorus", "[meters]"]
+    );
+}
+
+#[test]
+fn showing_a_fixed_unit_with_no_rack_leaves_the_other_where_it_was() {
+    let mut layout = RackLayout::default();
+    layout.place(FixedUnit::Meters, 4, &ids(&RACK));
+    layout.hide(FixedUnit::Tuner, Instant::now());
+    layout.place(FixedUnit::Tuner, 0, &[]);
+    assert_eq!(
+        drawn(&layout, &RACK),
+        ["[tuner]", "compressor", "preamp", "[meters]", "chorus"]
     );
 }
 
@@ -164,6 +228,20 @@ fn undo_of_a_hide_puts_the_unit_back_in_its_place() {
 }
 
 #[test]
+fn undo_of_a_hide_follows_a_module_removed_meanwhile() {
+    let mut layout = tuner_before_chorus();
+    let mut hidden = layout.hide(FixedUnit::Tuner, Instant::now()).unwrap();
+    let after = ids(&["compressor", "chorus"]);
+    layout.follow(&ids(&RACK), &after);
+    hidden.follow(&ids(&RACK), &after);
+    layout.undo_hide(&hidden);
+    assert_eq!(
+        drawn(&layout, &["compressor", "chorus"]),
+        ["[meters]", "compressor", "[tuner]", "chorus"]
+    );
+}
+
+#[test]
 fn stored_layout_round_trips() {
     let mut both_hidden = RackLayout::default();
     both_hidden.hide(FixedUnit::Meters, Instant::now());
@@ -186,10 +264,11 @@ fn a_bad_stored_layout_reads_as_the_default() {
         "",
         "nonsense",
         "{}",
-        r#"[{"unit": "amp", "at": "front"}]"#,
-        r#"[{"unit": "tuner", "at": "middle"}]"#,
-        r#"[{"unit": "tuner", "at": "front"}, {"unit": "tuner", "at": "end"}]"#,
-        r#"[{"unit": "tuner", "before": 3}]"#,
+        r#"[{"unit": "tuner", "before": "chorus"}]"#,
+        r#"[{"unit": "amp", "slot": 0}]"#,
+        r#"[{"unit": "tuner", "slot": -1}]"#,
+        r#"[{"unit": "tuner", "slot": "2"}]"#,
+        r#"[{"unit": "tuner", "slot": 0}, {"unit": "tuner", "slot": 3}]"#,
     ] {
         assert_eq!(
             RackLayout::from_stored(stored),
