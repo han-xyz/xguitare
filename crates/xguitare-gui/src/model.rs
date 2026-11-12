@@ -31,7 +31,7 @@ pub const LADDER_YELLOW_DB: f64 = -12.0;
 pub const LADDER_RED_DB: f64 = -3.0;
 pub const EAR_WIDTH: f32 = 30.0;
 pub const EAR_HOLE_RADIUS: f32 = 4.0;
-pub const EAR_HOLE_INSET: f32 = 22.0;
+pub const EAR_HOLE_INSET: f32 = 10.0;
 pub const CLIP_DB: f64 = 0.0;
 pub const PEAK_HOLD_FOR: Duration = Duration::from_secs(2);
 pub const CENTS_SPAN: i64 = 50;
@@ -766,6 +766,14 @@ pub enum Direction {
     Down,
 }
 
+/// Each Module id with the Rack position its ears show: 1-based in Rack order, as `rack move` counts.
+pub fn rack_position_labels(ids: &[String]) -> Vec<(String, String)> {
+    ids.iter()
+        .enumerate()
+        .map(|(index, id)| (id.clone(), (index + 1).to_string()))
+        .collect()
+}
+
 /// The Rack position a Module at `index` moves to; `None` when it is already at that end.
 pub fn move_target(index: usize, direction: Direction, len: usize) -> Option<usize> {
     match direction {
@@ -1336,12 +1344,12 @@ pub fn mute_banner(status: Option<&Value>, muted_by_tuner: bool) -> Option<Strin
 /// `held_db` is `None` while no status arrives, so the text shows no value.
 pub fn peak_text(held_db: Option<f64>, clipped: bool) -> String {
     let Some(db) = held_db else {
-        return "peak —".to_string();
+        return "—".to_string();
     };
     let text = if clipped {
-        format!("peak {db:+.1} dB, clipped")
+        format!("{db:+.1} dB, clipped")
     } else {
-        format!("peak {db:+.1} dB")
+        format!("{db:+.1} dB")
     };
     text.replace('-', "\u{2212}")
 }
@@ -1459,10 +1467,10 @@ pub fn closed_unit_rows(knob_count: usize, width: f32) -> usize {
 }
 
 /// The height of an open unit with one row of large knobs, and the least any open unit has.
-pub const OPEN_UNIT_HEIGHT: f32 = 190.0;
+pub const OPEN_UNIT_HEIGHT: f32 = 168.0;
 /// One large knob column with its label and value field, and the gap after it.
 pub const OPEN_KNOB_PITCH: f32 = 92.0;
-const OPEN_ROW_HEIGHT: f32 = 126.0;
+const OPEN_ROW_HEIGHT: f32 = 104.0;
 const OPEN_ROW_GAP: f32 = 8.0;
 const CHOICE_HEIGHT: f32 = 32.0;
 const CHOICE_GAP: f32 = 4.0;

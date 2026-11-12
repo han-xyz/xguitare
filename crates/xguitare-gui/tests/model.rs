@@ -32,7 +32,8 @@ use xguitare_gui::model::{
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RemovedUnit, Restore, ScreenRect, UnitStyle,
     bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects, knob_arcs, knob_origin,
-    module_title, mute_banner, palette_place, restore, shown_undo, unit_style,
+    module_title, mute_banner, palette_place, rack_position_labels, restore, shown_undo,
+    unit_style,
 };
 use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
@@ -1174,8 +1175,8 @@ fn ear_holes_sit_inside_the_ear() {
         }
         assert!(holes[0].1 < holes[1].1, "{height}");
     }
-    assert_eq!(ear_holes(66.0), [(15.0, 22.0), (15.0, 44.0)]);
-    assert_eq!(ear_holes(190.0), [(15.0, 22.0), (15.0, 168.0)]);
+    assert_eq!(ear_holes(66.0), [(15.0, 10.0), (15.0, 56.0)]);
+    assert_eq!(ear_holes(190.0), [(15.0, 10.0), (15.0, 180.0)]);
 }
 
 const UNIT_EDGES: [f32; 5] = [100.0, 170.0, 240.0, 430.0, 494.0];
@@ -1945,9 +1946,9 @@ fn tuner_header_shows_note_and_cents_or_no_signal() {
 
 #[test]
 fn peak_text_without_a_status_shows_no_value() {
-    assert_eq!(peak_text(Some(-4.2), false), "peak \u{2212}4.2 dB");
-    assert_eq!(peak_text(Some(0.3), true), "peak +0.3 dB, clipped");
-    assert_eq!(peak_text(None, false), "peak —");
+    assert_eq!(peak_text(Some(-4.2), false), "\u{2212}4.2 dB");
+    assert_eq!(peak_text(Some(0.3), true), "+0.3 dB, clipped");
+    assert_eq!(peak_text(None, false), "—");
 }
 
 fn spec(param: &str, unit: &str, integer: bool) -> ParamRow {
@@ -2362,4 +2363,43 @@ fn open_unit_grows_by_a_row_per_extra_row() {
     let one_more = open_unit_height(2) - OPEN_UNIT_HEIGHT;
     assert!(one_more > 100.0, "{one_more}");
     assert_eq!(open_unit_height(3) - open_unit_height(2), one_more);
+}
+
+#[test]
+fn ear_numbers_follow_rack_order_through_a_move_an_add_and_a_remove() {
+    let labels = |ids: &[&str]| {
+        let ids: Vec<String> = ids.iter().map(|id| (*id).to_string()).collect();
+        rack_position_labels(&ids)
+    };
+    let expected = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(id, label)| ((*id).to_string(), (*label).to_string()))
+            .collect()
+    };
+    assert_eq!(
+        labels(&["gate", "drive", "delay"]),
+        expected(&[("gate", "1"), ("drive", "2"), ("delay", "3")])
+    );
+    assert_eq!(
+        labels(&["delay", "gate", "drive"]),
+        expected(&[("delay", "1"), ("gate", "2"), ("drive", "3")]),
+        "after delay moves to the top"
+    );
+    assert_eq!(
+        labels(&["delay", "gate", "drive", "reverb"]),
+        expected(&[
+            ("delay", "1"),
+            ("gate", "2"),
+            ("drive", "3"),
+            ("reverb", "4")
+        ]),
+        "after reverb is added"
+    );
+    assert_eq!(
+        labels(&["delay", "drive", "reverb"]),
+        expected(&[("delay", "1"), ("drive", "2"), ("reverb", "3")]),
+        "after gate is removed"
+    );
+    assert_eq!(labels(&[]), expected(&[]));
 }

@@ -159,6 +159,12 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("on accent on hover boundary", c.on_accent, c.hover_boundary),
         pair("on accent on muted", c.on_accent, c.muted),
         pair("on accent on bypass arc", c.on_accent, c.bypass_arc),
+        pair("rack position on ear edge", c.on_accent, c.ear_edge),
+        pair("rack position on ear centre", c.on_accent, c.ear_centre),
+        pair("lit on well", c.lit, c.well),
+        pair("chevron on panel", c.hover_boundary, c.panel),
+        pair("chevron on panel open", c.hover_boundary, c.panel_open),
+        pair("chevron on bypass panel", c.hover_boundary, c.bypass_panel),
     ]
 }
 
@@ -203,6 +209,8 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("focus ring on focus gap", c.focus_ring, c.on_accent),
         pair("focus ring on hover", c.focus_ring, c.hover),
         pair("focus ring on well", c.focus_ring, c.well),
+        pair("cents needle on well", c.lit, c.well),
+        pair("centre mark on well", c.text, c.well),
     ]
 }
 
@@ -318,6 +326,26 @@ pub fn unit_name() -> FontId {
 /// The Tuner note and the Metronome bpm.
 pub fn note() -> FontId {
     FontId::monospace(TEXT_LARGE)
+}
+
+/// A Rack position engraved on a unit's ears.
+pub fn ear_number() -> FontId {
+    FontId::monospace(TEXT_UNIT)
+}
+
+/// An eq band column's title.
+pub fn band_title() -> FontId {
+    FontId::new(TEXT_BODY, family_semibold())
+}
+
+/// The cents beside the Tuner note.
+pub fn cents() -> FontId {
+    FontId::monospace(TEXT_UNIT)
+}
+
+/// The dB marks under the meter bridge's ladders.
+pub fn scale() -> FontId {
+    FontId::monospace(TEXT_LEGEND)
 }
 
 pub fn heading() -> FontId {

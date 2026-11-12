@@ -1,9 +1,9 @@
 use xguitare_core::ModuleRegistry;
 use xguitare_gui::eq_model::{
-    Clip, EqDot, eq_bands, eq_curve, eq_curve_name, eq_dot_of_param, eq_dots, eq_open_height, eq_x,
-    eq_y,
+    Clip, EqDot, eq_bands, eq_curve, eq_curve_name, eq_dot_of_param, eq_dots, eq_layout,
+    eq_summary, eq_x, eq_y,
 };
-use xguitare_gui::model::{OPEN_UNIT_HEIGHT, ParamRow};
+use xguitare_gui::model::{CLOSED_KNOB_WIDTH, OPEN_UNIT_HEIGHT, ParamRow};
 
 const RATE: f32 = 48_000.0;
 const POINTS: usize = 241;
@@ -225,10 +225,62 @@ fn band_columns_group_the_knobs() {
 #[test]
 fn open_eq_grows_with_its_longest_band_column() {
     let bands = eq_bands(&eq_rows(&[]));
-    let height = eq_open_height(&bands);
+    let height = eq_layout(&bands, 900.0).height;
     assert!(height > OPEN_UNIT_HEIGHT);
-    let fewer = eq_open_height(&bands[..3]);
+    let fewer = eq_layout(&bands[..3], 900.0).height;
     assert!(height > fewer, "the High column has one knob more");
+}
+
+#[test]
+fn band_columns_sit_right_of_the_plot_four_two_or_one_abreast() {
+    let bands = eq_bands(&eq_rows(&[]));
+    for (width, columns) in [(900.0, 4), (640.0, 2), (420.0, 1)] {
+        let layout = eq_layout(&bands, width);
+        assert_eq!(layout.columns, columns, "at {width}");
+        assert!(
+            layout.plot_width + columns as f32 * CLOSED_KNOB_WIDTH <= width,
+            "at {width}"
+        );
+    }
+    assert!(eq_layout(&bands, 640.0).height > eq_layout(&bands, 900.0).height);
+}
+
+#[test]
+fn summary_lists_the_bands_that_cut_or_boost() {
+    let summary = |values: &[(&str, f64)]| eq_summary(&eq_rows(values));
+    assert_eq!(
+        summary(&[
+            ("low_gain", 4.0),
+            ("low_freq", 100.0),
+            ("mid1_gain", -3.0),
+            ("mid1_freq", 400.0),
+            ("mid2_gain", 2.0),
+            ("mid2_freq", 2500.0),
+        ]),
+        "+4 @100 \u{2212}3 @400 +2 @2.5k"
+    );
+    assert_eq!(
+        summary(&[("high_gain", 3.0), ("high_freq", 8000.0)]),
+        "+3 @8k"
+    );
+    assert_eq!(
+        summary(&[
+            ("low_gain", -1.5),
+            ("low_freq", 82.0),
+            ("mid2_gain", 0.5),
+            ("mid2_freq", 1250.0)
+        ]),
+        "\u{2212}1.5 @82 +0.5 @1.3k"
+    );
+    assert_eq!(
+        summary(&[
+            ("low_gain", 0.0),
+            ("mid1_gain", 0.0),
+            ("mid2_gain", 0.0),
+            ("high_gain", 0.0)
+        ]),
+        "flat"
+    );
 }
 
 #[test]

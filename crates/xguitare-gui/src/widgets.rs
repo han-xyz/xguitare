@@ -1,7 +1,7 @@
 use egui::{
-    Align2, Button, Color32, Context, CornerRadius, EventFilter, Frame, Id, Margin, Mesh, Painter,
-    Pos2, Rect, Response, RichText, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, Visuals,
-    Widget, WidgetInfo, pos2, vec2,
+    Align2, Button, Color32, Context, CornerRadius, EventFilter, Id, Mesh, Painter, Pos2, Rect,
+    Response, RichText, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, Visuals, Widget,
+    WidgetInfo, pos2, vec2,
 };
 
 use crate::model::{
@@ -42,9 +42,17 @@ const LAMP_RADIUS: f32 = 6.0;
 const LAMP_GAP: f32 = 2.0;
 const LAMP_RING_WIDTH: f32 = 1.0;
 const LAMP_OFF_RING_WIDTH: f32 = 1.5;
-const TAG_MARGIN: Margin = Margin::symmetric(SPACE_S as i8, 0);
-const LADDER_SEGMENT_SIZE: Vec2 = Vec2::new(14.0, 10.0);
+const TAG_PADDING: Vec2 = Vec2::new(SPACE_S, 1.0);
+const LADDER_SEGMENT_HEIGHT: f32 = 11.0;
+const LADDER_SEGMENT_WIDTHS: (f32, f32) = (8.0, 20.0);
 const LADDER_GAP: f32 = 3.0;
+const SCREW_RING_WIDTH: f32 = 1.5;
+/// How far the light copy of an engraved Rack position sits below the dark one.
+const ENGRAVE_OFFSET: f32 = 1.0;
+const CENTS_TICKS: usize = 21;
+const CENTS_TICK_HEIGHT: f32 = 8.0;
+const CENTS_CENTRE_TICK_HEIGHT: f32 = 20.0;
+const CENTS_STRIP_INSET: f32 = 2.0;
 const BANK_ROW_HEIGHT: f32 = 40.0;
 const BANK_ROW_BORDER: f32 = 3.0;
 const BANK_ROW_PADDING: f32 = 10.0;
@@ -199,9 +207,9 @@ pub fn primary_button(text: &str) -> StyledButton {
 }
 
 /// The window's button look: a boundary edge, a lighter fill on hover, a dark well while pressed.
-pub fn outlined_button(text: &str) -> StyledButton {
+pub fn outlined_button(text: impl Into<RichText>) -> StyledButton {
     StyledButton {
-        button: Button::new(text.to_string()),
+        button: Button::new(text.into()),
         kind: ButtonKind::Outlined,
     }
 }
@@ -240,18 +248,23 @@ pub fn text_field(edit: TextEdit<'_>) -> impl Widget + '_ {
 /// The `Bypassed` pill beside a bypassed unit's name.
 pub fn tag(ui: &mut Ui, text: &str) -> Response {
     let colours = palette();
-    Frame::new()
-        .stroke(Stroke::new(1.0, colour(colours.boundary)))
-        .corner_radius(RADIUS_PILL)
-        .inner_margin(TAG_MARGIN)
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(text)
-                    .font(theme::legend())
-                    .color(colour(colours.bypass_text)),
-            )
-        })
-        .response
+    let galley = ui.painter().layout_no_wrap(
+        text.to_string(),
+        theme::legend(),
+        colour(colours.bypass_text),
+    );
+    let (rect, response) =
+        ui.allocate_exact_size(galley.size() + TAG_PADDING * 2.0, Sense::hover());
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, text));
+    let painter = ui.painter();
+    painter.rect_stroke(
+        rect,
+        RADIUS_PILL,
+        Stroke::new(1.0, colour(colours.boundary)),
+        StrokeKind::Inside,
+    );
+    painter.galley(rect.min + TAG_PADDING, galley, colour(colours.bypass_text));
+    response
 }
 
 /// The ring around whichever widget has keyboard focus, drawn once a frame on that widget's layer: a dark gap band, then the focus-ring colour. A text field shows its focus with its own lit edge instead; a widget partly scrolled out of view is ringed only inside the view. A widget that is no rounded rectangle names its corner radius with [`focus_corner`].
@@ -524,14 +537,18 @@ fn paint_knob_body(painter: &Painter, centre: Pos2, radius: f32) {
     painter.add(mesh);
 }
 
-/// Both silver ears, at the left and right edges of `unit`.
-pub fn rack_ears(painter: &Painter, unit: Rect) {
+/// Both steel ears, at the left and right edges of `unit`, each engraved with `position` between its two screws.
+pub fn rack_ears(painter: &Painter, unit: Rect, position: Option<&str>) {
     let size = vec2(EAR_WIDTH, unit.height());
-    paint_ear(painter, Rect::from_min_size(unit.min, size));
-    paint_ear(
-        painter,
+    for ear in [
+        Rect::from_min_size(unit.min, size),
         Rect::from_min_size(pos2(unit.right() - EAR_WIDTH, unit.top()), size),
-    );
+    ] {
+        paint_ear(painter, ear);
+        if let Some(position) = position {
+            engrave(painter, ear.center(), position);
+        }
+    }
 }
 
 fn paint_ear(painter: &Painter, ear: Rect) {
@@ -552,8 +569,33 @@ fn paint_ear(painter: &Painter, ear: Rect) {
     }
     painter.add(mesh);
     for (x, y) in ear_holes(ear.height()) {
-        painter.circle_filled(ear.min + vec2(x, y), EAR_HOLE_RADIUS, colour(colours.well));
+        painter.circle(
+            ear.min + vec2(x, y),
+            EAR_HOLE_RADIUS,
+            colour(colours.well),
+            Stroke::new(SCREW_RING_WIDTH, colour(colours.knob_highlight)),
+        );
     }
+}
+
+/// Dark text over a light copy of it one pixel lower, as if cut into the steel.
+fn engrave(painter: &Painter, centre: Pos2, text: &str) {
+    let colours = palette();
+    let font = theme::ear_number();
+    painter.text(
+        centre + vec2(0.0, ENGRAVE_OFFSET),
+        Align2::CENTER_CENTER,
+        text,
+        font.clone(),
+        colour(colours.ear_centre),
+    );
+    painter.text(
+        centre,
+        Align2::CENTER_CENTER,
+        text,
+        font,
+        colour(colours.on_accent),
+    );
 }
 
 /// Lit: filled in `colour_lit` inside a dark gap and a thin ring of it. Unlit: dark inside a ring of `colour_lit`.
@@ -581,25 +623,28 @@ pub fn lamp(painter: &Painter, centre: Pos2, colour_lit: Color32, lit: bool) {
     );
 }
 
-pub fn led_ladder(ui: &mut Ui, db: f64, clipped: bool) -> Response {
+/// A ladder of [`LADDER_SEGMENTS`] LEDs as wide as fits `width`, between the narrowest and widest segment.
+pub fn led_ladder(ui: &mut Ui, width: f32, db: f64, clipped: bool) -> Response {
     let count = LADDER_SEGMENTS as f32;
+    let (narrowest, widest) = LADDER_SEGMENT_WIDTHS;
+    let segment = ((width + LADDER_GAP) / count - LADDER_GAP).clamp(narrowest, widest);
     let size = vec2(
-        count * LADDER_SEGMENT_SIZE.x + (count - 1.0) * LADDER_GAP,
-        LADDER_SEGMENT_SIZE.y,
+        count * segment + (count - 1.0) * LADDER_GAP,
+        LADDER_SEGMENT_HEIGHT,
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     let colours = palette();
     let painter = ui.painter();
-    for (index, segment) in ladder_segments(db, clipped).iter().enumerate() {
-        let left = rect.left() + index as f32 * (LADDER_SEGMENT_SIZE.x + LADDER_GAP);
-        let fill = match (segment.lit, segment.band) {
+    for (index, led) in ladder_segments(db, clipped).iter().enumerate() {
+        let left = rect.left() + index as f32 * (segment + LADDER_GAP);
+        let fill = match (led.lit, led.band) {
             (false, _) => colours.arc_track,
             (true, Band::Green) => colours.go,
             (true, Band::Yellow) => colours.lit,
             (true, Band::Red) => colours.danger,
         };
         painter.rect_filled(
-            Rect::from_min_size(pos2(left, rect.top()), LADDER_SEGMENT_SIZE),
+            Rect::from_min_size(pos2(left, rect.top()), vec2(segment, LADDER_SEGMENT_HEIGHT)),
             RADIUS_LED,
             colour(fill),
         );
@@ -629,7 +674,7 @@ pub fn cents_arc(ui: &mut Ui, fraction: Option<f32>, colour: Color32) {
             CENTS_ARC_START_DEG,
             CENTS_ARC_START_DEG + CENTS_ARC_SWEEP_DEG,
         ),
-        Stroke::new(CENTS_ARC_WIDTH, ui.visuals().extreme_bg_color),
+        Stroke::new(CENTS_ARC_WIDTH, theme::colour(palette().arc_track)),
     );
     let Some(fraction) = fraction else {
         return;
@@ -639,6 +684,41 @@ pub fn cents_arc(ui: &mut Ui, fraction: Option<f32>, colour: Color32) {
         [center, point_at(center, radius, needle_deg)],
         Stroke::new(CENTS_NEEDLE_WIDTH, colour),
     );
+}
+
+/// A recessed strip from −50 cents at the left to +50 at the right: a tick every five cents, a tall one at 0, and the needle only when `fraction` is `Some`.
+pub fn cents_strip(painter: &Painter, rect: Rect, fraction: Option<f32>, needle: Color32) {
+    let colours = palette();
+    painter.rect(
+        rect,
+        RADIUS_CONTROL,
+        colour(colours.well),
+        Stroke::new(1.0, colour(colours.boundary)),
+        StrokeKind::Inside,
+    );
+    let inner = rect.shrink(CENTS_STRIP_INSET);
+    let x_at = |fraction: f32| inner.left() + inner.width() * (fraction + 1.0) / 2.0;
+    let centre = CENTS_TICKS / 2;
+    for index in 0..CENTS_TICKS {
+        let (height, tick) = if index == centre {
+            (CENTS_CENTRE_TICK_HEIGHT, colours.text)
+        } else {
+            (CENTS_TICK_HEIGHT, colours.boundary)
+        };
+        let x = x_at(index as f32 / centre as f32 - 1.0);
+        painter.vline(
+            x,
+            (inner.bottom() - height)..=inner.bottom(),
+            Stroke::new(1.0, colour(tick)),
+        );
+    }
+    if let Some(fraction) = fraction {
+        painter.vline(
+            x_at(fraction),
+            inner.y_range(),
+            Stroke::new(CENTS_NEEDLE_WIDTH, needle),
+        );
+    }
 }
 
 fn arc_points(center: Pos2, radius: f32, from_deg: f32, to_deg: f32) -> Vec<Pos2> {

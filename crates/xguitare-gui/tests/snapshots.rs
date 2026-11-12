@@ -465,7 +465,7 @@ fn gui_snapshots() {
     write_png(&mut two_open, "two-units-open");
 
     let (mut tuner, _, _dir) = harness();
-    tuner.get_by_role_and_label(Role::Button, "Tuner").click();
+    click_unit_switch(&mut tuner, "Tuner", "Off");
     write_png(&mut tuner, "tuner-open");
 
     let (mut save_as, _, _dir) = harness();
@@ -1588,8 +1588,18 @@ fn units_have_fixed_heights() {
     assert_eq!(unit_height(&harness, "compressor unit"), 64.0);
     assert_eq!(unit_height(&harness, "chorus unit"), 64.0);
     open_unit(&mut harness, 0);
-    assert_eq!(unit_height(&harness, "compressor unit"), 190.0);
+    assert_eq!(unit_height(&harness, "compressor unit"), 168.0);
     assert_eq!(unit_height(&harness, "preamp unit"), 64.0);
+}
+
+#[test]
+fn tuner_unit_switch_opens_and_closes_the_tuner_view() {
+    let (mut harness, _, _dir) = harness();
+    assert_eq!(unit_height(&harness, "Tuner unit"), 64.0);
+    click_unit_switch(&mut harness, "Tuner", "Off");
+    assert_eq!(unit_height(&harness, "Tuner unit"), 168.0);
+    click_unit_switch(&mut harness, "Tuner", "On");
+    assert_eq!(unit_height(&harness, "Tuner unit"), 64.0);
 }
 
 #[test]

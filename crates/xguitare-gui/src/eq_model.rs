@@ -1,6 +1,6 @@
 use xguitare_core::{EQ_MAX_FREQ_PER_RATE, eq_response_db};
 
-use crate::model::{ParamRow, format_value};
+use crate::model::{CLOSED_KNOB_WIDTH, ParamRow, format_value};
 
 pub const EQ: &str = "eq";
 pub const EQ_MIN_HZ: f32 = 10.0;
@@ -20,6 +20,8 @@ pub const EQ_FREQ_LINES: [(f32, &str); 9] = [
     (10_000.0, "10k"),
 ];
 pub const EQ_PLOT_HEIGHT: f32 = 120.0;
+/// The plot grows with its band columns up to this height.
+pub const EQ_PLOT_MAX_HEIGHT: f32 = 200.0;
 /// The dB labels' column left of the plot frame.
 pub const EQ_GUTTER: f32 = 36.0;
 pub const EQ_AXIS_LABEL_HEIGHT: f32 = 16.0;
@@ -27,6 +29,18 @@ pub const EQ_BAND_TITLE_HEIGHT: f32 = 20.0;
 /// One small knob with its label and value field, and the gap below it.
 pub const EQ_BAND_KNOB_PITCH: f32 = 52.0;
 pub const EQ_SECTION_GAP: f32 = 8.0;
+/// The plot keeps at least this width beside its band columns; with less, the columns stack.
+pub const EQ_PLOT_MIN_WIDTH: f32 = 320.0;
+/// Band columns side by side, tried widest first.
+const EQ_BAND_COLUMNS: [usize; 3] = [4, 2, 1];
+pub const EQ_FLAT: &str = "flat";
+/// The gain and frequency Parameters of each band, in band order.
+const SUMMARY_BANDS: [(&str, &str); 4] = [
+    ("low_gain", "low_freq"),
+    ("mid1_gain", "mid1_freq"),
+    ("mid2_gain", "mid2_freq"),
+    ("high_gain", "high_freq"),
+];
 pub const EQ_MINI_WIDTH: f32 = 160.0;
 pub const EQ_MINI_HEIGHT: f32 = 36.0;
 pub const EQ_CURVE_POINTS: usize = 241;
@@ -230,16 +244,82 @@ pub fn eq_bands(rows: &[ParamRow]) -> Vec<EqBand> {
         .collect()
 }
 
-/// An open eq unit's height: the header, the plot with its frequency labels, and the band columns.
-pub fn eq_open_height(bands: &[EqBand]) -> f32 {
-    let knobs = bands.iter().map(|band| band.knobs.len()).max().unwrap_or(0);
-    UNIT_FRAME_HEIGHT
-        + EQ_SECTION_GAP
-        + EQ_PLOT_HEIGHT
-        + EQ_AXIS_LABEL_HEIGHT
-        + EQ_SECTION_GAP
-        + EQ_BAND_TITLE_HEIGHT
-        + knobs as f32 * EQ_BAND_KNOB_PITCH
+/// An open eq's plot beside its band columns: `columns` bands abreast in rows, the plot `plot_width` wide (its dB gutter included) and `plot_height` tall, as tall as the band rows within [`EQ_PLOT_HEIGHT`]..=[`EQ_PLOT_MAX_HEIGHT`]; `height` is the unit's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EqLayout {
+    pub columns: usize,
+    pub plot_width: f32,
+    pub plot_height: f32,
+    pub height: f32,
+}
+
+/// The layout of an open eq whose content is `width` wide: four, two or one band columns, the most that leave the plot [`EQ_PLOT_MIN_WIDTH`].
+pub fn eq_layout(bands: &[EqBand], width: f32) -> EqLayout {
+    let beside = |columns: usize| width - columns as f32 * CLOSED_KNOB_WIDTH - 2.0 * EQ_SECTION_GAP;
+    let columns = EQ_BAND_COLUMNS
+        .into_iter()
+        .find(|&columns| beside(columns) >= EQ_PLOT_MIN_WIDTH)
+        .unwrap_or(1);
+    let rows = bands.chunks(columns.max(1));
+    let row_count = rows.len();
+    let bands_height = rows
+        .map(|row| {
+            let knobs = row.iter().map(|band| band.knobs.len()).max().unwrap_or(0);
+            EQ_BAND_TITLE_HEIGHT + knobs as f32 * EQ_BAND_KNOB_PITCH
+        })
+        .sum::<f32>()
+        + row_count.saturating_sub(1) as f32 * EQ_SECTION_GAP;
+    let plot_height =
+        (bands_height - EQ_AXIS_LABEL_HEIGHT).clamp(EQ_PLOT_HEIGHT, EQ_PLOT_MAX_HEIGHT);
+    EqLayout {
+        columns,
+        plot_width: beside(columns).max(0.0),
+        plot_height,
+        height: UNIT_FRAME_HEIGHT
+            + EQ_SECTION_GAP
+            + (plot_height + EQ_AXIS_LABEL_HEIGHT).max(bands_height)
+            + EQ_SECTION_GAP,
+    }
+}
+
+/// A closed eq's one-line summary: each band that cuts or boosts as `+4 @100`, gains in whole or tenth dB, frequencies in Hz or `k`; `flat` when none does.
+pub fn eq_summary(rows: &[ParamRow]) -> String {
+    let value = |param: &str| {
+        rows.iter()
+            .find(|row| row.param == param)
+            .map(|row| row.value)
+    };
+    let parts: Vec<String> = SUMMARY_BANDS
+        .iter()
+        .filter_map(|&(gain, freq)| {
+            let tenths = (value(gain)? * 10.0).round();
+            if tenths == 0.0 {
+                return None;
+            }
+            Some(format!(
+                "{} @{}",
+                gain_text(tenths),
+                freq_text(value(freq)?)
+            ))
+        })
+        .collect();
+    if parts.is_empty() {
+        return EQ_FLAT.to_string();
+    }
+    parts.join(" ")
+}
+
+fn gain_text(tenths: f64) -> String {
+    let sign = if tenths > 0.0 { "+" } else { "\u{2212}" };
+    format!("{sign}{}", tenths.abs() / 10.0)
+}
+
+fn freq_text(hz: f64) -> String {
+    let hz = hz.round();
+    if hz < 1000.0 {
+        return format!("{hz}");
+    }
+    format!("{}k", (hz / 100.0).round() / 10.0)
 }
 
 /// The plot's accessible name: every band's values in words.

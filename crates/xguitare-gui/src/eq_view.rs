@@ -1,8 +1,8 @@
-use egui::{Align2, Color32, Painter, Pos2, Rect, Stroke, pos2};
+use egui::{Align2, Color32, Painter, Pos2, Rect, Stroke, StrokeKind, pos2};
 
 use crate::eq_model::{
-    Clip, CurvePoint, DotPoint, EQ_FREQ_LINES, EQ_GRID_DB, EQ_GUTTER, EQ_PLOT_HEIGHT, EQ_RANGE_DB,
-    eq_x, eq_y,
+    Clip, CurvePoint, DotPoint, EQ_AXIS_LABEL_HEIGHT, EQ_FREQ_LINES, EQ_GRID_DB, EQ_GUTTER,
+    EQ_RANGE_DB, eq_x, eq_y,
 };
 use crate::theme::{self, colour, palette};
 
@@ -14,6 +14,8 @@ const RING_RADIUS: f32 = 7.0;
 const RING_WIDTH: f32 = 2.0;
 const AXIS_TEXT_GAP: f32 = 4.0;
 const AXIS_TEXT_TOP: f32 = 1.0;
+/// The grid frame's distance from the well's top and right edges.
+const WELL_INSET: f32 = 6.0;
 
 /// The curve and dots the plot draws over its grid; none while the Daemon is disconnected.
 pub struct PlotLines<'a> {
@@ -27,11 +29,15 @@ pub struct EqPainters<'a> {
     pub zero_line: &'a Painter,
 }
 
-/// The open eq's plot in `area`: the dB labels in the gutter at its left, the frame with its grid, the frequency labels below it, then the curve and band dots in `accent`.
+/// The open eq's plot in `area`, a recessed well: the dB labels in the gutter at its left, the frame with its grid, the frequency labels below it, then the curve and band dots in `accent`.
 pub fn paint_plot(painters: &EqPainters, area: Rect, lines: Option<PlotLines>, accent: Color32) {
+    paint_well(painters.painter, area);
     let frame = Rect::from_min_max(
-        pos2(area.left() + EQ_GUTTER, area.top()),
-        pos2(area.right(), area.top() + EQ_PLOT_HEIGHT),
+        pos2(area.left() + EQ_GUTTER, area.top() + WELL_INSET),
+        pos2(
+            area.right() - WELL_INSET,
+            area.bottom() - EQ_AXIS_LABEL_HEIGHT,
+        ),
     );
     paint_grid(painters.painter, frame);
     paint_zero_line(painters.zero_line, frame);
@@ -56,13 +62,23 @@ pub fn paint_mini(
     curve: Option<&[CurvePoint]>,
     accent: Color32,
 ) {
-    painters
-        .painter
-        .rect_filled(rect, 0, colour(palette().well));
+    paint_well(painters.painter, rect);
     paint_zero_line(painters.zero_line, rect);
     if let Some(curve) = curve {
         paint_curve(painters.painter, rect, curve, MINI_CURVE_WIDTH, accent);
     }
+}
+
+/// The well's fill inside a 1 px boundary edge.
+fn paint_well(painter: &Painter, rect: Rect) {
+    let colours = palette();
+    painter.rect(
+        rect,
+        theme::RADIUS_CONTROL,
+        colour(colours.well),
+        Stroke::new(1.0, colour(colours.boundary)),
+        StrokeKind::Inside,
+    );
 }
 
 fn at(frame: Rect, x: f32, y: f32) -> Pos2 {
@@ -78,7 +94,6 @@ fn paint_grid(painter: &Painter, frame: Rect) {
     let text = |pos: Pos2, align: Align2, label: &str| {
         painter.text(pos, align, label, theme::value(), colour(colours.muted));
     };
-    painter.rect_filled(frame, 0, colour(colours.well));
     let steps = (EQ_RANGE_DB / EQ_GRID_DB) as i32;
     for step in -steps..=steps {
         let db = step as f32 * EQ_GRID_DB;

@@ -62,7 +62,7 @@ pub struct Tuner<'a> {
 }
 
 impl Tuner<'_> {
-    fn toggle(&mut self, muted_now: bool) -> Option<Command> {
+    pub fn toggle(&mut self, muted_now: bool) -> Option<Command> {
         let (open, command, muted_by_us) =
             tuner_toggle(*self.open, self.mute_default, *self.muted_by_us, muted_now);
         *self.open = open;

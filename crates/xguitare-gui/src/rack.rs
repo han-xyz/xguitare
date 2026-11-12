@@ -11,19 +11,19 @@ use xguitare_core::control::SILENCE_DB;
 
 use crate::eq_model::{
     EQ, EQ_AXIS_LABEL_HEIGHT, EQ_BAND_TITLE_HEIGHT, EQ_CURVE_POINTS, EQ_MINI_HEIGHT,
-    EQ_MINI_POINTS, EQ_MINI_WIDTH, EQ_PLOT_HEIGHT, EQ_SECTION_GAP, EqBand, EqDot, eq_bands,
-    eq_curve, eq_curve_name, eq_dot_of_param, eq_dots, eq_open_height,
+    EQ_MINI_POINTS, EQ_MINI_WIDTH, EQ_SECTION_GAP, EqBand, EqDot, EqLayout, eq_bands, eq_curve,
+    eq_curve_name, eq_dot_of_param, eq_dots, eq_layout, eq_summary,
 };
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged, EAR_WIDTH,
-    Feedback, KnobKey, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
-    ScreenRect, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed, cabinet_ir,
-    cents_fraction, chip_click, choice_buttons, choice_step, choice_text, closed_unit_rows,
-    drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_origin,
-    knob_param_value, module_title, move_target, mute_banner, open_knob_rows, open_unit_height,
-    param_label, param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text,
-    typed_value, unit_style,
+    Feedback, KnobKey, METER_FLOOR_DB, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow,
+    PeakHold, ScreenRect, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed, cabinet_ir,
+    cents_fraction, cents_text, chip_click, choice_buttons, choice_step, choice_text,
+    closed_unit_rows, drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction,
+    knob_origin, knob_param_value, module_title, move_target, mute_banner, open_knob_rows,
+    open_unit_height, param_label, param_rows, peak_db, peak_text, rack_position_labels,
+    tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::theme::{self, Rgb, TEXT_DISPLAY, colour, palette};
@@ -40,16 +40,15 @@ const UNIT_HEIGHT: f32 = 64.0;
 const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const UNIT_NAME_WIDTH: f32 = 120.0;
-const LAMP_SLOT: f32 = 18.0;
 const BANNER_HEIGHT: f32 = 40.0;
-const METER_LABEL_WIDTH: f32 = 52.0;
+const METER_LABEL_WIDTH: f32 = 44.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
-const METER_ROW_GAP: f32 = 8.0;
+const METER_ROW_GAP: f32 = 4.0;
 const METER_ITEM_GAP: f32 = 12.0;
-const METER_TOP: f32 = 7.0;
+const METER_TOP: f32 = 2.0;
 pub const METERS: [(&str, &str); 2] = [("Input", "input_peak_db"), ("Output", "output_peak_db")];
 const CLEAR_CLIP_HINT: &str = "Click to clear the clip lamp";
-const MOVE_BUTTON_SIZE: Vec2 = Vec2::splat(36.0);
+const MOVE_BUTTON_SIZE: Vec2 = Vec2::splat(30.0);
 const MOVE_BUTTON_GAP: f32 = 8.0;
 const MOVE_BUTTONS_WIDTH: f32 = 2.0 * MOVE_BUTTON_SIZE.x + MOVE_BUTTON_GAP;
 const OPEN_CHEVRON: &str = "▼";
@@ -59,20 +58,30 @@ const GRIP: &str = "⠿";
 const TUNER_LABEL: &str = "Tuner";
 const METER_BRIDGE_LABEL: &str = "Meter bridge";
 const VALUE_FIELD_WIDTH: f32 = 64.0;
-const STRIPE_WIDTH: f32 = 3.0;
-const STRIPE_INSET: f32 = 10.0;
+const RULE_WIDTH: f32 = 1.0;
+const RULE_HEIGHT: f32 = 30.0;
+/// The `Bypassed` tag's place after the chevron, kept whatever the tag's text measures.
+const TAG_SLOT_WIDTH: f32 = 72.0;
+const METER_SCALE_HEIGHT: f32 = 14.0;
+const PEAK_WIDTH: f32 = 140.0;
+const PEAK_LABEL: &str = "peak";
+const METER_SCALE_DB: [f64; 6] = [-48.0, -36.0, -24.0, -12.0, -6.0, 0.0];
+const CENTS_STRIP_MAX_WIDTH: f32 = 420.0;
+const CENTS_STRIP_HEIGHT: f32 = 26.0;
+const CENTS_WIDTH: f32 = 64.0;
+const EQ_SUMMARY_LABEL: &str = "Bands";
 const HEADER_GAP: f32 = 10.0;
 const LARGE_KNOB_COLUMN_WIDTH: f32 = 84.0;
 const SMALL_KNOB_TOP: f32 = 4.0;
 const FOCUS_PENDING: &str = "focus pending";
 const CHEVRON_WIDTH: f32 = 20.0;
 const KNOB_FIELD_GAP: f32 = 8.0;
-/// The widths of a closed unit's header items other than its knobs, left to right: On/Off switch with its LED, name, stripe, chevron, ↑/↓.
+/// The widths of a closed unit's header items other than its knobs and the `Bypassed` tag, left to right: On/Off switch with its lamp, name, chevron, rule, ↑/↓.
 const HEADER_FIXED_ITEMS: [f32; 5] = [
     widgets::FOOTSWITCH_SIZE.x,
     UNIT_NAME_WIDTH,
-    STRIPE_WIDTH,
     CHEVRON_WIDTH,
+    RULE_WIDTH,
     MOVE_BUTTONS_WIDTH,
 ];
 const CHIP_SIZE: Vec2 = Vec2::new(56.0, 24.0);
@@ -108,6 +117,8 @@ pub struct RackView<'a, 'b> {
     pub clips: &'a mut [ClipLatch; 2],
     pub holds: &'a [PeakHold; 2],
     pub open_units: &'a mut BTreeSet<String>,
+    /// Set when the Tuner unit's switch was clicked, for the caller to open or close the Tuner view.
+    pub tuner_switched: bool,
 }
 
 pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Command> {
@@ -128,7 +139,7 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = UNIT_GAP;
                     meter_bridge(ui, snapshot, view.clips, view.holds);
-                    tuner_unit(ui, snapshot, view.tuner_open);
+                    view.tuner_switched |= tuner_unit(ui, snapshot, view.tuner_open);
                     let (unit_commands, placed) =
                         module_units(ui, snapshot, &modules, view.knobs, view.open_units);
                     commands.extend(unit_commands);
@@ -158,11 +169,18 @@ fn mute_banner_strip(ui: &mut Ui, text: &str) {
     );
 }
 
+/// How a unit's faceplate looks: its fill, its 1 px top edge, and the Rack position its ears show.
+struct Faceplate<'a> {
+    fill: Rgb,
+    edge: Color32,
+    position: Option<&'a str>,
+}
+
 /// A unit exactly `height` tall whatever its content, which is clipped to it; `label` names it in the accessibility tree.
 fn rack_unit<R>(
     ui: &mut Ui,
     label: &str,
-    fill: Rgb,
+    face: &Faceplate,
     height: f32,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> InnerResponse<R> {
@@ -171,7 +189,7 @@ fn rack_unit<R>(
     let mut unit_ui = ui.new_child(UiBuilder::new().id_salt(label).max_rect(rect));
     unit_ui.set_clip_rect(rect.intersect(ui.clip_rect()));
     let inner = Frame::new()
-        .fill(colour(fill))
+        .fill(colour(face.fill))
         .inner_margin(Margin::symmetric(UNIT_SIDE_MARGIN, UNIT_MARGIN))
         .show(&mut unit_ui, |ui| {
             ui.set_min_size(ui.available_size());
@@ -181,17 +199,13 @@ fn rack_unit<R>(
     let response = ui.allocate_rect(rect, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Group, true, label));
     let painter = ui.painter();
-    painter.hline(
-        rect.x_range(),
-        rect.top(),
-        Stroke::new(1.0, colour(colours.hover)),
-    );
+    painter.hline(rect.x_range(), rect.top(), Stroke::new(1.0, face.edge));
     painter.hline(
         rect.x_range(),
         rect.bottom(),
         Stroke::new(1.0, colour(colours.well)),
     );
-    widgets::rack_ears(painter, rect);
+    widgets::rack_ears(painter, rect, face.position);
     InnerResponse::new(inner, response)
 }
 
@@ -210,24 +224,25 @@ fn unit_header<R>(
     ui.scope_builder(header, content)
 }
 
-/// What a closed unit in `ui` leaves its knobs: the unit's width less its margins, the fixed header items and one header gap per item.
-fn closed_knobs_width(ui: &Ui) -> f32 {
+/// What a closed unit in `ui` leaves its knobs: the unit's width less its margins, the fixed header items, the `Bypassed` tag when `bypassed`, and one header gap per item.
+fn closed_knobs_width(ui: &Ui, bypassed: bool) -> f32 {
+    let tag = bypassed.then_some(TAG_SLOT_WIDTH);
     let fixed: f32 = HEADER_FIXED_ITEMS
         .iter()
+        .chain(&tag)
         .map(|width| width + HEADER_GAP)
         .sum();
     (ui.available_width() - 2.0 * f32::from(UNIT_SIDE_MARGIN) - fixed).max(0.0)
 }
 
-/// What an open unit in `ui` leaves its knob rows: the unit's width less its margins and the column of ↑/↓ and Remove at its right.
-fn open_knobs_width(ui: &Ui) -> f32 {
-    let side_column = MOVE_BUTTONS_WIDTH + HEADER_GAP;
+/// What an open unit in `ui` leaves its knob rows: the unit's width less its margins, and less the Cabinet IR column at its right when `has_ir`.
+fn open_knobs_width(ui: &Ui, has_ir: bool) -> f32 {
+    let side_column = if has_ir {
+        MOVE_BUTTONS_WIDTH + HEADER_GAP
+    } else {
+        0.0
+    };
     (ui.available_width() - 2.0 * f32::from(UNIT_SIDE_MARGIN) - side_column).max(0.0)
-}
-
-fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(LAMP_SLOT), Sense::hover());
-    widgets::lamp(ui.painter(), rect.center(), lit_colour, lit);
 }
 
 /// The unit's name, its `(type)` after it in small text; the name is truncated first so that the type stays.
@@ -264,10 +279,15 @@ fn fixed_width_label(ui: &mut Ui, width: f32, label: Label) {
     });
 }
 
-fn unit_stripe(ui: &mut Ui) {
-    let size = vec2(STRIPE_WIDTH, ui.available_height() - 2.0 * STRIPE_INSET);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().rect_filled(rect, 0, colour(palette().hover));
+fn unit_rule(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(RULE_WIDTH, RULE_HEIGHT), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, 0, colour(palette().knob_highlight));
+}
+
+/// A knob's or field's name: the legend face in muted text.
+fn legend_text(text: impl Into<String>) -> RichText {
+    muted_text(text).font(theme::legend())
 }
 
 pub fn muted_text(text: impl Into<String>) -> RichText {
@@ -284,56 +304,133 @@ fn meter_bridge(
     holds: &[PeakHold; 2],
 ) {
     let mut cleared = false;
-    rack_unit(
-        ui,
-        METER_BRIDGE_LABEL,
-        palette().panel,
-        METER_BRIDGE_HEIGHT,
-        |ui| {
-            ui.spacing_mut().item_spacing = vec2(METER_ITEM_GAP, METER_ROW_GAP);
-            ui.add_space(METER_TOP);
-            for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
-                let row = vec2(ui.available_width(), METER_ROW_HEIGHT);
-                ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
-                    fixed_width_label(ui, METER_LABEL_WIDTH, Label::new(muted_text(*label)));
-                    let db = snapshot
-                        .status
-                        .as_ref()
-                        .map_or(SILENCE_DB, |status| peak_db(status, key));
-                    let ladder = widgets::led_ladder(ui, db, clip.is_clipped())
-                        .interact(Sense::click())
-                        .on_hover_text(CLEAR_CLIP_HINT);
-                    cleared |= ladder.clicked();
-                    let held_db = snapshot.status.as_ref().map(|_| hold.held_db());
-                    ui.label(muted_text(peak_text(held_db, clip.is_clipped())));
+    let face = Faceplate {
+        fill: palette().panel,
+        edge: colour(palette().hover),
+        position: None,
+    };
+    rack_unit(ui, METER_BRIDGE_LABEL, &face, METER_BRIDGE_HEIGHT, |ui| {
+        ui.spacing_mut().item_spacing = vec2(METER_ITEM_GAP, METER_ROW_GAP);
+        ui.add_space(METER_TOP);
+        let ladder_width =
+            ui.available_width() - METER_LABEL_WIDTH - PEAK_WIDTH - 2.0 * METER_ITEM_GAP;
+        let mut ladder_x = None;
+        for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
+            let row = vec2(ui.available_width(), METER_ROW_HEIGHT);
+            ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+                fixed_width_label(
+                    ui,
+                    METER_LABEL_WIDTH,
+                    Label::new(RichText::new(*label).font(theme::body())),
+                );
+                let db = snapshot
+                    .status
+                    .as_ref()
+                    .map_or(SILENCE_DB, |status| peak_db(status, key));
+                let ladder = widgets::led_ladder(ui, ladder_width, db, clip.is_clipped())
+                    .interact(Sense::click())
+                    .on_hover_text(CLEAR_CLIP_HINT);
+                ladder_x = Some(ladder.rect.x_range());
+                cleared |= ladder.clicked();
+                let held_db = snapshot.status.as_ref().map(|_| hold.held_db());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
+                    ui.label(
+                        RichText::new(peak_text(held_db, clip.is_clipped())).font(theme::value()),
+                    );
+                    ui.label(muted_text(PEAK_LABEL).font(theme::scale()));
                 });
-            }
-        },
-    );
+            });
+        }
+        if let Some(range) = ladder_x {
+            meter_scale(ui, range);
+        }
+    });
     if cleared {
         clips.iter_mut().for_each(ClipLatch::reset);
     }
 }
 
-/// The Tuner's readout; the left panel's Tuner toggle opens it to the Tuner view.
-fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) {
+/// The dB marks under the ladders, each where its level lights the ladder up to.
+fn meter_scale(ui: &mut Ui, range: egui::Rangef) {
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), METER_SCALE_HEIGHT),
+        Sense::hover(),
+    );
+    let painter = ui.painter();
+    for db in METER_SCALE_DB {
+        let fraction = ((db - METER_FLOOR_DB) / -METER_FLOOR_DB) as f32;
+        let text = format!("{}", db as i32).replace('-', "\u{2212}");
+        painter.text(
+            pos2(range.min + fraction * range.span(), rect.top()),
+            Align2::CENTER_TOP,
+            text,
+            theme::scale(),
+            colour(palette().muted),
+        );
+    }
+}
+
+/// The Tuner's readout and its switch, which opens or closes the Tuner view like the left panel's Tuner toggle; whether the switch was clicked.
+fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) -> bool {
+    let colours = palette();
     let (fill, height) = if open {
-        (palette().panel_open, OPEN_UNIT_HEIGHT)
+        (colours.panel_open, OPEN_UNIT_HEIGHT)
     } else {
-        (palette().panel, UNIT_HEIGHT)
+        (colours.panel, UNIT_HEIGHT)
+    };
+    let face = Faceplate {
+        fill,
+        edge: colour(colours.hover),
+        position: None,
     };
     let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
-    rack_unit(ui, "Tuner unit", fill, height, |ui| {
-        unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
+    rack_unit(ui, "Tuner unit", &face, height, |ui| {
+        let switched = unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
-            unit_lamp(ui, colour(palette().go), open);
+            let switched = widgets::footswitch(ui, open, colour(colours.go)).clicked();
             unit_name(ui, TUNER_LABEL, None);
-            unit_stripe(ui);
-            ui.label(RichText::new(tuner_header_text(reading.as_ref())).font(theme::note()));
-        });
+            unit_rule(ui);
+            tuner_readout(ui, reading.as_ref());
+            switched
+        })
+        .inner;
         if open {
             tuner_view(ui, reading.as_ref());
         }
+        switched
+    })
+    .inner
+}
+
+/// The note and cents, then the cents strip filling the rest of the row.
+fn tuner_readout(ui: &mut Ui, reading: Option<&TunerReading>) {
+    let colours = palette();
+    let readout = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = theme::SPACE_S;
+            let Some(reading) = reading else {
+                ui.label(muted_text(NO_SIGNAL));
+                return;
+            };
+            ui.label(RichText::new(&reading.note).font(theme::note()));
+            fixed_width_label(
+                ui,
+                CENTS_WIDTH,
+                Label::new(
+                    RichText::new(cents_text(reading.cents))
+                        .font(theme::cents())
+                        .color(colour(colours.lit)),
+                ),
+            );
+        })
+        .response;
+    readout.widget_info(|| WidgetInfo::labeled(Role::Label, true, tuner_header_text(reading)));
+    let width = ui.available_width().min(CENTS_STRIP_MAX_WIDTH);
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, CENTS_STRIP_HEIGHT), Sense::hover());
+        let fraction = reading.map(|reading| cents_fraction(reading.cents));
+        widgets::cents_strip(ui.painter(), rect, fraction, colour(colours.lit));
     });
 }
 
@@ -348,7 +445,11 @@ fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
             );
             ui.vertical(|ui| {
                 widgets::cents_arc(ui, Some(cents_fraction(reading.cents)), colour);
-                ui.label(RichText::new(format!("{:.1} Hz", reading.hz)).color(colour));
+                ui.label(
+                    RichText::new(format!("{:.1} Hz", reading.hz))
+                        .font(theme::value())
+                        .color(colour),
+                );
             });
         } else {
             ui.label(RichText::new(NO_SIGNAL).font(theme::heading()));
@@ -367,7 +468,9 @@ fn module_units(
 ) -> (Vec<Command>, Vec<(Rect, Response)>) {
     let mut commands = Vec::new();
     let mut placed = Vec::with_capacity(modules.len());
-    for (index, (module, rows)) in modules.iter().enumerate() {
+    let ids: Vec<String> = modules.iter().map(|(id, _)| id.clone()).collect();
+    let positions = rack_position_labels(&ids);
+    for (index, ((module, rows), (_, position))) in modules.iter().zip(&positions).enumerate() {
         let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
         let unit = ModuleUnit {
             module,
@@ -377,6 +480,7 @@ fn module_units(
                 .as_ref()
                 .is_some_and(|params| bypassed(params, module)),
             place: (index, modules.len()),
+            position,
             ir_choice: snapshot
                 .params
                 .as_ref()
@@ -484,6 +588,8 @@ struct ModuleUnit<'a> {
     rows: &'a [ParamRow],
     bypassed: bool,
     place: (usize, usize),
+    /// The Rack position its ears show.
+    position: &'a str,
     ir_choice: Option<IrChoice<'a>>,
     /// The Daemon's rate; `None` while it is disconnected.
     sample_rate: Option<f32>,
@@ -507,16 +613,17 @@ fn module_unit(
     let style = unit_style(unit.bypassed, open);
     let arc = style.arc.map_or(accent, colour);
     let is_eq = type_name == EQ;
-    let knobs_width = closed_knobs_width(ui);
+    let knobs_width = closed_knobs_width(ui, unit.bypassed);
     let rows = if is_eq {
         1.0
     } else {
         closed_unit_rows(unit.rows.len(), knobs_width) as f32
     };
-    let open_width = open_knobs_width(ui);
+    let open_width = open_knobs_width(ui, unit.ir_choice.is_some());
     let open_rows = open_knob_rows(type_name, unit.rows.len(), open_width);
+    let eq = eq_layout(&eq_bands(unit.rows), open_width);
     let open_height = if is_eq {
-        eq_open_height(&eq_bands(unit.rows))
+        eq.height
     } else {
         open_unit_height(open_rows.len())
     };
@@ -529,7 +636,12 @@ fn module_unit(
     let mut toggled = false;
     let mut open_asked = false;
     let mut header_drag = None;
-    let inner = rack_unit(ui, &format!("{module} unit"), style.panel, height, |ui| {
+    let face = Faceplate {
+        fill: style.panel,
+        edge: arc,
+        position: Some(unit.position),
+    };
+    let inner = rack_unit(ui, &format!("{module} unit"), &face, height, |ui| {
         let mut commands = Vec::new();
         let header = unit_header(ui, Sense::click_and_drag(), header_height, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
@@ -543,38 +655,45 @@ fn module_unit(
             let (name, type_part) = module_title(module, type_name);
             ui.scope(|ui| {
                 ui.visuals_mut().override_text_color = Some(colour(style.text));
-                let Some(tag) = style.tag else {
-                    unit_name(ui, &name, type_part);
-                    return;
-                };
-                let slot = vec2(UNIT_NAME_WIDTH, header_height);
-                ui.allocate_ui_with_layout(slot, Layout::top_down(Align::Min), |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    let name_slot = vec2(UNIT_NAME_WIDTH, header_height - theme::SPACE_L);
-                    ui.allocate_ui(name_slot, |ui| unit_name(ui, &name, type_part));
+                unit_name(ui, &name, type_part);
+            });
+            toggled |= chevron(ui, open).clicked();
+            if let Some(tag) = style.tag {
+                let slot = vec2(TAG_SLOT_WIDTH, header_height);
+                ui.allocate_ui_with_layout(slot, Layout::left_to_right(Align::Center), |ui| {
+                    ui.set_min_size(slot);
                     widgets::tag(ui, tag);
                 });
-            });
-            unit_stripe(ui);
-            let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
-            let chevron = Button::new(chevron).small().frame(false);
-            toggled |= ui
-                .add_sized(vec2(CHEVRON_WIDTH, CHEVRON_WIDTH), chevron)
-                .clicked();
-            let rows = Layout::left_to_right(Align::Min).with_main_wrap(true);
-            ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
-                ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
-                ui.visuals_mut().override_text_color = Some(colour(style.text));
-                if !open && is_eq {
-                    eq_mini(ui, unit, arc, knobs);
-                } else if !open {
-                    let (closed_commands, asked) = closed_params(ui, unit.rows, arc, knobs);
-                    commands.extend(closed_commands);
-                    open_asked = asked;
-                }
-            });
+            }
+            unit_rule(ui);
+            if !open {
+                let rows = Layout::left_to_right(Align::Min).with_main_wrap(true);
+                ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
+                    ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
+                    ui.visuals_mut().override_text_color = Some(colour(style.text));
+                    if is_eq {
+                        eq_closed(ui, unit, knobs_width, arc, knobs);
+                    } else {
+                        let (closed_commands, asked) = closed_params(ui, unit.rows, arc, knobs);
+                        commands.extend(closed_commands);
+                        open_asked = asked;
+                    }
+                });
+            }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = MOVE_BUTTON_GAP;
+                if open
+                    && ui
+                        .add(
+                            widgets::warning_button("Remove")
+                                .min_size(vec2(0.0, MOVE_BUTTON_SIZE.y)),
+                        )
+                        .clicked()
+                {
+                    commands.push(Command::RackRemove {
+                        id: module.to_string(),
+                    });
+                }
                 commands.extend(move_buttons(ui, module, unit.place));
             });
         });
@@ -586,27 +705,16 @@ fn module_unit(
                 ui.scope(|ui| {
                     ui.visuals_mut().override_text_color = Some(colour(style.text));
                     if is_eq {
-                        commands.extend(eq_editor(ui, unit, open_width, arc, knobs));
+                        commands.extend(eq_editor(ui, unit, &eq, arc, knobs));
                     } else {
                         commands.extend(open_params(ui, unit.rows, &open_rows, arc, knobs));
                     }
                 });
-                ui.with_layout(Layout::top_down(Align::Max), |ui| {
-                    if let Some(ir_choice) = &unit.ir_choice {
+                if let Some(ir_choice) = &unit.ir_choice {
+                    ui.with_layout(Layout::top_down(Align::Max), |ui| {
                         commands.extend(ir_row(ui, module, ir_choice));
-                    }
-                    if ui
-                        .add(
-                            widgets::warning_button("Remove")
-                                .min_size(vec2(0.0, MOVE_BUTTON_SIZE.y)),
-                        )
-                        .clicked()
-                    {
-                        commands.push(Command::RackRemove {
-                            id: module.to_string(),
-                        });
-                    }
-                });
+                    });
+                }
             });
         }
         commands
@@ -672,6 +780,18 @@ fn ir_row(ui: &mut Ui, module: &str, ir_choice: &IrChoice) -> Vec<Command> {
     commands
 }
 
+/// The open/close triangle after the unit's name.
+fn chevron(ui: &mut Ui, open: bool) -> Response {
+    let text = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
+    let glyph = RichText::new(text)
+        .font(theme::legend())
+        .color(colour(palette().hover_boundary));
+    ui.add_sized(
+        vec2(CHEVRON_WIDTH, CHEVRON_WIDTH),
+        Button::new(glyph).frame(false),
+    )
+}
+
 /// In the gap between the left ear and the header, which drags with the ears.
 fn grip(ui: &Ui, header: Rect) {
     ui.painter().text(
@@ -691,7 +811,8 @@ fn move_buttons(ui: &mut Ui, module: &str, (index, len): (usize, usize)) -> Opti
         if ui
             .add_enabled(
                 to.is_some(),
-                widgets::outlined_button(text).min_size(MOVE_BUTTON_SIZE),
+                widgets::outlined_button(RichText::new(text).font(theme::heading()))
+                    .min_size(MOVE_BUTTON_SIZE),
             )
             .clicked()
             && let Some(to) = to
@@ -766,8 +887,8 @@ fn eq_painters(ui: &Ui) -> (Painter, Painter) {
     (painter, zero_line)
 }
 
-/// A closed eq's curve in place of its knobs; a click on it opens the unit like a click on the header.
-fn eq_mini(ui: &mut Ui, unit: &ModuleUnit, accent: Color32, knobs: &Knobs) {
+/// A closed eq's curve in place of its knobs, then its band summary; a click on the curve opens the unit like a click on the header.
+fn eq_closed(ui: &mut Ui, unit: &ModuleUnit, width: f32, accent: Color32, knobs: &Knobs) {
     let shown: Vec<ParamRow> = unit.rows.iter().map(|row| shown_row(row, knobs)).collect();
     let (slot, _) = ui.allocate_exact_size(vec2(EQ_MINI_WIDTH, HEADER_HEIGHT), Sense::hover());
     let rect = Rect::from_center_size(slot.center(), vec2(EQ_MINI_WIDTH, EQ_MINI_HEIGHT));
@@ -782,32 +903,58 @@ fn eq_mini(ui: &mut Ui, unit: &ModuleUnit, accent: Color32, knobs: &Knobs) {
         zero_line: &zero_line,
     };
     paint_mini(&painters, rect, curve.as_deref(), accent);
+    ui.add_space(HEADER_GAP);
+    let column = vec2((width - EQ_MINI_WIDTH - HEADER_GAP).max(0.0), HEADER_HEIGHT);
+    ui.allocate_ui_with_layout(column, Layout::top_down(Align::Min), |ui| {
+        ui.set_max_width(column.x);
+        ui.spacing_mut().item_spacing.y = UNIT_GAP;
+        ui.add_space(SMALL_KNOB_TOP);
+        ui.label(legend_text(EQ_SUMMARY_LABEL));
+        Frame::new()
+            .fill(colour(palette().well))
+            .stroke(Stroke::new(1.0, colour(palette().boundary)))
+            .corner_radius(theme::RADIUS_CONTROL)
+            .inner_margin(Margin::symmetric(theme::SPACE_XS as i8 + 2, 2))
+            .show(ui, |ui| {
+                ui.add(
+                    Label::new(RichText::new(eq_summary(&shown)).font(theme::value())).truncate(),
+                );
+            });
+    });
 }
 
-/// An open eq: the response curve over four band columns of small knobs; the dot of the band whose knob is hovered, dragged or focused is ringed.
+/// An open eq: the response curve in its well, its band columns beside it as `layout` places them; the dot of the band whose knob is hovered, dragged or focused is ringed.
 fn eq_editor(
     ui: &mut Ui,
     unit: &ModuleUnit,
-    width: f32,
+    layout: &EqLayout,
     accent: Color32,
     knobs: &mut Knobs,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     let mut active = None;
     let area = ui
-        .vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.add_space(EQ_SECTION_GAP);
-            let plot_size = vec2(width, EQ_PLOT_HEIGHT + EQ_AXIS_LABEL_HEIGHT);
-            let (area, _) = ui.allocate_exact_size(plot_size, Sense::hover());
-            ui.add_space(EQ_SECTION_GAP);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                for band in eq_bands(unit.rows) {
-                    let (band_commands, in_use) =
-                        eq_band_column(ui, unit.rows, &band, accent, knobs);
-                    commands.extend(band_commands);
-                    active = active.or(in_use);
+        .horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2.0 * EQ_SECTION_GAP, EQ_SECTION_GAP);
+            let plot_size = vec2(layout.plot_width, layout.plot_height + EQ_AXIS_LABEL_HEIGHT);
+            let area = ui
+                .vertical(|ui| {
+                    ui.add_space(EQ_SECTION_GAP);
+                    ui.allocate_exact_size(plot_size, Sense::hover()).0
+                })
+                .inner;
+            ui.vertical(|ui| {
+                ui.add_space(EQ_SECTION_GAP);
+                for band_row in eq_bands(unit.rows).chunks(layout.columns) {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for band in band_row {
+                            let (band_commands, in_use) =
+                                eq_band_column(ui, unit.rows, band, accent, knobs);
+                            commands.extend(band_commands);
+                            active = active.or(in_use);
+                        }
+                    });
                 }
             });
             area
@@ -856,13 +1003,13 @@ fn eq_band_column(
             title.left_center(),
             Align2::LEFT_CENTER,
             band.title,
-            theme::body(),
+            theme::band_title(),
             colour(colours.text),
         );
         ui.painter().hline(
             title.left()..=title.right() - KNOB_FIELD_GAP,
             title.bottom(),
-            Stroke::new(1.0, colour(colours.hover)),
+            Stroke::new(1.0, colour(colours.knob_highlight)),
         );
         for knob in &band.knobs {
             let row = &rows[knob.index];
@@ -918,7 +1065,7 @@ fn choice_column(
         .fold(0.0, f32::max);
     let column = Layout::top_down(Align::Center);
     ui.allocate_ui_with_layout(vec2(LARGE_KNOB_COLUMN_WIDTH, 0.0), column, |ui| {
-        ui.label(muted_text(param_label(&row.param)));
+        ui.label(legend_text(param_label(&row.param)));
         let (area, _) =
             ui.allocate_exact_size(vec2(LARGE_KNOB_COLUMN_WIDTH, height), Sense::hover());
         let id = |index: usize| Id::unique(("choice", &row.address, index));
@@ -996,7 +1143,7 @@ fn choice_chip(
         .allocate_ui_with_layout(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT), group, |ui| {
             ui.set_min_size(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT));
             ui.spacing_mut().item_spacing.y = UNIT_GAP;
-            ui.label(muted_text(param_label(&row.param)));
+            ui.label(legend_text(param_label(&row.param)));
             let (rect, _) = ui.allocate_exact_size(CHIP_SIZE, Sense::hover());
             let id = Id::unique(("chip", &row.address));
             let chip = widgets::choice_button(ui, rect, id, (&text, true), accent);
@@ -1044,7 +1191,7 @@ fn param_knob_named(
     };
     let fraction = knob_fraction(shown as f32, row.min as f32, row.max as f32);
     let field_id = Id::unique(("value", &row.address));
-    let label = muted_text(label);
+    let label = legend_text(label);
     let name_label = |ui: &mut Ui, label: RichText| {
         let response = ui.label(label);
         response.widget_info(|| WidgetInfo::labeled(Role::Label, true, name));
