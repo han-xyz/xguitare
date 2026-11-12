@@ -1987,6 +1987,78 @@ fn t_and_ctrl_keys_take_duplicate_copy_and_paste() {
     assert!(!item_selected(&harness, GUITAR_ITEM));
 }
 
+/// The zoom of the 1024x640 editing snapshots, so that the punch-in, the trimmed edge and the pasted Item fit the narrow lanes.
+const EDITING_ZOOM_1024: f32 = 0.25;
+
+/// [`project_snapshot`] stopped with one Item on the clipboard, the Guitar Item holding three Takes and a two-beat punch-in Item over it from bar 2 beat 2.
+fn editing_snapshot() -> Snapshot {
+    let mut snapshot = with_clipboard(project_snapshot("stopped"), 1);
+    let items = snapshot.items.as_mut().unwrap();
+    let guitar = &mut items["tracks"][0]["items"];
+    guitar[0]["takes"] = json!([
+        "takes/guitar-1.wav",
+        "takes/guitar-2.wav",
+        "takes/guitar-3.wav"
+    ]);
+    guitar.as_array_mut().unwrap().push(json!(
+        {"id": 3, "position": 120_000, "bars_beats": "2.2", "offset": 0, "length": 48_000,
+         "take": 0, "takes": ["takes/punch-1.wav"], "take_frames": 96_000}
+    ));
+    snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
+    snapshot
+}
+
+#[test]
+fn trim_menu_overlap_and_paste_snapshots() {
+    for (size, suffix, zoom) in [
+        (DEFAULT_WINDOW, "1280x800", None),
+        (MIN_WINDOW, "1024x640", Some(EDITING_ZOOM_1024)),
+    ] {
+        let beat = BEAT_PX * zoom.unwrap_or(1.0);
+        let editing = |snapshot: Snapshot| {
+            let (mut harness, sent, dir) = harness_with(size, snapshot);
+            if let Some(zoom) = zoom {
+                zoom_timeline(&mut harness, zoom);
+            }
+            (harness, sent, dir)
+        };
+        let (mut overlap, _, _dir) = editing(editing_snapshot());
+        write_png(&mut overlap, &format!("item-overlap-{suffix}"));
+
+        let (mut trim, _, _dir) = editing(editing_snapshot());
+        let plate = item_rect(&trim, GUITAR_ITEM);
+        let edge = pos2(plate.left() - 1.0, plate.center().y);
+        press_and_drag(&mut trim, edge, edge + Vec2::new(2.0 * beat + 3.0, 0.0));
+        write_png(&mut trim, &format!("item-trim-{suffix}"));
+
+        let (mut menu, _, _dir) = editing(editing_snapshot());
+        let plate = item_rect(&menu, GUITAR_ITEM);
+        right_click_at(&mut menu, pos2(plate.left() + beat / 2.0, plate.center().y));
+        write_png(&mut menu, &format!("item-menu-{suffix}"));
+
+        let snapshot = editing_snapshot();
+        let (mut paste, updates, _sent, _dir) = streamed_harness_sending(size, snapshot.clone());
+        if let Some(zoom) = zoom {
+            zoom_timeline(&mut paste, zoom);
+        }
+        let bass = item_rect(&paste, BASS_ITEM).left_center() + Vec2::X * 20.0;
+        click_at(&mut paste, bass);
+        paste.event(Event::Paste("text".to_string()));
+        paste.run_steps(1);
+        let mut pasted = snapshot;
+        pasted.items.as_mut().unwrap()["tracks"][1]["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(
+                {"id": 9, "position": 230_400, "bars_beats": "3.2", "offset": 0, "length": 96_000,
+                 "take": 0, "takes": ["takes/punch-1.wav"], "take_frames": 96_000}
+            ));
+        updates.send(pasted).unwrap();
+        paste.run_steps(2);
+        write_png(&mut paste, &format!("item-paste-{suffix}"));
+    }
+}
+
 #[test]
 fn undo_keys_work_in_every_project_view() {
     let (mut harness, sent, _dir) = project_harness("stopped");

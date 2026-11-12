@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::ops::Range;
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
@@ -6,6 +10,7 @@ use xguitare_gui::model::{
     Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
     requests_until_quit, response_message, restore,
 };
+use xguitare_gui::project_model::covered_stretches;
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
     ItemSelection, KeyFocus, LoopEdge, MainView, MoveDrag, MovePointer, ProjectRow, Tempo,
@@ -1667,4 +1672,106 @@ fn shift_f10_and_the_menu_key_open_a_focused_items_menu() {
     );
     assert_eq!(press(ItemKey::F10, (false, false, false)), None);
     assert_eq!(press(ItemKey::Menu, (true, false, false)), None);
+}
+
+/// The frames of each of `spans` (start, end; later on top) that core's `flatten` does not play, from the stretches it plays.
+fn unheard_by_core(spans: &[(u64, u64)]) -> Vec<Vec<Range<u64>>> {
+    let core_items: Vec<xguitare_core::project::Item> = spans
+        .iter()
+        .enumerate()
+        .map(|(index, &(start, end))| xguitare_core::project::Item {
+            id: index as u64,
+            position: start,
+            offset: 0,
+            length: Some(end - start),
+            take: 0,
+            takes: vec![xguitare_core::project::Take {
+                file: format!("t{index}.wav"),
+                frames: end - start,
+            }],
+        })
+        .collect();
+    let takes: HashMap<String, Arc<[f32]>> = spans
+        .iter()
+        .enumerate()
+        .map(|(index, &(start, end))| {
+            let samples: Arc<[f32]> = vec![0.0; (end - start) as usize].into();
+            (format!("t{index}.wav"), samples)
+        })
+        .collect();
+    let placed = xguitare_core::flatten::flatten(&core_items, &takes, 0).unwrap();
+    spans
+        .iter()
+        .enumerate()
+        .map(|(index, &(start, end))| {
+            let own = &takes[&format!("t{index}.wav")];
+            let mut heard: Vec<Range<u64>> = placed
+                .iter()
+                .filter(|span| Arc::ptr_eq(&span.samples, own))
+                .map(|span| span.position..span.position + span.len as u64)
+                .collect();
+            heard.sort_by_key(|range| range.start);
+            let mut unheard = Vec::new();
+            let mut from = start;
+            for range in heard {
+                if range.start > from {
+                    unheard.push(from..range.start);
+                }
+                from = from.max(range.end);
+            }
+            if from < end {
+                unheard.push(from..end);
+            }
+            unheard
+        })
+        .collect()
+}
+
+#[test]
+fn covered_stretches_are_what_core_does_not_play() {
+    let cases: [&[(u64, u64)]; 6] = [
+        &[(0, 400), (100, 200)],
+        &[(0, 400), (300, 600)],
+        &[(200, 600), (0, 300)],
+        &[(100, 200), (0, 400)],
+        &[(0, 1000), (100, 500), (300, 700)],
+        &[(0, 1000), (200, 400), (600, 800), (300, 700)],
+    ];
+    for spans in cases {
+        let items: Vec<ItemBlock> = spans
+            .iter()
+            .enumerate()
+            .map(|(index, &(start, end))| block(index as u64, GUITAR, start, end - start))
+            .collect();
+        let ours: Vec<Vec<Range<u64>>> = (0..spans.len() as u64)
+            .map(|id| covered_stretches(&items, id))
+            .collect();
+        assert_eq!(ours, unheard_by_core(spans), "{spans:?}");
+    }
+}
+
+#[test]
+fn covered_stretches_only_count_items_above_on_the_same_track() {
+    let items = vec![
+        block(1, GUITAR, 0, 400),
+        block(2, BASS, 100, 100),
+        block(3, GUITAR, 300, 50),
+        block(4, GUITAR, 320, 100),
+    ];
+    assert_eq!(
+        covered_stretches(&items, 1),
+        [Range {
+            start: 300,
+            end: 400
+        }]
+    );
+    assert_eq!(
+        covered_stretches(&items, 3),
+        [Range {
+            start: 320,
+            end: 350
+        }]
+    );
+    assert_eq!(covered_stretches(&items, 2), Vec::<Range<u64>>::new());
+    assert_eq!(covered_stretches(&items, 4), Vec::<Range<u64>>::new());
 }

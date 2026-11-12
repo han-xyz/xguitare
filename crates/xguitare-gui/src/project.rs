@@ -19,11 +19,12 @@ use crate::model::{
 use crate::project_model::{
     EDGE_GRAB_PX, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
     ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView,
-    TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, dragged_loop, grid_lines,
-    grid_step, hit_test, item_blocks, item_name, item_node_action, items_in_box, move_preview,
-    nearest_line, nudge_command, parse_meter, project_key_to_command, project_tempo,
-    recording_span, sample_rate, snap_to_beat, take_names, time_text, track_colour, track_rows,
-    track_step_command, transport_view, trim_preview, trim_step_command, waveform_columns,
+    TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, covered_stretches,
+    dragged_loop, grid_lines, grid_step, hit_test, item_blocks, item_name, item_node_action,
+    items_in_box, move_preview, nearest_line, nudge_command, parse_meter, project_key_to_command,
+    project_tempo, recording_span, sample_rate, snap_to_beat, take_names, time_text, track_colour,
+    track_rows, track_step_command, transport_view, trim_preview, trim_step_command,
+    waveform_columns,
 };
 use crate::rack::muted_text;
 use crate::theme::{
@@ -69,6 +70,8 @@ const SWITCH_GAP: f32 = 3.0;
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
 const SWATCH_WIDTH: f32 = 5.0;
 const ITEM_INSET: f32 = 6.0;
+/// How much lower an Item's plate starts where it covers another, showing the covered stretch above it.
+const COVER_INSET: f32 = theme::SPACE_S;
 /// Where a Take's waveform starts below its plate's top: under the top edge and the Take's name.
 const WAVE_TOP: f32 = UNIT_EDGE_WIDTH + theme::SPACE_XS + theme::SPACE_L;
 /// The loop region's lit tint over the lanes (project mockup: loop overlay, 13 %).
@@ -629,6 +632,24 @@ impl Scene {
         .intersect(lane)
     }
 
+    /// An Item's plate on `lane`: an Item that lies over part of one before it in `items` starts [`COVER_INSET`] lower, so that the dimmed stretch it covers shows above it.
+    fn item_plate(&self, lane: Rect, items: &[ItemBlock], item: &ItemBlock) -> Rect {
+        let plate = self.plate(lane, item.position, item.length);
+        let covers = items
+            .iter()
+            .take_while(|lower| lower.id != item.id)
+            .any(|lower| {
+                lower.track_id == item.track_id
+                    && lower.position < item.end()
+                    && item.position < lower.end()
+            });
+        if covers {
+            Rect::from_min_max(pos2(plate.left(), plate.top() + COVER_INSET), plate.max)
+        } else {
+            plate
+        }
+    }
+
     fn paint_grid(&self, painter: &Painter, rect: Rect) {
         let colours = palette();
         for line in &self.grid {
@@ -907,17 +928,37 @@ fn paint_lane(
     scene.paint_loop(painter, lane);
     scene.paint_grid(painter, lane);
     let rows = lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET;
+    let track = track_colour(row.index);
     for item in items.iter().filter(|item| item.track_id == row.id) {
-        let span = scene.plate(lane, item.position, item.length);
-        let track = track_colour(row.index);
+        let span = scene.item_plate(lane, items, item);
         paint_take(painter, span, item, track);
-        if let Some(visible) = item.visible_take(scene.timeline, lane.width())
-            && let Some(peaks) = peaks.get(&item.file)
-        {
-            let columns = waveform_columns(peaks, visible.frames, visible.width);
-            let left = lane.left() + visible.x;
-            let inner = span.shrink(TAKE_EDGE_WIDTH);
-            paint_waveform(&painter.with_clip_rect(inner), inner, left, &columns, track);
+        let inner = span.shrink(TAKE_EDGE_WIDTH);
+        paint_item_waveform(
+            &painter.with_clip_rect(inner),
+            (lane, inner),
+            item,
+            peaks,
+            scene,
+            track,
+        );
+        for stretch in covered_stretches(items, item.id) {
+            let covered = ItemBlock {
+                position: stretch.start,
+                offset: item.offset + (stretch.start - item.position),
+                length: stretch.end - stretch.start,
+                ..item.clone()
+            };
+            let body = scene
+                .plate(lane, covered.position, covered.length)
+                .x_range();
+            let body = Rect::from_x_y_ranges(body, inner.y_range()).intersect(inner);
+            paint_covered(
+                &painter.with_clip_rect(body),
+                (lane, body),
+                &covered,
+                peaks,
+                scene,
+            );
         }
     }
     if row.armed
@@ -933,8 +974,47 @@ fn paint_lane(
         .iter()
         .filter(|item| item.track_id == row.id && scene.selected.contains(item.id))
     {
-        paint_selection(painter, scene.plate(lane, item.position, item.length));
+        paint_selection(painter, scene.item_plate(lane, items, item));
     }
+}
+
+/// The waveform of the Take frames `item` plays, in `ink` over `body`, from its peaks once they have come.
+fn paint_item_waveform(
+    painter: &Painter,
+    (lane, body): (Rect, Rect),
+    item: &ItemBlock,
+    peaks: &HashMap<String, Arc<[i8]>>,
+    scene: &Scene,
+    ink: Rgb,
+) {
+    if let Some(visible) = item.visible_take(scene.timeline, lane.width())
+        && let Some(peaks) = peaks.get(&item.file)
+    {
+        let columns = waveform_columns(peaks, visible.frames, visible.width);
+        paint_waveform(painter, body, lane.left() + visible.x, &columns, ink);
+    }
+}
+
+/// A stretch of an Item that an Item above covers, so that it is not heard: dimmed to the `panel` body with a `boundary` top edge and waveform and no name, over `body`.
+fn paint_covered(
+    painter: &Painter,
+    (lane, body): (Rect, Rect),
+    covered: &ItemBlock,
+    peaks: &HashMap<String, Arc<[i8]>>,
+    scene: &Scene,
+) {
+    let colours = palette();
+    painter.rect_filled(body, 0, colour(colours.panel));
+    let edge = Rect::from_min_size(body.min, vec2(body.width(), UNIT_EDGE_WIDTH));
+    painter.rect_filled(edge, 0, colour(colours.boundary));
+    paint_item_waveform(
+        painter,
+        (lane, body),
+        covered,
+        peaks,
+        scene,
+        colours.boundary,
+    );
 }
 
 /// A selected Item's mark around its plate, over the loop edges and the playhead so that it stays one closed shape: a [`SELECTED_OUTLINE`] `lit` ring a [`HALO_WIDTH`] `well` gap outside the plate with thicker corners, all on a `well` halo, so that it holds against the lane and any plate next to it and reads by its shape as well as its colour.
@@ -1011,7 +1091,7 @@ fn item_nodes(
     let track_ids: Vec<u64> = lanes.iter().map(|lane| lane.track_id).collect();
     let mut command = None;
     for (item, lane) in placed {
-        let plate = scene.plate(lane.rect, item.position, item.length);
+        let plate = scene.item_plate(lane.rect, items, item);
         if !plate.is_positive() {
             continue;
         }
@@ -1506,19 +1586,19 @@ fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
     paint_plate_top(painter, span, track, &item.label());
 }
 
-/// A zero line and min/max columns in `track` from `left`, one per pixel, over the plate body below the Take's name, so silence reads as a flat line.
+/// A zero line and min/max columns in `ink` from `left`, one per pixel, over the plate body below the Take's name, so silence reads as a flat line.
 #[allow(
     clippy::cast_precision_loss,
     reason = "a column index below the window width"
 )]
-fn paint_waveform(painter: &Painter, span: Rect, left: f32, columns: &[(i8, i8)], track: Rgb) {
+fn paint_waveform(painter: &Painter, span: Rect, left: f32, columns: &[(i8, i8)], ink: Rgb) {
     let body = Rect::from_x_y_ranges(
         span.x_range(),
         span.top() + WAVE_TOP..=span.bottom() - theme::SPACE_XS,
     );
     let centre = body.center().y.floor();
     let scale = body.height() / 2.0 / f32::from(i8::MAX);
-    let fill = colour(track);
+    let fill = colour(ink);
     let zero = Rect::from_x_y_ranges(left..=left + columns.len() as f32, centre..=centre + 1.0);
     painter.rect_filled(zero, 0, fill);
     for (index, &(min, max)) in columns.iter().enumerate() {

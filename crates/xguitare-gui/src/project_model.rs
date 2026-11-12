@@ -919,6 +919,29 @@ pub fn hit_test(items: &[ItemBlock], track_id: u64, view: TimelineView, x: f32) 
     }
 }
 
+/// The timeline frames of the Item `id` that Items after it in `items` on its Track cover, so that it is not heard there; merged and in order.
+pub fn covered_stretches(items: &[ItemBlock], id: u64) -> Vec<Range<u64>> {
+    let Some(index) = items.iter().position(|item| item.id == id) else {
+        return Vec::new();
+    };
+    let item = &items[index];
+    let mut over: Vec<Range<u64>> = items[index + 1..]
+        .iter()
+        .filter(|top| top.track_id == item.track_id)
+        .map(|top| top.position.max(item.position)..top.end().min(item.end()))
+        .filter(|range| !range.is_empty())
+        .collect();
+    over.sort_by_key(|range| range.start);
+    let mut merged: Vec<Range<u64>> = Vec::with_capacity(over.len());
+    for range in over {
+        match merged.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => merged.push(range),
+        }
+    }
+    merged
+}
+
 /// The ids of the Items on the Tracks `track_ids` that overlap the timeline `frames`, in `items` order.
 #[allow(clippy::cast_precision_loss, reason = "frames far below 2^52")]
 pub fn items_in_box(items: &[ItemBlock], track_ids: &[u64], frames: Range<f64>) -> Vec<u64> {
