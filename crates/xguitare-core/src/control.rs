@@ -41,6 +41,7 @@ use crate::project_control::{
 use crate::render::{RenderBits, RenderRange};
 use crate::render_control::{render, render_cancel};
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
+use crate::take_peaks::peak_page;
 use crate::tuner::Tuner;
 use crate::{
     Bank, BankEntry, BankKind, BuildWarning, Config, ModuleRegistry, ParamAddress, Ports, Preset,
@@ -315,6 +316,12 @@ pub enum Request {
     ItemPaste {
         track: TrackRef,
         at: u64,
+    },
+    /// Pairs of the loaded Take `file`'s peak table from pair `first`, `count` of them.
+    TakePeaks {
+        file: String,
+        first: Option<usize>,
+        count: Option<usize>,
     },
 }
 
@@ -720,6 +727,7 @@ fn handle_from(
         Request::ItemDuplicate { ids } => item_duplicate(state, &ids),
         Request::ItemCopy { ids } => item_copy(state, &ids),
         Request::ItemPaste { track, at } => item_paste(state, &track, at),
+        Request::TakePeaks { file, first, count } => peak_page(state, &file, first, count),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),

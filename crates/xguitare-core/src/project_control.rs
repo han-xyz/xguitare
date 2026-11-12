@@ -13,7 +13,7 @@ use crate::build::{ENGINE_BUSY, build_arrangement, swap_arrangement};
 use crate::control::{
     BusRef, EngineState, IndexOrName, MixPeaks, Position, TrackRef, TransportAction, peak_db, slug,
 };
-use crate::engine::{Command, MeterPoint, transport_from_code};
+use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
 use crate::item_control::CopiedItem;
@@ -27,6 +27,7 @@ use crate::project::{
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
 use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
+use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Config, Preset, PresetModule};
 
 pub(crate) const NO_PROJECT: &str = "no project open";
@@ -69,6 +70,8 @@ struct OpenProject {
     dir: PathBuf,
     project: Project,
     takes: HashMap<String, Arc<[f32]>>,
+    /// The peak table of each Take in `takes`, built by [`sync_peaks`].
+    peaks: HashMap<String, Vec<i8>>,
     selected: usize,
     /// Whether the last transport request was `record`; `play` and `stop` end it.
     recording: bool,
@@ -200,6 +203,7 @@ pub fn add_finished_takes(
     }
     failures.extend(warnings.iter().map(ToString::to_string));
     let open = open_project_mut(state);
+    sync_peaks(open);
     if !open.recording {
         failures.extend(autosave_on_stop(open).map(|err| format!("cannot autosave: {err}")));
     }
@@ -732,6 +736,7 @@ fn restore_track(state: &mut EngineState, placed: &mut PlacedTrack) -> Result<()
         return Err(err);
     }
     let open = open_project_mut(state);
+    sync_peaks(open);
     if placed.selected {
         open.selected = placed.index;
     } else if had_tracks && placed.index <= open.selected {
@@ -1018,7 +1023,9 @@ pub(crate) fn apply_items(state: &mut EngineState, project: Project) -> Result<(
             .push(Command::Arrangement(command))
             .map_err(|_| ENGINE_BUSY.to_string())?;
     }
-    open_project_mut(state).takes = takes;
+    let open = open_project_mut(state);
+    open.takes = takes;
+    sync_peaks(open);
     commit(state, project);
     Ok(())
 }
@@ -1242,28 +1249,7 @@ pub(crate) fn status_fields(
         Transport::Recording => "recording",
     };
     let meters = &shared.mix_meters;
-    let tracks: Vec<Value> = project
-        .tracks
-        .iter()
-        .zip(track_peaks)
-        .enumerate()
-        .map(|(index, (track, &peak))| {
-            json!({
-                "name": track.name,
-                "input": track.input,
-                "volume_db": track.volume_db,
-                "pan": track.pan,
-                "mute": track.mute,
-                "solo": track.solo,
-                "armed": track.arm,
-                "input_peak_db": peak_db(peak),
-                "to_master": track.to_master,
-                "sends": sends_status(project, track),
-                "peak_db": peaks_db(mix.tracks[index]),
-                "clip": meters.clip(MeterPoint::Track(index)),
-            })
-        })
-        .collect();
+    let tracks = tracks_status(open, track_peaks, mix, meters);
     let LoopRegion { start, end, on } = project.loop_region;
     for (key, value) in [
         ("project", json!(project.name)),
@@ -1292,6 +1278,39 @@ pub(crate) fn status_fields(
         fields.insert(key.to_string(), value);
     }
     fields
+}
+
+/// Each Track of the open Project as `status` lists it, with its input peak from `track_peaks` and its post-fader peak from `mix`.
+fn tracks_status(
+    open: &OpenProject,
+    track_peaks: &[f32],
+    mix: &MixPeaks,
+    meters: &MixMeters,
+) -> Vec<Value> {
+    let project = &open.project;
+    project
+        .tracks
+        .iter()
+        .zip(track_peaks)
+        .enumerate()
+        .map(|(index, (track, &peak))| {
+            json!({
+                "id": open.track_ids[index],
+                "name": track.name,
+                "input": track.input,
+                "volume_db": track.volume_db,
+                "pan": track.pan,
+                "mute": track.mute,
+                "solo": track.solo,
+                "armed": track.arm,
+                "input_peak_db": peak_db(peak),
+                "to_master": track.to_master,
+                "sends": sends_status(project, track),
+                "peak_db": peaks_db(mix.tracks[index]),
+                "clip": meters.clip(MeterPoint::Track(index)),
+            })
+        })
+        .collect()
 }
 
 fn open(
@@ -1330,10 +1349,11 @@ fn open(
         .map(|bus| bus.id + 1)
         .max()
         .unwrap_or(0);
-    state.projects.open = Some(OpenProject {
+    let mut open = OpenProject {
         dir,
         project,
         takes,
+        peaks: HashMap::new(),
         selected: 0,
         recording: false,
         recorded: false,
@@ -1345,9 +1365,31 @@ fn open(
         unplaced: Vec::new(),
         history: History::default(),
         clipboard: Vec::new(),
-    });
+    };
+    sync_peaks(&mut open);
+    state.projects.open = Some(open);
     state.revision += 1;
     Ok(())
+}
+
+/// Builds the peak table of each loaded Take that has none and drops those of Takes no longer loaded.
+fn sync_peaks(open: &mut OpenProject) {
+    let OpenProject { takes, peaks, .. } = open;
+    peaks.retain(|file, _| takes.contains_key(file));
+    for (file, samples) in takes.iter() {
+        if !peaks.contains_key(file) {
+            peaks.insert(file.clone(), peak_table(samples));
+        }
+    }
+}
+
+/// The peak table of the open Project's loaded Take `file`.
+pub(crate) fn loaded_peaks<'a>(state: &'a EngineState, file: &str) -> Result<&'a [i8], String> {
+    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+    open.peaks
+        .get(file)
+        .map(Vec::as_slice)
+        .ok_or_else(|| format!("no such take: {file}"))
 }
 
 /// Builds `project`'s Arrangement, swaps it in and makes `project` the open Project's; on an error nothing changes.

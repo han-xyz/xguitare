@@ -549,7 +549,7 @@ fn status_reports_buses_master_sends_and_meters() {
     let status = ok(&mut s, r#"{"cmd":"status"}"#);
     assert_eq!(
         status["tracks"][1],
-        json!({"name": "Keys", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0, "to_master": true, "sends": [{"bus": 0, "level_db": -12.0, "pre": true}], "peak_db": [-6.0, -12.0], "clip": false})
+        json!({"id": 1, "name": "Keys", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0, "to_master": true, "sends": [{"bus": 0, "level_db": -12.0, "pre": true}], "peak_db": [-6.0, -12.0], "clip": false})
     );
     assert_eq!(status["tracks"][0]["peak_db"], json!([-120.0, -120.0]));
     assert_eq!(

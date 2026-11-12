@@ -2435,6 +2435,7 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::ItemDuplicate { .. } => "Could not duplicate the Items",
         Request::ItemCopy { .. } => "Could not copy the Items",
         Request::ItemPaste { .. } => "Could not paste the Items",
+        Request::TakePeaks { .. } => "Could not read the waveform",
     }
 }
 

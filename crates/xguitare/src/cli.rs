@@ -668,7 +668,8 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         | Request::SetPorts { .. }
         | Request::Settings
         | Request::SetSettings { .. }
-        | Request::Loop { .. } => format!("{payload}\n"),
+        | Request::Loop { .. }
+        | Request::TakePeaks { .. } => format!("{payload}\n"),
     };
     Ok(rendered)
 }

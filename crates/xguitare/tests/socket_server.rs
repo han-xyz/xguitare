@@ -13,7 +13,9 @@ use xguitare_core::control::{EngineState, PeakMeters, Value};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
 use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
+use xguitare_core::project::{Item, Project, Take};
 use xguitare_core::project_control::Projects;
+use xguitare_core::take_peaks::{FRAMES_PER_PEAK, MAX_PEAKS_PER_REPLY};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config, Ports};
 
@@ -263,5 +265,70 @@ fn peaks_per_connection() {
 fn empty_config(dir: &Path) -> Config {
     let path = dir.join("config");
     fs::write(&path, "").unwrap();
-    Config::load(Some(&path)).unwrap()
+    Config {
+        projects_dir: dir.join("projects"),
+        ..Config::load(Some(&path)).unwrap()
+    }
+}
+
+/// One more pair than a reply carries, each pair at full scale: the longest `take_peaks` line.
+const TAKE_FRAMES: usize = (MAX_PEAKS_PER_REPLY + 1) * FRAMES_PER_PEAK;
+
+fn write_full_scale_take(path: &Path) {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for n in 0..TAKE_FRAMES {
+        writer
+            .write_sample(if n % 2 == 0 { -1.0_f32 } else { 1.0 })
+            .unwrap();
+    }
+    writer.finalize().unwrap();
+}
+
+#[test]
+fn a_full_take_peaks_reply_crosses_the_socket() {
+    let server = server("take-peaks");
+    let dir = server.path.parent().unwrap();
+    let stream = UnixStream::connect(&server.path).unwrap();
+    assert!(
+        request(&stream, r#"{"cmd":"project_new","name":"Song"}"#).starts_with(r#"{"ok":true"#)
+    );
+    assert!(
+        request(&stream, r#"{"cmd":"track_add","name":"Guitar"}"#).starts_with(r#"{"ok":true"#)
+    );
+    assert!(request(&stream, r#"{"cmd":"project_close"}"#).starts_with(r#"{"ok":true"#));
+    let folder = dir.join("projects/song");
+    write_full_scale_take(&folder.join("takes/a.wav"));
+    let mut project = Project::load(&folder).unwrap();
+    project.tracks[0].items = vec![Item {
+        id: 1,
+        position: 0,
+        offset: 0,
+        length: None,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/a.wav".to_string(),
+            frames: TAKE_FRAMES as u64,
+        }],
+    }];
+    project.next_item_id = 2;
+    project.save(&folder).unwrap();
+    assert!(
+        request(&stream, r#"{"cmd":"project_open","name":"Song"}"#).starts_with(r#"{"ok":true"#)
+    );
+    for line in [
+        r#"{"cmd":"take_peaks","file":"takes/a.wav"}"#,
+        r#"{"cmd":"take_peaks","file":"takes/a.wav","first":0,"count":20000}"#,
+    ] {
+        let reply: Value = request(&stream, line).parse().unwrap();
+        assert_eq!(reply["total"], MAX_PEAKS_PER_REPLY + 1);
+        let peaks = reply["peaks"].as_array().unwrap();
+        assert_eq!(peaks.len(), MAX_PEAKS_PER_REPLY * 2);
+        assert!(peaks.chunks(2).all(|pair| pair == [-127, 127]));
+    }
 }

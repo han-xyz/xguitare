@@ -977,7 +977,7 @@ fn status_reports_transport_position_and_tracks() {
     assert_eq!(status["disk_overflows"], 2);
     assert_eq!(
         status["tracks"][0],
-        json!({"name": "Guitar", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": false, "solo": false, "armed": false, "input_peak_db": -6.0, "to_master": true, "sends": [], "peak_db": [-120.0, -120.0], "clip": false})
+        json!({"id": 0, "name": "Guitar", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": false, "solo": false, "armed": false, "input_peak_db": -6.0, "to_master": true, "sends": [], "peak_db": [-120.0, -120.0], "clip": false})
     );
 }
 
@@ -1023,6 +1023,48 @@ fn finished_takes_become_items_and_close_hands_the_project_over() {
         event,
         ProjectEvent::Closed(closed) if closed.dir == folder && closed.project.tracks[0].items.len() == 1
     )));
+}
+
+#[test]
+fn status_names_each_track_by_the_id_items_gives_it() {
+    let (mut state, _audio, _dir) = state("status-ids");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    add_track(&mut state, "Bass");
+    ok(handle(&mut state, Request::TrackRemove { track: index(0) }));
+    add_track(&mut state, "Keys");
+    let ids = |payload: &Value| -> Vec<Value> {
+        payload["tracks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|track| track["id"].clone())
+            .collect()
+    };
+    let items = ok(handle(&mut state, Request::Items));
+    assert_eq!(ids(&status(&mut state)), ids(&items));
+    assert_eq!(ids(&items), [json!(1), json!(2)]);
+}
+
+#[test]
+fn a_finished_take_has_peaks() {
+    let (mut state, _audio, _dir) = state("finished-peaks");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let folder = state.config.projects_dir.join("song");
+    write_take(&folder.join("takes/guitar-1.wav"), &[-0.5; 300]);
+    let track_id = reader_ids(&mut state)[0].1;
+    let finished = take(track_id, "takes/guitar-1.wav", 0, 300);
+    add_finished_takes(&mut state, &[finished], |_| Latency::default());
+    let reply = ok(handle(
+        &mut state,
+        Request::TakePeaks {
+            file: "takes/guitar-1.wav".to_string(),
+            first: None,
+            count: None,
+        },
+    ));
+    assert_eq!(reply["peaks"], json!([-64, -64, -64, -64]));
 }
 
 fn item_counts(state: &mut EngineState) -> Vec<usize> {
