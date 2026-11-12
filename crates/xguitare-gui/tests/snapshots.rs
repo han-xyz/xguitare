@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
 
 use eframe::egui_wgpu::{RenderState, Renderer, RendererOptions};
@@ -241,6 +241,9 @@ fn mixer_snapshot() -> Snapshot {
         snapshot.status.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
         snapshot.items.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
     }
+    let items = snapshot.items.as_mut().unwrap();
+    items["tracks"][0]["items"][0]["takes"] = json!(["takes/bass-di-1.wav", "takes/bass-di-2.wav"]);
+    items["tracks"][1]["items"][0]["takes"] = json!(["takes/bass-amp-1.wav"]);
     let status = snapshot.status.as_mut().unwrap();
     let mixer = [
         (
@@ -310,6 +313,75 @@ fn render_snapshot(render: Value) -> Snapshot {
     let mut snapshot = mixer_snapshot();
     snapshot.status.as_mut().unwrap()["render"] = render;
     snapshot
+}
+
+/// [`mixer_snapshot`] with the brief's Bass DI Rack: compressor, eq, blend, cabinet, limiter.
+fn bass_di_rack_snapshot() -> Snapshot {
+    let mut snapshot = mixer_snapshot();
+    let funk = funk_params();
+    let of = |module: &str| -> Vec<Value> {
+        funk["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|param| param["module"] == module)
+            .cloned()
+            .collect()
+    };
+    let eq = EQ_SPEC.map(|(name, min, max, default, unit)| {
+        let value = EQ_EXAMPLE
+            .iter()
+            .find(|(param, _)| *param == name)
+            .map_or(default, |(_, value)| *value);
+        param("eq", name, value, (min, max, default, unit, false))
+    });
+    let blend = [
+        param("blend", "blend", 100.0, (0.0, 100.0, 100.0, "%", false)),
+        param("blend", "drive", 40.0, (0.0, 100.0, 40.0, "%", false)),
+        param("blend", "level", 0.0, (-24.0, 12.0, 0.0, "dB", false)),
+        param("blend", "treble", 0.0, (-12.0, 12.0, 0.0, "dB", false)),
+    ];
+    let limiter = [
+        param("limiter", "input", 6.0, (0.0, 18.0, 0.0, "dB", false)),
+        param("limiter", "ceiling", -1.0, (-12.0, 0.0, -1.0, "dB", false)),
+    ];
+    let params: Vec<Value> = of("compressor")
+        .into_iter()
+        .chain(eq)
+        .chain(blend)
+        .chain(of("cabinet"))
+        .chain(limiter)
+        .collect();
+    snapshot.params = Some(json!({ "params": params }));
+    snapshot
+}
+
+/// [`bass_di_rack_snapshot`] recording on the armed Bass DI past the count-in, the playhead at `frames`.
+fn recording_snapshot(frames: u64) -> Snapshot {
+    let mut snapshot = bass_di_rack_snapshot();
+    let status = snapshot.status.as_mut().unwrap();
+    status["transport"] = json!("recording");
+    status["count_in_remaining"] = json!(0);
+    status["position"]["frames"] = json!(frames);
+    snapshot
+}
+
+/// [`harness_with`] whose App takes later Snapshots from the returned sender.
+fn streamed_harness(
+    size: Vec2,
+    snapshot: Snapshot,
+) -> (Harness<'static, App>, Sender<Snapshot>, TempDir) {
+    let (config, dir) = bass_config();
+    let (commands, _sent) = mpsc::channel();
+    let (updates, snapshots) = mpsc::channel();
+    updates.send(snapshot).unwrap();
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .with_context_setup(|ctx| ctx.add_font_provider(Arc::new(SystemFontProvider::new())))
+        .renderer(shared_gpu_renderer())
+        .build_eframe(move |cc| App::with_updates(cc, &config, snapshots, commands));
+    harness.run_steps(2);
+    (harness, updates, dir)
 }
 
 fn click_button(harness: &mut Harness<App>, label: &str) {
@@ -1148,11 +1220,22 @@ fn double_click_on_the_metronome_volume_knob_resets_it_to_its_default() {
     );
 }
 
+/// Where the window first sees the recording snapshot fixture recording (bar 2, beat 3), then the playhead (bar 3, beat 2).
+const RECORDING_FROM: u64 = 144_000;
+const PLAYHEAD: u64 = 230_400;
+/// The eq among the closed units of [`bass_di_rack_snapshot`].
+const BASS_DI_EQ_CLOSED_INDEX: usize = 1;
+
 #[test]
 fn project_snapshots() {
     write_png(&mut project_harness("playing").0, "project");
 
-    let (mut recording, _, _dir) = project_harness("recording");
+    let (mut counting, _, _dir) = project_harness("recording");
+    write_png(&mut counting, "project-count-in");
+
+    let (mut recording, updates, _dir) =
+        streamed_harness(DEFAULT_WINDOW, recording_snapshot(RECORDING_FROM));
+    updates.send(recording_snapshot(PLAYHEAD)).unwrap();
     write_png(&mut recording, "project-recording");
 
     for (size, suffix) in [
@@ -1160,9 +1243,13 @@ fn project_snapshots() {
         (DEFAULT_WINDOW, "1280x800"),
         (FULL_HD_WINDOW, "1920x1080"),
     ] {
-        let (mut view, _, _dir) = harness_with(size, mixer_snapshot());
+        let (mut view, _, _dir) = harness_with(size, bass_di_rack_snapshot());
         write_png(&mut view, &format!("view-arrange-{suffix}"));
         view.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+        if size == DEFAULT_WINDOW {
+            view.run_steps(2);
+            open_unit(&mut view, BASS_DI_EQ_CLOSED_INDEX);
+        }
         write_png(&mut view, &format!("view-rack-{suffix}"));
     }
 
@@ -2157,4 +2244,20 @@ fn render_dialog_sends_render_and_cancel() {
     harness.run_steps(2);
     click_button(&mut harness, "Cancel");
     assert_eq!(sent_now(&sent), [Command::RenderCancel]);
+}
+
+#[test]
+fn clicking_the_selected_track_shows_its_rack_again() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
+    click_button(&mut harness, "Mixer");
+    click_button(&mut harness, "Rack of Room");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Room — Rack").is_some());
+    sent_now(&sent);
+    harness.get_by_label("Track Bass DI").click();
+    harness.run_steps(2);
+    assert!(sent_now(&sent).contains(&Command::ShowRack(ShownRack::Track)));
+    assert!(harness.query_by_label("Bass DI — Rack").is_some());
+    assert!(harness.query_by_label("Room — Rack").is_none());
 }

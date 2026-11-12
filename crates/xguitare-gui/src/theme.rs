@@ -187,7 +187,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("go on panel", c.go, c.panel),
         pair("lit on panel", c.lit, c.panel),
         pair(
-            "lit on panel open; also the lit lamp ring",
+            "lit on panel open; also the lit lamp ring and the loop edges over a Take",
             c.lit,
             c.panel_open,
         ),
@@ -206,11 +206,16 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("rack position on ear edge", c.on_accent, c.ear_edge),
         pair("rack position on ear centre", c.on_accent, c.ear_centre),
         pair(
-            "lit on well; also the edit border, the cents needle and the transport's seconds",
+            "lit on well; also the edit border, the cents needle, the transport's seconds and the loop edges on a lane",
             c.lit,
             c.well,
         ),
         pair("bar numbers on the ruler", c.muted, c.ruler),
+        pair(
+            "the recording Take's name on its body",
+            c.text,
+            c.recording_take,
+        ),
     ]
 }
 

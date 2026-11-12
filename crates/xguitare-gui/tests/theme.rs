@@ -522,7 +522,15 @@ fn the_timeline_and_transport_draw_in_declared_pairs() {
     assert!(has(&text, c.muted, c.ruler), "bar numbers on the ruler");
     assert!(has(&text, c.text, c.panel_open), "Take name on its body");
     assert!(has(&text, c.text, c.well), "bar.beat in the LCD well");
-    assert!(has(&text, c.lit, c.well), "seconds in the LCD well");
+    assert!(
+        has(&text, c.lit, c.well),
+        "seconds in the LCD well; loop edges on the lane"
+    );
+    assert!(has(&text, c.lit, c.panel_open), "loop edges over a Take");
+    assert!(
+        has(&text, c.text, c.recording_take),
+        "the recording Take's name on its body"
+    );
     assert!(has(&boundary, c.take_edge, c.well), "Take edge on the lane");
     assert!(
         has(&boundary, c.danger, c.recording_take),

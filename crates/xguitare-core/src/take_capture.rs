@@ -233,12 +233,19 @@ pub fn add_take(track: &mut Track, placement: TakePlacement, take: Take, loop_ta
     });
 }
 
+/// The start of a Track's Take file names: its name as a slug, `track` when that is empty.
+pub fn take_stem(track_name: &str) -> String {
+    let stem = slug(track_name);
+    if stem.is_empty() {
+        UNNAMED_TRACK.to_string()
+    } else {
+        stem
+    }
+}
+
 /// The first free `takes/<track slug>-<n>.wav` under `project_dir`, counting from 1.
 pub fn next_take_file(project_dir: &Path, track_name: &str) -> String {
-    let mut stem = slug(track_name);
-    if stem.is_empty() {
-        stem = UNNAMED_TRACK.to_string();
-    }
+    let stem = take_stem(track_name);
     let mut n = 1u64;
     loop {
         let file = format!("{TAKES_DIR}/{stem}-{n}.wav");

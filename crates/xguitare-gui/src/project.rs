@@ -16,9 +16,9 @@ use crate::model::{
 };
 use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
-    bars_beats_text, dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command,
-    project_tempo, recording_span, sample_rate, snap_to_beat, time_text, track_colour, track_rows,
-    transport_view,
+    bars_beats_text, dragged_loop, grid_lines, item_blocks, next_take_name, parse_meter,
+    project_key_to_command, project_tempo, recording_span, sample_rate, snap_to_beat, time_text,
+    track_colour, track_rows, transport_view,
 };
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette, translucent};
@@ -171,6 +171,7 @@ fn transport_row(
         }
         ui.add_space(GROUP_GAP);
         commands.extend(view_switch(ui, shown));
+        ui.add_space(GROUP_GAP);
         if ui
             .add(outlined_button("Render").min_size(PANEL_BUTTON))
             .clicked()
@@ -395,7 +396,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
             .map(|from| recording_span(from, &transport)),
     };
     let add = Rect::from_min_size(full.min, vec2(TRACK_LIST_WIDTH - 8.0, RULER_HEIGHT));
-    if ui.put(add, primary_button("+ Add Track")).clicked() {
+    if ui.put(add, outlined_button("+ Add Track")).clicked() {
         commands.push(Command::TrackAdd);
     }
     commands.extend(ruler_strip(
@@ -515,6 +516,26 @@ impl Scene {
             ruler.bottom() - LOOP_BAND_HEIGHT..=ruler.bottom(),
         );
         painter.rect_filled(span, 0, colour(band));
+    }
+
+    /// The loop region's start and end down a lane, over its Takes: lit while the loop is on, else in the boundary grey.
+    fn paint_loop_edges(&self, painter: &Painter, lane: Rect) {
+        if self.loop_region.start >= self.loop_region.end {
+            return;
+        }
+        let colours = palette();
+        let edge = if self.loop_region.on {
+            colours.lit
+        } else {
+            colours.boundary
+        };
+        for frame in [self.loop_region.start, self.loop_region.end] {
+            painter.vline(
+                self.x(lane, frame),
+                lane.y_range(),
+                Stroke::new(1.0, colour(edge)),
+            );
+        }
     }
 
     fn paint_playhead(&self, painter: &Painter, rect: Rect) {
@@ -702,8 +723,10 @@ fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock]
         && let Some((from, to)) = scene.recording
     {
         let span = Rect::from_x_y_ranges(scene.x(lane, from)..=scene.x(lane, to), rows);
-        paint_recording_take(painter, span.intersect(lane));
+        let name = next_take_name(&row.name, items);
+        paint_recording_take(painter, span.intersect(lane), &name);
     }
+    scene.paint_loop_edges(painter, lane);
     scene.paint_playhead(painter, lane);
 }
 
@@ -717,21 +740,27 @@ fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
         Stroke::new(1.0, colour(colours.take_edge)),
         egui::StrokeKind::Inside,
     );
-    let edge = Rect::from_min_size(span.min, vec2(span.width(), UNIT_EDGE_WIDTH));
-    painter.rect_filled(edge, 0, colour(track));
+    paint_plate_top(painter, span, track, &item.label());
+}
+
+/// A Take plate's top edge in `edge` and `name` on the body below it.
+fn paint_plate_top(painter: &Painter, span: Rect, edge: Rgb, name: &str) {
+    let top = Rect::from_min_size(span.min, vec2(span.width(), UNIT_EDGE_WIDTH));
+    painter.rect_filled(top, 0, colour(edge));
     painter.with_clip_rect(span).text(
-        span.left_top() + vec2(6.0, UNIT_EDGE_WIDTH + 3.0),
+        span.left_top() + vec2(theme::SPACE_XS, UNIT_EDGE_WIDTH + theme::SPACE_XS),
         Align2::LEFT_TOP,
-        item.label(),
+        name,
         theme::legend(),
-        colour(colours.text),
+        colour(palette().text),
     );
 }
 
-/// The Take being recorded: a dark red plate in a dashed danger outline, up to the playhead.
-fn paint_recording_take(painter: &Painter, span: Rect) {
+/// The Take being recorded: a dark red plate with a danger top edge and its name, in a dashed danger outline, up to the playhead.
+fn paint_recording_take(painter: &Painter, span: Rect, name: &str) {
     let colours = palette();
     painter.rect_filled(span, RADIUS_CONTROL, colour(colours.recording_take));
+    paint_plate_top(painter, span, colours.danger, name);
     let corners = [
         span.left_top(),
         span.right_top(),

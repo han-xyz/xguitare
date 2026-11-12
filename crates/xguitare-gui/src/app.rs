@@ -134,6 +134,16 @@ impl App {
         updates
             .send(snapshot)
             .expect("the receiver is held in this scope");
+        App::with_updates(cc, config, snapshots, commands)
+    }
+
+    /// An App with no client thread: each Snapshot sent on `snapshots` arrives as a client update and its commands go to `commands`.
+    pub fn with_updates(
+        cc: &eframe::CreationContext,
+        config: &Config,
+        snapshots: Receiver<Snapshot>,
+        commands: Sender<Command>,
+    ) -> App {
         let stop = Arc::new(AtomicBool::new(false));
         App::assemble(cc, config, commands, snapshots, None, stop)
     }
