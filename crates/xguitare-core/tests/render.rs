@@ -59,8 +59,10 @@ fn track(name: &str, items: Vec<Item>) -> Track {
 
 fn item(position: u64, file: &str, frames: usize) -> Item {
     Item {
+        id: 0,
         position,
         offset: 0,
+        length: None,
         take: 0,
         takes: vec![Take {
             file: file.to_string(),
@@ -79,6 +81,7 @@ fn project(tracks: Vec<Track>) -> Project {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
+        next_item_id: 1,
         tracks,
         buses: Vec::new(),
         master: Master::default(),

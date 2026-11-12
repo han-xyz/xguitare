@@ -1396,7 +1396,7 @@ fn items_list_each_tracks_items_and_status_counts_loaded_audio() {
             "sample_rate": 48_000,
             "tracks": [
                 {"id": ids[0].1, "name": "Guitar", "items": [
-                    {"position": 0, "bars_beats": "1.1", "offset": 50, "length": 50, "take": 0, "takes": ["takes/guitar-1.wav"]}
+                    {"id": 1, "position": 0, "bars_beats": "1.1", "offset": 50, "length": 50, "take": 0, "takes": ["takes/guitar-1.wav"]}
                 ]},
                 {"id": ids[1].1, "name": "Bass", "items": []}
             ]
@@ -1684,4 +1684,64 @@ fn a_busy_engine_leaves_the_metronome_unchanged() {
         metronome(None, Some(100.0), None, Some(-20.0)),
     ));
     assert_eq!(status(&mut state)["metronome"]["volume_db"], -20.0);
+}
+
+#[test]
+fn locate_is_bounded_by_the_end_each_item_plays() {
+    let (mut state, mut audio, _dir) = state("locate-end");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let folder = state.config.projects_dir.join("song");
+    let mut project = saved(&state, "song");
+    let take = |file: &str, frames| xguitare_core::project::Take {
+        file: file.to_string(),
+        frames,
+    };
+    write_take(&folder.join("takes/guitar-2.wav"), &[0.25; 1000]);
+    write_take(&folder.join("takes/guitar-3.wav"), &[0.25; 1000]);
+    let items = &mut project.tracks[0].items;
+    items.push(xguitare_core::project::Item {
+        id: 1,
+        position: 1000,
+        offset: 200,
+        length: None,
+        take: 1,
+        takes: vec![
+            take("takes/guitar-1.wav", 10_000),
+            take("takes/guitar-2.wav", 1000),
+        ],
+    });
+    items.push(xguitare_core::project::Item {
+        id: 2,
+        position: 1500,
+        offset: 0,
+        length: Some(100),
+        take: 0,
+        takes: vec![take("takes/guitar-3.wav", 1000)],
+    });
+    project.next_item_id = 3;
+    project.save(&folder).unwrap();
+    ok(handle(
+        &mut state,
+        Request::ProjectOpen {
+            name: "Song".to_string(),
+            restore: false,
+        },
+    ));
+    drain_commands(&mut audio);
+    let hour = 3600 * 48_000;
+    let locate = |frames| transport(TransportAction::Locate, Some(Position::Frames(frames)));
+    ok(handle(&mut state, locate(1800 + hour)));
+    assert_eq!(
+        error(handle(&mut state, locate(1801 + hour))),
+        "position is more than an hour past the end of the project"
+    );
+    let lengths: Vec<Value> = ok(handle(&mut state, Request::Items))["tracks"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| json!([item["id"], item["length"]]))
+        .collect();
+    assert_eq!(lengths, [json!([1, 800]), json!([2, 100])]);
 }

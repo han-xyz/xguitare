@@ -276,6 +276,7 @@ fn an_arrangement_switches_the_practice_metronome_off() {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
+        next_item_id: 1,
         tracks: Vec::new(),
         buses: Vec::new(),
         master: Master::default(),

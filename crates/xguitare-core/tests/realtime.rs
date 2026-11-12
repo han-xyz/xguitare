@@ -268,8 +268,10 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
                 sends: Vec::new(),
                 modules: Vec::new(),
                 items: vec![Item {
+                    id: 0,
                     position: 50 * idx as u64,
                     offset: 0,
+                    length: None,
                     take: 0,
                     takes: vec![Take { file, frames: 1000 }],
                 }],
@@ -289,6 +291,7 @@ fn playing_project(tracks: usize) -> (Project, HashMap<String, Arc<[f32]>>) {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
+        next_item_id: 1,
         tracks,
         buses: Vec::new(),
         master: Master::default(),

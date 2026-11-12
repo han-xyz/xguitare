@@ -125,8 +125,10 @@ fn round_trip_keeps_tracks_items_takes_and_racks() {
     assert_eq!(
         guitar.items,
         vec![Item {
+            id: 1,
             position: 48_000,
             offset: 0,
+            length: None,
             take: 1,
             takes: vec![
                 Take {
@@ -515,8 +517,10 @@ fn save_refuses_what_load_would_reject() {
     let mut stray = project;
     let mut track = Track::from_preset("Gtr", &Preset::parse("name = \"P\"\n").unwrap());
     track.items.push(Item {
+        id: 1,
         position: 0,
         offset: 0,
+        length: None,
         take: 0,
         takes: vec![Take {
             file: "project.toml".to_string(),
@@ -524,6 +528,7 @@ fn save_refuses_what_load_would_reject() {
         }],
     });
     stray.tracks.push(track);
+    stray.next_item_id = 2;
     assert_eq!(
         stray.save(&folder).unwrap_err().to_string(),
         "take file 'project.toml' must be takes/<name>.wav"
@@ -553,8 +558,10 @@ fn item_offset_round_trips_and_is_range_checked() {
     let (folder, mut project) = Project::new(&dir.0, "Song").unwrap();
     let mut track = Track::from_preset("Gtr", &Preset::parse("name = \"P\"\n").unwrap());
     track.items.push(Item {
+        id: 1,
         position: 0,
         offset: 256,
+        length: None,
         take: 0,
         takes: vec![Take {
             file: "takes/gtr-1.wav".to_string(),
@@ -562,6 +569,7 @@ fn item_offset_round_trips_and_is_range_checked() {
         }],
     });
     project.tracks.push(track);
+    project.next_item_id = 2;
     project.save(&folder).unwrap();
     assert!(
         fs::read_to_string(folder.join(PROJECT_FILE))
@@ -878,4 +886,105 @@ fn bus_names_and_ids_follow_the_rules() {
         &["id = 3"],
         "two buses have id 3",
     );
+}
+
+fn item(id: u64, offset: u64, length: Option<u64>, frames: u64) -> Item {
+    Item {
+        id,
+        position: 0,
+        offset,
+        length,
+        take: 0,
+        takes: vec![Take {
+            file: format!("takes/gtr-{id}.wav"),
+            frames,
+        }],
+    }
+}
+
+fn project_with_items(dir: &Path, items: Vec<Item>) -> (PathBuf, Project) {
+    let (folder, mut project) = Project::new(dir, "Song").unwrap();
+    let mut track = Track::from_preset("Gtr", &Preset::parse("name = \"P\"\n").unwrap());
+    project.next_item_id = items.iter().map(|item| item.id + 1).max().unwrap_or(1);
+    track.items = items;
+    project.tracks.push(track);
+    (folder, project)
+}
+
+#[test]
+fn item_ids_and_length_round_trip() {
+    let dir = temp_dir("item-ids");
+    let (folder, mut project) = project_with_items(
+        &dir.0,
+        vec![item(7, 10, Some(500), 1000), item(3, 0, None, 1000)],
+    );
+    project.next_item_id = 12;
+    project.save(&folder).unwrap();
+    let text = fs::read_to_string(folder.join(PROJECT_FILE)).unwrap();
+    assert!(text.contains("next_item_id = 12"), "{text}");
+    assert!(text.contains("id = 7") && text.contains("id = 3"), "{text}");
+    assert_eq!(text.matches("length = ").count(), 1, "{text}");
+    assert!(text.contains("length = 500"), "{text}");
+    assert_eq!(Project::load(&folder).unwrap(), project);
+}
+
+#[test]
+fn a_file_without_item_ids_gets_them_in_file_order() {
+    let dir = temp_dir("old-ids");
+    let bass_items = "arm = false\n\n[[tracks.items]]\nposition = 0\ntake = 0\n\n[[tracks.items.takes]]\nfile = \"takes/bass-1.wav\"\nframes = 10\n\n[[tracks.items]]\nposition = 20\ntake = 0\n\n[[tracks.items.takes]]\nfile = \"takes/bass-2.wav\"\nframes = 10\n";
+    let text = format!(
+        "{}{bass_items}",
+        TWO_TRACKS.strip_suffix("arm = false\n").unwrap()
+    );
+    fs::write(dir.0.join(PROJECT_FILE), text).unwrap();
+    let project = Project::load(&dir.0).unwrap();
+    let ids: Vec<Vec<u64>> = project
+        .tracks
+        .iter()
+        .map(|track| track.items.iter().map(|item| item.id).collect())
+        .collect();
+    assert_eq!(ids, [vec![1], vec![2, 3]]);
+    assert_eq!(project.next_item_id, 4);
+}
+
+#[test]
+fn item_length_and_ids_are_checked() {
+    let dir = temp_dir("item-checks");
+    let cases = [
+        (
+            vec![item(1, 10, Some(991), 1000)],
+            "track 'Gtr' item 0 plays past the end of its take",
+        ),
+        (
+            vec![item(1, 0, Some(0), 1000)],
+            "track 'Gtr' item 0 length must be at least 1",
+        ),
+        (
+            vec![item(1, 0, None, 1000), item(1, 0, None, 1000)],
+            "two items have id 1",
+        ),
+    ];
+    for (idx, (items, message)) in cases.into_iter().enumerate() {
+        let (folder, project) = project_with_items(&dir.0.join(idx.to_string()), items);
+        assert_eq!(project.save(&folder).unwrap_err().to_string(), message);
+    }
+    let (folder, mut project) =
+        project_with_items(&dir.0.join("next"), vec![item(4, 0, None, 1000)]);
+    project.next_item_id = 4;
+    assert_eq!(
+        project.save(&folder).unwrap_err().to_string(),
+        "next_item_id must be above every item id"
+    );
+    project.next_item_id = 5;
+    project.tracks[0].items[0].length = Some(1000);
+    project.save(&folder).unwrap();
+}
+
+#[test]
+fn item_end_is_the_active_take_less_offset_or_the_length() {
+    let mut item = item(1, 200, None, 1000);
+    item.position = 50;
+    assert_eq!((item.played_frames(), item.end()), (800, 850));
+    item.length = Some(300);
+    assert_eq!((item.played_frames(), item.end()), (300, 350));
 }

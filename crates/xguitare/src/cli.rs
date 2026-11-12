@@ -584,7 +584,8 @@ fn render_items(payload: &Value) -> Result<String, String> {
             let take = item["take"].as_u64().unwrap_or(0) + 1;
             let _ = writeln!(
                 lines,
-                "{} {} {seconds:.2}s take {take}/{}",
+                "{} {} {} {seconds:.2}s take {take}/{}",
+                text(&item["id"]),
                 text(&track["name"]),
                 text(&item["bars_beats"]),
                 items(&item["takes"]).count()

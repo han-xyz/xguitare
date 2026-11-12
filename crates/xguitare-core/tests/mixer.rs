@@ -58,6 +58,7 @@ fn project(tracks: Vec<Track>, buses: Vec<Bus>) -> Project {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
+        next_item_id: 1,
         tracks,
         buses,
         master: Master::default(),

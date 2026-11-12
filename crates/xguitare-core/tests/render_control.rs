@@ -129,8 +129,10 @@ fn song(test: &str, items: bool) -> Session {
     if items {
         write_take(&dir.join("takes/guitar-1.wav"), &vec![0.25; TAKE_FRAMES]);
         track.items = vec![Item {
+            id: 0,
             position: 0,
             offset: 0,
+            length: None,
             take: 0,
             takes: vec![Take {
                 file: "takes/guitar-1.wav".to_string(),

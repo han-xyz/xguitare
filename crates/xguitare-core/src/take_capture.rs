@@ -215,8 +215,14 @@ pub fn take_position(
     }
 }
 
-/// Adds `take` at `placement`: a loop Take placed like the Track's last Item becomes that Item's newest, active Take; anything else becomes a new Item.
-pub fn add_take(track: &mut Track, placement: TakePlacement, take: Take, loop_take: bool) {
+/// Adds `take` at `placement`: a loop Take placed like the Track's last Item becomes that Item's newest, active Take; anything else becomes a new Item with id `next_item_id`, which then counts on.
+pub fn add_take(
+    track: &mut Track,
+    placement: TakePlacement,
+    take: Take,
+    loop_take: bool,
+    next_item_id: &mut u64,
+) {
     if loop_take
         && let Some(item) = track.items.last_mut()
         && (item.position, item.offset) == (placement.position, placement.offset)
@@ -226,11 +232,14 @@ pub fn add_take(track: &mut Track, placement: TakePlacement, take: Take, loop_ta
         return;
     }
     track.items.push(Item {
+        id: *next_item_id,
         position: placement.position,
         offset: placement.offset,
+        length: None,
         take: 0,
         takes: vec![take],
     });
+    *next_item_id += 1;
 }
 
 /// The first free `takes/<track slug>-<n>.wav` under `project_dir`, counting from 1.
@@ -285,7 +294,12 @@ pub fn add_finished_take<S: BuildHasher>(
         project.latency_offset_ms,
         project.sample_rate,
     );
-    let Some(track) = project.tracks.get_mut(track) else {
+    let Project {
+        tracks,
+        next_item_id,
+        ..
+    } = project;
+    let Some(track) = tracks.get_mut(track) else {
         return Ok(None);
     };
     let samples = load_take(project_dir, &finished.file)?;
@@ -294,6 +308,12 @@ pub fn add_finished_take<S: BuildHasher>(
         frames: samples.len() as u64,
     };
     takes.insert(finished.file.clone(), samples);
-    add_take(track, placement, take, finished.span.loop_take);
+    add_take(
+        track,
+        placement,
+        take,
+        finished.span.loop_take,
+        next_item_id,
+    );
     Ok(Some(placement))
 }

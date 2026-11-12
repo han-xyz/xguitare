@@ -765,16 +765,17 @@ Request:
 Response:
 
 ```json
-{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"position":96000,"bars_beats":"2.1","offset":0,"length":192000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]},{"id":1,"name":"Bass","items":[]}]}
+{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":192000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]},{"id":1,"name":"Bass","items":[]}]}
 ```
 
 | Key | Value |
 | --- | --- |
 | `sample_rate` | The Project's sample rate, to turn frames into seconds. |
 | `tracks` | One entry per Track in order: `id`, which stays the Track's while other Tracks are added or removed, `name` and its `items`. |
+| `id` | The Item's id, unique in the Project and never reused; it stays the Item's while other Items are added or removed. |
 | `position` | Frames from the Project start where the Item begins; `bars_beats` is the same as `<bar>.<beat>`, as in `status`. |
 | `offset` | Frames of the active Take skipped before `position`. |
-| `length` | Frames the Item plays: the active Take's frames less `offset`. |
+| `length` | Frames the Item plays: its own length when it has one, else the active Take's frames less `offset`. |
 | `take` | Index in `takes` of the active Take, the one that plays. |
 | `takes` | The Take files, relative to the Project folder, oldest first. |
 

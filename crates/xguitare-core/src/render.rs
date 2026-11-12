@@ -12,7 +12,7 @@ use crate::Config;
 use crate::arrangement::{Arrangement, ArrangementCommand};
 use crate::build::{ArrangementError, build_arrangement};
 use crate::control::has_no_hard_links;
-use crate::project::Project;
+use crate::project::{Item, Project};
 
 /// The most frames one [`Render::step`] renders.
 pub const RENDER_BLOCK: usize = 1024;
@@ -231,10 +231,7 @@ fn last_item_end(project: &Project) -> u64 {
         .tracks
         .iter()
         .flat_map(|track| &track.items)
-        .map(|item| {
-            let frames = item.takes[item.take].frames.saturating_sub(item.offset);
-            item.position.saturating_add(frames)
-        })
+        .map(Item::end)
         .max()
         .unwrap_or(0)
 }

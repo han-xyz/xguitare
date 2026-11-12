@@ -49,6 +49,8 @@ pub struct Project {
     /// Bars of click before Recording starts from stopped.
     pub count_in: u32,
     pub tracks: Vec<Track>,
+    /// The id the next new Item gets; above every Item's id, so an id is never reused.
+    pub next_item_id: u64,
     pub buses: Vec<Bus>,
     pub master: Master,
 }
@@ -123,17 +125,32 @@ impl Default for Master {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
+    /// Unique in the Project; stays the Item's while others are added, moved or removed.
+    pub id: u64,
     /// Frames from the start of the Project.
     pub position: u64,
     /// Frames of the active Take skipped before `position`: the Item plays its Take from this frame on.
-    #[serde(default, skip_serializing_if = "is_zero")]
     pub offset: u64,
+    /// Frames played from `offset`; `None` plays to the end of the active Take.
+    pub length: Option<u64>,
     /// The index in `takes` of the Take that plays.
     pub take: usize,
     pub takes: Vec<Take>,
+}
+
+impl Item {
+    /// The frames the Item plays: `length`, or its active Take's frames less `offset`.
+    pub fn played_frames(&self) -> u64 {
+        self.length
+            .unwrap_or_else(|| self.takes[self.take].frames.saturating_sub(self.offset))
+    }
+
+    /// The frame after the Item's last.
+    pub fn end(&self) -> u64 {
+        self.position.saturating_add(self.played_frames())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,6 +201,16 @@ pub enum ProjectError {
         item: usize,
         take: usize,
     },
+    ZeroLength {
+        track: String,
+        item: usize,
+    },
+    LengthPastTake {
+        track: String,
+        item: usize,
+    },
+    DuplicateItemId(u64),
+    NextItemId,
     EmptyName,
     Exists(String),
     /// A Track name that `track_add` would refuse, with its message.
@@ -225,6 +252,8 @@ struct ProjectFile {
     #[serde(default)]
     count_in: u32,
     loop_region: LoopRegion,
+    #[serde(default)]
+    next_item_id: Option<u64>,
     #[serde(default)]
     master: MasterFile,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -288,9 +317,24 @@ struct TrackFile {
     #[serde(default)]
     module: Vec<ModuleEntry>,
     #[serde(default)]
-    items: Vec<Item>,
+    items: Vec<ItemFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sends: Vec<Send>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ItemFile {
+    /// Absent in files saved before Items had ids; [`read`] gives them ids in file order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id: Option<u64>,
+    position: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    offset: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    length: Option<u64>,
+    take: usize,
+    takes: Vec<Take>,
 }
 
 impl Project {
@@ -324,6 +368,7 @@ impl Project {
             click: false,
             count_in: 0,
             tracks: Vec::new(),
+            next_item_id: 1,
             buses: Vec::new(),
             master: Master::default(),
         };
@@ -502,10 +547,17 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
     if file.tracks.len() > MAX_TRACKS {
         return Err(ProjectError::TooManyTracks);
     }
+    let item_files = file.tracks.iter().flat_map(|track| &track.items);
+    let mut next_item_id = file.next_item_id.unwrap_or_else(|| {
+        item_files
+            .filter_map(|item| item.id)
+            .max()
+            .map_or(1, |id| id.saturating_add(1))
+    });
     let mut tracks: Vec<Track> = file
         .tracks
         .into_iter()
-        .map(track_from_file)
+        .map(|track| track_from_file(track, &mut next_item_id))
         .collect::<Result<_, _>>()?;
     for idx in 0..tracks.len() {
         tracks[idx].name = checked_name(&tracks[..idx], &tracks[idx].name, None)
@@ -534,6 +586,7 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         click: file.click,
         count_in: file.count_in,
         tracks,
+        next_item_id,
         buses,
         master,
     };
@@ -573,7 +626,21 @@ pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
         return Err(ProjectError::Loop);
     }
     project.tracks.iter().try_for_each(check_track)?;
+    check_item_ids(project)?;
     check_mixer(project)
+}
+
+fn check_item_ids(project: &Project) -> Result<(), ProjectError> {
+    let mut ids = HashSet::new();
+    for item in project.tracks.iter().flat_map(|track| &track.items) {
+        if !ids.insert(item.id) {
+            return Err(ProjectError::DuplicateItemId(item.id));
+        }
+        if item.id >= project.next_item_id {
+            return Err(ProjectError::NextItemId);
+        }
+    }
+    Ok(())
 }
 
 fn check_mixer(project: &Project) -> Result<(), ProjectError> {
@@ -660,6 +727,20 @@ pub(crate) fn check_track(track: &Track) -> Result<(), ProjectError> {
                 item: index,
             });
         }
+        if item.length == Some(0) {
+            return Err(ProjectError::ZeroLength {
+                track: track.name.clone(),
+                item: index,
+            });
+        }
+        if let Some(length) = item.length
+            && item.offset.saturating_add(length) > item.takes[item.take].frames
+        {
+            return Err(ProjectError::LengthPastTake {
+                track: track.name.clone(),
+                item: index,
+            });
+        }
         let longest = item.takes.iter().map(|take| take.frames).max().unwrap_or(0);
         if item.position.saturating_add(longest) > LAST_FRAME {
             return Err(ProjectError::ItemPastLastFrame {
@@ -687,7 +768,7 @@ fn is_take_file(file: &str) -> bool {
         .is_some_and(|stem| !stem.is_empty() && !stem.contains('/'))
 }
 
-fn track_from_file(file: TrackFile) -> Result<Track, ProjectError> {
+fn track_from_file(file: TrackFile, next_item_id: &mut u64) -> Result<Track, ProjectError> {
     let modules = parse_modules(file.module).map_err(|error| ProjectError::Track {
         track: file.name.clone(),
         error,
@@ -703,8 +784,39 @@ fn track_from_file(file: TrackFile) -> Result<Track, ProjectError> {
         to_master: file.to_master,
         sends: file.sends,
         modules,
-        items: file.items,
+        items: file
+            .items
+            .into_iter()
+            .map(|item| item_from_file(item, next_item_id))
+            .collect(),
     })
+}
+
+fn item_from_file(file: ItemFile, next_item_id: &mut u64) -> Item {
+    let id = file.id.unwrap_or_else(|| {
+        let id = *next_item_id;
+        *next_item_id = next_item_id.saturating_add(1);
+        id
+    });
+    Item {
+        id,
+        position: file.position,
+        offset: file.offset,
+        length: file.length,
+        take: file.take,
+        takes: file.takes,
+    }
+}
+
+fn item_file(item: &Item) -> ItemFile {
+    ItemFile {
+        id: Some(item.id),
+        position: item.position,
+        offset: item.offset,
+        length: item.length,
+        take: item.take,
+        takes: item.takes.clone(),
+    }
 }
 
 fn bus_from_file(file: BusFile) -> Result<Bus, ProjectError> {
@@ -747,6 +859,7 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
         click: project.click,
         count_in: project.count_in,
         loop_region: project.loop_region,
+        next_item_id: Some(project.next_item_id),
         master: MasterFile {
             volume_db: project.master.volume_db,
             module: module_entries(&project.master.modules),
@@ -777,7 +890,7 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
                 arm: track.arm,
                 to_master: track.to_master,
                 module: module_entries(&track.modules),
-                items: track.items.clone(),
+                items: track.items.iter().map(item_file).collect(),
                 sends: track
                     .sends
                     .iter()
@@ -856,6 +969,17 @@ impl fmt::Display for ProjectError {
             ProjectError::NoTake { track, item, take } => {
                 write!(f, "track '{track}' item {item} has no take {take}")
             }
+            ProjectError::ZeroLength { track, item } => {
+                write!(f, "track '{track}' item {item} length must be at least 1")
+            }
+            ProjectError::LengthPastTake { track, item } => {
+                write!(
+                    f,
+                    "track '{track}' item {item} plays past the end of its take"
+                )
+            }
+            ProjectError::DuplicateItemId(id) => write!(f, "two items have id {id}"),
+            ProjectError::NextItemId => f.write_str("next_item_id must be above every item id"),
             ProjectError::EmptyName => f.write_str("project name must not be empty"),
             ProjectError::Exists(name) => write!(f, "a project named '{name}' already exists"),
             ProjectError::TrackName(error) | ProjectError::BusName(error) => f.write_str(error),

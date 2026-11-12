@@ -18,8 +18,8 @@ use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
-    LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due, autosave_newer,
-    check_project, check_track, checked_name,
+    Item, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due,
+    autosave_newer, check_project, check_track, checked_name,
 };
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
@@ -831,7 +831,7 @@ pub(crate) fn click(
     Ok(json!({"on": on, "count_in": count_in}))
 }
 
-/// Each Track's id, name and Items, with each Item's `length` the frames of its active Take it plays.
+/// Each Track's id, name and Items, with each Item's id and its `length` the frames it plays.
 pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
     let project = &open.project;
@@ -847,10 +847,11 @@ pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
                     let files: Vec<&str> =
                         item.takes.iter().map(|take| take.file.as_str()).collect();
                     json!({
+                        "id": item.id,
                         "position": item.position,
                         "bars_beats": bars_beats(project, item.position),
                         "offset": item.offset,
-                        "length": item.takes[item.take].frames.saturating_sub(item.offset),
+                        "length": item.played_frames(),
                         "take": item.take,
                         "takes": files,
                     })
@@ -1297,15 +1298,11 @@ fn text_frame(project: &Project, text: &str) -> Result<f64, String> {
     Ok((beat_index * frames_per_beat(project)).round())
 }
 
-/// The last frame any Take or the loop region reaches.
+/// The last frame any Item or the loop region reaches.
 fn project_end(project: &Project) -> u64 {
     let items = project.tracks.iter().flat_map(|track| &track.items);
-    let item_ends = items.flat_map(|item| {
-        item.takes
-            .iter()
-            .map(|take| item.position.saturating_add(take.frames))
-    });
-    item_ends
+    items
+        .map(Item::end)
         .chain([project.loop_region.end])
         .max()
         .unwrap_or(0)

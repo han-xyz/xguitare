@@ -218,23 +218,26 @@ fn a_dropped_recorder_ends_its_open_take_then_is_abandoned() {
 #[test]
 fn first_take_makes_an_item_and_loop_takes_stack_on_it() {
     let mut t = track("t");
-    add_take(&mut t, at(1000), take("takes/t-1.wav"), false);
-    add_take(&mut t, at(1000), take("takes/t-2.wav"), true);
-    add_take(&mut t, at(1000), take("takes/t-3.wav"), true);
+    let mut next = 1;
+    add_take(&mut t, at(1000), take("takes/t-1.wav"), false, &mut next);
+    add_take(&mut t, at(1000), take("takes/t-2.wav"), true, &mut next);
+    add_take(&mut t, at(1000), take("takes/t-3.wav"), true, &mut next);
     assert_eq!(t.items.len(), 1);
     assert_eq!(t.items[0].position, 1000);
     assert_eq!(t.items[0].takes.len(), 3);
     assert_eq!(t.items[0].take, 2);
-    add_take(&mut t, at(1000), take("takes/t-4.wav"), false);
-    add_take(&mut t, at(500), take("takes/t-5.wav"), true);
+    add_take(&mut t, at(1000), take("takes/t-4.wav"), false, &mut next);
+    add_take(&mut t, at(500), take("takes/t-5.wav"), true, &mut next);
     let skipped = TakePlacement {
         position: 500,
         offset: 10,
     };
-    add_take(&mut t, skipped, take("takes/t-6.wav"), true);
+    add_take(&mut t, skipped, take("takes/t-6.wav"), true, &mut next);
     assert_eq!(t.items.len(), 4);
     assert_eq!((t.items[2].position, t.items[2].take), (500, 0));
     assert_eq!((t.items[3].position, t.items[3].offset), (500, 10));
+    let ids: Vec<u64> = t.items.iter().map(|item| item.id).collect();
+    assert_eq!((ids, next), (vec![1, 2, 3, 4], 5));
 }
 
 #[test]
@@ -266,6 +269,7 @@ fn finished_take_is_placed_latency_compensated_and_loaded() {
         click: false,
         count_in: 0,
         tracks: vec![track("t")],
+        next_item_id: 1,
         buses: Vec::new(),
         master: Master::default(),
     };
@@ -314,6 +318,7 @@ fn a_take_recorded_from_frame_0_starts_its_item_latency_frames_into_the_take() {
         click: false,
         count_in: 0,
         tracks: vec![track("t")],
+        next_item_id: 1,
         buses: Vec::new(),
         master: Master::default(),
     };

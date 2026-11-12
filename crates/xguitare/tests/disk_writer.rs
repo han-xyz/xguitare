@@ -209,6 +209,7 @@ fn armed_arrangement() -> Box<Arrangement> {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
+        next_item_id: 1,
         tracks: vec![Track {
             name: "t".to_string(),
             input: None,

@@ -1053,13 +1053,13 @@ fn project_items_prints_one_line_per_item() {
     let out = cli(
         &["project", "items"],
         reply(
-            r#"{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"position":0,"bars_beats":"1.1","offset":50,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]},{"position":192000,"bars_beats":"3.1","offset":0,"length":24000,"take":1,"takes":["takes/guitar-2.wav","takes/guitar-3.wav"]}]},{"id":2,"name":"Bass","items":[]}]}"#,
+            r#"{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"id":4,"position":0,"bars_beats":"1.1","offset":50,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]},{"id":9,"position":192000,"bars_beats":"3.1","offset":0,"length":24000,"take":1,"takes":["takes/guitar-2.wav","takes/guitar-3.wav"]}]},{"id":2,"name":"Bass","items":[]}]}"#,
         ),
     );
     assert_eq!(out.requests, [Request::Items]);
     assert_eq!(
         out.stdout,
-        "Guitar 1.1 2.00s take 1/1\nGuitar 3.1 0.50s take 2/2\n"
+        "4 Guitar 1.1 2.00s take 1/1\n9 Guitar 3.1 0.50s take 2/2\n"
     );
     assert_eq!(out.code, 0);
 }

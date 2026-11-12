@@ -74,6 +74,7 @@ fn project_with(tracks: Vec<Track>) -> Project {
         latency_offset_ms: 0.0,
         click: false,
         count_in: 0,
+        next_item_id: 1,
         tracks,
         buses: Vec::new(),
         master: Master::default(),
@@ -87,8 +88,10 @@ fn arrangement_builds_one_rack_per_track_and_swaps_in() {
     let preset = Preset::parse("name = \"G\"\n[[module]]\ntype = \"gain\"\n").unwrap();
     let mut with_item = Track::from_preset("b", &preset);
     with_item.items.push(Item {
+        id: 0,
         position: 0,
         offset: 0,
+        length: None,
         take: 0,
         takes: vec![Take {
             file: "takes/b-1.wav".to_string(),
@@ -116,8 +119,10 @@ fn arrangement_with_an_unloaded_take_is_an_error() {
     let config = config(&dir.0);
     let mut t = Track::from_preset("a", &Preset::parse("name = \"G\"\n").unwrap());
     t.items.push(Item {
+        id: 0,
         position: 0,
         offset: 0,
+        length: None,
         take: 0,
         takes: vec![Take {
             file: "takes/a-1.wav".to_string(),
