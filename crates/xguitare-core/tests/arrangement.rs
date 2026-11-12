@@ -213,17 +213,99 @@ fn item_plays_at_its_position_and_stops_at_its_end() {
 const FADE_FRAMES: usize = 240;
 
 fn played(items: Vec<(Item, f32)>, frames: usize) -> Vec<f32> {
+    let items = items
+        .into_iter()
+        .map(|(item, level)| {
+            let take = vec![level; item.takes[0].frames as usize];
+            (item, take)
+        })
+        .collect();
+    played_takes(items, frames)
+}
+
+fn played_takes(items: Vec<(Item, Vec<f32>)>, frames: usize) -> Vec<f32> {
     let mut t = track("t");
     let mut takes = HashMap::new();
-    for (mut item, level) in items {
+    for (mut item, take) in items {
         let file = format!("takes/t-{}.wav", t.items.len() + 1);
         item.takes[0].file.clone_from(&file);
-        takes.insert(file, Arc::from(vec![level; item.takes[0].frames as usize]));
+        takes.insert(file, Arc::from(take));
         t.items.push(item);
     }
     let mut arrangement = arrangement(&project(vec![t]), &takes);
     arrangement.apply(ArrangementCommand::Play);
     run(&mut arrangement, &[&[0.0; BLOCK]], frames).0
+}
+
+/// A Take whose frame n holds n / 10 000, so a sample tells which Take frame was read.
+fn frame_ramp(frames: u64) -> Vec<f32> {
+    (0..frames).map(|frame| frame as f32 / 10_000.0).collect()
+}
+
+fn silent(item: Item) -> (Item, Vec<f32>) {
+    let take = vec![0.0; item.takes[0].frames as usize];
+    (item, take)
+}
+
+/// Asserts `left[frames]` is Take frame `frame + shift` of [`frame_ramp`] times `gain(frame)`.
+fn assert_ramp_read(
+    left: &[f32],
+    frames: std::ops::Range<usize>,
+    shift: usize,
+    gain: impl Fn(usize) -> f32,
+) {
+    for frame in frames {
+        let expected = (frame + shift) as f32 / 10_000.0 * gain(frame);
+        assert!(
+            close(left[frame], expected),
+            "frame {frame}: {} vs {expected}",
+            left[frame]
+        );
+    }
+}
+
+#[test]
+fn a_lower_item_plays_its_own_take_frames_under_a_top_fade_in() {
+    let mut lower = item(0, "", 6000);
+    lower.offset = 500;
+    let left = played_takes(
+        vec![(lower, frame_ramp(6000)), silent(item(1000, "", 2000))],
+        1300,
+    );
+    let fade = FADE_FRAMES as f32;
+    assert_ramp_read(&left, 1000..1000 + FADE_FRAMES, 500, |frame| {
+        ((1240 - frame) as f32 - 0.5) / fade
+    });
+}
+
+#[test]
+fn a_lower_item_leads_in_with_its_own_take_frames_after_a_top_ends() {
+    let mut lower = item(0, "", 6000);
+    lower.offset = 500;
+    let left = played_takes(
+        vec![(lower, frame_ramp(6000)), silent(item(1000, "", 2000))],
+        3300,
+    );
+    let fade = FADE_FRAMES as f32;
+    assert_ramp_read(&left, 3000 - FADE_FRAMES..3000, 500, |frame| {
+        ((frame - 2760) as f32 + 0.5) / fade
+    });
+    assert_ramp_read(&left, 3000..3300, 500, |_| 1.0);
+}
+
+#[test]
+fn an_item_plays_on_into_its_take_at_a_join_with_another_take() {
+    let mut first = item(0, "", 4800);
+    first.length = Some(2000);
+    let left = played_takes(
+        vec![(first, frame_ramp(4800)), silent(item(2000, "", 2000))],
+        2300,
+    );
+    let fade = FADE_FRAMES as f32;
+    assert_ramp_read(&left, 2000..2000 + FADE_FRAMES, 0, |frame| {
+        ((2240 - frame) as f32 - 0.5) / fade
+    });
+    assert!(left[2240..].iter().all(|&sample| sample == 0.0));
 }
 
 #[test]
