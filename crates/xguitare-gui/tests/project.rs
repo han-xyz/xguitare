@@ -9,7 +9,7 @@ use xguitare_gui::model::{
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, LoopEdge, MainView, ProjectRow, Tempo, TimelineView,
     TrackRow, TransportState, TransportView, ViewSwitch, autosave_offer, bars_beats_text,
-    dragged_loop, grid_lines, item_blocks, key_active, next_take_name, parse_meter, project_end,
+    dragged_loop, grid_lines, item_blocks, key_active, parse_meter, project_end,
     project_key_to_command, project_name, project_rows, project_tempo, recording_from,
     recording_span, restored_view, snap_to_beat, still_closing, time_text, track_rows,
     transport_view,
@@ -846,12 +846,4 @@ fn a_recording_take_reaches_the_playhead_and_after_a_loop_wraps_starts_at_the_lo
     let recording = transport_view(&project_status("recording")).unwrap();
     assert_eq!(recording_span(12_000, &recording), (12_000, 36_000));
     assert_eq!(recording_span(100_000, &recording), (0, 36_000));
-}
-
-#[test]
-fn the_recording_take_is_named_after_its_track_and_the_takes_it_holds() {
-    let blocks = item_blocks(&project_items());
-    assert_eq!(next_take_name("Guitar", &blocks), "guitar-3");
-    assert_eq!(next_take_name("Lead Guitar", &blocks), "lead-guitar-1");
-    assert_eq!(next_take_name("!!", &blocks), "track-1");
 }

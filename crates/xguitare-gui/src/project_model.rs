@@ -3,7 +3,6 @@ use xguitare_client::ClientError;
 use xguitare_core::control::{Request, Response, SILENCE_DB, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_core::project_control::STILL_CLOSING;
-use xguitare_core::take_capture::take_stem;
 
 use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
 use crate::theme::{Rgb, TRACK_COLOURS};
@@ -382,16 +381,6 @@ fn item_block(track: &str, item: &Value) -> Option<ItemBlock> {
         take,
         takes: takes.len(),
     })
-}
-
-/// The name the Take being recorded on `track` will get: the Track's Take stem and one more than the Takes its Items hold, as the Daemon numbers a Project whose Take files are all in use.
-pub fn next_take_name(track: &str, items: &[ItemBlock]) -> String {
-    let held: usize = items
-        .iter()
-        .filter(|item| item.track == track)
-        .map(|item| item.takes)
-        .sum();
-    format!("{}-{}", take_stem(track), held + 1)
 }
 
 /// Where the Take being recorded began: the playhead the window first saw recording at once the count-in ended, kept while recording goes on; status names no such frame.

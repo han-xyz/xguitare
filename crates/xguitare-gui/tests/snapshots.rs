@@ -2126,7 +2126,7 @@ fn mixer_faders_and_switches_show_whole_in_the_mixer_view() {
     ] {
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
-        let footer_top = harness.get_by_label("connected").rect().top();
+        let footer_top = size.y - FOOTER_ALLOWANCE;
         for name in ["Room", "Bass DI", "Bass Amp", "Click", "Master"] {
             let mut labels = vec![format!("Volume {name}"), format!("Volume {name} value")];
             if name != "Master" {

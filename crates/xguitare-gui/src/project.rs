@@ -16,9 +16,9 @@ use crate::model::{
 };
 use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
-    bars_beats_text, dragged_loop, grid_lines, item_blocks, next_take_name, parse_meter,
-    project_key_to_command, project_tempo, recording_span, sample_rate, snap_to_beat, time_text,
-    track_colour, track_rows, transport_view,
+    bars_beats_text, dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command,
+    project_tempo, recording_span, sample_rate, snap_to_beat, time_text, track_colour, track_rows,
+    transport_view,
 };
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette, translucent};
@@ -70,6 +70,8 @@ const PLAYHEAD_WIDTH: f32 = 2.0;
 const VOLUME_DB: (f64, f64) = (-60.0, 6.0);
 pub(crate) const PAN: (f64, f64) = (-1.0, 1.0);
 const NO_INPUT: &str = "no input";
+/// After the Track name on the Take being recorded: the Daemon names its file only when recording stops.
+const RECORDING: &str = "recording";
 const NO_TRACKS: &str = "No Tracks yet: Add Track";
 const COUNT_IN_BARS: [u32; 3] = [0, 1, 2];
 const COUNT_IN_WIDTH: f32 = 76.0;
@@ -723,7 +725,7 @@ fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock]
         && let Some((from, to)) = scene.recording
     {
         let span = Rect::from_x_y_ranges(scene.x(lane, from)..=scene.x(lane, to), rows);
-        let name = next_take_name(&row.name, items);
+        let name = format!("{} {RECORDING}", row.name);
         paint_recording_take(painter, span.intersect(lane), &name);
     }
     scene.paint_loop_edges(painter, lane);
