@@ -23,11 +23,13 @@ use crate::model::{
     key_to_command, open_units_from_string, open_units_to_string, param_rows, peak_db,
     quit_commands, remember_removes,
 };
-use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
+use crate::project::{
+    ProjectView, TIMELINE_HEIGHT, autosave_prompt, item_node_id, tracks_view, transport_bar,
+};
 use crate::project_model::{
-    AutosaveOffer, MainView, ViewSwitch, esc_clears_selection, item_blocks, item_key_to_command,
-    key_active, project_key_to_command, project_name, recording_from, restored_view,
-    transport_view,
+    AutosaveOffer, KeyFocus, MainView, ViewSwitch, esc_clears_selection, item_blocks,
+    item_key_to_command, key_active, project_key_to_command, project_name, recording_from,
+    restored_view, transport_view,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, error_toast, footer, sidebar};
@@ -434,7 +436,15 @@ impl eframe::App for App {
             .map(|_| self.views.shown);
         let esc_taken = esc_taken(ui.ctx());
         let arrange = (main_view == Some(MainView::Arrange)).then_some(&self.project_view);
-        let mut commands: Vec<Command> = pressed_keys(ui)
+        let item_ids: Vec<u64> = snapshot
+            .items
+            .as_ref()
+            .map(item_blocks)
+            .unwrap_or_default()
+            .iter()
+            .map(|item| item.id)
+            .collect();
+        let mut commands: Vec<Command> = pressed_keys(ui, &item_ids)
             .into_iter()
             .filter_map(|key| key_command(key, snapshot, &rows, arrange))
             .collect();
@@ -597,9 +607,14 @@ fn key_command(
 }
 
 /// The keys [`key_active`] lets through. Keys match the key event's own modifiers: an injected or fast press releases Ctrl within the same frame, so the frame's modifier state reads none.
-fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
+fn pressed_keys(ui: &Ui, item_ids: &[u64]) -> Vec<KeyEvent> {
     let text_edit_focused = ui.ctx().text_edit_focused();
-    let widget_focused = ui.ctx().memory(|memory| memory.focused().is_some());
+    let focus = match ui.ctx().memory(egui::Memory::focused) {
+        _ if text_edit_focused => KeyFocus::TextField,
+        None => KeyFocus::Nothing,
+        Some(id) if item_ids.iter().any(|&item| item_node_id(item) == id) => KeyFocus::Item,
+        Some(_) => KeyFocus::Widget,
+    };
     let keys = ui.input_mut(|input| {
         let mut keys: Vec<KeyEvent> = input
             .events
@@ -638,7 +653,7 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         keys
     });
     keys.into_iter()
-        .filter(|&key| key_active(key, text_edit_focused, widget_focused))
+        .filter(|&key| key_active(key, focus))
         .collect()
 }
 

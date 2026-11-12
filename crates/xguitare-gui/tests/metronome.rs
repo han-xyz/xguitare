@@ -15,7 +15,7 @@ use xguitare_gui::metronome_model::{
     metronome_view,
 };
 use xguitare_gui::model::{Command, KeyEvent, Outgoing, requests_until_quit};
-use xguitare_gui::project_model::{key_active, project_key_to_command};
+use xguitare_gui::project_model::{KeyFocus, key_active, project_key_to_command};
 
 fn status(on: bool, beat: u32) -> Value {
     json!({
@@ -181,9 +181,9 @@ fn m_and_t_do_nothing_with_a_project_open() {
 #[test]
 fn m_and_t_wait_while_a_text_field_has_focus() {
     for key in [KeyEvent::M, KeyEvent::T] {
-        assert!(key_active(key, false, false), "{key:?}");
-        assert!(key_active(key, false, true), "{key:?}");
-        assert!(!key_active(key, true, true), "{key:?}");
+        assert!(key_active(key, KeyFocus::Nothing), "{key:?}");
+        assert!(key_active(key, KeyFocus::Widget), "{key:?}");
+        assert!(!key_active(key, KeyFocus::TextField), "{key:?}");
     }
 }
 

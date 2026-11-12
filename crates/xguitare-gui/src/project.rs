@@ -17,12 +17,12 @@ use crate::model::{
     Message, Snapshot, TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
-    EDGE_GRAB_PX, GridLine, ItemBlock, ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer,
-    MovePreview, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text, dragged_loop,
-    grid_lines, grid_step, hit_test, item_blocks, item_name, items_in_box, move_preview,
-    nudge_command, parse_meter, project_key_to_command, project_tempo, recording_span, sample_rate,
-    snap_to_beat, time_text, track_colour, track_rows, track_step_command, transport_view,
-    waveform_columns,
+    EDGE_GRAB_PX, GridLine, ItemBlock, ItemKey, ItemKeyPress, ItemNodeAction, ItemSelection,
+    LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView, TrackRow,
+    TransportView, bars_beats_text, dragged_loop, grid_lines, grid_step, hit_test, item_blocks,
+    item_name, item_node_action, items_in_box, move_preview, nudge_command, parse_meter,
+    project_key_to_command, project_tempo, recording_span, sample_rate, snap_to_beat, time_text,
+    track_colour, track_rows, track_step_command, transport_view, waveform_columns,
 };
 use crate::rack::muted_text;
 use crate::theme::{
@@ -962,7 +962,7 @@ fn item_nodes(
         }
         let inside = plate.shrink(FOCUS_RING_GAP + FOCUS_RING_WIDTH);
         let node = if inside.is_positive() { inside } else { plate };
-        let id = Id::unique(("item", item.id));
+        let id = item_node_id(item.id);
         let response = ui.interact(node, id, Sense::FOCUSABLE);
         let name = item_name(item, &lane.name, rate, tempo);
         response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, &name));
@@ -979,22 +979,44 @@ fn item_nodes(
         };
         ui.memory_mut(|memory| memory.set_focus_lock_filter(id, arrows_stay));
         let step = grid_step(scene.timeline, rate, tempo);
-        for (key, modifiers) in pressed(ui) {
-            match key {
-                Key::Enter => view.selection.pick(item.id, modifiers.command),
-                Key::ArrowLeft => command = nudge_command(items, &view.selection, -step),
-                Key::ArrowRight => command = nudge_command(items, &view.selection, step),
-                Key::ArrowUp if modifiers.alt => {
-                    command = track_step_command(items, &view.selection, &track_ids, -1);
+        for press in pressed(ui).into_iter().filter_map(item_key_press) {
+            match item_node_action(press) {
+                Some(ItemNodeAction::Select) => view.selection.pick(item.id, false),
+                Some(ItemNodeAction::Toggle) => view.selection.pick(item.id, true),
+                Some(ItemNodeAction::Nudge(direction)) => {
+                    command = nudge_command(items, &view.selection, direction as f64 * step);
                 }
-                Key::ArrowDown if modifiers.alt => {
-                    command = track_step_command(items, &view.selection, &track_ids, 1);
+                Some(ItemNodeAction::TrackStep(rows)) => {
+                    command = track_step_command(items, &view.selection, &track_ids, rows);
                 }
-                _ => {}
+                None => {}
             }
         }
     }
     command
+}
+
+/// The focus id of an Item's node.
+pub(crate) fn item_node_id(item: u64) -> Id {
+    Id::unique(("item", item))
+}
+
+/// A key press a focused Item takes, with Ctrl standing for the command key.
+fn item_key_press((key, modifiers): (Key, Modifiers)) -> Option<ItemKeyPress> {
+    let key = match key {
+        Key::Enter => ItemKey::Enter,
+        Key::ArrowLeft => ItemKey::Left,
+        Key::ArrowRight => ItemKey::Right,
+        Key::ArrowUp => ItemKey::Up,
+        Key::ArrowDown => ItemKey::Down,
+        _ => return None,
+    };
+    Some(ItemKeyPress {
+        key,
+        ctrl: modifiers.command || modifiers.ctrl,
+        shift: modifiers.shift,
+        alt: modifiers.alt,
+    })
 }
 
 /// This frame's key presses with the modifiers each was pressed with.

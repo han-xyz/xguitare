@@ -576,17 +576,24 @@ impl ViewSwitch {
     }
 }
 
-/// Plain keys act only while no widget has focus, so that a focused knob keeps Home, End and the arrows and a focused button its Space; with modifiers, and M, T, S and Delete, they act unless a text field takes typing.
-pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) -> bool {
+/// What has the keyboard focus: nothing, an Item on the timeline, another widget, or a text field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyFocus {
+    Nothing,
+    Item,
+    Widget,
+    TextField,
+}
+
+/// Plain keys act only while no widget has focus, so that a focused knob keeps Home, End and the arrows and a focused button its Space; a focused Item keeps only the arrows, which it takes itself. With modifiers, and M, T, S and Delete, keys act unless a text field takes typing.
+pub fn key_active(key: KeyEvent, focus: KeyFocus) -> bool {
     match key {
-        KeyEvent::Space
-        | KeyEvent::R
-        | KeyEvent::Home
-        | KeyEvent::End
-        | KeyEvent::Left
-        | KeyEvent::Right
-        | KeyEvent::AltUp
-        | KeyEvent::AltDown => !widget_focused,
+        KeyEvent::Space | KeyEvent::R | KeyEvent::Home | KeyEvent::End => {
+            matches!(focus, KeyFocus::Nothing | KeyFocus::Item)
+        }
+        KeyEvent::Left | KeyEvent::Right | KeyEvent::AltUp | KeyEvent::AltDown => {
+            focus == KeyFocus::Nothing
+        }
         KeyEvent::Digit(..)
         | KeyEvent::M
         | KeyEvent::T
@@ -597,7 +604,53 @@ pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) 
         | KeyEvent::CtrlS
         | KeyEvent::CtrlR
         | KeyEvent::CtrlM
-        | KeyEvent::CtrlAltR => shortcuts_active(text_edit_focused),
+        | KeyEvent::CtrlAltR => shortcuts_active(focus == KeyFocus::TextField),
+    }
+}
+
+/// A key a focused Item takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemKey {
+    Enter,
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// An [`ItemKey`] with the modifiers it was pressed with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemKeyPress {
+    pub key: ItemKey,
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+}
+
+/// What a key does on a focused Item; steps are -1 (left, up) or 1 (right, down).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemNodeAction {
+    /// Only this Item is selected.
+    Select,
+    /// This Item goes in or out of the selection.
+    Toggle,
+    /// The selected Items move by one grid step.
+    Nudge(isize),
+    /// The selected Items move to the next Track.
+    TrackStep(isize),
+}
+
+/// Enter selects, Ctrl+Enter toggles, ← and → nudge, Alt+↑ and Alt+↓ change the Track; under any other modifiers these keys do nothing.
+pub fn item_node_action(press: ItemKeyPress) -> Option<ItemNodeAction> {
+    let modifiers = (press.ctrl, press.shift, press.alt);
+    match (press.key, modifiers) {
+        (ItemKey::Enter, (false, false, false)) => Some(ItemNodeAction::Select),
+        (ItemKey::Enter, (true, false, false)) => Some(ItemNodeAction::Toggle),
+        (ItemKey::Left, (false, false, false)) => Some(ItemNodeAction::Nudge(-1)),
+        (ItemKey::Right, (false, false, false)) => Some(ItemNodeAction::Nudge(1)),
+        (ItemKey::Up, (false, false, true)) => Some(ItemNodeAction::TrackStep(-1)),
+        (ItemKey::Down, (false, false, true)) => Some(ItemNodeAction::TrackStep(1)),
+        _ => None,
     }
 }
 

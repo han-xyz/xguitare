@@ -7,13 +7,14 @@ use xguitare_gui::model::{
     requests_until_quit, response_message, restore,
 };
 use xguitare_gui::project_model::{
-    AutosaveOffer, GridLine, ItemBlock, ItemHit, ItemSelection, LoopEdge, MainView, MoveDrag,
-    MovePointer, ProjectRow, Tempo, TimelineView, TrackRow, TransportState, TransportView,
-    ViewSwitch, VisibleTake, autosave_offer, bars_beats_text, dragged_loop, esc_clears_selection,
-    grid_lines, hit_test, item_blocks, item_key_to_command, item_name, items_in_box, key_active,
-    move_preview, parse_meter, project_end, project_key_to_command, project_name, project_rows,
-    project_tempo, recording_from, recording_span, restored_view, snap_to_beat, still_closing,
-    time_text, track_rows, transport_view, undo_text, waveform_columns,
+    AutosaveOffer, GridLine, ItemBlock, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
+    ItemSelection, KeyFocus, LoopEdge, MainView, MoveDrag, MovePointer, ProjectRow, Tempo,
+    TimelineView, TrackRow, TransportState, TransportView, ViewSwitch, VisibleTake, autosave_offer,
+    bars_beats_text, dragged_loop, esc_clears_selection, grid_lines, hit_test, item_blocks,
+    item_key_to_command, item_name, item_node_action, items_in_box, key_active, move_preview,
+    parse_meter, project_end, project_key_to_command, project_name, project_rows, project_tempo,
+    recording_from, recording_span, restored_view, snap_to_beat, still_closing, time_text,
+    track_rows, transport_view, undo_text, waveform_columns,
 };
 
 const RATE: f64 = 48_000.0;
@@ -400,15 +401,15 @@ fn project_keys_need_an_open_project() {
 #[test]
 fn plain_keys_wait_for_no_focus() {
     let digit = KeyEvent::Digit(1, KeyModifiers::default());
-    assert!(key_active(KeyEvent::Space, false, false));
-    assert!(!key_active(KeyEvent::Space, false, true));
-    assert!(!key_active(KeyEvent::Home, false, true));
-    assert!(!key_active(KeyEvent::R, false, true));
-    assert!(key_active(KeyEvent::CtrlS, false, true));
-    assert!(key_active(KeyEvent::CtrlR, false, true));
-    assert!(key_active(digit, false, true));
-    assert!(!key_active(KeyEvent::CtrlS, true, true));
-    assert!(!key_active(digit, true, true));
+    assert!(key_active(KeyEvent::Space, KeyFocus::Nothing));
+    assert!(!key_active(KeyEvent::Space, KeyFocus::Widget));
+    assert!(!key_active(KeyEvent::Home, KeyFocus::Widget));
+    assert!(!key_active(KeyEvent::R, KeyFocus::Widget));
+    assert!(key_active(KeyEvent::CtrlS, KeyFocus::Widget));
+    assert!(key_active(KeyEvent::CtrlR, KeyFocus::Widget));
+    assert!(key_active(digit, KeyFocus::Widget));
+    assert!(!key_active(KeyEvent::CtrlS, KeyFocus::TextField));
+    assert!(!key_active(digit, KeyFocus::TextField));
 }
 
 const CTRL: KeyModifiers = KeyModifiers {
@@ -452,9 +453,9 @@ fn ctrl_digits_select_the_views_in_a_project() {
 #[test]
 fn view_keys_wait_while_a_text_field_has_focus() {
     let ctrl_two = KeyEvent::Digit(2, CTRL);
-    assert!(key_active(ctrl_two, false, true));
-    assert!(!key_active(ctrl_two, true, true));
-    assert!(!key_active(KeyEvent::CtrlM, true, true));
+    assert!(key_active(ctrl_two, KeyFocus::Widget));
+    assert!(!key_active(ctrl_two, KeyFocus::TextField));
+    assert!(!key_active(KeyEvent::CtrlM, KeyFocus::TextField));
 }
 
 #[test]
@@ -1280,8 +1281,8 @@ fn item_keys_wait_only_for_a_text_field_and_arrows_for_no_focus() {
         KeyEvent::CtrlZ,
         KeyEvent::CtrlShiftZ,
     ] {
-        assert!(key_active(key, false, true), "{key:?}");
-        assert!(!key_active(key, true, true), "{key:?}");
+        assert!(key_active(key, KeyFocus::Widget), "{key:?}");
+        assert!(!key_active(key, KeyFocus::TextField), "{key:?}");
     }
     for key in [
         KeyEvent::Left,
@@ -1289,8 +1290,8 @@ fn item_keys_wait_only_for_a_text_field_and_arrows_for_no_focus() {
         KeyEvent::AltUp,
         KeyEvent::AltDown,
     ] {
-        assert!(key_active(key, false, false), "{key:?}");
-        assert!(!key_active(key, false, true), "{key:?}");
+        assert!(key_active(key, KeyFocus::Nothing), "{key:?}");
+        assert!(!key_active(key, KeyFocus::Widget), "{key:?}");
     }
     assert_eq!(
         project_key_to_command(KeyEvent::S, &project_status("stopped"), &[]),
@@ -1374,4 +1375,70 @@ fn item_edits_become_their_requests() {
             request(Request::ProjectRedo),
         ]
     );
+}
+
+#[test]
+fn a_focused_item_leaves_the_transport_and_view_keys_active() {
+    for key in [KeyEvent::Space, KeyEvent::R, KeyEvent::Home, KeyEvent::End] {
+        assert!(key_active(key, KeyFocus::Item), "{key:?}");
+    }
+    for key in [
+        KeyEvent::Left,
+        KeyEvent::Right,
+        KeyEvent::AltUp,
+        KeyEvent::AltDown,
+    ] {
+        assert!(
+            !key_active(key, KeyFocus::Item),
+            "{key:?} is the Item's own"
+        );
+    }
+    for key in [
+        KeyEvent::S,
+        KeyEvent::Delete,
+        KeyEvent::CtrlZ,
+        KeyEvent::CtrlS,
+    ] {
+        assert!(key_active(key, KeyFocus::Item), "{key:?}");
+    }
+}
+
+fn press(key: ItemKey, (ctrl, shift, alt): (bool, bool, bool)) -> Option<ItemNodeAction> {
+    item_node_action(ItemKeyPress {
+        key,
+        ctrl,
+        shift,
+        alt,
+    })
+}
+
+#[test]
+fn a_focused_item_takes_its_keys_only_with_their_own_modifiers() {
+    const NONE: (bool, bool, bool) = (false, false, false);
+    const CTRL: (bool, bool, bool) = (true, false, false);
+    const SHIFT: (bool, bool, bool) = (false, true, false);
+    const ALT: (bool, bool, bool) = (false, false, true);
+    const CTRL_ALT: (bool, bool, bool) = (true, false, true);
+    assert_eq!(press(ItemKey::Enter, NONE), Some(ItemNodeAction::Select));
+    assert_eq!(press(ItemKey::Enter, CTRL), Some(ItemNodeAction::Toggle));
+    assert_eq!(press(ItemKey::Left, NONE), Some(ItemNodeAction::Nudge(-1)));
+    assert_eq!(press(ItemKey::Right, NONE), Some(ItemNodeAction::Nudge(1)));
+    assert_eq!(press(ItemKey::Up, ALT), Some(ItemNodeAction::TrackStep(-1)));
+    assert_eq!(
+        press(ItemKey::Down, ALT),
+        Some(ItemNodeAction::TrackStep(1))
+    );
+    for (key, modifiers) in [
+        (ItemKey::Enter, SHIFT),
+        (ItemKey::Enter, ALT),
+        (ItemKey::Enter, CTRL_ALT),
+        (ItemKey::Left, CTRL),
+        (ItemKey::Left, ALT),
+        (ItemKey::Right, CTRL_ALT),
+        (ItemKey::Up, NONE),
+        (ItemKey::Down, CTRL),
+        (ItemKey::Up, CTRL_ALT),
+    ] {
+        assert_eq!(press(key, modifiers), None, "{key:?} {modifiers:?}");
+    }
 }

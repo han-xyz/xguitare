@@ -1771,6 +1771,30 @@ fn a_focused_item_is_selected_by_enter_and_moved_by_alt_arrows() {
 }
 
 #[test]
+fn a_focused_item_lets_space_play_and_ignores_arrows_under_other_modifiers() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness.get_by_label(BASS_ITEM).focus();
+    harness.run_steps(2);
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    sent_now(&sent);
+    harness.key_press(Key::Space);
+    harness.run_steps(1);
+    for modifiers in [
+        Modifiers::COMMAND,
+        Modifiers::ALT,
+        Modifiers::COMMAND | Modifiers::ALT,
+    ] {
+        harness.key_press_modifiers(modifiers, Key::ArrowRight);
+        harness.run_steps(1);
+    }
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
+    harness.run_steps(1);
+    assert_eq!(sent_now(&sent), [Command::Transport(TransportAction::Play)]);
+    assert!(item_selected(&harness, BASS_ITEM));
+}
+
+#[test]
 fn undo_keys_work_in_every_project_view() {
     let (mut harness, sent, _dir) = project_harness("stopped");
     for view in [Key::Num1, Key::Num2, Key::Num3] {
