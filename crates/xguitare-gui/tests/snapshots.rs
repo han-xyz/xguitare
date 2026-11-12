@@ -1658,6 +1658,43 @@ fn both_halves_of_a_split_stay_selected_and_the_footer_shows_the_undo_label() {
     harness.get_by_label("Undo: split Item");
 }
 
+/// From the empty start of the Guitar lane to the Bass lane, past the Guitar Item's start: a box over both Items.
+fn box_over_both_items(harness: &Harness<App>) -> (Pos2, Pos2) {
+    let guitar = harness.get_by_label("Track Guitar").rect();
+    let bass = harness.get_by_label("Track Bass").rect();
+    let from = pos2(guitar.left() + 400.0 + BEAT_PX, guitar.center().y);
+    (from, pos2(from.x + 4.0 * BEAT_PX, bass.center().y))
+}
+
+#[test]
+fn item_editing_snapshots() {
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let mut edited = project_snapshot("stopped");
+        edited.status.as_mut().unwrap()["undo"] = json!("move 2 Items");
+        let (mut selected, _, _dir) = harness_with(size, edited);
+        let (from, to) = box_over_both_items(&selected);
+        drag_and_release(&mut selected, from, to);
+        assert!(item_selected(&selected, GUITAR_ITEM) && item_selected(&selected, BASS_ITEM));
+        selected.get_by_label("Undo: move 2 Items");
+        write_png(&mut selected, &format!("project-selection-{suffix}"));
+
+        let (mut boxing, _, _dir) = harness_with(size, project_snapshot("stopped"));
+        let (from, to) = box_over_both_items(&boxing);
+        press_and_drag(&mut boxing, from, to);
+        write_png(&mut boxing, &format!("project-box-{suffix}"));
+
+        let (mut moving, _, _dir) = harness_with(size, project_snapshot("stopped"));
+        let from = item_rect(&moving, GUITAR_ITEM).center();
+        let row = moving.get_by_label("Track Bass").rect().height();
+        press_and_drag(
+            &mut moving,
+            from,
+            from + Vec2::new(2.0 * BEAT_PX + 3.0, row),
+        );
+        write_png(&mut moving, &format!("project-move-ghost-{suffix}"));
+    }
+}
+
 #[test]
 fn items_are_focusable_after_the_track_headers() {
     let (mut harness, _sent, _dir) = project_harness("stopped");

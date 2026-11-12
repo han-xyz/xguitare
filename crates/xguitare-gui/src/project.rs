@@ -863,7 +863,7 @@ fn paint_lane(
                 span,
                 RADIUS_CONTROL,
                 Stroke::new(SELECTED_OUTLINE, colour(colours.lit)),
-                egui::StrokeKind::Outside,
+                egui::StrokeKind::Inside,
             );
         }
     }
