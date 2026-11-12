@@ -21,7 +21,7 @@ use crate::model::{
     shown_undo, tuner_toggle,
 };
 use crate::project::{knob_with_reset, released_value};
-use crate::project_model::{project_name, project_rows, transport_view};
+use crate::project_model::{project_name, project_rows, transport_view, undo_text};
 use crate::rack::choice_keys;
 use crate::rack::muted_text;
 use crate::theme::{
@@ -33,6 +33,8 @@ use crate::widgets::{
     toggle_switch,
 };
 
+/// After the footer's undo label: the key that undoes.
+const UNDO_KEY: &str = "Ctrl+Z";
 const NO_PRESET: &str = "no preset";
 const CABINET: &str = "cabinet";
 /// The Daemon's `rack_add` error for a cabinet on a Bus or Master Rack.
@@ -929,6 +931,10 @@ pub fn footer(
     ui.horizontal(|ui| {
         if let Some(text) = feedback.notice(now) {
             ui.label(text);
+        }
+        if let Some(text) = snapshot.status.as_ref().and_then(undo_text) {
+            ui.label(text);
+            ui.label(muted_text(UNDO_KEY));
         }
         if hidden.as_ref().is_some_and(|hidden| !hidden.is_shown(now)) {
             *hidden = None;

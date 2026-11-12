@@ -25,8 +25,9 @@ use crate::model::{
 };
 use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
 use crate::project_model::{
-    AutosaveOffer, MainView, ViewSwitch, item_blocks, key_active, project_key_to_command,
-    project_name, recording_from, restored_view, transport_view,
+    AutosaveOffer, MainView, ViewSwitch, esc_clears_selection, item_blocks, item_key_to_command,
+    key_active, project_key_to_command, project_name, recording_from, restored_view,
+    transport_view,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, error_toast, footer, sidebar};
@@ -61,6 +62,8 @@ const TIMELINE_SHARE: f32 = 0.45;
 const OPEN_UNITS_KEY: &str = "open_units";
 const VIEW_KEY: &str = "view";
 const RACK_LAYOUT_KEY: &str = "rack_layout";
+/// The Snap switch in eframe storage: `on` or `off`.
+const SNAP_KEY: &str = "snap";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -164,6 +167,10 @@ impl App {
             .map(|stored| open_units_from_string(&stored))
             .unwrap_or_default();
         let stored_view = cc.storage.and_then(|storage| storage.get_string(VIEW_KEY));
+        let snap = cc
+            .storage
+            .and_then(|storage| storage.get_string(SNAP_KEY))
+            .is_none_or(|stored| stored != "off");
         let rack_layout = cc
             .storage
             .and_then(|storage| storage.get_string(RACK_LAYOUT_KEY))
@@ -220,7 +227,7 @@ impl App {
             settings_draft: None,
             configured_bank_kind: config.bank_kind,
             new_project: String::new(),
-            project_view: ProjectView::default(),
+            project_view: ProjectView::new(snap),
             mixer: MixerView::default(),
             views: ViewSwitch::new(restored_view(stored_view.as_deref())),
             autosave_prompt: None,
@@ -426,9 +433,10 @@ impl eframe::App for App {
             .filter(|status| project_name(Some(status)).is_some())
             .map(|_| self.views.shown);
         let esc_taken = esc_taken(ui.ctx());
+        let arrange = (main_view == Some(MainView::Arrange)).then_some(&self.project_view);
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
-            .filter_map(|key| key_command(key, snapshot, &rows))
+            .filter_map(|key| key_command(key, snapshot, &rows, arrange))
             .collect();
         commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| {
@@ -470,11 +478,20 @@ impl eframe::App for App {
                 feedback,
             ));
         } else {
-            self.project_view = ProjectView::default();
+            self.project_view = ProjectView::new(self.project_view.snap);
             self.mixer = MixerView::default();
         }
         let dialog_open = self.mixer.render.is_some() || self.autosave_prompt.is_some();
-        show_error_toast(ui, &mut self.feedback, esc_taken, dialog_open);
+        let has_selection =
+            main_view == Some(MainView::Arrange) && !self.project_view.selection.is_empty();
+        if ui.input(|input| input.key_pressed(Key::Escape)) {
+            if esc_clears_selection(esc_taken, dialog_open, has_selection) {
+                self.project_view.selection.clear();
+            } else if esc_dismisses_toast(esc_taken.0, esc_taken.1, dialog_open) {
+                self.feedback.dismiss();
+            }
+        }
+        error_toast(ui.ctx(), &mut self.feedback);
         commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)
@@ -512,6 +529,12 @@ impl eframe::App for App {
         }
         widgets::paint_focus_ring(ui.ctx());
         let commands = self.keep_window_commands(commands);
+        if let Some(Command::ItemSplit { at, .. }) = commands
+            .iter()
+            .rfind(|command| matches!(command, Command::ItemSplit { .. }))
+        {
+            self.project_view.split_at = Some(*at);
+        }
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);
         for command in commands {
@@ -528,6 +551,8 @@ impl eframe::App for App {
         storage.set_string(OPEN_UNITS_KEY, open_units_to_string(&self.open_units));
         storage.set_string(VIEW_KEY, self.views.shown.stored().to_string());
         storage.set_string(RACK_LAYOUT_KEY, self.rack_layout.to_stored());
+        let snap = if self.project_view.snap { "on" } else { "off" };
+        storage.set_string(SNAP_KEY, snap.to_string());
     }
 
     fn on_exit(&mut self) {
@@ -545,8 +570,13 @@ impl eframe::App for App {
     }
 }
 
-/// The Metronome's M and T first, then the Project view's keys while a Project is open, else the Preset keys.
-fn key_command(key: KeyEvent, snapshot: &Snapshot, rows: &[BankRow]) -> Option<Command> {
+/// The Metronome's M and T first, then while a Project is open the Item keys in Arrange (`arrange`) and the Project view's keys, else the Preset keys.
+fn key_command(
+    key: KeyEvent,
+    snapshot: &Snapshot,
+    rows: &[BankRow],
+    arrange: Option<&ProjectView>,
+) -> Option<Command> {
     let Some(status) = &snapshot.status else {
         return key_to_command(key, rows);
     };
@@ -557,6 +587,12 @@ fn key_command(key: KeyEvent, snapshot: &Snapshot, rows: &[BankRow]) -> Option<C
         return key_to_command(key, rows);
     }
     let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
+    if let Some(view) = arrange
+        && let Some(command) =
+            item_key_to_command(key, status, &items, &view.selection, view.timeline)
+    {
+        return Some(command);
+    }
     project_key_to_command(key, status, &items)
 }
 
@@ -590,6 +626,12 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         if input.consume_key(Modifiers::COMMAND, Key::M) {
             keys.push(KeyEvent::CtrlM);
         }
+        if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) {
+            keys.push(KeyEvent::CtrlShiftZ);
+        }
+        if input.consume_key(Modifiers::COMMAND, Key::Z) {
+            keys.push(KeyEvent::CtrlZ);
+        }
         keys
     });
     keys.into_iter()
@@ -597,7 +639,7 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         .collect()
 }
 
-/// Digits with their modifiers; Space, R, Home, End, M and T only without one.
+/// Digits with their modifiers; Space, R, Home, End, M, T, S, Delete or Backspace, ← and → only without one.
 fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
     if let Some((digit, _)) = (1..)
         .zip(DIGIT_KEYS)
@@ -621,6 +663,10 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
         Key::End => Some(KeyEvent::End),
         Key::M => Some(KeyEvent::M),
         Key::T => Some(KeyEvent::T),
+        Key::S => Some(KeyEvent::S),
+        Key::Delete | Key::Backspace => Some(KeyEvent::Delete),
+        Key::ArrowLeft => Some(KeyEvent::Left),
+        Key::ArrowRight => Some(KeyEvent::Right),
         _ => None,
     }
 }
@@ -725,21 +771,6 @@ fn revision(snapshot: &Snapshot) -> u64 {
         .as_ref()
         .and_then(|status| status["revision"].as_u64())
         .unwrap_or_default()
-}
-
-/// The error toast, closed first by Esc when [`esc_dismisses_toast`] lets it.
-fn show_error_toast(
-    ui: &Ui,
-    feedback: &mut Feedback,
-    (widget_focused, popup_open): (bool, bool),
-    dialog_open: bool,
-) {
-    if ui.input(|input| input.key_pressed(Key::Escape))
-        && esc_dismisses_toast(widget_focused, popup_open, dialog_open)
-    {
-        feedback.dismiss();
-    }
-    error_toast(ui.ctx(), feedback);
 }
 
 /// Whether a focused widget or an open menu takes this frame's Esc, read before the frame's widgets act on it.

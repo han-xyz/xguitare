@@ -1484,6 +1484,188 @@ fn clicking_a_track_row_selects_it() {
     assert_eq!(sent_now(&sent), [Command::TrackSelect(2)]);
 }
 
+const GUITAR_ITEM: &str = "Item guitar-2, Guitar, bar 2";
+const BASS_ITEM: &str = "Item bass-1, Bass, bar 1";
+/// Pixels per beat at the default zoom: 24 000 frames at 480 frames per pixel.
+const BEAT_PX: f32 = 50.0;
+
+fn item_rect(harness: &Harness<App>, name: &str) -> egui::Rect {
+    harness.get_by_label(name).rect()
+}
+
+fn item_selected(harness: &Harness<App>, name: &str) -> bool {
+    harness.get_by_label(name).accesskit_node().is_selected() == Some(true)
+}
+
+fn snap_is_on(harness: &Harness<App>) -> bool {
+    harness
+        .get_by_role_and_label(Role::Button, "Snap")
+        .accesskit_node()
+        .toggled()
+        == Some(egui::accesskit::Toggled::True)
+}
+
+/// A press and release without movement at `pos`.
+fn click_at(harness: &mut Harness<App>, pos: Pos2) {
+    harness.event(Event::PointerMoved(pos));
+    harness.run_steps(1);
+    pointer_button(harness, pos, true);
+    pointer_button(harness, pos, false);
+    harness.run_steps(2);
+}
+
+/// A point on the empty Keys lane, `x` pixels right of the timeline's left edge.
+fn keys_lane_point(harness: &Harness<App>, x: f32) -> Pos2 {
+    let row = harness.get_by_label("Track Keys").rect();
+    pos2(row.left() + 400.0 + x, row.center().y)
+}
+
+#[test]
+fn clicking_items_selects_them_and_the_empty_lane_clears() {
+    let (mut harness, _sent, _dir) = project_harness("stopped");
+    assert!(!item_selected(&harness, GUITAR_ITEM));
+    let at = item_rect(&harness, GUITAR_ITEM).center();
+    click_at(&mut harness, at);
+    assert!(item_selected(&harness, GUITAR_ITEM));
+    let at = item_rect(&harness, BASS_ITEM).center();
+    click_at(&mut harness, at);
+    assert!(item_selected(&harness, BASS_ITEM));
+    assert!(
+        !item_selected(&harness, GUITAR_ITEM),
+        "a click selects only this"
+    );
+    let at = keys_lane_point(&harness, 300.0);
+    click_at(&mut harness, at);
+    assert!(!item_selected(&harness, BASS_ITEM));
+}
+
+#[test]
+fn a_box_on_an_empty_lane_selects_the_items_it_touches() {
+    let (mut harness, _sent, _dir) = project_harness("stopped");
+    let from = keys_lane_point(&harness, 300.0);
+    let to = pos2(from.x + 60.0, item_rect(&harness, GUITAR_ITEM).center().y);
+    drag_and_release(&mut harness, from, to);
+    assert!(item_selected(&harness, GUITAR_ITEM));
+    assert!(item_selected(&harness, BASS_ITEM));
+}
+
+#[test]
+fn dragging_an_item_moves_it_on_release_snapped_unless_snap_is_off() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let from = item_rect(&harness, GUITAR_ITEM).center();
+    let row = harness.get_by_label("Track Bass").rect().height();
+    drag_and_release(
+        &mut harness,
+        from,
+        from + Vec2::new(2.0 * BEAT_PX + 3.0, row),
+    );
+    assert_eq!(
+        sent_now(&sent),
+        [Command::ItemMove {
+            ids: vec![1],
+            delta: 48_000,
+            track: Some(1),
+        }]
+    );
+    assert!(snap_is_on(&harness));
+    click_button(&mut harness, "Snap");
+    assert!(!snap_is_on(&harness));
+    drag_and_release(
+        &mut harness,
+        from,
+        from + Vec2::new(2.0 * BEAT_PX + 3.0, 0.0),
+    );
+    assert_eq!(
+        sent_now(&sent),
+        [Command::ItemMove {
+            ids: vec![1],
+            delta: 49_440,
+            track: None,
+        }]
+    );
+}
+
+#[test]
+fn item_keys_split_delete_undo_and_redo() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let at = item_rect(&harness, GUITAR_ITEM).center();
+    click_at(&mut harness, at);
+    sent_now(&sent);
+    harness.key_press(Key::S);
+    harness.run_steps(1);
+    harness.key_press(Key::Delete);
+    harness.run_steps(1);
+    harness.key_press(Key::Backspace);
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    harness.run_steps(1);
+    harness.key_press(Key::ArrowRight);
+    harness.run_steps(1);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::ItemSplit {
+                ids: Some(vec![1]),
+                at: 230_400,
+            },
+            Command::ItemDelete(vec![1]),
+            Command::ItemDelete(vec![1]),
+            Command::ProjectUndo,
+            Command::ProjectRedo,
+            Command::ItemMove {
+                ids: vec![1],
+                delta: 24_000,
+                track: None,
+            },
+        ]
+    );
+    harness.key_press(Key::Escape);
+    harness.run_steps(2);
+    assert!(!item_selected(&harness, GUITAR_ITEM));
+    harness.key_press(Key::S);
+    harness.run_steps(1);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::ItemSplit {
+            ids: None,
+            at: 230_400,
+        }]
+    );
+}
+
+#[test]
+fn both_halves_of_a_split_stay_selected_and_the_footer_shows_the_undo_label() {
+    let snapshot = project_snapshot("stopped");
+    let (mut harness, updates, _dir) = streamed_harness(WINDOW, snapshot.clone());
+    let at = item_rect(&harness, GUITAR_ITEM).center();
+    click_at(&mut harness, at);
+    harness.key_press(Key::S);
+    harness.run_steps(2);
+    let mut split = snapshot;
+    split.status.as_mut().unwrap()["undo"] = json!("split Item");
+    split.items.as_mut().unwrap()["tracks"][0]["items"] = json!([
+        {"id": 1, "position": 96_000, "bars_beats": "2.1", "offset": 0, "length": 134_400,
+         "take": 1, "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000},
+        {"id": 7, "position": 230_400, "bars_beats": "3.2", "offset": 134_400, "length": 153_600,
+         "take": 1, "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000},
+    ]);
+    updates.send(split).unwrap();
+    harness.run_steps(2);
+    assert!(item_selected(&harness, GUITAR_ITEM));
+    assert!(item_selected(&harness, "Item guitar-2, Guitar, bar 3"));
+    harness.get_by_label("Undo: split Item");
+}
+
+#[test]
+fn items_are_focusable_after_the_track_headers() {
+    let (mut harness, _sent, _dir) = project_harness("stopped");
+    harness.get_by_label(BASS_ITEM).focus();
+    harness.run_steps(2);
+    assert!(item_selected(&harness, BASS_ITEM), "focus selects the Item");
+}
+
 #[test]
 fn transport_buttons_and_keys_send_transport() {
     let (mut harness, sent, _dir) = project_harness("stopped");

@@ -166,13 +166,17 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         ),
         pair("text on panel open", c.text, c.panel_open),
         pair(
-            "text on well; also the pressed edge, the cents centre mark, the mixer scroll bar handle and the Render progress percentage past the lit part",
+            "text on well; also the pressed edge, the cents centre mark, the mixer scroll bar handle, the Render progress percentage past the lit part and the snap line on its halo",
             c.text,
             c.well,
         ),
         pair("text on hover; also the selection stroke", c.text, c.hover),
         pair("muted on case", c.muted, c.case),
-        pair("muted on panel", c.muted, c.panel),
+        pair(
+            "muted on panel; also a drag ghost's Take name",
+            c.muted,
+            c.panel,
+        ),
         pair(
             "muted on panel open; also the error toast's detail",
             c.muted,
@@ -220,7 +224,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("rack position on ear edge", c.on_accent, c.ear_edge),
         pair("rack position on ear centre", c.on_accent, c.ear_centre),
         pair(
-            "lit on well; also the edit border, the cents needle, the transport's seconds, the loop edges on a lane and the Render progress fill",
+            "lit on well; also the edit border, the cents needle, the transport's seconds, the loop edges on a lane, the Render progress fill, the selected Item's outline and the selection box on its halo",
             c.lit,
             c.well,
         ),
@@ -239,13 +243,13 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
     let mut pairs = vec![
         pair("boundary on case", c.boundary, c.case),
         pair(
-            "boundary on panel; also a Metronome beat's ring",
+            "boundary on panel; also a Metronome beat's ring and a drag ghost's edge on its body",
             c.boundary,
             c.panel,
         ),
         pair("boundary on panel open", c.boundary, c.panel_open),
         pair(
-            "boundary on well; also the loop edges, loop off, on their halo over the Takes",
+            "boundary on well; also the loop edges, loop off, on their halo over the Takes, and a drag ghost's edge on the lane",
             c.boundary,
             c.well,
         ),

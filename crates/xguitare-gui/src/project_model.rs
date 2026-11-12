@@ -890,7 +890,7 @@ pub struct MovePointer {
 }
 
 /// Where a [`MoveDrag`] would put its Items: `delta` frames and `rows` Tracks away, and the grid line the grabbed Item's start snapped to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MovePreview {
     pub delta: i64,
     pub rows: isize,
@@ -945,11 +945,7 @@ pub fn move_preview(
 ) -> MovePreview {
     let moved: Vec<&ItemBlock> = items.iter().filter(|item| drag.moves(item.id)).collect();
     let Some(grabbed) = moved.iter().find(|item| item.id == drag.grabbed) else {
-        return MovePreview {
-            delta: 0,
-            rows: 0,
-            snap_line: None,
-        };
+        return MovePreview::default();
     };
     let start = grabbed.position as f64 + pointer.frame - drag.grab_frame;
     let line = grid

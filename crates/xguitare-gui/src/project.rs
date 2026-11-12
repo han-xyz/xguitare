@@ -1,7 +1,7 @@
 use egui::{
-    Align2, Color32, ComboBox, CursorIcon, DragValue, Frame, Id, Key, Margin, Painter, Rect,
-    Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, TextStyle, TextWrapMode, Ui,
-    UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
+    Align2, Color32, ComboBox, CursorIcon, DragValue, EventFilter, Frame, Id, Key, Margin, Painter,
+    Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, TextStyle, TextWrapMode,
+    Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::TransportAction;
@@ -17,10 +17,11 @@ use crate::model::{
     Message, Snapshot, TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
-    GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
-    bars_beats_text, dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command,
-    project_tempo, recording_span, sample_rate, snap_to_beat, time_text, track_colour, track_rows,
-    transport_view, waveform_columns,
+    EDGE_GRAB_PX, GridLine, ItemBlock, ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer,
+    MovePreview, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text, dragged_loop,
+    grid_lines, grid_step, hit_test, item_blocks, item_name, items_in_box, move_preview,
+    nudge_command, parse_meter, project_key_to_command, project_tempo, recording_span, sample_rate,
+    snap_to_beat, time_text, track_colour, track_rows, transport_view, waveform_columns,
 };
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette, translucent};
@@ -69,7 +70,9 @@ const WAVE_TOP: f32 = UNIT_EDGE_WIDTH + theme::SPACE_XS + theme::SPACE_L;
 const LOOP_ALPHA_ON: u8 = 33;
 const LOOP_ALPHA_OFF: u8 = 16;
 const SELECTED_OUTLINE: f32 = 2.0;
-const EDGE_GRAB_PX: f32 = 6.0;
+const SNAP_BUTTON_WIDTH: f32 = 56.0;
+/// The selection box's outline, on a [`HALO_WIDTH`] halo each side.
+const BOX_EDGE_WIDTH: f32 = 1.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
 /// The `well` margin each side of the playhead and the loop edges down a lane.
 const HALO_WIDTH: f32 = 1.0;
@@ -94,13 +97,48 @@ pub struct LoopDrag {
     now: LoopRegion,
 }
 
-/// The Track and timeline view's own state: the visible stretch of the timeline and a loop edge being dragged.
-#[derive(Debug, Default)]
+/// A drag on the lanes: the selected Items being moved, or a selection box from one corner (a timeline frame and a screen y) to the other.
+#[derive(Debug, Clone)]
+enum LaneDrag {
+    Move {
+        drag: MoveDrag,
+        preview: MovePreview,
+    },
+    Box {
+        from: (f64, f32),
+        to: (f64, f32),
+    },
+}
+
+/// The Track and timeline view's own state: the visible stretch of the timeline, a loop edge or lane drag under way, the selected Items and the Snap switch.
+#[derive(Debug)]
 pub struct ProjectView {
     pub timeline: Option<TimelineView>,
     pub loop_drag: Option<LoopDrag>,
     /// Where the Take being recorded began ([`recording_from`]).
     pub recording_from: Option<u64>,
+    pub selection: ItemSelection,
+    pub snap: bool,
+    /// The frame of a split sent whose halves `items` has not shown yet.
+    pub split_at: Option<u64>,
+    lane_drag: Option<LaneDrag>,
+    /// The Item ids of the `items` last drawn.
+    seen: Vec<u64>,
+}
+
+impl ProjectView {
+    pub fn new(snap: bool) -> ProjectView {
+        ProjectView {
+            timeline: None,
+            loop_drag: None,
+            recording_from: None,
+            selection: ItemSelection::default(),
+            snap,
+            split_at: None,
+            lane_drag: None,
+            seen: Vec::new(),
+        }
+    }
 }
 
 /// Play, Stop, Record (a second click stops recording) with the count-in beats left, the view switch `Rack`, `Arrange`, `Mixer` (`shown` lit) and `Render`, Loop, Click with its count-in in bars, tempo, meter, then the position, left to right on one row. A meter that is no `<beats>/<note>` goes to `feedback`.
@@ -390,6 +428,13 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         return commands;
     };
     let rate = sample_rate(status);
+    let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
+    let ids: Vec<u64> = items.iter().map(|item| item.id).collect();
+    if ids != view.seen {
+        view.selection
+            .follow(&view.seen, &items, view.split_at.take());
+        view.seen = ids;
+    }
     let face = ui.available_rect_before_wrap();
     let full = face.shrink2(vec2(EAR_WIDTH, 0.0));
     let ruler = Rect::from_min_max(
@@ -410,10 +455,25 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         recording: view
             .recording_from
             .map(|from| recording_span(from, &transport)),
+        selected: view.selection.clone(),
     };
-    let add = Rect::from_min_size(full.min, vec2(TRACK_LIST_WIDTH - 8.0, RULER_HEIGHT));
+    let strip = TRACK_LIST_WIDTH - 8.0;
+    let add = Rect::from_min_size(
+        full.min,
+        vec2(strip - SNAP_BUTTON_WIDTH - theme::SPACE_XS, RULER_HEIGHT),
+    );
     if ui.put(add, outlined_button("+ Add Track")).clicked() {
         commands.push(Command::TrackAdd);
+    }
+    let snap = Rect::from_min_size(
+        pos2(full.left() + strip - SNAP_BUTTON_WIDTH, full.top()),
+        vec2(SNAP_BUTTON_WIDTH, RULER_HEIGHT),
+    );
+    if ui
+        .put(snap, switched_button("Snap", view.snap, palette().lit))
+        .clicked()
+    {
+        view.snap = !view.snap;
     }
     commands.extend(ruler_strip(
         ui,
@@ -425,7 +485,6 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         transport.loop_region,
     ));
     let rows = track_rows(status);
-    let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
     let ports = snapshot
         .ports
         .as_ref()
@@ -438,9 +497,21 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         }
         ScrollArea::vertical().id_salt("tracks").show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            let mut lanes = Vec::new();
             for row in &rows {
-                commands.extend(track(ui, row, &items, &snapshot.peaks, &ports, &scene));
+                commands.extend(track(
+                    ui,
+                    row,
+                    &items,
+                    &snapshot.peaks,
+                    &ports,
+                    &scene,
+                    &mut lanes,
+                ));
             }
+            commands.extend(item_nodes(ui, &items, &lanes, &scene, view, (rate, tempo)));
+            commands.extend(lane_pointer(ui, &lanes, &items, &scene, view));
+            paint_lane_drag(ui, &lanes, &items, &scene, view);
         });
     });
     widgets::rack_ears(ui.painter(), face, None);
@@ -479,11 +550,21 @@ struct Scene {
     playhead: u64,
     /// The frames the Take being recorded covers so far.
     recording: Option<(u64, u64)>,
+    selected: ItemSelection,
 }
 
 impl Scene {
     fn x(&self, rect: Rect, frame: u64) -> f32 {
         rect.left() + self.timeline.x_of(frame as f64)
+    }
+
+    /// The plate of an Item `length` frames long from `position` on `lane`, cut to the lane.
+    fn plate(&self, lane: Rect, position: u64, length: u64) -> Rect {
+        Rect::from_x_y_ranges(
+            self.x(lane, position)..=self.x(lane, position.saturating_add(length)),
+            lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET,
+        )
+        .intersect(lane)
     }
 
     fn paint_grid(&self, painter: &Painter, rect: Rect) {
@@ -669,7 +750,17 @@ fn loop_edge_drag(
     (region != loop_region).then_some(Command::Loop(region))
 }
 
-/// A click anywhere on the row or its lane that no control takes selects the Track.
+/// A Track's lane as drawn this frame: its row, its Track's id and name, where it is, its pointer response and the command a click on it sends.
+struct Lane {
+    row: usize,
+    track_id: u64,
+    name: String,
+    rect: Rect,
+    response: Response,
+    selects: Command,
+}
+
+/// A click anywhere on the row or its lane that no control takes selects the Track; the lane, pushed to `lanes`, takes the pointer for the Items.
 fn track(
     ui: &mut Ui,
     row: &TrackRow,
@@ -677,17 +768,19 @@ fn track(
     peaks: &HashMap<String, Arc<[i8]>>,
     ports: &[String],
     scene: &Scene,
+    lanes: &mut Vec<Lane>,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, TRACK_ROW_HEIGHT), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Row, true, format!("Track {}", row.name)));
+    let selects = if row.selected {
+        Command::ShowRack(ShownRack::Track)
+    } else {
+        Command::TrackSelect(row.index)
+    };
     if response.clicked() {
-        commands.push(if row.selected {
-            Command::ShowRack(ShownRack::Track)
-        } else {
-            Command::TrackSelect(row.index)
-        });
+        commands.push(selects.clone());
     }
     let colours = palette();
     let list = Rect::from_min_size(rect.min, vec2(TRACK_LIST_WIDTH, rect.height()));
@@ -716,6 +809,21 @@ fn track(
         Stroke::new(1.0, colour(colours.well)),
     );
     paint_lane(&ui.painter_at(lane), lane, row, items, peaks, scene);
+    let lane_response = ui.interact(
+        lane,
+        Id::unique(("lane", row.id)),
+        Sense::CLICK | Sense::DRAG,
+    );
+    lane_response
+        .widget_info(|| WidgetInfo::labeled(Role::Group, true, format!("Lane {}", row.name)));
+    lanes.push(Lane {
+        row: row.index,
+        track_id: row.id,
+        name: row.name.clone(),
+        rect: lane,
+        response: lane_response,
+        selects,
+    });
     let controls = list
         .shrink2(vec2(SWATCH_WIDTH + 2.0, 6.0))
         .translate(vec2(SWATCH_WIDTH, 0.0));
@@ -739,11 +847,7 @@ fn paint_lane(
     scene.paint_grid(painter, lane);
     let rows = lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET;
     for item in items.iter().filter(|item| item.track_id == row.id) {
-        let span = Rect::from_x_y_ranges(
-            scene.x(lane, item.position)..=scene.x(lane, item.end()),
-            rows.clone(),
-        );
-        let span = span.intersect(lane);
+        let span = scene.plate(lane, item.position, item.length);
         let track = track_colour(row.index);
         paint_take(painter, span, item, track);
         if let Some(visible) = item.visible_take(scene.timeline, lane.width())
@@ -753,6 +857,14 @@ fn paint_lane(
             let left = lane.left() + visible.x;
             let inner = span.shrink(TAKE_EDGE_WIDTH);
             paint_waveform(&painter.with_clip_rect(inner), inner, left, &columns, track);
+        }
+        if scene.selected.contains(item.id) {
+            painter.rect_stroke(
+                span,
+                RADIUS_CONTROL,
+                Stroke::new(SELECTED_OUTLINE, colour(colours.lit)),
+                egui::StrokeKind::Outside,
+            );
         }
     }
     if row.armed
@@ -764,6 +876,257 @@ fn paint_lane(
     }
     scene.paint_loop_edges(painter, lane);
     scene.paint_lane_playhead(painter, lane);
+}
+
+/// One focusable node per Item, after every Track header and in time order, named by [`item_name`] with its selected state; focus selects the Item, and ← and → on it move the selected Items by one grid step.
+fn item_nodes(
+    ui: &Ui,
+    items: &[ItemBlock],
+    lanes: &[Lane],
+    scene: &Scene,
+    view: &mut ProjectView,
+    (rate, tempo): (f64, Tempo),
+) -> Option<Command> {
+    let mut placed: Vec<(&ItemBlock, &Lane)> = items
+        .iter()
+        .filter_map(|item| {
+            let lane = lanes.iter().find(|lane| lane.track_id == item.track_id)?;
+            Some((item, lane))
+        })
+        .collect();
+    placed.sort_by_key(|(item, lane)| (item.position, lane.row));
+    let mut nudge = None;
+    for (item, lane) in placed {
+        let plate = scene.plate(lane.rect, item.position, item.length);
+        if !plate.is_positive() {
+            continue;
+        }
+        let id = Id::unique(("item", item.id));
+        let response = ui.interact(plate, id, Sense::FOCUSABLE);
+        let name = item_name(item, &lane.name, rate, tempo);
+        response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, &name));
+        let selected = view.selection.contains(item.id);
+        ui.ctx()
+            .accesskit_node_builder(id, |node| node.set_selected(selected));
+        if response.gained_focus() {
+            view.selection.pick(item.id, false);
+        }
+        if !response.has_focus() {
+            continue;
+        }
+        let arrows_stay = EventFilter {
+            horizontal_arrows: true,
+            ..EventFilter::default()
+        };
+        ui.memory_mut(|memory| memory.set_focus_lock_filter(id, arrows_stay));
+        let step = grid_step(scene.timeline, rate, tempo);
+        let (left, right) = ui.input(|input| {
+            (
+                input.key_pressed(Key::ArrowLeft),
+                input.key_pressed(Key::ArrowRight),
+            )
+        });
+        if left || right {
+            let delta = if left { -step } else { step };
+            nudge = nudge_command(items, &view.selection, delta);
+        }
+    }
+    nudge
+}
+
+/// A click on an Item selects it (Ctrl: in or out), on the empty lane clears the selection (Ctrl: keeps it); both select the lane's Track. A drag from an Item moves the selected Items, sent as `item_move` on release; a drag from the empty lane draws a selection box (Ctrl: adds to the selection).
+fn lane_pointer(
+    ui: &Ui,
+    lanes: &[Lane],
+    items: &[ItemBlock],
+    scene: &Scene,
+    view: &mut ProjectView,
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let (modifiers, origin, pointer) = ui.input(|input| {
+        (
+            input.modifiers,
+            input.pointer.press_origin(),
+            input.pointer.interact_pos(),
+        )
+    });
+    let toggle = modifiers.command;
+    for lane in lanes {
+        let response = &lane.response;
+        if response.clicked()
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            match hit_test(
+                items,
+                lane.track_id,
+                scene.timeline,
+                at.x - lane.rect.left(),
+            )
+            .item()
+            {
+                Some(id) => view.selection.pick(id, toggle),
+                None if !toggle => view.selection.clear(),
+                None => {}
+            }
+            commands.push(lane.selects.clone());
+        }
+        if response.drag_started()
+            && let Some(origin) = origin
+        {
+            let x = origin.x - lane.rect.left();
+            let frame = scene.timeline.frame_at(x);
+            view.lane_drag = Some(
+                match hit_test(items, lane.track_id, scene.timeline, x).item() {
+                    Some(id) => {
+                        view.selection.grab(id, toggle);
+                        LaneDrag::Move {
+                            drag: MoveDrag::new(id, &view.selection, frame, lane.row),
+                            preview: MovePreview::default(),
+                        }
+                    }
+                    None => LaneDrag::Box {
+                        from: (frame, origin.y),
+                        to: (frame, origin.y),
+                    },
+                },
+            );
+        }
+    }
+    let Some(lane) = lanes
+        .iter()
+        .find(|lane| lane.response.dragged() || lane.response.drag_stopped())
+    else {
+        view.lane_drag = None;
+        return commands;
+    };
+    let snap = view.snap != modifiers.alt;
+    let track_ids: Vec<u64> = lanes.iter().map(|lane| lane.track_id).collect();
+    if let (Some(drag), Some(at)) = (view.lane_drag.as_mut(), pointer) {
+        let frame = scene.timeline.frame_at(at.x - lane.rect.left());
+        match drag {
+            LaneDrag::Move { drag, preview } => {
+                let pointer = MovePointer {
+                    frame,
+                    row: row_at(lanes, at.y),
+                    snap,
+                    lock_track: modifiers.shift,
+                };
+                *preview = move_preview(drag, items, &track_ids, &scene.grid, pointer);
+            }
+            LaneDrag::Box { to, .. } => *to = (frame, at.y),
+        }
+    }
+    if !lane.response.drag_stopped() {
+        return commands;
+    }
+    match view.lane_drag.take() {
+        Some(LaneDrag::Move { drag, preview }) => commands.extend(preview.command(&drag)),
+        Some(LaneDrag::Box { from, to }) => {
+            let (top, bottom) = (from.1.min(to.1), from.1.max(to.1));
+            let tracks: Vec<u64> = lanes
+                .iter()
+                .filter(|lane| {
+                    lane.rect.top() + ITEM_INSET < bottom && top < lane.rect.bottom() - ITEM_INSET
+                })
+                .map(|lane| lane.track_id)
+                .collect();
+            let frames = from.0.min(to.0)..from.0.max(to.0);
+            view.selection
+                .select_box(&items_in_box(items, &tracks, frames), toggle);
+        }
+        None => {}
+    }
+    commands
+}
+
+/// The row of the lane under the screen `y`: the first above it, the last below it.
+fn row_at(lanes: &[Lane], y: f32) -> usize {
+    lanes
+        .iter()
+        .find(|lane| y < lane.rect.bottom())
+        .or(lanes.last())
+        .map_or(0, |lane| lane.row)
+}
+
+/// Over the lanes during a drag: a ghost plate of each moved Item at its preview place with the snap line down every lane, or the selection box on a `well` halo.
+fn paint_lane_drag(
+    ui: &Ui,
+    lanes: &[Lane],
+    items: &[ItemBlock],
+    scene: &Scene,
+    view: &ProjectView,
+) {
+    let Some(drag) = &view.lane_drag else {
+        return;
+    };
+    let Some(area) = lanes.iter().map(|lane| lane.rect).reduce(Rect::union) else {
+        return;
+    };
+    let painter = ui.painter().with_clip_rect(area.intersect(ui.clip_rect()));
+    let colours = palette();
+    match drag {
+        LaneDrag::Move { drag, preview } => {
+            for item in items.iter().filter(|item| drag.moves(item.id)) {
+                let Some(row) = lanes.iter().position(|lane| lane.track_id == item.track_id) else {
+                    continue;
+                };
+                let (position, row) = preview.place(item, row);
+                let Some(lane) = lanes.get(row) else {
+                    continue;
+                };
+                paint_ghost(
+                    &painter,
+                    scene.plate(lane.rect, position, item.length),
+                    item,
+                );
+            }
+            if let Some(line) = preview.snap_line {
+                for lane in lanes {
+                    paint_haloed_line(
+                        &painter,
+                        scene.x(lane.rect, line),
+                        lane.rect,
+                        1.0,
+                        colours.text,
+                    );
+                }
+            }
+        }
+        LaneDrag::Box { from, to } => {
+            let x = |frame: f64| area.left() + scene.timeline.x_of(frame);
+            let rect = Rect::from_two_pos(pos2(x(from.0), from.1), pos2(x(to.0), to.1));
+            for (width, ink) in [
+                (BOX_EDGE_WIDTH + 2.0 * HALO_WIDTH, colours.well),
+                (BOX_EDGE_WIDTH, colours.lit),
+            ] {
+                painter.rect_stroke(
+                    rect,
+                    0,
+                    Stroke::new(width, colour(ink)),
+                    egui::StrokeKind::Middle,
+                );
+            }
+        }
+    }
+}
+
+/// Where a moved Item would land: a plate at reduced emphasis, the panel with a boundary edge and its Take name in muted text, no waveform.
+fn paint_ghost(painter: &Painter, span: Rect, item: &ItemBlock) {
+    let colours = palette();
+    painter.rect(
+        span,
+        RADIUS_CONTROL,
+        colour(colours.panel),
+        Stroke::new(TAKE_EDGE_WIDTH, colour(colours.boundary)),
+        egui::StrokeKind::Inside,
+    );
+    painter.with_clip_rect(span).text(
+        span.left_top() + vec2(theme::SPACE_XS, UNIT_EDGE_WIDTH + theme::SPACE_XS),
+        Align2::LEFT_TOP,
+        item.label(),
+        theme::legend(),
+        colour(colours.muted),
+    );
 }
 
 /// A vertical line `width` wide down `lane` in `ink`, over a `well` halo of [`HALO_WIDTH`] on each side, so it holds its contrast against a Track colour.
