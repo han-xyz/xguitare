@@ -865,3 +865,39 @@ fn duplicate_and_paste_are_refused_while_recording_and_copy_is_not() {
     }
     assert_eq!(layout(&mut state), before);
 }
+
+const LAST_FRAME: u64 = i64::MAX as u64;
+
+#[test]
+fn duplicate_and_paste_past_the_last_frame_change_nothing() {
+    let (mut state, mut audio, _dir) = state("past-last-frame");
+    open_with(
+        &mut state,
+        vec![(
+            "Guitar",
+            vec![item(1, LAST_FRAME - 4800, "takes/a.wav", 4800)],
+        )],
+        &TAKES,
+    );
+    ok(handle(&mut state, item_copy(&[1])));
+    ok(handle(&mut state, item_move(&[1], -10, None)));
+    drain_commands(&mut audio);
+    let before = layout(&mut state);
+    let revision = state.revision;
+    let history = undo_and_clipboard(&mut state);
+    for request in [
+        item_duplicate(&[1]),
+        item_paste(TrackRef::Index(0), LAST_FRAME - 4799),
+    ] {
+        assert_eq!(
+            error(handle(&mut state, request)),
+            "track 'Guitar' item 1 ends past the last frame"
+        );
+        assert_eq!(state.revision, revision);
+        assert_eq!(layout(&mut state), before);
+        assert_eq!(undo_and_clipboard(&mut state), history);
+        assert!(item_swaps(&mut audio).is_empty(), "no Track got a new list");
+    }
+    ok(handle(&mut state, Request::ProjectUndo));
+    assert_eq!(layout(&mut state), [vec![[1, LAST_FRAME - 4800, 0, 4800]]]);
+}
