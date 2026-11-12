@@ -3,8 +3,8 @@ use std::path::Path;
 
 use egui::{Color32, Context, FontDefinitions, FontId, RawInput, Vec2};
 use xguitare_gui::theme::{
-    self, ContrastPair, NEUTRAL_ACCENT, Rgb, accent_for, boundary_pairs, decorative_pairs, palette,
-    text_pairs,
+    self, ContrastPair, NEUTRAL_ACCENT, Rgb, TRACK_COLOURS, accent_for, boundary_pairs,
+    decorative_pairs, palette, text_pairs,
 };
 
 const TEXT_FLOOR: f64 = 4.5;
@@ -193,6 +193,24 @@ fn on_accent_text_and_value_arcs_meet_their_floors() {
         ] {
             let arc = contrast(accent, back);
             assert!(arc >= BOUNDARY_FLOOR, "{type_name} arc on {name} {arc:.2}");
+        }
+    }
+}
+
+#[test]
+fn track_colours_mark_the_strip_tab_on_every_surface_it_meets() {
+    let colours = palette();
+    let declared = boundary_pairs();
+    for track in TRACK_COLOURS {
+        for back in [colours.panel, colours.panel_open] {
+            let ratio = contrast(track, back);
+            assert!(ratio >= BOUNDARY_FLOOR, "{track:?} on {back:?} {ratio:.2}");
+            assert!(
+                declared
+                    .iter()
+                    .any(|pair| (pair.fore, pair.back) == (track, back)),
+                "{track:?} on {back:?} is not a declared boundary pair"
+            );
         }
     }
 }
@@ -456,6 +474,7 @@ fn every_palette_token_is_in_a_declared_pair() {
         ("knob_shadow", c.knob_shadow),
         ("hover", c.hover),
         ("on_accent", c.on_accent),
+        ("clip_off", c.clip_off),
     ];
     let pairs = all_declared_pairs();
     for (name, token) in tokens {

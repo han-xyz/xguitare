@@ -613,7 +613,7 @@ fn central_view(
         let max_height = (ui.available_height() - RACK_MIN_HEIGHT).max(MIXER_MIN_HEIGHT);
         Panel::top("mixer_split")
             .resizable(true)
-            .default_size(MIXER_HEIGHT)
+            .default_size(MIXER_HEIGHT + f32::from(MIXER_GAP))
             .size_range(MIXER_MIN_HEIGHT..=max_height)
             .frame(Frame::new().inner_margin(Margin {
                 bottom: MIXER_GAP,

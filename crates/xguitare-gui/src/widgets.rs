@@ -144,9 +144,10 @@ enum ButtonKind {
     Outlined,
     Warning,
     Lit(theme::Rgb),
+    Edged(theme::Rgb),
 }
 
-/// A button with a rest, a hover and a pressed look: [`primary_button`], [`outlined_button`], [`warning_button`] and [`switched_button`]. Keyboard focus keeps the rest or hover look inside the focus ring; only a press shows the pressed one.
+/// A button with a rest, a hover and a pressed look: [`primary_button`], [`outlined_button`], [`warning_button`], [`switched_button`] and [`edged_button`]. Keyboard focus keeps the rest or hover look inside the focus ring; only a press shows the pressed one.
 pub struct StyledButton {
     button: Button<'static>,
     kind: ButtonKind,
@@ -157,6 +158,15 @@ impl StyledButton {
     pub fn min_size(self, size: Vec2) -> Self {
         Self {
             button: self.button.min_size(size),
+            ..self
+        }
+    }
+
+    /// Cuts the text short with an ellipsis where it does not fit.
+    #[must_use]
+    pub fn truncate(self) -> Self {
+        Self {
+            button: self.button.truncate(),
             ..self
         }
     }
@@ -188,6 +198,10 @@ impl Widget for StyledButton {
                 [colours.danger; 3],
             ),
             ButtonKind::Lit(lit) => ([lit; 3], [lit, colours.hover_boundary, colours.text]),
+            ButtonKind::Edged(edge) => (
+                [colours.panel_open, colours.hover, colours.well],
+                [edge, colours.hover_boundary, colours.text],
+            ),
         };
         ui.scope(|ui| {
             // egui draws a focused widget with its `active` look, so `active` gets the look the button had last frame: pressed while the pointer is down on it, else hover or rest.
@@ -250,6 +264,14 @@ pub fn switched_button(text: &str, lit: bool, lit_colour: theme::Rgb) -> StyledB
         outlined_button(text)
     };
     button.selected(lit)
+}
+
+/// An [`outlined_button`] whose resting edge is `edge`: a state between unlit and lit.
+pub fn edged_button(text: &str, edge: theme::Rgb) -> StyledButton {
+    StyledButton {
+        button: Button::new(text.to_string()),
+        kind: ButtonKind::Edged(edge),
+    }
 }
 
 /// A pill switch named `name`: while on, lit with its thumb at the right; while off, a dark well with a muted thumb at the left.

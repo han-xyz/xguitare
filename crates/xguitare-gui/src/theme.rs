@@ -32,6 +32,8 @@ pub struct Palette {
     pub knob_shadow: Rgb,
     pub hover: Rgb,
     pub on_accent: Rgb,
+    /// An unlit clip LED (mixer mockup: clip off).
+    pub clip_off: Rgb,
 }
 
 pub fn palette() -> Palette {
@@ -59,6 +61,7 @@ pub fn palette() -> Palette {
         knob_shadow: (0x1b, 0x1e, 0x22),
         hover: (0x3d, 0x44, 0x4c),
         on_accent: (0x15, 0x17, 0x1a),
+        clip_off: (0x3a, 0x22, 0x20),
     }
 }
 
@@ -106,13 +109,23 @@ pub fn accent_for(type_name: &str) -> Rgb {
 
 /// Track colours in Track order, repeating after the last.
 pub const TRACK_COLOURS: [Rgb; 6] = [
-    (60, 120, 220),
+    (70, 135, 230),
     (235, 130, 40),
     (70, 180, 80),
-    (150, 90, 210),
+    (165, 105, 230),
     (40, 170, 160),
-    (210, 50, 45),
+    (232, 72, 64),
 ];
+
+/// A Bus strip's top edge: the reverb accent, as the mixer mockup's Bus.
+pub fn bus_colour() -> Rgb {
+    accent_for("reverb")
+}
+
+/// The Master strip's top edge: the gain accent, as the mixer mockup's Master.
+pub fn master_colour() -> Rgb {
+    accent_for("gain")
+}
 
 /// A foreground drawn on a background somewhere in the GUI, so that its contrast can be checked once here.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -188,7 +201,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
 /// Control boundaries, focus rings, lamps and arcs on their backgrounds; each must reach 3:1.
 pub fn boundary_pairs() -> Vec<ContrastPair> {
     let c = palette();
-    vec![
+    let mut pairs = vec![
         pair("boundary on case", c.boundary, c.case),
         pair("boundary on panel", c.boundary, c.panel),
         pair("boundary on panel open", c.boundary, c.panel_open),
@@ -229,7 +242,17 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("focus ring on focus gap", c.focus_ring, c.on_accent),
         pair("focus ring on hover", c.focus_ring, c.hover),
         pair("focus ring on well", c.focus_ring, c.well),
-    ]
+        pair("Bus edge, pan and Send arc on panel", bus_colour(), c.panel),
+        pair("Master edge on panel", master_colour(), c.panel),
+        pair("clip LED lit on clip off", c.danger, c.clip_off),
+        pair("fader cap on panel", c.ear_edge, c.panel),
+        pair("fader cap on well", c.ear_edge, c.well),
+    ];
+    for track in TRACK_COLOURS {
+        pairs.push(pair("Track edge and pan arc on panel", track, c.panel));
+        pairs.push(pair("Track swatch on panel open", track, c.panel_open));
+    }
+    pairs
 }
 
 /// Pure decoration: divider rules, band-title underlines, screw rings, the faceplate edge of the meter bridge and the Tuner, the knob body's gradient, the unlit LED and arc track, a bypassed unit's accent top edge. These mark no control and no state, so WCAG 1.4.11 sets them no floor; anything that outlines or identifies a control belongs in [`boundary_pairs`].
@@ -262,6 +285,7 @@ pub fn decorative_pairs() -> Vec<ContrastPair> {
         ),
         pair("arc track on panel", c.arc_track, c.panel),
         pair("arc track on panel open", c.arc_track, c.panel_open),
+        pair("unlit clip LED on panel", c.clip_off, c.panel),
     ];
     pairs.extend(MODULE_ACCENTS.iter().map(|(_, accent)| {
         pair(

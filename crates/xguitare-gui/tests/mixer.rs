@@ -5,9 +5,9 @@ use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
     Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, SendView, ShownRack,
     StereoPeakHold, aim_rack_commands, default_render_name, fader_db, fader_position,
-    mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text,
+    mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text, strip_ladder,
 };
-use xguitare_gui::model::{Command, KeyEvent, key_to_command};
+use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command};
 use xguitare_gui::project_model::project_key_to_command;
 
 fn track(name: &str, mute: bool, solo: bool, sends: &[usize]) -> Value {
@@ -209,6 +209,30 @@ fn fader_puts_minus_inf_at_the_bottom_0_db_at_three_quarters_and_6_db_at_the_top
         assert!((fader_db(fader_position(db)) - db).abs() < 1e-3, "{db}");
     }
     assert!(fader_position(-12.0) < fader_position(-6.0));
+}
+
+#[test]
+fn strip_ladder_lights_up_to_the_level_on_the_fader_scale() {
+    let lit = |db: f64| strip_ladder(db).iter().filter(|led| led.lit).count();
+    assert_eq!(lit(-120.0), 0);
+    assert_eq!(lit(6.0), strip_ladder(6.0).len());
+    let unity = strip_ladder(-0.5);
+    let below_unity = unity.len() * 3 / 4;
+    assert!(unity[..below_unity].iter().all(|led| led.lit));
+    assert!(unity[below_unity..].iter().all(|led| !led.lit));
+    assert!(lit(-59.0) >= 1);
+    assert!(lit(-12.0) < lit(-6.0));
+}
+
+#[test]
+fn strip_ladder_bands_follow_the_meter_thresholds() {
+    let ladder = strip_ladder(6.0);
+    assert_eq!(ladder[0].band, Band::Green);
+    assert_eq!(ladder[ladder.len() - 1].band, Band::Red);
+    let segment_of = |db: f64| (fader_position(db) * ladder.len() as f32) as usize;
+    assert_eq!(ladder[segment_of(-30.0)].band, Band::Green);
+    assert_eq!(ladder[segment_of(-6.0)].band, Band::Yellow);
+    assert_eq!(ladder[segment_of(3.0)].band, Band::Red);
 }
 
 #[test]

@@ -710,10 +710,10 @@ pub(crate) fn track_knob(
     range: (f64, f64),
     suffix: &str,
 ) -> Option<f64> {
-    knob_with_reset(ui, label, value, range, suffix, 0.0)
+    knob_with_reset(ui, label, value, range, suffix, 0.0, colour(palette().text))
 }
 
-/// [`track_knob`] whose double-click returns `reset`.
+/// [`track_knob`] whose double-click returns `reset`, its value arc in `accent`.
 pub(crate) fn knob_with_reset(
     ui: &mut Ui,
     (what, track): (&str, &str),
@@ -721,17 +721,13 @@ pub(crate) fn knob_with_reset(
     (min, max): (f64, f64),
     suffix: &str,
     reset: f64,
+    accent: Color32,
 ) -> Option<f64> {
     ui.vertical_centered(|ui| {
         ui.set_width(KNOB_COLUMN_WIDTH);
         let fraction = ((value - min) / (max - min)) as f32;
         let origin = knob_origin(min, max, reset);
-        let knob = widgets::rack_knob(
-            ui,
-            KnobSize::Strip,
-            (fraction, origin),
-            colour(palette().text),
-        );
+        let knob = widgets::rack_knob(ui, KnobSize::Strip, (fraction, origin), accent);
         knob.response
             .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("{what} {track}")));
         let field_id = knob.response.id.with("field");

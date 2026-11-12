@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use egui::{
-    DragValue, Frame, Id, Margin, Modal, ProgressBar, Rect, RichText, Role, ScrollArea, Sense,
-    Stroke, TextEdit, Ui, WidgetInfo, pos2, vec2,
+    Align, Align2, CornerRadius, DragValue, Frame, Id, Layout, Margin, Mesh, Modal, ProgressBar,
+    Rect, RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind, TextEdit, Ui,
+    WidgetInfo, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::SendLevel;
@@ -12,47 +13,81 @@ use xguitare_core::render::{RenderBits, RenderRange};
 use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
     SendView, ShownRack, StereoPeakHold, default_render_name, fader_db, fader_position,
-    mixer_columns, render_view, send_fraction, send_level, send_text,
+    mixer_columns, render_view, send_fraction, send_level, send_text, strip_ladder,
 };
-use crate::model::{Command, LADDER_RED_DB, LADDER_YELLOW_DB, Snapshot, TrackEdit};
-use crate::project::{PAN, lit_button, released_value, track_knob};
+use crate::model::{Band, Command, EAR_WIDTH, Snapshot, TrackEdit};
+use crate::project::{PAN, knob_with_reset, released_value};
 use crate::project_model::{track_colour, transport_view};
 use crate::rack::muted_text;
-use crate::theme::{self, colour, palette, translucent};
-use crate::widgets::{self, KnobSize, outlined_button, primary_button};
+use crate::theme::{
+    self, CONTROL_HEIGHT, RADIUS_PANEL, SPACE_S, bus_colour, colour, master_colour, palette,
+};
+use crate::widgets::{
+    self, KnobSize, edged_button, outlined_button, primary_button, switched_button,
+};
 
-const COLUMN_WIDTH: f32 = 118.0;
-const COLUMN_GAP: f32 = 4.0;
-/// A column's outer width: its content, inner margin and stroke.
-const MASTER_WIDTH: f32 = COLUMN_WIDTH + 10.0;
-const NAME_HEIGHT: f32 = 24.0;
-const TRACK_TAB_HEIGHT: f32 = 3.0;
-const SEND_ROW_HEIGHT: f32 = 36.0;
+/// A strip's content width; its outer width adds [`STRIP_MARGIN`] and the edge at each side.
+const STRIP_WIDTH: f32 = 124.0;
+const STRIP_MARGIN: Margin = Margin {
+    left: 6,
+    right: 6,
+    top: 5,
+    bottom: 3,
+};
+const STRIP_OUTER_WIDTH: f32 =
+    STRIP_WIDTH + STRIP_MARGIN.left as f32 + STRIP_MARGIN.right as f32 + 2.0;
+const STRIP_GAP: f32 = SPACE_S;
+/// The Track, Bus or Master colour along a strip's top.
+const STRIP_TAB_HEIGHT: f32 = 3.0;
+const SELECTED_EDGE_WIDTH: f32 = 2.0;
+/// The faceplate around the strips: an ear and a gap at each side, a gap above and below.
+const FACE_MARGIN: Margin = Margin {
+    left: EAR_WIDTH as i8 + 8,
+    right: EAR_WIDTH as i8 + 8,
+    top: 4,
+    bottom: 4,
+};
+const KIND_HEIGHT: f32 = 12.0;
+const NAME_HEIGHT: f32 = CONTROL_HEIGHT;
+const ROUTING_HEIGHT: f32 = CONTROL_HEIGHT;
+const SEND_ROW_HEIGHT: f32 = 34.0;
 /// The Send rows a column shows before they scroll.
 const SEND_ROWS_SHOWN: usize = 2;
-const TO_MASTER_HEIGHT: f32 = 26.0;
-const PAN_HEIGHT: f32 = 58.0;
-const FADER_SIZE: egui::Vec2 = egui::Vec2::new(26.0, 96.0);
-const FADER_CAP: egui::Vec2 = egui::Vec2::new(26.0, 12.0);
-const METER_BAR_WIDTH: f32 = 7.0;
-const METER_GAP: f32 = 2.0;
-const CLIP_LED: egui::Vec2 = egui::Vec2::new(16.0, 8.0);
-const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(30.0, 22.0);
+const PAN_HEIGHT: f32 = 56.0;
+const FADER_HEIGHT: f32 = 88.0;
+const FADER_CAP: egui::Vec2 = egui::Vec2::new(34.0, 14.0);
+const FADER_SLOT_WIDTH: f32 = 8.0;
+const FADER_CAP_LINE: f32 = 2.0;
+/// The dB marks printed left of the fader; each reads the fader and the ladders beside it.
+const FADER_SCALE_DB: [f64; 6] = [6.0, 0.0, -6.0, -12.0, -24.0, -48.0];
+const SCALE_WIDTH: f32 = 24.0;
+const LADDER_WIDTH: f32 = 7.0;
+const LADDER_GAP: f32 = 3.0;
+const LED_GAP: f32 = 2.0;
+const HOLD_WIDTH: f32 = 2.0;
+/// The clip LED sits above the ladders in the half cap height the fader travel leaves there.
+const CLIP_LED_HEIGHT: f32 = 5.0;
 const VALUE_FIELD_HEIGHT: f32 = 20.0;
-/// The gap between a column's rows: egui's default item spacing.
-const ROW_GAP: f32 = 3.0;
-/// The mixer panel's height with each column whole: its frame, the name, `to Master` and the Send rows shown, pan, the fader, its value field and M/S.
-pub const MIXER_HEIGHT: f32 = 10.0
+const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(40.0, CONTROL_HEIGHT);
+const PRE_SIZE: egui::Vec2 = egui::Vec2::new(28.0, CONTROL_HEIGHT);
+const ROW_GAP: f32 = 1.0;
+const ADD_BUS_DASH: f32 = 5.0;
+const ADD_BUS_GAP: f32 = 4.0;
+/// A strip's height: its edge, margins and rows, so that every strip and the Add Bus slot line up.
+const STRIP_HEIGHT: f32 = 2.0
+    + STRIP_MARGIN.top as f32
+    + STRIP_MARGIN.bottom as f32
+    + KIND_HEIGHT
     + NAME_HEIGHT
-    + TO_MASTER_HEIGHT
+    + ROUTING_HEIGHT
     + SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32
     + PAN_HEIGHT
-    + FADER_SIZE.y
+    + FADER_HEIGHT
     + VALUE_FIELD_HEIGHT
     + SWITCH_SIZE.y
-    + 5.0 * ROW_GAP;
-const SOLO_IN_PLACE_ALPHA: u8 = 90;
-const PRE_SIZE: egui::Vec2 = egui::Vec2::new(32.0, 20.0);
+    + 7.0 * ROW_GAP;
+/// The mixer panel's height with each strip whole: the faceplate's margins around one strip.
+pub const MIXER_HEIGHT: f32 = FACE_MARGIN.top as f32 + FACE_MARGIN.bottom as f32 + STRIP_HEIGHT;
 const DIALOG_WIDTH: f32 = 420.0;
 const BITS: [(RenderBits, &str); 3] = [
     (RenderBits::Pcm24, "24"),
@@ -117,7 +152,7 @@ impl RenderDraft {
     }
 }
 
-/// One column per Track, then per Bus with `Add Bus` after the last, scrolled sideways when they do not fit, and Master at the right edge.
+/// A faceplate between two rack ears: one strip per Track, then per Bus with the Add Bus slot after the last, scrolled sideways when they do not fit, and Master pinned at the right edge.
 pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Vec<Command> {
     let mut commands = Vec::new();
     let Some(status) = snapshot.status.as_ref() else {
@@ -147,25 +182,42 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
         };
         mixer_column(ui, column, hold, &shape)
     };
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = COLUMN_GAP;
-        let scrolled_width = ui.available_width() - MASTER_WIDTH - COLUMN_GAP;
-        ScrollArea::horizontal()
-            .id_salt("mixer")
-            .max_width(scrolled_width)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    for column in strips {
-                        commands.extend(show_column(ui, column));
-                    }
-                    if ui.add(primary_button("+ Add Bus")).clicked() {
-                        commands.push(Command::BusAdd);
-                    }
-                });
+    let colours = palette();
+    let face = Frame::new()
+        .fill(colour(colours.panel))
+        .inner_margin(FACE_MARGIN)
+        .show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = STRIP_GAP;
+                let scrolled_width = ui.available_width() - STRIP_OUTER_WIDTH - 2.0 * STRIP_GAP;
+                ScrollArea::horizontal()
+                    .id_salt("mixer")
+                    .max_width(scrolled_width)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            for column in strips {
+                                commands.extend(show_column(ui, column));
+                            }
+                            if add_bus_slot(ui) {
+                                commands.push(Command::BusAdd);
+                            }
+                        });
+                    });
+                let (rule, _) = ui.allocate_exact_size(vec2(1.0, STRIP_HEIGHT), Sense::hover());
+                ui.painter()
+                    .rect_filled(rule, 0, colour(colours.knob_highlight));
+                commands.extend(show_column(ui, master));
             });
-        commands.extend(show_column(ui, master));
-    });
+        });
+    let rect = face.response.rect;
+    let painter = ui.painter();
+    painter.hline(
+        rect.x_range(),
+        rect.top() + 0.5,
+        Stroke::new(1.0, colour(colours.hover)),
+    );
+    widgets::rack_ears(painter, rect, None);
     commands
 }
 
@@ -177,6 +229,25 @@ struct Shape<'a> {
     rack: Option<ShownRack>,
 }
 
+/// The colour along a strip's top, which its pan and Send arcs share.
+fn strip_colour(target: MixerTarget) -> theme::Rgb {
+    match target {
+        MixerTarget::Track(index) => track_colour(index),
+        MixerTarget::Bus(_) => bus_colour(),
+        MixerTarget::Master => master_colour(),
+    }
+}
+
+/// `Track 1`, `Bus 1` or `Master` above the strip's name.
+fn kind_text(target: MixerTarget) -> String {
+    match target {
+        MixerTarget::Track(index) => format!("Track {}", index + 1),
+        MixerTarget::Bus(index) => format!("Bus {}", index + 1),
+        MixerTarget::Master => "Master".to_string(),
+    }
+}
+
+/// One strip's faceplate: a coloured top tab, the open strip edged in the lit colour.
 fn mixer_column(
     ui: &mut Ui,
     column: &MixerColumn,
@@ -185,26 +256,28 @@ fn mixer_column(
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
-    let fill = if shape.open {
-        colours.panel_open
-    } else {
-        colours.panel
-    };
-    Frame::new()
-        .fill(colour(fill))
+    let strip = Frame::new()
+        .fill(colour(colours.panel))
         .stroke(Stroke::new(1.0, colour(colours.hover)))
-        .inner_margin(Margin::same(4))
+        .corner_radius(RADIUS_PANEL)
+        .inner_margin(STRIP_MARGIN)
         .show(ui, |ui| {
-            ui.set_width(COLUMN_WIDTH);
-            ui.vertical_centered(|ui| {
+            ui.set_width(STRIP_WIDTH);
+            ui.set_min_height(STRIP_HEIGHT - 2.0 - STRIP_MARGIN.sum().y);
+            ui.spacing_mut().item_spacing.y = ROW_GAP;
+            ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                kind_label(ui, column.target);
                 commands.extend(name_button(ui, column, shape));
-                let shown_rows = shape.send_rows.min(SEND_ROWS_SHOWN);
-                let sends_height = TO_MASTER_HEIGHT + SEND_ROW_HEIGHT * shown_rows as f32;
-                ui.allocate_ui(vec2(COLUMN_WIDTH, sends_height), |ui| {
-                    ui.set_min_height(sends_height);
-                    commands.extend(track_routing(ui, column, shape.bus_names));
+                ui.allocate_ui(vec2(STRIP_WIDTH, ROUTING_HEIGHT), |ui| {
+                    ui.set_min_height(ROUTING_HEIGHT);
+                    commands.extend(routing(ui, column));
                 });
-                ui.allocate_ui(vec2(COLUMN_WIDTH, PAN_HEIGHT), |ui| {
+                let sends_height = SEND_ROW_HEIGHT * shape.send_rows.min(SEND_ROWS_SHOWN) as f32;
+                ui.allocate_ui(vec2(STRIP_WIDTH, sends_height), |ui| {
+                    ui.set_min_height(sends_height);
+                    commands.extend(sends(ui, column, shape.bus_names));
+                });
+                ui.allocate_ui(vec2(STRIP_WIDTH, PAN_HEIGHT), |ui| {
                     ui.set_min_height(PAN_HEIGHT);
                     commands.extend(pan_knob(ui, column));
                 });
@@ -213,7 +286,33 @@ fn mixer_column(
                 commands.extend(mute_and_solo(ui, column));
             });
         });
+    let rect = strip.response.rect;
+    let painter = ui.painter();
+    if shape.open {
+        painter.rect_stroke(
+            rect,
+            RADIUS_PANEL,
+            Stroke::new(SELECTED_EDGE_WIDTH, colour(colours.lit)),
+            StrokeKind::Inside,
+        );
+    }
+    let tab = Rect::from_min_size(rect.min, vec2(rect.width(), STRIP_TAB_HEIGHT));
+    let rounded_top = CornerRadius {
+        nw: RADIUS_PANEL,
+        ne: RADIUS_PANEL,
+        sw: 0,
+        se: 0,
+    };
+    painter.rect_filled(tab, rounded_top, colour(strip_colour(column.target)));
     commands
+}
+
+fn kind_label(ui: &mut Ui, target: MixerTarget) {
+    let row = vec2(STRIP_WIDTH, KIND_HEIGHT);
+    ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+        ui.set_min_size(row);
+        ui.label(muted_text(kind_text(target)).font(theme::legend()));
+    });
 }
 
 /// Opens the column's Rack below the panel; a Bus's name also has `Remove` in its context menu.
@@ -226,24 +325,16 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
         colours.text
     };
     let text = RichText::new(&column.name)
-        .strong()
+        .font(theme::unit_name())
         .color(colour(text_colour));
-    let button = egui::Button::new(text)
+    let button = outlined_button(text)
         .selected(shape.open)
-        .min_size(vec2(COLUMN_WIDTH, NAME_HEIGHT))
+        .min_size(vec2(STRIP_WIDTH, NAME_HEIGHT))
         .truncate();
     let response = ui.add(button);
     response.widget_info(|| {
         WidgetInfo::labeled(Role::Button, true, format!("Rack of {}", column.name))
     });
-    if let MixerTarget::Track(index) = column.target {
-        let tab = Rect::from_min_size(
-            response.rect.min,
-            vec2(response.rect.width(), TRACK_TAB_HEIGHT),
-        );
-        ui.painter()
-            .rect_filled(tab, 0, colour(track_colour(index)));
-    }
     if response.clicked() {
         if let MixerTarget::Track(index) = column.target
             && shape.selected != Some(index)
@@ -254,7 +345,7 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
     }
     if let MixerTarget::Bus(index) = column.target {
         response.context_menu(|ui| {
-            if ui.button("Remove").clicked() {
+            if ui.add(outlined_button("Remove")).clicked() {
                 commands.push(Command::BusRemove(index));
                 ui.close();
             }
@@ -263,28 +354,36 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
     commands
 }
 
-/// `to Master` and one Send knob with a `pre` toggle per Bus, the Sends in their own scroll past two rows; nothing for a Bus or Master.
-fn track_routing(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec<Command> {
-    let mut commands = Vec::new();
+/// A Track's `to Master` switch, lit while routed; Master's `Main out`; nothing for a Bus.
+fn routing(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
+    if column.target == MixerTarget::Master {
+        ui.label(muted_text("Main out"));
+        return None;
+    }
     let (MixerTarget::Track(track), Some(to_master)) = (column.target, column.to_master) else {
-        return commands;
+        return None;
     };
-    let colours = palette();
-    let toggle = lit_button("to Master", to_master, colour(colours.go))
-        .min_size(vec2(COLUMN_WIDTH - 8.0, TO_MASTER_HEIGHT - 6.0));
+    let toggle = switched_button("to Master", to_master, palette().lit)
+        .min_size(vec2(STRIP_WIDTH, ROUTING_HEIGHT));
     let response = ui.add(toggle);
     response.widget_info(|| {
         WidgetInfo::labeled(Role::Button, true, format!("to Master {}", column.name))
     });
-    if response.clicked() {
-        commands.push(Command::TrackSet {
-            track,
-            edit: TrackEdit {
-                to_master: Some(!to_master),
-                ..TrackEdit::default()
-            },
-        });
-    }
+    response.clicked().then(|| Command::TrackSet {
+        track,
+        edit: TrackEdit {
+            to_master: Some(!to_master),
+            ..TrackEdit::default()
+        },
+    })
+}
+
+/// One Send knob with a `pre` switch per Bus, in their own scroll past two rows; nothing for a Bus or Master.
+fn sends(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let MixerTarget::Track(track) = column.target else {
+        return commands;
+    };
     ScrollArea::vertical()
         .id_salt(("sends", track))
         .max_height(SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32)
@@ -300,11 +399,11 @@ fn track_routing(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec
 fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendView) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
-    ui.allocate_ui(vec2(COLUMN_WIDTH, SEND_ROW_HEIGHT), |ui| {
+    ui.allocate_ui(vec2(STRIP_WIDTH, SEND_ROW_HEIGHT), |ui| {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
             let accent = if send.level_db.is_some() {
-                colours.lit
+                bus_colour()
             } else {
                 colours.muted
             };
@@ -330,12 +429,18 @@ fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendVie
                     SendLevel::Db(db) => Some(f64::from(db)),
                     SendLevel::Off => None,
                 });
-            ui.vertical(|ui| {
-                ui.label(RichText::new(bus).font(theme::legend()));
-                let shown = dragged.unwrap_or(send.level_db);
-                ui.label(muted_text(send_text(shown)).font(theme::legend()));
+            let readout_width =
+                STRIP_WIDTH - KnobSize::Strip.diameter() - PRE_SIZE.x - 2.0 * theme::SPACE_XS;
+            ui.allocate_ui(vec2(readout_width, SEND_ROW_HEIGHT), |ui| {
+                ui.set_width(readout_width);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.label(muted_text(bus).font(theme::legend()));
+                    let shown = dragged.unwrap_or(send.level_db);
+                    ui.label(RichText::new(send_text(shown)).font(theme::scale()));
+                });
             });
-            let pre = lit_button("pre", send.pre, colour(colours.lit)).min_size(PRE_SIZE);
+            let pre = switched_button("pre", send.pre, colours.lit).min_size(PRE_SIZE);
             let pre = ui.add(pre);
             pre.widget_info(|| {
                 WidgetInfo::labeled(Role::Button, true, format!("pre {name} {bus}"))
@@ -366,13 +471,15 @@ fn knob_release(ui: &Ui, knob: &widgets::RackKnob) -> Option<f32> {
     None
 }
 
+/// The pan knob, its arc from the centre in the strip's colour.
 fn pan_knob(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     let pan = column.pan?;
+    let accent = colour(strip_colour(column.target));
     #[allow(
         clippy::cast_possible_truncation,
         reason = "a pan between -1 and 1 fits an f32"
     )]
-    let changed = track_knob(ui, ("Pan", &column.name), pan, PAN, "")? as f32;
+    let changed = knob_with_reset(ui, ("Pan", &column.name), pan, PAN, "", 0.0, accent)? as f32;
     Some(match column.target {
         MixerTarget::Track(track) => Command::TrackSet {
             track,
@@ -418,39 +525,49 @@ fn volume_command(column: &MixerColumn, db: f64) -> Command {
     }
 }
 
-/// The fader (drag it; sent on release, a double-click for 0 dB), the clip LED (click to reset) and the stereo meter with its peak hold, on one scale.
+/// The printed dB scale, the fader (drag it; sent on release, a double-click for 0 dB), and the twin LED ladders with their peak hold under the latching clip LED (click to reset), all on the fader's travel.
 fn fader_and_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold) -> Vec<Command> {
     let mut commands = Vec::new();
+    let meter_width = 2.0 * LADDER_WIDTH + LADDER_GAP;
+    let zone_width = SCALE_WIDTH + FADER_CAP.x + meter_width + 2.0 * theme::SPACE_XS;
     ui.horizontal(|ui| {
-        let meter_width = 2.0 * METER_BAR_WIDTH + METER_GAP;
-        ui.add_space((COLUMN_WIDTH - FADER_SIZE.x - meter_width - 16.0) / 2.0);
+        ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
+        ui.add_space((STRIP_WIDTH - zone_width) / 2.0 - theme::SPACE_XS);
+        fader_scale(ui);
         commands.extend(fader(ui, column));
-        ui.add_space(8.0);
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            let (led, response) =
-                ui.allocate_exact_size(vec2(meter_width, CLIP_LED.y), Sense::click());
-            response.widget_info(|| {
-                WidgetInfo::labeled(Role::Button, true, format!("Clip {}", column.name))
-            });
-            let colours = palette();
-            let lit = if column.clip {
-                colours.danger
-            } else {
-                colours.arc_track
-            };
-            ui.painter().rect_filled(led, 1, colour(lit));
-            if response.clicked() {
-                commands.push(Command::ClipReset(column.target));
-            }
-            stereo_meter(ui, column, hold, meter_width);
-        });
+        commands.extend(stereo_meter(ui, column, hold, meter_width));
     });
     commands
 }
 
+/// The y of a fader position inside `rect`: the cap's centre travels from half a cap below the top to half a cap above the bottom.
+fn travel_y(rect: Rect, position: f32) -> f32 {
+    let travel = rect.height() - FADER_CAP.y;
+    rect.top() + FADER_CAP.y / 2.0 + travel * (1.0 - position)
+}
+
+fn fader_scale(ui: &mut Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(SCALE_WIDTH, FADER_HEIGHT), Sense::hover());
+    let painter = ui.painter();
+    for db in FADER_SCALE_DB {
+        let text = if db > 0.0 {
+            format!("+{db:.0}")
+        } else {
+            format!("{db:.0}").replace('-', "\u{2212}")
+        };
+        painter.text(
+            pos2(rect.right(), travel_y(rect, fader_position(db))),
+            Align2::RIGHT_CENTER,
+            text,
+            theme::scale(),
+            colour(palette().muted),
+        );
+    }
+}
+
 fn fader(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
-    let (rect, response) = ui.allocate_exact_size(FADER_SIZE, Sense::click_and_drag());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(FADER_CAP.x, FADER_HEIGHT), Sense::click_and_drag());
     response
         .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("Volume {}", column.name)));
     let id = response.id.with("position");
@@ -476,35 +593,63 @@ fn fader(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     }
     let colours = palette();
     let painter = ui.painter();
-    let slot = Rect::from_center_size(rect.center(), vec2(4.0, travel));
-    painter.rect_filled(slot, 2, colour(colours.well));
-    let unity_y = rect.top() + FADER_CAP.y / 2.0 + travel * (1.0 - fader_position(0.0));
-    painter.hline(
-        rect.x_range(),
-        unity_y,
-        Stroke::new(1.0, colour(colours.boundary)),
+    let slot = Rect::from_center_size(
+        rect.center(),
+        vec2(FADER_SLOT_WIDTH, travel + FADER_SLOT_WIDTH),
     );
-    let cap_y = rect.top() + FADER_CAP.y / 2.0 + travel * (1.0 - position);
-    let cap = Rect::from_center_size(pos2(rect.center().x, cap_y), FADER_CAP);
-    let rim = if response.hovered() || response.dragged() {
-        colours.text
-    } else {
-        colours.boundary
-    };
     painter.rect(
-        cap,
-        2,
-        colour(colours.ear_centre),
-        Stroke::new(1.0, colour(rim)),
-        egui::StrokeKind::Inside,
+        slot,
+        FADER_SLOT_WIDTH / 2.0,
+        colour(colours.well),
+        Stroke::new(1.0, colour(colours.boundary)),
+        StrokeKind::Inside,
     );
-    painter.hline(cap.x_range(), cap_y, Stroke::new(1.0, colour(colours.well)));
+    let cap_y = travel_y(rect, position);
+    let cap = Rect::from_center_size(pos2(rect.center().x, cap_y), FADER_CAP);
+    paint_fader_cap(painter, cap);
+    if response.hovered() || response.dragged() {
+        painter.rect_stroke(
+            cap,
+            0,
+            Stroke::new(1.0, colour(colours.hover_boundary)),
+            StrokeKind::Outside,
+        );
+    }
     command
 }
 
-fn stereo_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold, width: f32) {
-    let height = FADER_SIZE.y - CLIP_LED.y - 2.0;
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+/// A steel cap, light at the top and darker below, with a dark edge and centre line.
+fn paint_fader_cap(painter: &egui::Painter, cap: Rect) {
+    let colours = palette();
+    let mut mesh = Mesh::default();
+    for (y, shade) in [
+        (cap.top(), colours.ear_centre),
+        (cap.bottom(), colours.ear_edge),
+    ] {
+        mesh.colored_vertex(pos2(cap.left(), y), colour(shade));
+        mesh.colored_vertex(pos2(cap.right(), y), colour(shade));
+    }
+    for first in [0, 1] {
+        mesh.add_triangle(first, first + 1, first + 2);
+    }
+    painter.add(mesh);
+    let dark = colour(colours.on_accent);
+    painter.rect_stroke(cap, 0, Stroke::new(1.0, dark), StrokeKind::Inside);
+    painter.hline(
+        cap.x_range(),
+        cap.center().y,
+        Stroke::new(FADER_CAP_LINE, dark),
+    );
+}
+
+/// Two LED ladders on the fader's travel with the peak hold across each, under one clip LED; a click on the LED or the ladders' top resets the clip.
+fn stereo_meter(
+    ui: &mut Ui,
+    column: &MixerColumn,
+    hold: StereoPeakHold,
+    width: f32,
+) -> Option<Command> {
+    let (rect, response) = ui.allocate_exact_size(vec2(width, FADER_HEIGHT), Sense::hover());
     let [left, right] = column.peak_db;
     response.widget_info(|| {
         WidgetInfo::labeled(
@@ -514,31 +659,59 @@ fn stereo_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold, width: 
         )
     });
     let colours = palette();
+    let led = Rect::from_min_size(rect.min, vec2(width, CLIP_LED_HEIGHT));
+    let target = Rect::from_min_size(
+        led.min - vec2(theme::SPACE_XS, 0.0),
+        vec2(width + 2.0 * theme::SPACE_XS, CONTROL_HEIGHT),
+    );
+    let clip = ui.interact(target, response.id.with("clip"), Sense::click());
+    clip.widget_info(|| WidgetInfo::labeled(Role::Button, true, format!("Clip {}", column.name)));
     let painter = ui.painter();
+    let (fill, edge) = if column.clip {
+        (colours.danger, colours.danger)
+    } else {
+        (colours.clip_off, colours.boundary)
+    };
+    painter.rect(
+        led,
+        theme::RADIUS_LED,
+        colour(fill),
+        Stroke::new(1.0, colour(edge)),
+        StrokeKind::Inside,
+    );
+    let travel = Rect::from_x_y_ranges(rect.x_range(), travel_y(rect, 1.0)..=travel_y(rect, 0.0));
     for side in 0..2 {
-        let left_edge = rect.left() + side as f32 * (METER_BAR_WIDTH + METER_GAP);
-        let bar = Rect::from_min_size(pos2(left_edge, rect.top()), vec2(METER_BAR_WIDTH, height));
-        painter.rect_filled(bar, 1, colour(colours.arc_track));
-        let db = column.peak_db[side];
-        let lit = if db >= LADDER_RED_DB {
-            colours.danger
-        } else if db >= LADDER_YELLOW_DB {
-            colours.lit
-        } else {
-            colours.go
+        let ladder_left = rect.left() + side as f32 * (LADDER_WIDTH + LADDER_GAP);
+        let ladder =
+            Rect::from_x_y_ranges(ladder_left..=ladder_left + LADDER_WIDTH, travel.y_range());
+        paint_ladder(painter, ladder, column.peak_db[side]);
+        let held_db = hold.held_db()[side];
+        if held_db > FADER_FLOOR_DB {
+            let hold_y = travel_y(rect, fader_position(held_db));
+            painter.hline(
+                ladder.x_range(),
+                hold_y,
+                Stroke::new(HOLD_WIDTH, colour(colours.text)),
+            );
+        }
+    }
+    clip.clicked().then_some(Command::ClipReset(column.target))
+}
+
+fn paint_ladder(painter: &egui::Painter, ladder: Rect, db: f64) {
+    let colours = palette();
+    let segments = strip_ladder(db);
+    let pitch = ladder.height() / segments.len() as f32;
+    for (index, segment) in segments.iter().enumerate() {
+        let bottom = ladder.bottom() - index as f32 * pitch;
+        let led = Rect::from_x_y_ranges(ladder.x_range(), bottom - pitch + LED_GAP..=bottom);
+        let fill = match (segment.lit, segment.band) {
+            (false, _) => colours.arc_track,
+            (true, Band::Green) => colours.go,
+            (true, Band::Yellow) => colours.lit,
+            (true, Band::Red) => colours.danger,
         };
-        let top = bar.bottom() - bar.height() * fader_position(db);
-        painter.rect_filled(
-            Rect::from_min_max(pos2(bar.left(), top), bar.max),
-            1,
-            colour(lit),
-        );
-        let hold_y = bar.bottom() - bar.height() * fader_position(hold.held_db()[side]);
-        painter.hline(
-            bar.x_range(),
-            hold_y,
-            Stroke::new(2.0, colour(colours.text)),
-        );
+        painter.rect_filled(led, theme::RADIUS_LED, colour(fill));
     }
 }
 
@@ -562,7 +735,47 @@ fn volume_field(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     typed.map(|db| volume_command(column, db))
 }
 
-/// M and S; S is drawn dimmer-lit on a column that sounds only through solo in place.
+/// The Add Bus slot: a dashed outline as tall as a strip, its name at the top.
+fn add_bus_slot(ui: &mut Ui) -> bool {
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(STRIP_OUTER_WIDTH, STRIP_HEIGHT), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, "+ Add Bus"));
+    let colours = palette();
+    let hovered = response.hovered() || response.is_pointer_button_down_on();
+    let edge = if hovered {
+        colours.hover_boundary
+    } else {
+        colours.boundary
+    };
+    let painter = ui.painter();
+    if hovered {
+        painter.rect_filled(rect, RADIUS_PANEL, colour(colours.hover));
+    }
+    let outline = rect.shrink(0.5);
+    let corners = [
+        outline.left_top(),
+        outline.right_top(),
+        outline.right_bottom(),
+        outline.left_bottom(),
+        outline.left_top(),
+    ];
+    painter.extend(PaintShape::dashed_line(
+        &corners,
+        Stroke::new(1.0, colour(edge)),
+        ADD_BUS_DASH,
+        ADD_BUS_GAP,
+    ));
+    painter.text(
+        pos2(rect.center().x, rect.top() + CONTROL_HEIGHT),
+        Align2::CENTER_CENTER,
+        "+ Add Bus",
+        theme::body(),
+        colour(colours.text),
+    );
+    response.clicked()
+}
+
+/// M lit in the lit colour, S in the go colour; S is edged in go on a column that sounds only through solo in place; Master has neither.
 fn mute_and_solo(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     if column.target == MixerTarget::Master {
         return None;
@@ -571,27 +784,21 @@ fn mute_and_solo(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     let mut mute = None;
     let mut solo = None;
     ui.horizontal(|ui| {
-        ui.add_space((COLUMN_WIDTH - 2.0 * SWITCH_SIZE.x - 4.0) / 2.0);
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let response =
-            ui.add(lit_button("M", column.mute, colour(colours.lit)).min_size(SWITCH_SIZE));
+        ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
+        ui.add_space((STRIP_WIDTH - 2.0 * SWITCH_SIZE.x - theme::SPACE_XS) / 2.0 - theme::SPACE_XS);
+        let response = ui.add(switched_button("M", column.mute, colours.lit).min_size(SWITCH_SIZE));
         response.widget_info(|| {
             WidgetInfo::labeled(Role::Button, true, format!("Mute {}", column.name))
         });
         if response.clicked() {
             mute = Some(!column.mute);
         }
-        let response = if column.audibility == Audibility::SoloInPlace && !column.solo {
-            let dim = translucent(colours.go, SOLO_IN_PLACE_ALPHA);
-            ui.add(
-                egui::Button::new(RichText::new("S").strong())
-                    .fill(dim)
-                    .stroke(Stroke::new(1.0, colour(colours.go)))
-                    .min_size(SWITCH_SIZE),
-            )
+        let solo_button = if column.audibility == Audibility::SoloInPlace && !column.solo {
+            edged_button("S", colours.go)
         } else {
-            ui.add(lit_button("S", column.solo, colour(colours.go)).min_size(SWITCH_SIZE))
+            switched_button("S", column.solo, colours.go)
         };
+        let response = ui.add(solo_button.min_size(SWITCH_SIZE));
         response.widget_info(|| {
             WidgetInfo::labeled(Role::Button, true, format!("Solo {}", column.name))
         });

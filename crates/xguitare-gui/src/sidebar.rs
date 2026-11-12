@@ -555,6 +555,7 @@ fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<
             VOLUME_DB_RANGE,
             " dB",
             DEFAULT_VOLUME_DB,
+            colour(palette().text),
         ) {
             commands.push(change(None, None, None, Some(volume)));
         }

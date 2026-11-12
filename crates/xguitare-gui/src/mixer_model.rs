@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_core::control::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
-use crate::model::{Command, acts_on_rack};
+use crate::model::{Band, Command, LADDER_RED_DB, LADDER_YELLOW_DB, Segment, acts_on_rack};
 use crate::project_model::{project_name, track_rows};
 
 /// The fader position of 0 dB; the top is +6 dB.
@@ -13,6 +13,8 @@ pub const FADER_TOP_DB: f64 = 6.0;
 pub const FADER_FLOOR_DB: f64 = -60.0;
 pub const MIXER_PEAK_HOLD_FOR: Duration = Duration::from_secs(1);
 pub const MASTER: &str = "Master";
+/// The LEDs in each of a strip's two ladders.
+pub const STRIP_LADDER_SEGMENTS: usize = 20;
 
 /// A Track, a Bus or Master: a column of the mixer panel and the Rack it opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -172,6 +174,25 @@ pub fn fader_db(position: f32) -> f64 {
     }
     let gain = (f64::from(position.min(1.0)) / f64::from(FADER_UNITY)).powf(1.0 / fader_exponent());
     (20.0 * gain.log10()).min(FADER_TOP_DB)
+}
+
+/// Bottom LED first, on the fader's own scale so that the dB marks beside the fader read the ladder too: each LED covers an equal stretch of fader travel, lights once `db` is above its bottom edge (the bottom one from [`FADER_FLOOR_DB`]) and takes its band from its top edge.
+pub fn strip_ladder(db: f64) -> [Segment; STRIP_LADDER_SEGMENTS] {
+    let edge_db = |index: usize| fader_db(index as f32 / STRIP_LADDER_SEGMENTS as f32);
+    std::array::from_fn(|index| {
+        let top_db = edge_db(index + 1);
+        let band = if top_db < LADDER_YELLOW_DB {
+            Band::Green
+        } else if top_db < LADDER_RED_DB {
+            Band::Yellow
+        } else {
+            Band::Red
+        };
+        Segment {
+            lit: db > edge_db(index).max(FADER_FLOOR_DB),
+            band,
+        }
+    })
 }
 
 /// Each side's largest peak, held for [`MIXER_PEAK_HOLD_FOR`], then the current one.
