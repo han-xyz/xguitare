@@ -451,6 +451,7 @@ impl eframe::App for App {
             settings: &mut self.settings_draft,
             new_project: &mut self.new_project,
             beat_light: self.beat_light,
+            layout: &mut self.rack_layout,
         };
         let sidebar_frame = Frame::side_top_panel(ui.style())
             .fill(colour(palette().case))

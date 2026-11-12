@@ -1668,35 +1668,30 @@ fn the_metronome_switch_turns_it_off() {
     );
 }
 
+/// Where the left panel ends above the footer in the 1280x800 window.
+const LEFT_PANEL_BOTTOM_1280X800: f32 = 780.0;
+
 #[test]
-fn the_tuner_buttons_show_at_1280x800_and_the_metronome_scrolls_into_view() {
+fn the_metronome_shows_whole_at_1280x800_above_add_module() {
     let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, metronome_snapshot());
     harness.run_steps(2);
-    let bottom = DEFAULT_WINDOW.y;
-    for label in ["Tuner", "Mute"] {
-        let rect = harness.get_by_role_and_label(Role::Button, label).rect();
-        assert!(rect.bottom() <= bottom, "{label} ends at {}", rect.bottom());
-    }
-    write_png(&mut harness, "left-panel-1280x800");
-    let panel = harness.get_by_label("Add Module").rect();
-    harness.event(Event::PointerMoved(panel.center()));
-    harness.event(Event::MouseWheel {
-        unit: MouseWheelUnit::Point,
-        delta: Vec2::new(0.0, -200.0),
-        phase: TouchPhase::Move,
-        source: MouseWheelSource::Unknown,
-        modifiers: Modifiers::NONE,
-    });
-    harness.run_steps(20);
-    let metronome = harness
-        .get_by_role_and_label(Role::Switch, "Metronome")
-        .rect();
-    assert!(
-        metronome.bottom() <= bottom,
-        "the Metronome ends at {} after scrolling",
-        metronome.bottom()
+    assert_eq!(
+        harness.query_all_by_label_contains("(mono)").count()
+            + harness.query_all_by_label_contains("(stereo)").count()
+            + harness
+                .query_all_by_label_contains("(mono_to_stereo)")
+                .count(),
+        17
     );
+    let tap = harness.get_by_role_and_label(Role::Button, "Tap").rect();
+    assert!(
+        tap.bottom() <= LEFT_PANEL_BOTTOM_1280X800,
+        "the Metronome ends at {}",
+        tap.bottom()
+    );
+    assert!(tap.bottom() < harness.get_by_label("Add Module").rect().top());
     harness.get_by_label("Beat 1");
+    write_png(&mut harness, "left-panel-1280x800");
 }
 
 #[test]
@@ -2465,5 +2460,36 @@ fn a_fixed_unit_hides_by_its_button_and_moves_by_its_arrows() {
         .click();
     harness.run_steps(2);
     harness.get_by_label("Meters unit, 2 of 7");
+    assert_eq!(sent_now(&sent), []);
+}
+
+#[test]
+fn a_hidden_fixed_unit_chip_shows_it_and_a_shown_chip_does_nothing() {
+    let (mut harness, sent, _dir) = harness();
+    let shown_chip = harness.get_by_role_and_label(Role::Button, "Show Meters");
+    assert!(shown_chip.accesskit_node().is_disabled());
+    shown_chip.click();
+    harness.run_steps(2);
+    harness.get_by_label("Meters unit, 1 of 8");
+    click_button(&mut harness, "Hide Tuner");
+    assert!(
+        !harness
+            .get_by_role_and_label(Role::Button, "Show Tuner")
+            .accesskit_node()
+            .is_disabled()
+    );
+    click_button(&mut harness, "Show Tuner");
+    harness.get_by_label("Tuner unit, 1 of 8");
+    assert_eq!(sent_now(&sent), []);
+}
+
+#[test]
+fn a_hidden_fixed_unit_chip_dragged_into_the_rack_shows_it_at_the_gap() {
+    let (mut harness, sent, _dir) = harness();
+    click_button(&mut harness, "Hide Tuner");
+    let from = tile_centre(&harness, "Show Tuner");
+    let to = pos2(800.0, unit_top(&harness, "tonestack") + 10.0);
+    drag_and_release(&mut harness, from, to);
+    harness.get_by_label("Tuner unit, 4 of 8");
     assert_eq!(sent_now(&sent), []);
 }

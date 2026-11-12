@@ -14,8 +14,8 @@ use crate::metronome_model::{
 };
 use crate::metronome_model::{BeatDot, beat_dots, bpm_text};
 use crate::model::{
-    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, HiddenFixed, ModuleType,
-    PortSelection, RackLayout, RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot,
+    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, FixedUnit, HiddenFixed,
+    ModuleType, PortSelection, RackLayout, RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot,
     add_command, add_place, add_places, chip_columns, engine_readout, filter_bank, param_rows,
     port_choices, rack_channels, set_ports_command, set_settings_command, settings_draft,
     shown_undo, tuner_toggle,
@@ -101,6 +101,8 @@ pub struct SidebarView<'a, 'b> {
     pub settings: &'a mut Option<SettingsDraft>,
     pub new_project: &'a mut String,
     pub beat_light: BeatLight,
+    /// Where the Tuner and the meters sit in the Rack; their chips show a hidden one.
+    pub layout: &'a mut RackLayout,
 }
 
 /// One collapsible section per [`SECTIONS`] entry, top to bottom.
@@ -195,9 +197,11 @@ fn section_body(
                 .into_iter()
                 .collect()
         }
-        Section::Rack => add_module(ui, snapshot, view.add, view.stereo_rack)
-            .into_iter()
-            .collect(),
+        Section::Rack => {
+            let command = add_module(ui, snapshot, view.add, view.stereo_rack);
+            fixed_chips(ui, snapshot, view.layout);
+            command.into_iter().collect()
+        }
         Section::Tuner => tuner_and_mute(ui, snapshot, view.tuner),
         Section::Metronome => metronome_section(ui, snapshot, view.beat_light),
         Section::Audio => audio_ports(ui, snapshot, view.ports),
@@ -475,6 +479,96 @@ fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
         type_name,
         theme::caption(),
         colour(colours.text),
+    );
+}
+
+/// One chip per fixed unit, as wide as a Module tile: a hidden unit's chip shows it at the top of the Rack on a click, or at the gap it is dragged into; a shown unit's chip is readable but takes no input.
+fn fixed_chips(ui: &mut Ui, snapshot: &Snapshot, layout: &mut RackLayout) {
+    let width = ui.available_width();
+    let columns = chip_columns(width);
+    let size = vec2(
+        (width - CHIP_GAP * (columns - 1) as f32) / columns as f32,
+        CONTROL_HEIGHT,
+    );
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::splat(CHIP_GAP);
+        for unit in FixedUnit::ALL {
+            if fixed_chip(ui, unit, layout.is_shown(unit), size).clicked() {
+                clicked = Some(unit);
+            }
+        }
+    });
+    if let Some(unit) = clicked {
+        let ids: Vec<String> = snapshot
+            .params
+            .as_ref()
+            .map(param_rows)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        layout.place(unit, 0, &ids);
+    }
+}
+
+/// Named `Show Tuner` or `Show Meters`; while dragged it follows the pointer and carries [`Dragged::FixedChip`].
+fn fixed_chip(ui: &mut Ui, unit: FixedUnit, shown: bool, size: Vec2) -> Response {
+    let sense = if shown {
+        Sense::hover()
+    } else {
+        Sense::click_and_drag()
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let name = format!("Show {}", unit.label());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, !shown, &name));
+    paint_fixed_chip(ui.painter(), rect, unit, shown, response.hovered());
+    if shown {
+        return response;
+    }
+    if response.dragged() {
+        DragAndDrop::set_payload(ui.ctx(), Dragged::FixedChip(unit));
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+        if let Some(pointer) = ui.ctx().pointer_interact_pos() {
+            let painter = ui
+                .ctx()
+                .layer_painter(LayerId::new(Order::Tooltip, response.id));
+            paint_fixed_chip(
+                &painter,
+                Rect::from_center_size(pointer, size),
+                unit,
+                false,
+                true,
+            );
+        }
+    }
+    response.on_hover_cursor(CursorIcon::Grab)
+}
+
+/// A hidden unit's chip as a Module tile without its accent tab; a shown unit's chip unedged, its name muted.
+fn paint_fixed_chip(painter: &Painter, rect: Rect, unit: FixedUnit, shown: bool, hovered: bool) {
+    let colours = palette();
+    let (edge, text) = match (shown, hovered) {
+        (true, _) => (Stroke::NONE, colours.muted),
+        (false, true) => (
+            Stroke::new(1.0, colour(colours.hover_boundary)),
+            colours.text,
+        ),
+        (false, false) => (Stroke::new(1.0, colour(colours.boundary)), colours.text),
+    };
+    painter.rect(
+        rect,
+        RADIUS_CONTROL,
+        colour(colours.well),
+        edge,
+        StrokeKind::Inside,
+    );
+    painter.text(
+        rect.left_center() + vec2(SPACE_S, 0.0),
+        Align2::LEFT_CENTER,
+        unit.label(),
+        theme::caption(),
+        colour(text),
     );
 }
 
