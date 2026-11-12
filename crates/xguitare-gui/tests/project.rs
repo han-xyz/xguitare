@@ -16,7 +16,7 @@ use xguitare_gui::project_model::{
     recording_from, recording_span, restored_view, snap_to_beat, still_closing, time_text,
     track_rows, transport_view, undo_text, waveform_columns,
 };
-use xguitare_gui::project_model::{TrimDrag, trim_preview, trim_step_command};
+use xguitare_gui::project_model::{TrimDrag, take_names, trim_preview, trim_step_command};
 
 const RATE: f64 = 48_000.0;
 const FOUR_FOUR: Tempo = Tempo {
@@ -1581,4 +1581,90 @@ fn trim_keys_step_an_edge_inside_the_take() {
         Some(ItemNodeAction::Trim(ItemEdge::Start, 1))
     );
     assert_eq!(press(ItemKey::Right, (false, true, true)), None);
+}
+
+#[test]
+fn t_duplicate_copy_and_paste_keys() {
+    let mut items = edit_items();
+    items[0].takes = 3;
+    items[0].take = 2;
+    let mut status = project_status("stopped");
+    status["selected"] = json!(1);
+    status["clipboard"] = json!(0);
+    let key = |key, status: &Value, ids: &[u64]| {
+        item_key_to_command(key, status, &items, &selection(ids), Some(EDIT_VIEW))
+    };
+    assert_eq!(
+        key(KeyEvent::T, &status, &[3]),
+        Some(Command::ItemTake { id: 3, take: 0 }),
+        "T wraps to the first Take"
+    );
+    assert_eq!(key(KeyEvent::T, &status, &[1]), None, "one Take only");
+    assert_eq!(
+        key(KeyEvent::T, &status, &[1, 3]),
+        None,
+        "more than one Item"
+    );
+    assert_eq!(
+        key(KeyEvent::CtrlD, &status, &[1, 3]),
+        Some(Command::ItemDuplicate(vec![1, 3]))
+    );
+    assert_eq!(
+        key(KeyEvent::CtrlC, &status, &[3]),
+        Some(Command::ItemCopy(vec![3]))
+    );
+    assert_eq!(key(KeyEvent::CtrlD, &status, &[]), None);
+    assert_eq!(key(KeyEvent::CtrlC, &status, &[]), None);
+    assert_eq!(key(KeyEvent::CtrlV, &status, &[]), None, "empty clipboard");
+    status["clipboard"] = json!(2);
+    assert_eq!(
+        key(KeyEvent::CtrlV, &status, &[]),
+        Some(Command::ItemPaste {
+            track: 1,
+            at: 36_000
+        })
+    );
+    for edit in [KeyEvent::CtrlD, KeyEvent::CtrlC, KeyEvent::CtrlV] {
+        assert!(key_active(edit, KeyFocus::Item), "{edit:?}");
+        assert!(!key_active(edit, KeyFocus::TextField), "{edit:?}");
+        assert_eq!(project_key_to_command(edit, &status, &[]), None, "{edit:?}");
+    }
+}
+
+#[test]
+fn take_names_lists_an_items_takes_by_file_name() {
+    let payload = json!({"tracks": [
+        {"id": 0, "items": [{"id": 4, "position": 0, "offset": 0, "length": 10, "take": 1,
+         "takes": ["takes/a-1.wav", "takes/a-2.wav", "b.wav"]}]},
+    ]});
+    assert_eq!(take_names(&payload, 4), ["a-1", "a-2", "b"]);
+    assert_eq!(take_names(&payload, 5), Vec::<String>::new());
+}
+
+#[test]
+fn new_items_after_a_duplicate_or_paste_become_the_selection() {
+    let before = [3, 1, 5];
+    let mut after = edit_items();
+    after.push(block(8, GUITAR, 144_000, 96_000));
+    after.push(block(9, BASS, 240_000, 240_000));
+    let mut chosen = selection(&[3, 1]);
+    chosen.select_new(&before, &after);
+    assert_eq!(chosen.ids(), [8, 9]);
+    let mut unchanged = selection(&[3]);
+    unchanged.select_new(&before, &edit_items());
+    assert_eq!(unchanged.ids(), [3], "nothing new: the selection stays");
+}
+
+#[test]
+fn shift_f10_and_the_menu_key_open_a_focused_items_menu() {
+    assert_eq!(
+        press(ItemKey::F10, (false, true, false)),
+        Some(ItemNodeAction::Menu)
+    );
+    assert_eq!(
+        press(ItemKey::Menu, (false, false, false)),
+        Some(ItemNodeAction::Menu)
+    );
+    assert_eq!(press(ItemKey::F10, (false, false, false)), None);
+    assert_eq!(press(ItemKey::Menu, (true, false, false)), None);
 }

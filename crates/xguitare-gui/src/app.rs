@@ -545,6 +545,14 @@ impl eframe::App for App {
         {
             self.project_view.split_at = Some(*at);
         }
+        if commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::ItemDuplicate(_) | Command::ItemPaste { .. }
+            )
+        }) {
+            self.project_view.select_new = true;
+        }
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);
         for command in commands {
@@ -626,6 +634,8 @@ fn pressed_keys(ui: &Ui, item_ids: &[u64]) -> Vec<KeyEvent> {
                     modifiers,
                     ..
                 } => key_event(*key, *modifiers),
+                Event::Copy => Some(KeyEvent::CtrlC),
+                Event::Paste(_) | Event::PasteImage(_) => Some(KeyEvent::CtrlV),
                 _ => None,
             })
             .collect();
@@ -649,6 +659,15 @@ fn pressed_keys(ui: &Ui, item_ids: &[u64]) -> Vec<KeyEvent> {
         }
         if input.consume_key(Modifiers::COMMAND, Key::Z) {
             keys.push(KeyEvent::CtrlZ);
+        }
+        if input.consume_key(Modifiers::COMMAND, Key::D) {
+            keys.push(KeyEvent::CtrlD);
+        }
+        if input.consume_key(Modifiers::COMMAND, Key::C) {
+            keys.push(KeyEvent::CtrlC);
+        }
+        if input.consume_key(Modifiers::COMMAND, Key::V) {
+            keys.push(KeyEvent::CtrlV);
         }
         keys
     });

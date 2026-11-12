@@ -1,7 +1,7 @@
 use egui::{
-    Align2, Color32, ComboBox, CursorIcon, DragValue, EventFilter, Frame, Id, Key, Margin,
-    Modifiers, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit,
-    TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
+    Align2, Button, Color32, ComboBox, CursorIcon, DragValue, EventFilter, Frame, Id, Key, Margin,
+    Modifiers, Painter, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, SetOpenCommand,
+    Stroke, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::TransportAction;
@@ -21,9 +21,9 @@ use crate::project_model::{
     ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView,
     TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, dragged_loop, grid_lines,
     grid_step, hit_test, item_blocks, item_name, item_node_action, items_in_box, move_preview,
-    nudge_command, parse_meter, project_key_to_command, project_tempo, recording_span, sample_rate,
-    snap_to_beat, time_text, track_colour, track_rows, track_step_command, transport_view,
-    trim_preview, trim_step_command, waveform_columns,
+    nearest_line, nudge_command, parse_meter, project_key_to_command, project_tempo,
+    recording_span, sample_rate, snap_to_beat, take_names, time_text, track_colour, track_rows,
+    track_step_command, transport_view, trim_preview, trim_step_command, waveform_columns,
 };
 use crate::rack::muted_text;
 use crate::theme::{
@@ -133,6 +133,10 @@ pub struct ProjectView {
     pub snap: bool,
     /// The frame of a split sent whose halves `items` has not shown yet.
     pub split_at: Option<u64>,
+    /// A duplicate or paste was sent: the Items new in the next `items` become the selection.
+    pub select_new: bool,
+    /// What the lane menu opened on: the Item right-clicked, or none on the empty lane, with the timeline frame and the Track row.
+    menu_at: Option<(Option<u64>, u64, usize)>,
     lane_drag: Option<LaneDrag>,
     /// The Item ids of the `items` last drawn.
     seen: Vec<u64>,
@@ -147,6 +151,8 @@ impl ProjectView {
             selection: ItemSelection::default(),
             snap,
             split_at: None,
+            select_new: false,
+            menu_at: None,
             lane_drag: None,
             seen: Vec::new(),
         }
@@ -445,6 +451,9 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
     if ids != view.seen {
         view.selection
             .follow(&view.seen, &items, view.split_at.take());
+        if std::mem::take(&mut view.select_new) {
+            view.selection.select_new(&view.seen, &items);
+        }
         view.seen = ids;
     }
     let face = ui.available_rect_before_wrap();
@@ -469,24 +478,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
             .map(|from| recording_span(from, &transport)),
         selected: view.selection.clone(),
     };
-    let strip = TRACK_LIST_WIDTH - 8.0;
-    let add = Rect::from_min_size(
-        full.min,
-        vec2(strip - SNAP_BUTTON_WIDTH - theme::SPACE_XS, RULER_HEIGHT),
-    );
-    if ui.put(add, outlined_button("+ Add Track")).clicked() {
-        commands.push(Command::TrackAdd);
-    }
-    let snap = Rect::from_min_size(
-        pos2(full.left() + strip - SNAP_BUTTON_WIDTH, full.top()),
-        vec2(SNAP_BUTTON_WIDTH, RULER_HEIGHT),
-    );
-    if ui
-        .put(snap, switched_button("Snap", view.snap, palette().lit))
-        .clicked()
-    {
-        view.snap = !view.snap;
-    }
+    commands.extend(track_list_head(ui, full, view));
     commands.extend(ruler_strip(
         ui,
         ruler,
@@ -522,8 +514,20 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
                     &mut lanes,
                 ));
             }
-            commands.extend(item_nodes(ui, &items, &lanes, &scene, view, (rate, tempo)));
+            let menu = MenuContext {
+                payload: snapshot.items.as_ref(),
+                clipboard: status["clipboard"].as_u64().unwrap_or_default() > 0,
+            };
+            commands.extend(item_nodes(
+                ui,
+                (&items, &lanes),
+                &scene,
+                &menu,
+                view,
+                (rate, tempo),
+            ));
             commands.extend(lane_pointer(ui, &lanes, &items, &scene, view));
+            commands.extend(lane_menus(&lanes, &items, &scene, &menu, view));
             paint_lane_drag(ui, &lanes, &items, &scene, view);
         });
     });
@@ -551,6 +555,30 @@ fn trim_shown(items: &[ItemBlock], drag: Option<&LaneDrag>) -> Vec<ItemBlock> {
             }
         })
         .collect()
+}
+
+/// `+ Add Track` and the Snap switch left of the ruler.
+fn track_list_head(ui: &mut Ui, full: Rect, view: &mut ProjectView) -> Option<Command> {
+    let mut command = None;
+    let strip = TRACK_LIST_WIDTH - 8.0;
+    let add = Rect::from_min_size(
+        full.min,
+        vec2(strip - SNAP_BUTTON_WIDTH - theme::SPACE_XS, RULER_HEIGHT),
+    );
+    if ui.put(add, outlined_button("+ Add Track")).clicked() {
+        command = Some(Command::TrackAdd);
+    }
+    let snap = Rect::from_min_size(
+        pos2(full.left() + strip - SNAP_BUTTON_WIDTH, full.top()),
+        vec2(SNAP_BUTTON_WIDTH, RULER_HEIGHT),
+    );
+    if ui
+        .put(snap, switched_button("Snap", view.snap, palette().lit))
+        .clicked()
+    {
+        view.snap = !view.snap;
+    }
+    command
 }
 
 /// Ctrl+wheel zooms about the pointer, a sideways wheel (or Shift+wheel) scrolls, while the pointer is over the timeline.
@@ -966,9 +994,9 @@ fn paint_selection(painter: &Painter, plate: Rect) {
 /// One focusable node per Item, after every Track header and in time order, named by [`item_name`] with its selected state. Focus leaves the selection alone and rings the plate inside its edge, apart from the selection mark outside it. On a focused Item, Enter selects only it, Ctrl+Enter takes it in or out, ← and → move the selected Items by one grid step, Alt+↑ and Alt+↓ to the Track above or below.
 fn item_nodes(
     ui: &Ui,
-    items: &[ItemBlock],
-    lanes: &[Lane],
+    (items, lanes): (&[ItemBlock], &[Lane]),
     scene: &Scene,
+    menu: &MenuContext,
     view: &mut ProjectView,
     (rate, tempo): (f64, Tempo),
 ) -> Option<Command> {
@@ -996,6 +1024,16 @@ fn item_nodes(
         let selected = view.selection.contains(item.id);
         ui.ctx()
             .accesskit_node_builder(id, |node| node.set_selected(selected));
+        let open_menu = response.has_focus()
+            && pressed(ui)
+                .into_iter()
+                .filter_map(item_key_press)
+                .any(|press| item_node_action(press) == Some(ItemNodeAction::Menu));
+        let shown = Popup::menu(&response)
+            .id(id.with("menu"))
+            .open_memory(open_menu.then_some(SetOpenCommand::Bool(true)))
+            .show(|ui| item_menu(ui, item, (scene, menu), &view.selection, open_menu));
+        command = command.or(shown.and_then(|shown| shown.inner));
         if !response.has_focus() {
             continue;
         }
@@ -1019,9 +1057,95 @@ fn item_nodes(
                 Some(ItemNodeAction::Trim(edge, direction)) => {
                     command = trim_step_command(item, edge, direction as f64 * step);
                 }
-                None => {}
+                Some(ItemNodeAction::Menu) | None => {}
             }
         }
+    }
+    command
+}
+
+/// What the Item and lane menus need besides the Items: the `items` payload for the Take names, and whether the clipboard holds anything.
+struct MenuContext<'a> {
+    payload: Option<&'a Value>,
+    clipboard: bool,
+}
+
+/// An Item's menu: its Takes with the active one marked (another one chosen is sent as `item_take`), then `Split at playhead`, `Duplicate`, `Copy` and `Delete` for the selected Items, or for this Item alone when it is not selected. With `focus_first` the first entry takes the keyboard focus.
+fn item_menu(
+    ui: &mut Ui,
+    item: &ItemBlock,
+    (scene, menu): (&Scene, &MenuContext),
+    selection: &ItemSelection,
+    focus_first: bool,
+) -> Option<Command> {
+    let names = menu
+        .payload
+        .map(|payload| take_names(payload, item.id))
+        .unwrap_or_default();
+    let mut command = None;
+    for (take, name) in names.iter().enumerate() {
+        let entry = ui.selectable_label(take == item.take, name);
+        if take == 0 && focus_first {
+            entry.request_focus();
+        }
+        if entry.clicked() {
+            command = (take != item.take).then_some(Command::ItemTake { id: item.id, take });
+            ui.close();
+        }
+    }
+    ui.separator();
+    let ids = if selection.contains(item.id) {
+        selection.ids()
+    } else {
+        vec![item.id]
+    };
+    let edits = [
+        (
+            "Split at playhead",
+            Command::ItemSplit {
+                ids: Some(ids.clone()),
+                at: scene.playhead,
+            },
+        ),
+        ("Duplicate", Command::ItemDuplicate(ids.clone())),
+        ("Copy", Command::ItemCopy(ids.clone())),
+        ("Delete", Command::ItemDelete(ids)),
+    ];
+    for (label, edit) in edits {
+        if ui.button(label).clicked() {
+            command = Some(edit);
+            ui.close();
+        }
+    }
+    command
+}
+
+/// The menu a right-click opens on a lane: [`item_menu`] on an Item, else `Paste` at the frame clicked on that Track, enabled while the clipboard holds Items.
+fn lane_menus(
+    lanes: &[Lane],
+    items: &[ItemBlock],
+    scene: &Scene,
+    menu: &MenuContext,
+    view: &ProjectView,
+) -> Option<Command> {
+    let mut command = None;
+    for lane in lanes {
+        lane.response.context_menu(|ui| {
+            command = match view.menu_at {
+                Some((Some(id), ..)) => items
+                    .iter()
+                    .find(|item| item.id == id)
+                    .and_then(|item| item_menu(ui, item, (scene, menu), &view.selection, false)),
+                Some((None, at, row)) => {
+                    let paste = ui.add_enabled(menu.clipboard, Button::new("Paste"));
+                    paste.clicked().then(|| {
+                        ui.close();
+                        Command::ItemPaste { track: row, at }
+                    })
+                }
+                None => None,
+            };
+        });
     }
     command
 }
@@ -1039,6 +1163,8 @@ fn item_key_press((key, modifiers): (Key, Modifiers)) -> Option<ItemKeyPress> {
         Key::ArrowRight => ItemKey::Right,
         Key::ArrowUp => ItemKey::Up,
         Key::ArrowDown => ItemKey::Down,
+        Key::F10 => ItemKey::F10,
+        Key::Menu => ItemKey::Menu,
         _ => return None,
     };
     Some(ItemKeyPress {
@@ -1114,6 +1240,16 @@ fn lane_pointer(
                 None => {}
             }
             commands.push(lane.selects.clone());
+        }
+        if response.secondary_clicked()
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            let x = at.x - lane.rect.left();
+            let hit = hit_test(items, lane.track_id, scene.timeline, x).item();
+            if let Some(id) = hit {
+                view.selection.grab(id, false);
+            }
+            view.menu_at = Some((hit, menu_frame(scene, x, view.snap), lane.row));
         }
         if response.drag_started()
             && let Some(origin) = origin
@@ -1192,6 +1328,20 @@ fn released(
         }
         None => None,
     }
+}
+
+/// The timeline frame `x` pixels into a lane, on the nearest grid line when `snap`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a non-negative frame far below u64::MAX"
+)]
+fn menu_frame(scene: &Scene, x: f32, snap: bool) -> u64 {
+    let frame = scene.timeline.frame_at(x);
+    nearest_line(&scene.grid, frame, snap)
+        .unwrap_or(frame)
+        .max(0.0)
+        .round() as u64
 }
 
 /// The resize cursor over an Item's edge.

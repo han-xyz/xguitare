@@ -467,7 +467,6 @@ fn item_block(track_id: u64, item: &Value) -> Option<ItemBlock> {
     let takes = item["takes"].as_array()?;
     let take = usize::try_from(item["take"].as_u64()?).ok()?;
     let path = takes.get(take)?.as_str()?;
-    let file = path.rsplit('/').next().unwrap_or(path);
     Some(ItemBlock {
         id: item["id"].as_u64()?,
         track_id,
@@ -476,10 +475,33 @@ fn item_block(track_id: u64, item: &Value) -> Option<ItemBlock> {
         length: item["length"].as_u64()?,
         file: path.to_string(),
         take_frames: item["take_frames"].as_u64().unwrap_or_default(),
-        take_name: file.strip_suffix(".wav").unwrap_or(file).to_string(),
+        take_name: take_name(path),
         take,
         takes: takes.len(),
     })
+}
+
+/// The names of the Item `id`'s Takes in an `items` payload, in order: each file name without folder and `.wav`.
+pub fn take_names(items_payload: &Value, id: u64) -> Vec<String> {
+    let tracks = items_payload["tracks"].as_array().map(Vec::as_slice);
+    let item = tracks
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|track| track["items"].as_array())
+        .flatten()
+        .find(|item| item["id"].as_u64() == Some(id));
+    let takes = item.and_then(|item| item["takes"].as_array());
+    takes
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(take_name)
+        .collect()
+}
+
+fn take_name(path: &str) -> String {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.strip_suffix(".wav").unwrap_or(file).to_string()
 }
 
 /// Where the Take being recorded began: the playhead the window first saw recording at once the count-in ended, kept while recording goes on; status names no such frame.
@@ -601,6 +623,9 @@ pub fn key_active(key: KeyEvent, focus: KeyFocus) -> bool {
         | KeyEvent::Delete
         | KeyEvent::CtrlZ
         | KeyEvent::CtrlShiftZ
+        | KeyEvent::CtrlD
+        | KeyEvent::CtrlC
+        | KeyEvent::CtrlV
         | KeyEvent::CtrlS
         | KeyEvent::CtrlR
         | KeyEvent::CtrlM
@@ -616,6 +641,9 @@ pub enum ItemKey {
     Right,
     Up,
     Down,
+    F10,
+    /// The context menu key.
+    Menu,
 }
 
 /// An [`ItemKey`] with the modifiers it was pressed with.
@@ -640,9 +668,11 @@ pub enum ItemNodeAction {
     TrackStep(isize),
     /// This Item's edge moves by one grid step.
     Trim(ItemEdge, isize),
+    /// This Item's menu opens.
+    Menu,
 }
 
-/// Enter selects, Ctrl+Enter toggles, ← and → nudge, Shift+← and Shift+→ trim the end, Ctrl+Shift+← and Ctrl+Shift+→ the start, Alt+↑ and Alt+↓ change the Track; under any other modifiers these keys do nothing.
+/// Enter selects, Ctrl+Enter toggles, ← and → nudge, Shift+← and Shift+→ trim the end, Ctrl+Shift+← and Ctrl+Shift+→ the start, Alt+↑ and Alt+↓ change the Track, Shift+F10 and the menu key open the Item's menu; under any other modifiers these keys do nothing.
 pub fn item_node_action(press: ItemKeyPress) -> Option<ItemNodeAction> {
     let modifiers = (press.ctrl, press.shift, press.alt);
     match (press.key, modifiers) {
@@ -656,6 +686,9 @@ pub fn item_node_action(press: ItemKeyPress) -> Option<ItemNodeAction> {
         (ItemKey::Right, (true, true, false)) => Some(ItemNodeAction::Trim(ItemEdge::Start, 1)),
         (ItemKey::Up, (false, false, true)) => Some(ItemNodeAction::TrackStep(-1)),
         (ItemKey::Down, (false, false, true)) => Some(ItemNodeAction::TrackStep(1)),
+        (ItemKey::F10, (false, true, false)) | (ItemKey::Menu, (false, false, false)) => {
+            Some(ItemNodeAction::Menu)
+        }
         _ => None,
     }
 }
@@ -691,6 +724,9 @@ pub fn project_key_to_command(
         | KeyEvent::T
         | KeyEvent::S
         | KeyEvent::Delete
+        | KeyEvent::CtrlD
+        | KeyEvent::CtrlC
+        | KeyEvent::CtrlV
         | KeyEvent::Left
         | KeyEvent::Right
         | KeyEvent::AltUp
@@ -698,7 +734,7 @@ pub fn project_key_to_command(
     }
 }
 
-/// The Arrange view's Item keys: S splits at the playhead the selected Items (none: the selected Track's), Delete deletes the selected Items, ← and → move the selected Items by one step of the grid drawn for `timeline` (a beat without one), Alt+↑ and Alt+↓ to the Track above or below.
+/// The Arrange view's Item keys: S splits at the playhead the selected Items (none: the selected Track's), Delete deletes the selected Items, T plays the next Take of the one selected Item (after the last, the first), Ctrl+D duplicates and Ctrl+C copies the selected Items, Ctrl+V pastes a filled clipboard at the playhead on the selected Track, ← and → move the selected Items by one step of the grid drawn for `timeline` (a beat without one), Alt+↑ and Alt+↓ to the Track above or below.
 pub fn item_key_to_command(
     key: KeyEvent,
     status: &Value,
@@ -713,6 +749,24 @@ pub fn item_key_to_command(
             at: transport.frames,
         }),
         KeyEvent::Delete if !selection.is_empty() => Some(Command::ItemDelete(selection.ids())),
+        KeyEvent::CtrlD if !selection.is_empty() => Some(Command::ItemDuplicate(selection.ids())),
+        KeyEvent::CtrlC if !selection.is_empty() => Some(Command::ItemCopy(selection.ids())),
+        KeyEvent::CtrlV if status["clipboard"].as_u64().unwrap_or_default() > 0 => {
+            Some(Command::ItemPaste {
+                track: usize::try_from(status["selected"].as_u64()?).ok()?,
+                at: transport.frames,
+            })
+        }
+        KeyEvent::T => {
+            let [id] = selection.ids()[..] else {
+                return None;
+            };
+            let item = items.iter().find(|item| item.id == id)?;
+            (item.takes > 1).then(|| Command::ItemTake {
+                id,
+                take: (item.take + 1) % item.takes,
+            })
+        }
         KeyEvent::AltUp | KeyEvent::AltDown => {
             let track_ids: Vec<u64> = track_rows(status).iter().map(|row| row.id).collect();
             let step = if key == KeyEvent::AltUp { -1 } else { 1 };
@@ -923,6 +977,18 @@ impl ItemSelection {
         self.0.extend(ids);
     }
 
+    /// After a duplicate or paste: the Items new in `after` since `before` become the selection, when there are any.
+    pub fn select_new(&mut self, before: &[u64], after: &[ItemBlock]) {
+        let new: BTreeSet<u64> = after
+            .iter()
+            .map(|item| item.id)
+            .filter(|id| !before.contains(id))
+            .collect();
+        if !new.is_empty() {
+            self.0 = new;
+        }
+    }
+
     /// Keeps the ids still in `after`. With `split_at`, a split there was sent: each Item new since `before` that starts at `split_at` is selected with the Item ending there on its Track, when that one was selected or nothing was.
     pub fn follow(&mut self, before: &[u64], after: &[ItemBlock], split_at: Option<u64>) {
         let had_none = self.is_empty();
@@ -1047,11 +1113,7 @@ pub fn move_preview(
         return MovePreview::default();
     };
     let start = grabbed.position as f64 + pointer.frame - drag.grab_frame;
-    let line = grid
-        .iter()
-        .map(|line| line.frame.round())
-        .filter(|_| pointer.snap)
-        .min_by(|a, b| (a - start).abs().total_cmp(&(b - start).abs()));
+    let line = nearest_line(grid, start, pointer.snap);
     let wanted = line.unwrap_or(start).round() as i64 - grabbed.position as i64;
     let earliest = moved.iter().map(|item| item.position).min().unwrap_or(0) as i64;
     let delta = wanted.max(-earliest);
@@ -1078,6 +1140,14 @@ pub fn move_preview(
         rows,
         snap_line,
     }
+}
+
+/// The whole frame of the `grid` line nearest `frame` when `snap`.
+pub(crate) fn nearest_line(grid: &[GridLine], frame: f64, snap: bool) -> Option<f64> {
+    grid.iter()
+        .map(|line| line.frame.round())
+        .filter(|_| snap)
+        .min_by(|a, b| (a - frame).abs().total_cmp(&(b - frame).abs()))
 }
 
 /// An Item's start or end.
@@ -1174,11 +1244,7 @@ pub fn trim_preview(
         ItemEdge::End => item.end(),
     };
     let wanted = from as f64 + frame - drag.grab_frame;
-    let line = grid
-        .iter()
-        .map(|line| line.frame.round())
-        .filter(|_| snap)
-        .min_by(|a, b| (a - wanted).abs().total_cmp(&(b - wanted).abs()));
+    let line = nearest_line(grid, wanted, snap);
     let moved = trimmed_edge(item, drag.edge, line.unwrap_or(wanted));
     let snap_line = line.map(|line| line as u64).filter(|line| *line == moved);
     let (start, end) = match drag.edge {

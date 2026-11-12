@@ -417,8 +417,22 @@ fn streamed_harness(
     size: Vec2,
     snapshot: Snapshot,
 ) -> (Harness<'static, App>, Sender<Snapshot>, TempDir) {
+    let (harness, updates, _sent, dir) = streamed_harness_sending(size, snapshot);
+    (harness, updates, dir)
+}
+
+/// A [`streamed_harness`] with the commands it sends.
+fn streamed_harness_sending(
+    size: Vec2,
+    snapshot: Snapshot,
+) -> (
+    Harness<'static, App>,
+    Sender<Snapshot>,
+    Receiver<Command>,
+    TempDir,
+) {
     let (config, dir) = bass_config();
-    let (commands, _sent) = mpsc::channel();
+    let (commands, sent) = mpsc::channel();
     let (updates, snapshots) = mpsc::channel();
     updates.send(snapshot).unwrap();
     let mut harness = Harness::builder()
@@ -427,7 +441,7 @@ fn streamed_harness(
         .renderer(shared_gpu_renderer())
         .build_eframe(move |cc| App::with_updates(cc, &config, snapshots, commands));
     harness.run_steps(2);
-    (harness, updates, dir)
+    (harness, updates, sent, dir)
 }
 
 fn click_button(harness: &mut Harness<App>, label: &str) {
@@ -1839,6 +1853,138 @@ fn shift_arrows_trim_a_focused_item() {
             },
         ]
     );
+}
+
+/// A press and release of the secondary button without movement at `pos`.
+fn right_click_at(harness: &mut Harness<App>, pos: Pos2) {
+    harness.event(Event::PointerMoved(pos));
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(Event::PointerButton {
+            pos,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(1);
+    }
+    harness.run_steps(1);
+}
+
+fn with_clipboard(mut snapshot: Snapshot, items: u64) -> Snapshot {
+    snapshot.status.as_mut().unwrap()["clipboard"] = json!(items);
+    snapshot
+}
+
+#[test]
+fn the_item_menu_chooses_a_take_and_edits_the_item() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let at = item_rect(&harness, GUITAR_ITEM).center();
+    right_click_at(&mut harness, at);
+    assert!(
+        item_selected(&harness, GUITAR_ITEM),
+        "a right-click selects"
+    );
+    assert_eq!(
+        harness.get_by_label("guitar-2").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True),
+        "the active Take is marked"
+    );
+    sent_now(&sent);
+    harness.get_by_label("guitar-1").click();
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), [Command::ItemTake { id: 1, take: 0 }]);
+    for (entry, command) in [
+        (
+            "Split at playhead",
+            Command::ItemSplit {
+                ids: Some(vec![1]),
+                at: 230_400,
+            },
+        ),
+        ("Duplicate", Command::ItemDuplicate(vec![1])),
+        ("Copy", Command::ItemCopy(vec![1])),
+        ("Delete", Command::ItemDelete(vec![1])),
+    ] {
+        right_click_at(&mut harness, at);
+        harness.get_by_label(entry).click();
+        harness.run_steps(2);
+        assert_eq!(sent_now(&sent), [command], "{entry}");
+    }
+}
+
+#[test]
+fn the_empty_lane_menu_pastes_where_clicked_once_something_is_copied() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let at = keys_lane_point(&harness, 2.0 * BEAT_PX + 3.0);
+    right_click_at(&mut harness, at);
+    assert!(harness.get_by_label("Paste").accesskit_node().is_disabled());
+    let (mut harness, sent2, _dir2) =
+        harness_with(WINDOW, with_clipboard(project_snapshot("stopped"), 1));
+    drop(sent);
+    right_click_at(&mut harness, at);
+    sent_now(&sent2);
+    harness.get_by_label("Paste").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent2),
+        [Command::ItemPaste {
+            track: 2,
+            at: 48_000
+        }]
+    );
+}
+
+#[test]
+fn shift_f10_opens_the_item_menu_from_the_keyboard() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness.get_by_label(GUITAR_ITEM).focus();
+    harness.run_steps(2);
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::F10);
+    harness.run_steps(2);
+    harness.get_by_label("Duplicate");
+    sent_now(&sent);
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), [Command::ItemTake { id: 1, take: 0 }]);
+}
+
+#[test]
+fn t_and_ctrl_keys_take_duplicate_copy_and_paste() {
+    let snapshot = with_clipboard(project_snapshot("stopped"), 1);
+    let (mut harness, updates, sent, _dir) = streamed_harness_sending(WINDOW, snapshot.clone());
+    let at = item_rect(&harness, GUITAR_ITEM).center();
+    click_at(&mut harness, at);
+    sent_now(&sent);
+    harness.key_press(Key::T);
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::D);
+    harness.run_steps(1);
+    harness.event(Event::Copy);
+    harness.run_steps(1);
+    harness.event(Event::Paste("text".to_string()));
+    harness.run_steps(1);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::ItemTake { id: 1, take: 0 },
+            Command::ItemDuplicate(vec![1]),
+            Command::ItemCopy(vec![1]),
+            Command::ItemPaste {
+                track: 0,
+                at: 230_400
+            },
+        ]
+    );
+    let mut pasted = snapshot;
+    pasted.items.as_mut().unwrap()["tracks"][2]["items"] = json!([
+        {"id": 9, "position": 230_400, "bars_beats": "3.2", "offset": 0, "length": 96_000,
+         "take": 0, "takes": ["takes/bass-1.wav"], "take_frames": 480_000},
+    ]);
+    updates.send(pasted).unwrap();
+    harness.run_steps(2);
+    assert!(item_selected(&harness, "Item bass-1, Keys, bar 3"));
+    assert!(!item_selected(&harness, GUITAR_ITEM));
 }
 
 #[test]

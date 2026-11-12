@@ -141,6 +141,18 @@ pub enum Command {
         at: u64,
     },
     ItemDelete(Vec<u64>),
+    /// Makes the Take at index `take` the one the Item `id` plays.
+    ItemTake {
+        id: u64,
+        take: usize,
+    },
+    ItemDuplicate(Vec<u64>),
+    ItemCopy(Vec<u64>),
+    /// Pastes the Daemon's clipboard with its first Item on the Track at index `track`, starting at the frame `at`.
+    ItemPaste {
+        track: usize,
+        at: u64,
+    },
     /// Moves the Item `id`'s start or end, or both, to those timeline frames.
     ItemTrim {
         id: u64,
@@ -1227,6 +1239,11 @@ pub enum KeyEvent {
     Delete,
     CtrlZ,
     CtrlShiftZ,
+    CtrlD,
+    /// Ctrl+C, or the copy event it becomes.
+    CtrlC,
+    /// Ctrl+V, or the paste event it becomes.
+    CtrlV,
     Left,
     Right,
     AltUp,
@@ -1319,6 +1336,9 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
         | KeyEvent::Delete
         | KeyEvent::CtrlZ
         | KeyEvent::CtrlShiftZ
+        | KeyEvent::CtrlD
+        | KeyEvent::CtrlC
+        | KeyEvent::CtrlV
         | KeyEvent::Left
         | KeyEvent::Right
         | KeyEvent::AltUp
@@ -1451,6 +1471,13 @@ pub fn requests_until_quit(
             Command::ItemSplit { ids, at } => Request::ItemSplit { ids, at },
             Command::ItemDelete(ids) => Request::ItemDelete { ids },
             Command::ItemTrim { id, start, end } => Request::ItemTrim { id, start, end },
+            Command::ItemTake { id, take } => Request::ItemTake { id, take },
+            Command::ItemDuplicate(ids) => Request::ItemDuplicate { ids },
+            Command::ItemCopy(ids) => Request::ItemCopy { ids },
+            Command::ItemPaste { track, at } => Request::ItemPaste {
+                track: TrackRef::Index(track),
+                at,
+            },
             Command::TrackAdd => Request::TrackAdd { name: None },
             Command::TrackSet { track, edit } => track_set_request(track, edit),
             Command::TrackSelect(index) => {
