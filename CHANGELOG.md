@@ -6,6 +6,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Added
 
+- Items have an id (Control API `items` `id`, first on each `project items` line) and may have a `length`; where Items overlap on a Track the one on top (the newest) is heard, and Item edges fade over 5 ms with a crossfade where one Item cuts into another. A `project.toml` without Item ids loads with ids in file order.
 - `autowah` Module, an envelope filter for bass and guitar: the input's envelope sweeps a low-, band- or high-pass filter between `freq_low` and `freq_high`, up or down, with `sensitivity`, `attack`, `decay`, `q`, `dry` and `wet`.
 - `eq` Module, a parametric equaliser: 12 dB/oct `low_cut` and `high_cut`, a low and a high shelf, two bells with their own `q`, and `output`.
 - `blend` Module, a bass DI blend drive: below `crossover` the signal stays clean, above it `presence` and `drive` clip it at `level`; `blend` mixes the clean input with that, and `bass` (40 or 80 Hz), `mid` (500 or 1000 Hz) and `treble` shape the result, also at `blend` 0.
@@ -55,6 +56,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Fixed
 
+- `locate` is bounded by where each Item really ends (its active Take less its `offset`), no longer by its longest Take.
 - A Cabinet IR with a NaN or infinite sample is refused with `ir <name>: non-finite sample`.
 - `rack_add cabinet` finds `default-cab.wav` or `bass-cab.wav` under the IR directory as well as the Bank directory.
 - An IR path error names both directories it looked in.

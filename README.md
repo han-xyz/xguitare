@@ -393,11 +393,13 @@ closed Live
 - `project items` prints one line per Item: its id, its Track, where it starts as `<bar>.<beat>`, its length in seconds (the Item's own length if it has one, else its active Take's frames minus the frames its `offset` skips) and which Take plays, e.g. `3 Guitar 2.1 4.00s take 2/2`. Right after `stop` the new Takes are not listed yet: they show up about a second later, once the disk thread has finished writing them.
 - `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name (a name cannot be only digits); `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off`, `--to-master on|off` and `--name`.
 - An armed Track monitors its input through its Rack, also while stopped, and records while recording; an unarmed Track plays its Items.
-- `play`, `stop` (the playhead stays), `record` (from stopped, after the count-in) and `locate <bar>.<beat>|<bar>|<seconds>s`, e.g. `locate 3.2` or `locate 12.5s`, up to an hour past the last Take or the loop end.
+- `play`, `stop` (the playhead stays), `record` (from stopped, after the count-in) and `locate <bar>.<beat>|<bar>|<seconds>s`, e.g. `locate 3.2` or `locate 12.5s`, up to an hour past the end of the last Item or the loop end.
 - `tempo <bpm> [<beats>/<note>]`, e.g. `tempo 100 3/4`; `click on|off [--count-in 0|1|2]`; all are saved with the Project. The loop region is set through the Control API `loop`, or in the GUI by dragging its edges on the ruler or pressing `R`.
 - While recording, a Track cannot be removed and an armed Track's input cannot change; `stop` first.
 
 Each Track records the dry input; its Rack is applied on playback, so its sound can still change after recording. A recording becomes a Take on a new Item; with the loop on, each pass after a wrap becomes another Take of the same Item, the newest one playing.
+
+Where Items overlap on a Track only the one on top, the newest, is heard; the Items under it are silent where it covers them. Every Item fades in and out over 5 ms, and where one Item cuts into another the two cross over those 5 ms, so edges do not click.
 
 ### Mixer
 
