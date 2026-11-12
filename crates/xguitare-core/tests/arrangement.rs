@@ -305,6 +305,37 @@ fn abutting_items_of_two_takes_cross_with_no_dip() {
     }
 }
 
+fn assert_level_across(left: &[f32], level: f32) {
+    let step = level / FADE_FRAMES as f32;
+    let inside = FADE_FRAMES..left.len() - FADE_FRAMES;
+    for (&sample, frame) in left[inside.clone()].iter().zip(inside) {
+        assert!(
+            (sample - level).abs() <= step + TOLERANCE,
+            "frame {frame}: {sample}"
+        );
+    }
+}
+
+#[test]
+fn a_split_with_the_right_half_one_frame_left_crosses_with_no_dip() {
+    let mut first = item(0, "", 4800);
+    first.length = Some(2000);
+    let mut second = item(1999, "", 4800);
+    second.offset = 2000;
+    let left = played(vec![(first, 0.5), (second, 0.5)], 4799);
+    assert_level_across(&left, 0.5);
+}
+
+#[test]
+fn a_split_with_the_left_half_one_frame_right_crosses_with_no_dip() {
+    let mut second = item(2000, "", 4800);
+    second.offset = 2000;
+    let mut first = item(1, "", 4800);
+    first.length = Some(2000);
+    let left = played(vec![(second, 0.5), (first, 0.5)], 4800);
+    assert_level_across(&left[1..], 0.5);
+}
+
 #[test]
 fn a_covered_stretch_carries_none_of_the_lower_item() {
     let left = played(

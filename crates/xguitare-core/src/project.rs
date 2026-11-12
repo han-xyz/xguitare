@@ -632,7 +632,7 @@ pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
 }
 
 fn check_item_ids(project: &Project) -> Result<(), ProjectError> {
-    if project.next_item_id > LAST_FRAME {
+    if project.next_item_id >= LAST_FRAME {
         return Err(ProjectError::NextItemIdPastLast);
     }
     let mut ids = HashSet::new();
@@ -985,7 +985,7 @@ impl fmt::Display for ProjectError {
             ProjectError::DuplicateItemId(id) => write!(f, "two items have id {id}"),
             ProjectError::NextItemId => f.write_str("next_item_id must be above every item id"),
             ProjectError::NextItemIdPastLast => {
-                write!(f, "next_item_id must be at most {LAST_FRAME}")
+                write!(f, "next_item_id must be below {LAST_FRAME}")
             }
             ProjectError::EmptyName => f.write_str("project name must not be empty"),
             ProjectError::Exists(name) => write!(f, "a project named '{name}' already exists"),
