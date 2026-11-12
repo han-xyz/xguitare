@@ -356,7 +356,7 @@ Projects live under `projects_dir`, by default `~/Music/xguitare`; the GUI's `Se
   renders/demo-song.wav   each Render, a stereo WAV (see Render)
 ```
 
-Takes are never deleted, also not when their Track is removed. `project.toml` names each Take file `takes/<name>.wav`; any other path is an error when the Project is opened or saved.
+Take files are deleted only by a clean-up (see [Clean up Takes](#clean-up-takes)); otherwise never, also not when their Item or Track is removed. `project.toml` names each Take file `takes/<name>.wav`; any other path is an error when the Project is opened or saved.
 
 ### Record a Track
 
@@ -433,6 +433,19 @@ $ xguitare item paste --track Guitar --at 9.1
 #### Undo
 
 `xguitare project undo` takes back the last Item edit (a duplicate or a paste too), recorded Take, or Track add or remove, and prints what it undid (`undid move 2 Items`); `xguitare project redo` does it again (`redid move 2 Items`). The last 200 are kept while the Project is open; closing it clears them, and a new edit clears what could be redone. Mixer, Rack, tempo and loop changes are not undone this way. An undone Take keeps its file in `takes/`. `xguitare status` shows the next undo and redo (`undo: trim, redo: -`). Neither works while recording.
+
+#### Clean up Takes
+
+Take files stay in `takes/` when their Item is deleted, a Take is undone or a Track is removed, so a Project folder only grows. `xguitare takes unused` lists the Take files nothing uses any more, with their sizes and the total:
+
+```console
+$ xguitare takes unused
+takes/guitar-2.wav 1.2 MB
+takes/guitar-3.wav 800 B
+2 unused takes, 1.2 MB
+```
+
+A file is unused when no Item has it as any of its Takes, active or not, the clipboard does not hold it, and it is not being recorded or written. `xguitare takes clean` prints the same list and `nothing deleted; pass --yes to delete`; `xguitare takes clean --yes` deletes them all (`deleted 2 takes, 1.2 MB freed`). Deleting first saves the Project and then clears Undo and the clipboard; it is refused while recording. In the GUI, `Clean up Takes…` in the `Project` section does the same. Nothing else deletes Take files.
 
 ### Mixer
 
@@ -522,7 +535,7 @@ The look is called the Faceplate: dark panels, each Rack unit a faceplate betwee
 
 The left panel has these sections, from the top, each in a framed box; click a section's title strip to close or open it (`Audio` and `Settings` start closed):
 
-- `Project`: with no Project open, `No Project open`, a `Name` field with `New` (creates the Project and opens it, as `xguitare project new` does) and `Open a Project`, a menu of the Projects in `projects_dir`, read again when it opens; choosing one opens it, and an invalid one is greyed out with its error on hover. With a Project open, its name, `audio N MB` (the Take audio it holds in memory), `Save` (`xguitare project save`) and `Close` (`xguitare project close`). See [Project view](#project-view).
+- `Project`: with no Project open, `No Project open`, a `Name` field with `New` (creates the Project and opens it, as `xguitare project new` does) and `Open a Project`, a menu of the Projects in `projects_dir`, read again when it opens; choosing one opens it, and an invalid one is greyed out with its error on hover. With a Project open, its name, `audio N MB` (the Take audio it holds in memory), `Save` (`xguitare project save`) and `Close` (`xguitare project close`), and `Clean up Takes…`, a dialog listing the Take files nothing uses any more with their sizes and the total; `Delete n files` deletes them (`xguitare takes clean --yes`), saving the Project and clearing Undo, and a notice says `Deleted n Takes, <size> freed`. See [Project view](#project-view).
 - `Preset`: the active Preset's name in large type, and under it `Program N` (its Bank position) and `unsaved changes` while the live Rack differs from the Preset file (`modified` in `xguitare status`). `Save` writes the live Rack to the active Preset's file, as `xguitare save` does. `Save as new` opens a name field: type a name and press Enter or the `Save` under it to write a new Preset file in the Bank directory and make it the active Preset, as `xguitare save --as <name>` does; `Cancel` closes the field. An empty or taken name shows the Daemon's error in the error toast (`a preset named 'Funk' already exists`).
 - `Guitar Bank` or `Bass Bank`, after the Bank kind: a search field, which keeps the rows whose name contains the text, in any case, or whose program number is the text, and one row per Bank entry, `program name`, the active Preset highlighted. Click a row to load it. An invalid entry is greyed out; hover over it for the parse error.
 - `Metronome`: `On`/`Off`, the beat light, `Tap`, the tempo, the meter and the volume (see [Metronome](#metronome)).

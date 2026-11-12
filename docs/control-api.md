@@ -995,6 +995,51 @@ Response:
 
 Errors: `no project open`; `no such take: <file>` for a file that is not a loaded Take of the open Project.
 
+## takes_unused
+
+Lists the open Project's Take files that nothing uses any more: regular files `takes/<name>.wav` directly in its `takes/` folder that no Item names in any of its Takes (active or not), that the clipboard does not hold, and that are not being recorded or still being written. Symlinks, subfolders and other files are never listed. Sorted by name.
+
+Request:
+
+```json
+{"cmd":"takes_unused"}
+```
+
+Response:
+
+```json
+{"ok":true,"files":[{"file":"takes/guitar-2.wav","bytes":1234567},{"file":"takes/guitar-3.wav","bytes":800}],"bytes":1235367}
+```
+
+| Key | Value |
+| --- | --- |
+| `files` | Each unused Take file as `takes/<name>.wav`, with its size in `bytes`. |
+| `bytes` | The total size. |
+
+Errors: `no project open`; `takes is not a directory` when `takes` is a symlink or a file; `cannot read <path>: <reason>`.
+
+## takes_clean
+
+Deletes Take files that `takes_unused` lists. Every name is checked first, against the unused list as it is now: one refused name refuses the whole request and nothing is deleted. Then the Project is saved (`project.toml` written, the autosave removed), so no saved file names a deleted Take; the deleted Takes leave memory, the undo and redo histories and the clipboard are cleared, and the Revision goes up. Each file is checked again just before it is removed: a symlink or anything but a regular file is refused, never followed. Take files are deleted only by this request.
+
+Request:
+
+```json
+{"cmd":"takes_clean","files":["takes/guitar-2.wav","takes/guitar-3.wav"]}
+```
+
+`files` are Take files as `takes_unused` lists them; a name given twice counts once. An empty list deletes nothing and does not save.
+
+Response:
+
+```json
+{"ok":true,"deleted":2,"bytes":1235367}
+```
+
+`deleted` is the number of files removed and `bytes` their total size.
+
+Errors: `no project open`; `cannot clean takes while recording` after `record`, until `stop` or `play`; `invalid take file '<file>'` for a name that is not `takes/<name>.wav` or holds `..` or a control character; `not an unused take: <file>` for a file that is not listed as unused (also one replaced by a symlink after listing); `takes is not a directory`; the errors of `project_save`; `cannot read <file>: <reason>`; `cannot delete <file>: <reason>`.
+
 ## track_add
 
 Adds a Track at the end with the active Preset's Modules (none when no Preset is active), no input, 0 dB, centred, and selects it. Without `name` it is `Track <n>`, the first number free.
