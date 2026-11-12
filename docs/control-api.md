@@ -63,7 +63,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"clipboard":0,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"clipboard":0,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"id":0,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"id":1,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
@@ -97,7 +97,7 @@ Response:
 | `selected` | Index of the selected Track. |
 | `undo`, `redo` | The label of what `project_undo` and `project_redo` would take back or do again, e.g. `move 2 Items` or `record Bass DI`; `null` when there is none. |
 | `clipboard` | How many Items `item_copy` put in the clipboard, which `item_paste` places; `0` when it is empty. |
-| `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
+| `tracks` | One entry per Track in order: `id` (as in `items`), `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
 | `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed, and is not given to a later Bus while the Project is open; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
 | `master` | `volume_db` (`null` when off), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
 
@@ -965,6 +965,33 @@ Response:
 ```
 
 Errors, besides those above: `clipboard is empty` before any `item_copy` in the open Project; `no track '<track>'`; `cannot paste: take <file> no longer exists` when a Take file of an Item to place is gone from the Project folder (nothing is placed).
+
+## take_peaks
+
+Pages of the peak table of a Take of the open Project, for drawing its waveform: the lowest and highest sample of every 256 frames, the last partial run included, scaled to −127…127. The Daemon builds the table when the Take is loaded or finished; a Take file does not change afterwards, so a client fetches each file once.
+
+Request:
+
+```json
+{"cmd":"take_peaks","file":"takes/guitar-2.wav","first":0,"count":16384}
+```
+
+`file` is a Take file as `items` lists it. `first` is the first pair (default 0); `count` the pairs wanted (default and most 16384).
+
+Response:
+
+```json
+{"ok":true,"frames_per_peak":256,"total":750,"first":0,"peaks":[-3,4,-80,96,-61,70]}
+```
+
+| Key | Value |
+| --- | --- |
+| `frames_per_peak` | Frames one pair covers: 256. |
+| `total` | Pairs in the whole table. |
+| `first` | The first pair of this page, as asked. |
+| `peaks` | `[min, max, …]`, one pair per 256 frames from `first`; empty when `first` is at or past `total`. |
+
+Errors: `no project open`; `no such take: <file>` for a file that is not a loaded Take of the open Project.
 
 ## track_add
 
