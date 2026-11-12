@@ -616,6 +616,11 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ProjectRedo => format!("redid {}\n", text(&payload["label"])),
         Request::Items => render_items(payload)?,
         Request::TakesUnused => render_takes_unused(payload),
+        Request::TakesClean { .. } => format!(
+            "deleted {} takes, {} freed\n",
+            text(&payload["deleted"]),
+            size_text(payload["bytes"].as_u64().unwrap_or(0))
+        ),
         Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
         Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),
         Request::TrackSet { .. } => render_track(payload),

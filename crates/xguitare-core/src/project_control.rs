@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
@@ -21,8 +22,8 @@ use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
-    Item, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track, autosave_due,
-    autosave_newer, check_project, check_track, checked_name,
+    AUTOSAVE_FILE, Item, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track,
+    autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
@@ -1108,6 +1109,32 @@ pub(crate) fn kept_takes(state: &EngineState) -> Result<(&Path, HashSet<String>)
             .cloned(),
     );
     Ok((&open.dir, kept))
+}
+
+/// Whether the open Project is recording.
+pub(crate) fn is_recording(state: &EngineState) -> Result<bool, String> {
+    Ok(state.projects.open.as_ref().ok_or(NO_PROJECT)?.recording)
+}
+
+/// Before the Take `files` are deleted: saves the open Project, removes its autosave, and forgets their audio, the undo history and the clipboard.
+pub(crate) fn forget_takes(state: &mut EngineState, files: &[String]) -> Result<(), String> {
+    project_save(state)?;
+    let open = open_project_mut(state);
+    let autosave = open.dir.join(AUTOSAVE_FILE);
+    match fs::remove_file(&autosave) {
+        Err(err) if err.kind() != ErrorKind::NotFound => {
+            return Err(format!("cannot remove {}: {err}", autosave.display()));
+        }
+        _ => {}
+    }
+    for file in files {
+        open.takes.remove(file);
+    }
+    sync_peaks(open);
+    open.history = History::default();
+    open.clipboard.clear();
+    state.revision += 1;
+    Ok(())
 }
 
 /// The first Take file of `items`, active or not, that is no longer in the open Project's folder.

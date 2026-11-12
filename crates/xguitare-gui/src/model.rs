@@ -2514,6 +2514,7 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::ItemPaste { .. } => "Could not paste the Items",
         Request::TakePeaks { .. } => "Could not read the waveform",
         Request::TakesUnused => "Could not list the unused Takes",
+        Request::TakesClean { .. } => "Could not clean up the Takes",
     }
 }
 

@@ -5,9 +5,10 @@ use serde_json::{Value, json};
 
 use crate::control::EngineState;
 use crate::project::{TAKES_DIR, is_take_file};
-use crate::project_control::kept_takes;
+use crate::project_control::{forget_takes, is_recording, kept_takes};
 
 const NOT_A_DIRECTORY: &str = "takes is not a directory";
+const CLEANING_WHILE_RECORDING: &str = "cannot clean takes while recording";
 
 /// The open Project's Take files that nothing keeps, with their sizes and the total.
 pub(crate) fn takes_unused(state: &EngineState) -> Result<Value, String> {
@@ -18,6 +19,53 @@ pub(crate) fn takes_unused(state: &EngineState) -> Result<Value, String> {
         .map(|(file, bytes)| json!({"file": file, "bytes": bytes}))
         .collect();
     Ok(json!({"files": files, "bytes": bytes}))
+}
+
+/// Deletes the Take `files`, each of which must be one [`takes_unused`] lists now, after saving the Project; one refused name deletes nothing. Refused while recording.
+pub(crate) fn takes_clean(state: &mut EngineState, files: &[String]) -> Result<Value, String> {
+    if is_recording(state)? {
+        return Err(CLEANING_WHILE_RECORDING.to_string());
+    }
+    let unused = unused_takes(state)?;
+    for file in files {
+        if !is_cleanable(file) {
+            return Err(format!("invalid take file '{}'", file.escape_debug()));
+        }
+        if unused.binary_search_by(|(name, _)| name.cmp(file)).is_err() {
+            return Err(format!("not an unused take: {file}"));
+        }
+    }
+    let mut files = files.to_vec();
+    files.sort();
+    files.dedup();
+    if files.is_empty() {
+        return Ok(json!({"deleted": 0, "bytes": 0}));
+    }
+    let (dir, _) = kept_takes(state)?;
+    let dir = dir.to_path_buf();
+    forget_takes(state, &files)?;
+    let takes = takes_dir(&dir)?;
+    let mut bytes = 0;
+    for file in &files {
+        bytes += delete_take(&takes, file)?;
+    }
+    Ok(json!({"deleted": files.len(), "bytes": bytes}))
+}
+
+/// Removes the regular file `file` (`takes/<name>.wav`) from the folder `takes` and returns its size; a symlink or anything else there is refused, never followed.
+fn delete_take(takes: &Path, file: &str) -> Result<u64, String> {
+    let name = file
+        .strip_prefix(TAKES_DIR)
+        .unwrap_or(file)
+        .trim_start_matches('/');
+    let path = takes.join(name);
+    let metadata =
+        fs::symlink_metadata(&path).map_err(|err| format!("cannot read {file}: {err}"))?;
+    if !metadata.is_file() {
+        return Err(format!("not an unused take: {file}"));
+    }
+    fs::remove_file(&path).map_err(|err| format!("cannot delete {file}: {err}"))?;
+    Ok(metadata.len())
 }
 
 /// Each regular file `takes/<name>.wav` of the open Project that [`kept_takes`] does not name, with its size, sorted by name; a symlink is never followed.
