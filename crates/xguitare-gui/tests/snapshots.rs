@@ -2493,3 +2493,41 @@ fn a_hidden_fixed_unit_chip_dragged_into_the_rack_shows_it_at_the_gap() {
     harness.get_by_label("Tuner unit, 4 of 8");
     assert_eq!(sent_now(&sent), []);
 }
+
+fn scroll_left_panel(harness: &mut Harness<App>, by: f32) {
+    let panel = harness.get_by_label("Add Module").rect();
+    harness.event(Event::PointerMoved(panel.center()));
+    harness.event(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, -by),
+        phase: TouchPhase::Move,
+        source: MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(20);
+}
+
+#[test]
+fn rack_layout_snapshots() {
+    let (mut between, _, _dir) = harness_sized(DEFAULT_WINDOW);
+    let tuner = fixed_unit_rect(&between, "Tuner");
+    let from = pos2(tuner.left() + 130.0, tuner.center().y);
+    let to = pos2(from.x, unit_top(&between, "tonestack") + 10.0);
+    drag_and_release(&mut between, from, to);
+    between.get_by_label("Tuner unit, 4 of 8");
+    write_png(&mut between, "rack-tuner-between");
+
+    let (mut meters_hidden, _, _dir) = harness_sized(DEFAULT_WINDOW);
+    click_button(&mut meters_hidden, "Hide Meters");
+    write_png(&mut meters_hidden, "rack-meters-hidden");
+
+    let (mut both_hidden, _, _dir) = harness_sized(DEFAULT_WINDOW);
+    click_button(&mut both_hidden, "Hide Meters");
+    click_button(&mut both_hidden, "Hide Tuner");
+    scroll_left_panel(&mut both_hidden, 400.0);
+    let chip = both_hidden
+        .get_by_role_and_label(Role::Button, "Show Tuner")
+        .rect();
+    assert!(chip.bottom() <= LEFT_PANEL_BOTTOM_1280X800, "{chip:?}");
+    write_png(&mut both_hidden, "rack-fixed-hidden");
+}
