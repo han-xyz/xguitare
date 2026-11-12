@@ -536,6 +536,14 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ClipReset { .. } => "clip reset\n".to_string(),
         Request::Render { .. } => format!("rendering {}\n", text(&payload["file"])),
         Request::RenderCancel => "render cancelling\n".to_string(),
+        Request::ItemMove { .. }
+        | Request::ItemTrim { .. }
+        | Request::ItemSplit { .. }
+        | Request::ItemTake { .. } => render_changed_items(payload),
+        Request::ItemDelete { .. } => {
+            let ids: Vec<String> = items(&payload["deleted"]).map(text).collect();
+            format!("deleted {}\n", ids.join(" "))
+        }
         Request::Ports
         | Request::SetPorts { .. }
         | Request::Settings
@@ -593,6 +601,25 @@ fn render_items(payload: &Value) -> Result<String, String> {
         }
     }
     Ok(lines)
+}
+
+/// One line per Item an edit changed: `<id> track <index> at <bar.beat> (frame <position>), <length> frames, take <n>/<takes>`.
+fn render_changed_items(payload: &Value) -> String {
+    let mut lines = String::new();
+    for item in items(&payload["items"]) {
+        let _ = writeln!(
+            lines,
+            "{} track {} at {} (frame {}), {} frames, take {}/{}",
+            text(&item["id"]),
+            text(&item["track"]),
+            text(&item["bars_beats"]),
+            text(&item["position"]),
+            text(&item["length"]),
+            item["take"].as_u64().unwrap_or(0) + 1,
+            items(&item["takes"]).count()
+        );
+    }
+    lines
 }
 
 fn track_label(payload: &Value) -> String {

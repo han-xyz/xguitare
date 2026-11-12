@@ -2425,6 +2425,11 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::Render { .. } => "Could not start the Render",
         Request::RenderCancel => "Could not cancel the Render",
         Request::ClipReset { .. } => "Could not reset the clip",
+        Request::ItemMove { .. } => "Could not move the Items",
+        Request::ItemTrim { .. } => "Could not trim the Item",
+        Request::ItemSplit { .. } => "Could not split the Items",
+        Request::ItemDelete { .. } => "Could not delete the Items",
+        Request::ItemTake { .. } => "Could not change the Take",
     }
 }
 

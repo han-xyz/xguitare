@@ -14,6 +14,7 @@ use crate::control::{
     BusRef, EngineState, IndexOrName, MixPeaks, Position, TrackRef, TransportAction, peak_db, slug,
 };
 use crate::engine::{Command, MeterPoint, transport_from_code};
+use crate::flatten::{flatten, item_fade_frames};
 use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
@@ -42,6 +43,7 @@ const MASTER_NAME: &str = "Master";
 /// `moved_from` when no Track or Bus moved.
 const NOTHING_MOVED: (usize, usize) = (MAX_TRACKS, MAX_BUSES);
 const ONE_TARGET: &str = "give track, bus or master, not more than one";
+const EDITING_WHILE_RECORDING: &str = "cannot edit items while recording";
 const SECONDS_SUFFIX: char = 's';
 
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
@@ -843,24 +845,77 @@ pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
             let items: Vec<Value> = track
                 .items
                 .iter()
-                .map(|item| {
-                    let files: Vec<&str> =
-                        item.takes.iter().map(|take| take.file.as_str()).collect();
-                    json!({
-                        "id": item.id,
-                        "position": item.position,
-                        "bars_beats": bars_beats(project, item.position),
-                        "offset": item.offset,
-                        "length": item.played_frames(),
-                        "take": item.take,
-                        "takes": files,
-                    })
-                })
+                .map(|item| item_json(project, item))
                 .collect();
             json!({"id": id, "name": track.name, "items": items})
         })
         .collect();
     Ok(json!({"sample_rate": project.sample_rate, "tracks": tracks}))
+}
+
+/// An Item as `items` lists it.
+pub(crate) fn item_json(project: &Project, item: &Item) -> Value {
+    let files: Vec<&str> = item.takes.iter().map(|take| take.file.as_str()).collect();
+    json!({
+        "id": item.id,
+        "position": item.position,
+        "bars_beats": bars_beats(project, item.position),
+        "offset": item.offset,
+        "length": item.played_frames(),
+        "take": item.take,
+        "takes": files,
+    })
+}
+
+/// The open Project and its selected Track, for an Item edit; refused while recording.
+pub(crate) fn editable_project(state: &EngineState) -> Result<(&Project, usize), String> {
+    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+    if open.recording {
+        return Err(EDITING_WHILE_RECORDING.to_string());
+    }
+    Ok((&open.project, open.selected))
+}
+
+/// Makes `project`, the open Project with its Items edited, the open one: checks it, loads each active Take not yet in memory and sends every Track whose Items changed its new Item list, which the Arrangement crossfades to; on an error nothing changes.
+pub(crate) fn apply_items(state: &mut EngineState, project: Project) -> Result<(), String> {
+    check_project(&project).map_err(|err| err.to_string())?;
+    let open = open_project(state);
+    let mut takes = open.takes.clone();
+    for item in project.tracks.iter().flat_map(|track| &track.items) {
+        let file = &item.takes[item.take].file;
+        if !takes.contains_key(file) {
+            let samples = load_take(&open.dir, file)
+                .map_err(|err| format!("cannot load take {file}: {err}"))?;
+            takes.insert(file.clone(), samples);
+        }
+    }
+    let mut commands = Vec::new();
+    if rate_mismatch(open.project.sample_rate, state.sample_rate).is_none() {
+        let fade = item_fade_frames(state.sample_rate);
+        for (index, (new, old)) in project.tracks.iter().zip(&open.project.tracks).enumerate() {
+            if new.items != old.items {
+                let items = flatten(&new.items, &takes, fade).map_err(|err| err.to_string())?;
+                commands.push(ArrangementCommand::SetTrackItems {
+                    track: index,
+                    items,
+                });
+            }
+        }
+    }
+    state.queues.drain_from_audio();
+    if state.queues.commands.slots() < commands.len() {
+        return Err(ENGINE_BUSY.to_string());
+    }
+    for command in commands {
+        state
+            .queues
+            .commands
+            .push(Command::Arrangement(command))
+            .map_err(|_| ENGINE_BUSY.to_string())?;
+    }
+    open_project_mut(state).takes = takes;
+    commit(state, project);
+    Ok(())
 }
 
 /// The Project fields of `status`, with `track_peaks` the input peaks of each Track and `mix` the post-fader peaks since this connection's last `status`.

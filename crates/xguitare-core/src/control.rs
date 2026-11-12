@@ -20,6 +20,7 @@ use crate::engine::{
     take_peak,
 };
 use crate::firstrun::{BASS_IR, DEFAULT_IR, ensure_bank};
+use crate::item_control::{item_delete, item_move, item_split, item_take, item_trim};
 use crate::metronome::Metronome;
 use crate::metronome_control::{metronome, metronome_status, metronome_tap, practice_settings};
 use crate::mixer_control::{
@@ -271,6 +272,32 @@ pub enum Request {
         bus: Option<BusRef>,
         #[serde(default, skip_serializing_if = "is_false")]
         master: bool,
+    },
+    /// Moves Items by `delta` frames, onto `track` for the first when given.
+    ItemMove {
+        ids: Vec<u64>,
+        delta: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<TrackRef>,
+    },
+    /// Moves an Item's start and end to these timeline frames.
+    ItemTrim {
+        id: u64,
+        start: Option<u64>,
+        end: Option<u64>,
+    },
+    /// Splits Items at the timeline frame `at`; without `ids`, those on the selected Track.
+    ItemSplit {
+        ids: Option<Vec<u64>>,
+        at: u64,
+    },
+    ItemDelete {
+        ids: Vec<u64>,
+    },
+    /// Makes the Take at index `take` the Item's active one.
+    ItemTake {
+        id: u64,
+        take: usize,
     },
 }
 
@@ -666,6 +693,11 @@ fn handle_from(
         }
         Request::Render { range, bits, name } => render(state, range, bits, name.as_deref()),
         Request::RenderCancel => render_cancel(state),
+        Request::ItemMove { ids, delta, track } => item_move(state, &ids, delta, track.as_ref()),
+        Request::ItemTrim { id, start, end } => item_trim(state, id, start, end),
+        Request::ItemSplit { ids, at } => item_split(state, ids.as_deref(), at),
+        Request::ItemDelete { ids } => item_delete(state, &ids),
+        Request::ItemTake { id, take } => item_take(state, id, take),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),

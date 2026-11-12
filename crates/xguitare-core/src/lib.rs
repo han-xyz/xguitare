@@ -9,6 +9,7 @@ pub mod firstrun;
 pub mod flatten;
 mod ir;
 mod irdir;
+mod item_control;
 pub mod metronome;
 mod metronome_control;
 mod mixer_control;
