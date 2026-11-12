@@ -159,7 +159,11 @@ pub fn text_pairs() -> Vec<ContrastPair> {
     let c = palette();
     vec![
         pair("text on case", c.text, c.case),
-        pair("text on panel", c.text, c.panel),
+        pair(
+            "text on panel; also the Metronome's playing beat dot",
+            c.text,
+            c.panel,
+        ),
         pair("text on panel open", c.text, c.panel_open),
         pair(
             "text on well; also the pressed edge, the cents centre mark and the mixer scroll bar handle",
@@ -167,7 +171,6 @@ pub fn text_pairs() -> Vec<ContrastPair> {
             c.well,
         ),
         pair("text on hover; also the selection stroke", c.text, c.hover),
-        pair("text on beat light", c.text, c.arc_track),
         pair("muted on case", c.muted, c.case),
         pair("muted on panel", c.muted, c.panel),
         pair("muted on panel open", c.muted, c.panel_open),
@@ -185,13 +188,16 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("danger text on hover", c.danger_text, c.hover),
         pair("go on case", c.go, c.case),
         pair("go on panel", c.go, c.panel),
-        pair("lit on panel", c.lit, c.panel),
+        pair(
+            "lit on panel; also the Metronome's beat 1 dot and ring",
+            c.lit,
+            c.panel,
+        ),
         pair(
             "lit on panel open; also the lit lamp ring and the loop edges over a Take",
             c.lit,
             c.panel_open,
         ),
-        pair("lit on beat light", c.lit, c.arc_track),
         pair(
             "go on panel open; also the Tuner lamp ring",
             c.go,
@@ -224,7 +230,11 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
     let c = palette();
     let mut pairs = vec![
         pair("boundary on case", c.boundary, c.case),
-        pair("boundary on panel", c.boundary, c.panel),
+        pair(
+            "boundary on panel; also a Metronome beat's ring",
+            c.boundary,
+            c.panel,
+        ),
         pair("boundary on panel open", c.boundary, c.panel_open),
         pair("boundary on well", c.boundary, c.well),
         pair("boundary on bypass panel", c.boundary, c.bypass_panel),

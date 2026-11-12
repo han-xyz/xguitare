@@ -315,7 +315,10 @@ pub fn strip_row(width: f32, gap: f32, strips: usize) -> StripRow {
     let slots = if (STRIP_MIN_WIDTH..=STRIP_MAX_WIDTH).contains(&filling) {
         most
     } else {
-        (width / (strip_width + gap)).floor().max(2.0)
+        (width / (strip_width + gap))
+            .floor()
+            .min(strips as f32 + 1.0)
+            .max(2.0)
     } as usize;
     StripRow {
         width: strip_width,

@@ -453,7 +453,10 @@ fn send_row(
                 colour(accent),
             );
             knob.response.widget_info(|| {
-                WidgetInfo::labeled(Role::Slider, true, format!("Send {name} to {bus}"))
+                let mut info =
+                    WidgetInfo::labeled(Role::Slider, true, format!("Send {name} to {bus}"));
+                info.current_text_value = Some(send_text(send.level_db));
+                info
             });
             let level = knob_release(ui, &knob).map(send_level);
             let level = if knob.reset {

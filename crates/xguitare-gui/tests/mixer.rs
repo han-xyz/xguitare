@@ -567,7 +567,7 @@ fn whole_strips_fill_the_width_beside_master() {
     assert!((wide.shown + 2) as f32 * (wide.width + 8.0) > 3000.0);
     let few = strip_row(1568.0, 8.0, 6);
     assert_eq!(few.width, STRIP_MAX_WIDTH);
-    assert!(few.shown >= 6);
+    assert_eq!(few.shown, 6);
     let narrow = strip_row(100.0, 8.0, 10);
     assert_eq!((narrow.shown, narrow.width), (1, STRIP_MIN_WIDTH));
 }

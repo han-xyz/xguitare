@@ -18,7 +18,7 @@ use xguitare_core::control::TrackRef;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 use xguitare_core::render::{RenderBits, RenderRange};
-use xguitare_core::{BankKind, Config};
+use xguitare_core::{BankKind, Config, ModuleRegistry};
 use xguitare_gui::app::App;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
@@ -111,6 +111,15 @@ fn funk_params() -> Value {
     json!({ "params": params })
 }
 
+/// The `channels` the `modules` payload gives for a `Channels` value's Debug name.
+fn channels_text(debug: &str) -> &'static str {
+    match debug {
+        "Mono" => "mono",
+        "Stereo" => "stereo",
+        _ => "mono_to_stereo",
+    }
+}
+
 fn funk_snapshot() -> Snapshot {
     let names = [
         "Blues",
@@ -123,26 +132,13 @@ fn funk_snapshot() -> Snapshot {
         .zip(names)
         .map(|(program, name)| json!({"program": program, "name": name, "valid": true}))
         .collect();
-    let module_types = [
-        ("gain", "mono"),
-        ("gate", "mono"),
-        ("compressor", "mono"),
-        ("drive", "mono"),
-        ("fuzz", "mono"),
-        ("preamp", "mono"),
-        ("tonestack", "mono"),
-        ("cabinet", "mono"),
-        ("delay", "stereo"),
-        ("chorus", "mono_to_stereo"),
-        ("flanger", "mono_to_stereo"),
-        ("reverb", "stereo"),
-    ]
-    .into_iter()
-    .map(|(type_name, channels)| ModuleType {
-        type_name: type_name.to_string(),
-        channels: channels.to_string(),
-    })
-    .collect();
+    let module_types = ModuleRegistry::default()
+        .specs()
+        .map(|spec| ModuleType {
+            type_name: spec.type_name.to_string(),
+            channels: channels_text(&format!("{:?}", spec.channels)).to_string(),
+        })
+        .collect();
     Snapshot {
         link: Link::Connected,
         status: Some(json!({
@@ -1664,20 +1660,34 @@ fn the_metronome_switch_turns_it_off() {
 }
 
 #[test]
-fn the_metronome_and_tuner_buttons_show_at_1280x800() {
+fn the_tuner_buttons_show_at_1280x800_and_the_metronome_scrolls_into_view() {
     let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, metronome_snapshot());
     harness.run_steps(2);
     let bottom = DEFAULT_WINDOW.y;
-    for (role, label) in [
-        (Role::Button, "Tuner"),
-        (Role::Button, "Mute"),
-        (Role::Switch, "Metronome"),
-    ] {
-        let rect = harness.get_by_role_and_label(role, label).rect();
+    for label in ["Tuner", "Mute"] {
+        let rect = harness.get_by_role_and_label(Role::Button, label).rect();
         assert!(rect.bottom() <= bottom, "{label} ends at {}", rect.bottom());
     }
-    harness.get_by_label("Beat 1");
     write_png(&mut harness, "left-panel-1280x800");
+    let panel = harness.get_by_label("Add Module").rect();
+    harness.event(Event::PointerMoved(panel.center()));
+    harness.event(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, -200.0),
+        phase: TouchPhase::Move,
+        source: MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(20);
+    let metronome = harness
+        .get_by_role_and_label(Role::Switch, "Metronome")
+        .rect();
+    assert!(
+        metronome.bottom() <= bottom,
+        "the Metronome ends at {} after scrolling",
+        metronome.bottom()
+    );
+    harness.get_by_label("Beat 1");
 }
 
 #[test]
@@ -2120,11 +2130,24 @@ fn transport_bar_fits_one_row_at_1280() {
     }
 }
 
-/// The footer's top, read off its link text: a disconnected link puts that text in the footer.
+const SAVED: &str = "saved bank/funk.toml";
+
+/// The footer's top, read off the [`SAVED`] notice it shows.
 fn footer_top(harness: &Harness<App>) -> f32 {
-    let text = harness.get_by_label_contains("disconnected").rect();
+    let text = harness.get_by_label(SAVED).rect();
     let margin = egui::Frame::side_top_panel(&harness.ctx.global_style()).inner_margin;
     text.top() - f32::from(margin.top)
+}
+
+#[test]
+fn send_knob_names_its_level_with_the_unit() {
+    let (mut harness, _, _dir) = harness_with(MIN_WINDOW, mixer_snapshot());
+    click_button(&mut harness, "Mixer");
+    let value = harness.get_by_label("Send Bass DI to Room").value();
+    assert!(
+        value.as_deref().is_some_and(|value| value.contains("dB")),
+        "the Send knob's value is {value:?}"
+    );
 }
 
 #[test]
@@ -2137,9 +2160,7 @@ fn mixer_faders_and_switches_show_whole_in_the_mixer_view() {
         (DEFAULT_WINDOW, eight_buses_snapshot(), "Delay", 232.0),
     ] {
         let mut snapshot = snapshot;
-        snapshot.link = Link::Disconnected {
-            since: std::time::Instant::now(),
-        };
+        snapshot.last_message = Some((SAVED.to_string(), std::time::Instant::now()));
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
         let footer_top = footer_top(&harness);
@@ -2237,7 +2258,7 @@ fn mixer_columns_send_their_commands() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     harness.run_steps(2);
     assert!(harness.query_by_label("Room — Rack").is_some());
-    click_button(&mut harness, "cabinet (mono)");
+    click_button(&mut harness, "cabinet (mono_to_stereo)");
     assert_eq!(sent_now(&sent), []);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
