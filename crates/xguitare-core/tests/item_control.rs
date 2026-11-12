@@ -571,9 +571,11 @@ fn fill_commands_to(state: &mut EngineState, free: usize) {
 
 #[test]
 fn a_busy_engine_leaves_the_project_and_revision_unchanged() {
-    let (mut state, _audio, _dir) = state("busy");
+    let (mut state, mut audio, _dir) = state("busy");
     guitar_and_bass(&mut state);
+    drain_commands(&mut audio);
     let before = layout(&mut state);
+    let loaded = ok(handle(&mut state, Request::Status))["loaded_audio_bytes"].clone();
     fill_commands_to(&mut state, 1);
     let revision = state.revision;
     assert_eq!(
@@ -582,5 +584,13 @@ fn a_busy_engine_leaves_the_project_and_revision_unchanged() {
         "two Tracks change and one slot is free"
     );
     assert_eq!(state.revision, revision);
+    assert!(
+        item_swaps(&mut audio).is_empty(),
+        "no Track got its new list"
+    );
     assert_eq!(layout(&mut state), before);
+    assert_eq!(
+        ok(handle(&mut state, Request::Status))["loaded_audio_bytes"],
+        loaded
+    );
 }
