@@ -13,6 +13,7 @@ use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::project_model::AutosaveOffer;
+use crate::theme::{Rgb, palette};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
@@ -25,7 +26,6 @@ pub const KNOB_DRAG_PX: f32 = 220.0;
 pub const KNOB_FINE_DRAG_PX: f32 = 2200.0;
 pub const KNOB_ARC_START_DEG: f32 = 135.0;
 pub const KNOB_ARC_SWEEP_DEG: f32 = 270.0;
-pub const KNOB_ARC_POINTS: usize = 49;
 pub const LADDER_SEGMENTS: usize = 24;
 pub const LADDER_YELLOW_DB: f64 = -12.0;
 pub const LADDER_RED_DB: f64 = -3.0;
@@ -285,26 +285,48 @@ pub fn knob_angle_deg(fraction: f32) -> f32 {
     KNOB_ARC_START_DEG + KNOB_ARC_SWEEP_DEG * fraction
 }
 
-/// Offsets from the knob's centre in egui's y-down space: the pointer tip at `radius`, and the arc from the sweep's start to the value.
+/// Offsets from the knob's centre in egui's y-down space: the pointer tip at `radius`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct KnobPoints {
     pub pointer: (f32, f32),
-    pub arc: Vec<(f32, f32)>,
 }
 
 pub fn knob_points(fraction: f32, radius: f32) -> KnobPoints {
-    let value_deg = knob_angle_deg(fraction);
-    let last = (KNOB_ARC_POINTS - 1) as f32;
-    let arc = (0..KNOB_ARC_POINTS)
-        .map(|step| {
-            let deg = KNOB_ARC_START_DEG + (value_deg - KNOB_ARC_START_DEG) * step as f32 / last;
-            point_at_deg(radius, deg)
-        })
-        .collect();
     KnobPoints {
-        pointer: point_at_deg(radius, value_deg),
-        arc,
+        pointer: point_at_deg(radius, knob_angle_deg(fraction)),
     }
+}
+
+/// A knob's two arcs as start and end angles in [`knob_angle_deg`]'s degrees: the track over the whole sweep, and the value arc from the sweep's start to the value, `None` at the start.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KnobArcs {
+    pub track: (f32, f32),
+    pub value: Option<(f32, f32)>,
+}
+
+pub fn knob_arcs(fraction: f32) -> KnobArcs {
+    let fraction = fraction.clamp(0.0, 1.0);
+    KnobArcs {
+        track: (knob_angle_deg(0.0), knob_angle_deg(1.0)),
+        value: (fraction > 0.0).then(|| (knob_angle_deg(0.0), knob_angle_deg(fraction))),
+    }
+}
+
+pub const FOCUS_RING_GAP: f32 = 2.0;
+pub const FOCUS_RING_WIDTH: f32 = 2.0;
+
+/// The centre lines of the dark gap band around a focused widget and of the focus ring outside it.
+pub fn focus_ring_rects(widget: ScreenRect) -> (ScreenRect, ScreenRect) {
+    let grown = |by: f32| ScreenRect {
+        left: widget.left - by,
+        top: widget.top - by,
+        right: widget.right + by,
+        bottom: widget.bottom + by,
+    };
+    (
+        grown(FOCUS_RING_GAP / 2.0),
+        grown(FOCUS_RING_GAP + FOCUS_RING_WIDTH / 2.0),
+    )
 }
 
 fn point_at_deg(radius: f32, deg: f32) -> (f32, f32) {
@@ -1252,26 +1274,40 @@ pub fn tuner_toggle(
     }
 }
 
-pub const BYPASSED_OPACITY: f32 = 0.45;
+pub const BYPASSED_TAG: &str = "Bypassed";
 
+/// `arc` replaces the Module accent on the unit's knobs and lit choices when `Some`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UnitStyle {
-    pub opacity: f32,
-    pub led_lit: bool,
+    pub panel: Rgb,
+    pub text: Rgb,
+    pub arc: Option<Rgb>,
+    pub lamp_lit: bool,
+    pub tag: Option<&'static str>,
 }
 
-/// How a unit shows its Module's Bypass: a bypassed unit's switch LED is dark and its name and knobs are dimmed.
-pub fn unit_style(bypassed: bool) -> UnitStyle {
+/// How a unit shows its Module's Bypass: a bypassed unit, open or closed, sits on the bypass panel in bypass text with grey arcs, an unlit lamp and a `Bypassed` tag.
+pub fn unit_style(bypassed: bool, open: bool) -> UnitStyle {
+    let colours = palette();
     if bypassed {
-        UnitStyle {
-            opacity: BYPASSED_OPACITY,
-            led_lit: false,
-        }
-    } else {
-        UnitStyle {
-            opacity: 1.0,
-            led_lit: true,
-        }
+        return UnitStyle {
+            panel: colours.bypass_panel,
+            text: colours.bypass_text,
+            arc: Some(colours.bypass_arc),
+            lamp_lit: false,
+            tag: Some(BYPASSED_TAG),
+        };
+    }
+    UnitStyle {
+        panel: if open {
+            colours.panel_open
+        } else {
+            colours.panel
+        },
+        text: colours.text,
+        arc: None,
+        lamp_lit: true,
+        tag: None,
     }
 }
 
@@ -1491,9 +1527,8 @@ pub fn choice_buttons(row: &ParamRow, column_width: f32) -> Vec<ChoiceButton> {
                 let width = column_width / count as f32;
                 (index as f32 * width, 0.0, width, CHOICE_HEIGHT)
             };
-            let selected = if index == lit { ", selected" } else { "" };
             ChoiceButton {
-                accessible_name: format!("{param}, {text}{selected}"),
+                accessible_name: format!("{param}, {text}"),
                 text,
                 lit: index == lit,
                 value: index as f64,

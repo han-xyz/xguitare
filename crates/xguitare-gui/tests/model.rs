@@ -30,15 +30,16 @@ use xguitare_gui::model::{
     tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, Dragged, Outgoing, RemovedUnit, Restore, ScreenRect, bypassed,
-    closed_unit_rows, drag_outcome, drop_slot, module_title, mute_banner, palette_place, restore,
-    shown_undo, unit_style,
+    CLOSED_KNOB_WIDTH, Dragged, FOCUS_RING_GAP, FOCUS_RING_WIDTH, KnobArcs, Outgoing, RemovedUnit,
+    Restore, ScreenRect, UnitStyle, bypassed, closed_unit_rows, drag_outcome, drop_slot,
+    focus_ring_rects, knob_arcs, module_title, mute_banner, palette_place, restore, shown_undo,
+    unit_style,
 };
 use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
     choice_buttons, choice_step, open_knob_rows, open_unit_height,
 };
-use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for};
+use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for, palette};
 
 struct TempDir(PathBuf);
 
@@ -905,13 +906,37 @@ fn tuner_leaves_a_mute_turned_on_by_hand_alone() {
 }
 
 #[test]
-fn bypassed_unit_is_dimmed_with_a_dark_led() {
-    let on = unit_style(false);
-    let bypassed = unit_style(true);
-    assert!(on.led_lit);
-    assert_eq!(on.opacity, 1.0);
-    assert!(!bypassed.led_lit);
-    assert!(bypassed.opacity < 0.6);
+fn active_unit_keeps_its_panel_and_accent() {
+    let colours = palette();
+    let closed = unit_style(false, false);
+    assert_eq!(
+        closed,
+        UnitStyle {
+            panel: colours.panel,
+            text: colours.text,
+            arc: None,
+            lamp_lit: true,
+            tag: None,
+        }
+    );
+    assert_eq!(unit_style(false, true).panel, colours.panel_open);
+}
+
+#[test]
+fn bypassed_unit_greys_its_panel_text_and_arcs_and_wears_a_tag() {
+    let colours = palette();
+    for open in [false, true] {
+        assert_eq!(
+            unit_style(true, open),
+            UnitStyle {
+                panel: colours.bypass_panel,
+                text: colours.bypass_text,
+                arc: Some(colours.bypass_arc),
+                lamp_lit: false,
+                tag: Some("Bypassed"),
+            }
+        );
+    }
 }
 
 #[test]
@@ -1048,23 +1073,57 @@ fn assert_near(actual: (f32, f32), expected: (f32, f32)) {
 }
 
 #[test]
-fn knob_points_follow_the_sweep() {
+fn knob_pointer_follows_the_sweep() {
     let diagonal = 10.0 * std::f32::consts::FRAC_1_SQRT_2;
-    let start = knob_points(0.0, 10.0);
-    assert_near(start.pointer, (-diagonal, diagonal));
-    assert!(start.arc.iter().all(|point| *point == start.arc[0]));
-    let middle = knob_points(0.5, 10.0);
-    assert_near(middle.pointer, (0.0, -10.0));
-    assert_near(middle.arc[0], (-diagonal, diagonal));
-    assert_near(*middle.arc.last().unwrap(), (0.0, -10.0));
-    let end = knob_points(1.0, 10.0);
-    assert_near(end.pointer, (diagonal, diagonal));
-    assert_near(*end.arc.last().unwrap(), (diagonal, diagonal));
-    assert!(
-        end.arc
-            .iter()
-            .any(|point| point.0.abs() < 1e-4 && point.1 < 0.0)
+    assert_near(knob_points(0.0, 10.0).pointer, (-diagonal, diagonal));
+    assert_near(knob_points(0.5, 10.0).pointer, (0.0, -10.0));
+    assert_near(knob_points(1.0, 10.0).pointer, (diagonal, diagonal));
+}
+
+#[test]
+fn knob_track_spans_the_sweep_and_the_value_arc_ends_at_the_value() {
+    assert_eq!(
+        knob_arcs(0.5),
+        KnobArcs {
+            track: (135.0, 405.0),
+            value: Some((135.0, 270.0)),
+        }
     );
+    assert_eq!(knob_arcs(1.0).value, Some((135.0, 405.0)));
+    assert_eq!(knob_arcs(0.0).value, None);
+    assert_eq!(knob_arcs(0.0).track, (135.0, 405.0));
+}
+
+#[test]
+fn focus_ring_sits_a_gap_outside_the_widget() {
+    let widget = ScreenRect {
+        left: 10.0,
+        top: 20.0,
+        right: 50.0,
+        bottom: 40.0,
+    };
+    let (gap, ring) = focus_ring_rects(widget);
+    let gap_out = FOCUS_RING_GAP / 2.0;
+    let ring_out = FOCUS_RING_GAP + FOCUS_RING_WIDTH / 2.0;
+    assert_eq!(
+        gap,
+        ScreenRect {
+            left: 10.0 - gap_out,
+            top: 20.0 - gap_out,
+            right: 50.0 + gap_out,
+            bottom: 40.0 + gap_out,
+        }
+    );
+    assert_eq!(
+        ring,
+        ScreenRect {
+            left: 10.0 - ring_out,
+            top: 20.0 - ring_out,
+            right: 50.0 + ring_out,
+            bottom: 40.0 + ring_out,
+        }
+    );
+    assert_eq!((FOCUS_RING_GAP, FOCUS_RING_WIDTH), (2.0, 2.0));
 }
 
 fn ladder_counts(db: f64, clipped: bool) -> (usize, usize, usize) {
@@ -2198,7 +2257,7 @@ fn three_choices_sit_side_by_side_in_the_column() {
             },
             ChoiceButton {
                 text: "BP".to_string(),
-                accessible_name: "Mode, BP, selected".to_string(),
+                accessible_name: "Mode, BP".to_string(),
                 lit: true,
                 value: 1.0,
                 cell: (28.0, 0.0, 28.0, 32.0),
@@ -2224,18 +2283,13 @@ fn two_choices_stack_full_width() {
     assert_eq!(
         summary,
         [
-            (
-                "Up",
-                "Direction, Up, selected",
-                true,
-                (0.0, 0.0, 84.0, 32.0)
-            ),
+            ("Up", "Direction, Up", true, (0.0, 0.0, 84.0, 32.0)),
             ("Down", "Direction, Down", false, (0.0, 36.0, 84.0, 32.0)),
         ]
     );
     let hertz = choice_buttons(&choice_row("bass_freq", &["40 Hz", "80 Hz"], 1.0), 84.0);
     assert_eq!(hertz[1].text, "80 Hz");
-    assert_eq!(hertz[1].accessible_name, "Bass freq, 80 Hz, selected");
+    assert_eq!(hertz[1].accessible_name, "Bass freq, 80 Hz");
 }
 
 #[test]

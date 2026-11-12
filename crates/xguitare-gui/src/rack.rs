@@ -41,6 +41,7 @@ const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const UNIT_NAME_WIDTH: f32 = 120.0;
 const LAMP_SLOT: f32 = 18.0;
+const TAG_ROW_HEIGHT: f32 = 18.0;
 const BANNER_HEIGHT: f32 = 40.0;
 const METER_LABEL_WIDTH: f32 = 52.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
@@ -504,7 +505,8 @@ fn module_unit(
     let open = open_units.contains(module);
     let type_name = unit.rows.first().map_or("", |row| row.module_type.as_str());
     let accent = widgets::accent(type_name);
-    let style = unit_style(unit.bypassed);
+    let style = unit_style(unit.bypassed, open);
+    let arc = style.arc.map_or(accent, colour);
     let is_eq = type_name == EQ;
     let knobs_width = closed_knobs_width(ui);
     let rows = if is_eq {
@@ -519,25 +521,21 @@ fn module_unit(
     } else {
         open_unit_height(open_rows.len())
     };
-    let (fill, height, header_height) = if open {
-        (palette().panel_open, open_height, HEADER_HEIGHT)
+    let (height, header_height) = if open {
+        (open_height, HEADER_HEIGHT)
     } else {
         let height = UNIT_HEIGHT * rows;
-        (
-            palette().panel,
-            height,
-            height - 2.0 * f32::from(UNIT_MARGIN),
-        )
+        (height, height - 2.0 * f32::from(UNIT_MARGIN))
     };
     let mut toggled = false;
     let mut open_asked = false;
     let mut header_drag = None;
-    let inner = rack_unit(ui, &format!("{module} unit"), fill, height, |ui| {
+    let inner = rack_unit(ui, &format!("{module} unit"), style.panel, height, |ui| {
         let mut commands = Vec::new();
         let header = unit_header(ui, Sense::click_and_drag(), header_height, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
             ui.style_mut().interaction.selectable_labels = false;
-            if widgets::footswitch(ui, style.led_lit, accent).clicked() {
+            if widgets::footswitch(ui, style.lamp_lit, accent).clicked() {
                 commands.push(Command::Bypass {
                     id: module.to_string(),
                     on: !unit.bypassed,
@@ -545,8 +543,18 @@ fn module_unit(
             }
             let (name, type_part) = module_title(module, type_name);
             ui.scope(|ui| {
-                ui.multiply_opacity(style.opacity);
-                unit_name(ui, &name, type_part);
+                ui.visuals_mut().override_text_color = Some(colour(style.text));
+                let Some(tag) = style.tag else {
+                    unit_name(ui, &name, type_part);
+                    return;
+                };
+                let slot = vec2(UNIT_NAME_WIDTH, header_height);
+                ui.allocate_ui_with_layout(slot, Layout::top_down(Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let name_slot = vec2(UNIT_NAME_WIDTH, header_height - TAG_ROW_HEIGHT);
+                    ui.allocate_ui(name_slot, |ui| unit_name(ui, &name, type_part));
+                    widgets::tag(ui, tag);
+                });
             });
             unit_stripe(ui);
             let chevron = if open { OPEN_CHEVRON } else { CLOSED_CHEVRON };
@@ -557,11 +565,11 @@ fn module_unit(
             let rows = Layout::left_to_right(Align::Min).with_main_wrap(true);
             ui.allocate_ui_with_layout(vec2(knobs_width, header_height), rows, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 2.0 * f32::from(UNIT_MARGIN));
-                ui.multiply_opacity(style.opacity);
+                ui.visuals_mut().override_text_color = Some(colour(style.text));
                 if !open && is_eq {
-                    eq_mini(ui, unit, accent, knobs);
+                    eq_mini(ui, unit, arc, knobs);
                 } else if !open {
-                    let (closed_commands, asked) = closed_params(ui, unit.rows, accent, knobs);
+                    let (closed_commands, asked) = closed_params(ui, unit.rows, arc, knobs);
                     commands.extend(closed_commands);
                     open_asked = asked;
                 }
@@ -577,11 +585,11 @@ fn module_unit(
         if open {
             ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
                 ui.scope(|ui| {
-                    ui.multiply_opacity(style.opacity);
+                    ui.visuals_mut().override_text_color = Some(colour(style.text));
                     if is_eq {
-                        commands.extend(eq_editor(ui, unit, open_width, accent, knobs));
+                        commands.extend(eq_editor(ui, unit, open_width, arc, knobs));
                     } else {
-                        commands.extend(open_params(ui, unit.rows, &open_rows, accent, knobs));
+                        commands.extend(open_params(ui, unit.rows, &open_rows, arc, knobs));
                     }
                 });
                 ui.with_layout(Layout::top_down(Align::Max), |ui| {
@@ -1070,7 +1078,7 @@ fn param_knob_named(
         (value, released, knobs.now)
     };
     let (value, released, typed) = match size {
-        KnobSize::Small => {
+        KnobSize::Strip | KnobSize::Small => {
             let group = Layout::left_to_right(Align::Min);
             ui.allocate_ui_with_layout(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT), group, |ui| {
                 ui.set_min_size(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT));
@@ -1097,7 +1105,7 @@ fn param_knob_named(
             ui.allocate_ui_with_layout(vec2(LARGE_KNOB_COLUMN_WIDTH, 0.0), column, |ui| {
                 let label = name_label(ui, label);
                 let (value, released, now) = knob_and_field(ui, knobs);
-                let field = (field_id, KnobSize::Large.diameter());
+                let field = (field_id, VALUE_FIELD_WIDTH);
                 let typed = value_field(ui, field, label.id, row, value, (knobs.feedback, now));
                 (value, released, typed)
             })
@@ -1148,7 +1156,9 @@ fn value_field(
     let editing = ui.data_mut(|data| data.remove_temp::<String>(id));
     let mut text = editing.clone().unwrap_or_else(|| format_value(row, value));
     let edit = ui
-        .add(TextEdit::singleline(&mut text).id(id).desired_width(width))
+        .add(widgets::text_field(
+            TextEdit::singleline(&mut text).id(id).desired_width(width),
+        ))
         .labelled_by(label);
     let pending = field_id_pending(id);
     let clicking = ui.input(|input| input.pointer.any_pressed() || input.pointer.any_click());

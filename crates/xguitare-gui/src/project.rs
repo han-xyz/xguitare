@@ -260,7 +260,9 @@ fn edited_text(ui: &mut Ui, id: Id, shown: &str, width: f32, label: Id) -> Optio
     let draft = ui.data_mut(|data| data.remove_temp::<String>(id));
     let mut text = draft.unwrap_or_else(|| shown.to_string());
     let edit = ui
-        .add(TextEdit::singleline(&mut text).id(id).desired_width(width))
+        .add(widgets::text_field(
+            TextEdit::singleline(&mut text).id(id).desired_width(width),
+        ))
         .labelled_by(label);
     if edit.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, text));
@@ -723,7 +725,7 @@ pub(crate) fn knob_with_reset(
     ui.vertical_centered(|ui| {
         ui.set_width(KNOB_COLUMN_WIDTH);
         let fraction = ((value - min) / (max - min)) as f32;
-        let knob = widgets::rack_knob(ui, KnobSize::Small, fraction, colour(palette().text));
+        let knob = widgets::rack_knob(ui, KnobSize::Strip, fraction, colour(palette().text));
         knob.response
             .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("{what} {track}")));
         let field_id = knob.response.id.with("field");

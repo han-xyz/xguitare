@@ -24,6 +24,9 @@ pub struct Palette {
     pub danger_text: Rgb,
     pub go: Rgb,
     pub focus_ring: Rgb,
+    pub hover_boundary: Rgb,
+    pub knob_highlight: Rgb,
+    pub knob_shadow: Rgb,
     pub hover: Rgb,
     pub on_accent: Rgb,
 }
@@ -48,6 +51,9 @@ pub fn palette() -> Palette {
         danger_text: (0xff, 0x9c, 0x94),
         go: (0x44, 0xb4, 0x4f),
         focus_ring: (0xf4, 0xf6, 0xf8),
+        hover_boundary: (0xc6, 0xcd, 0xd4),
+        knob_highlight: (0x5a, 0x61, 0x69),
+        knob_shadow: (0x1b, 0x1e, 0x22),
         hover: (0x3d, 0x44, 0x4c),
         on_accent: (0x15, 0x17, 0x1a),
     }
@@ -144,6 +150,11 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("lit on panel open", c.lit, c.panel_open),
         pair("lit on beat light", c.lit, c.arc_track),
         pair("go on panel open", c.go, c.panel_open),
+        pair("bypass text on well", c.bypass_text, c.well),
+        pair("danger text on well", c.danger_text, c.well),
+        pair("on accent on hover boundary", c.on_accent, c.hover_boundary),
+        pair("on accent on muted", c.on_accent, c.muted),
+        pair("on accent on bypass arc", c.on_accent, c.bypass_arc),
     ]
 }
 
@@ -168,6 +179,21 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("lit on panel open", c.lit, c.panel_open),
         pair("go on panel open", c.go, c.panel_open),
         pair("danger on panel open", c.danger, c.panel_open),
+        pair("hover boundary on hover", c.hover_boundary, c.hover),
+        pair("hover boundary on well", c.hover_boundary, c.well),
+        pair("hover boundary on pressed", c.hover_boundary, c.arc_track),
+        pair("danger on hover", c.danger, c.hover),
+        pair("danger on well", c.danger, c.well),
+        pair("tick on panel", c.hover_boundary, c.panel),
+        pair("tick on panel open", c.hover_boundary, c.panel_open),
+        pair("tick on bypass panel", c.hover_boundary, c.bypass_panel),
+        pair("pointer on knob highlight", c.text, c.knob_highlight),
+        pair("pointer on knob shadow", c.text, c.knob_shadow),
+        pair("knob rim on knob shadow", c.boundary, c.knob_shadow),
+        pair("edit border on well", c.lit, c.well),
+        pair("focus ring on focus gap", c.focus_ring, c.on_accent),
+        pair("focus ring on hover", c.focus_ring, c.hover),
+        pair("focus ring on well", c.focus_ring, c.well),
     ]
 }
 

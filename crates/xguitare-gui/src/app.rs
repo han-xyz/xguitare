@@ -442,6 +442,7 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 commands.extend(central_view(ui, snapshot, &mut self.mixer, &mut view));
             });
+        widgets::paint_focus_ring(ui.ctx());
         let commands = self.keep_window_commands(commands);
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);

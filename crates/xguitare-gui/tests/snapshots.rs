@@ -10,7 +10,7 @@ use egui::{
     Vec2, pos2,
 };
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state, default_wgpu_setup};
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
@@ -23,6 +23,7 @@ use xguitare_gui::app::App;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
 use xguitare_gui::project_model::AutosaveOffer;
+use xguitare_gui::theme::palette;
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);
@@ -624,7 +625,7 @@ fn choice_buttons_send_the_choice() {
         .click();
     harness.run_steps(2);
     harness
-        .get_by_role_and_label(Role::RadioButton, "Direction, Up, selected")
+        .get_by_role_and_label(Role::RadioButton, "Direction, Up")
         .focus();
     harness.run_steps(2);
     harness.key_press(Key::ArrowDown);
@@ -644,9 +645,124 @@ fn choice_buttons_send_the_choice() {
     );
     assert!(
         harness
-            .get_by_role_and_label(Role::RadioButton, "Direction, Down, selected")
+            .get_by_role_and_label(Role::RadioButton, "Direction, Down")
             .is_focused()
     );
+}
+
+#[test]
+fn a_choice_group_is_one_tab_stop() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
+    open_unit(&mut harness, AUTOWAH_CLOSED_INDEX);
+    let focused = |harness: &Harness<App>, name: &str| {
+        harness
+            .get_by_role_and_label(Role::RadioButton, name)
+            .is_focused()
+    };
+    harness
+        .get_by_role_and_label(Role::RadioButton, "Mode, BP")
+        .focus();
+    harness.run_steps(2);
+    harness.key_press(Key::Tab);
+    harness.run_steps(2);
+    assert!(focused(&harness, "Direction, Up"));
+    harness.key_press(Key::Tab);
+    harness.run_steps(2);
+    assert!(
+        harness
+            .get_all_by_role(Role::RadioButton)
+            .all(|radio| !radio.is_focused())
+    );
+    for _ in 0..2 {
+        harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+        harness.run_steps(2);
+    }
+    assert!(focused(&harness, "Mode, BP"));
+    harness.key_press(Key::ArrowRight);
+    harness.run_steps(2);
+    assert!(focused(&harness, "Mode, HP"));
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Set {
+            param: "autowah.mode".to_string(),
+            value: 2.0,
+        }]
+    );
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::RadioButton, "Mode, HP")
+            .accesskit_node()
+            .toggled(),
+        Some(egui::accesskit::Toggled::True)
+    );
+}
+
+const FOCUS_CROP_MARGIN: f32 = 8.0;
+const FOCUS_CROP_TOP: u32 = 16;
+const FOCUS_CROP_GAP: u32 = 16;
+
+/// The focused knob, button, choice group (one choice hovered) and field side by side, as the states mockup's focus row.
+#[test]
+fn focus_states_snapshot() {
+    let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, autowah_snapshot());
+    open_unit(&mut harness, AUTOWAH_CLOSED_INDEX);
+    let mut shots = Vec::new();
+    let knob = harness.get_by_role_and_label(Role::Slider, "Threshold");
+    let rect = knob.rect();
+    knob.focus();
+    harness.run_steps(2);
+    shots.push((harness.render().unwrap(), rect));
+    let button = harness.get_by_role_and_label(Role::Button, "Save as new");
+    let rect = button.rect();
+    button.focus();
+    harness.run_steps(2);
+    shots.push((harness.render().unwrap(), rect));
+    let lit = harness.get_by_role_and_label(Role::RadioButton, "Mode, BP");
+    let hovered = harness
+        .get_by_role_and_label(Role::RadioButton, "Mode, LP")
+        .rect();
+    let last = harness
+        .get_by_role_and_label(Role::RadioButton, "Mode, HP")
+        .rect();
+    let rect = lit.rect().union(hovered).union(last);
+    lit.focus();
+    harness.event(Event::PointerMoved(hovered.center()));
+    harness.run_steps(2);
+    shots.push((harness.render().unwrap(), rect));
+    let field = harness.get_by_role_and_label(Role::TextInput, "Threshold");
+    let rect = field.rect();
+    field.focus();
+    harness.run_steps(2);
+    shots.push((harness.render().unwrap(), rect));
+    let scale = harness.ctx.pixels_per_point();
+    let mut canvas = shots[0].0.clone();
+    let mut case = *canvas.get_pixel(0, 0);
+    let (r, g, b) = palette().case;
+    case.0 = [r, g, b, 255];
+    canvas.pixels_mut().for_each(|pixel| *pixel = case);
+    let mut left = FOCUS_CROP_GAP;
+    for (image, rect) in &shots {
+        let rect = rect.expand(FOCUS_CROP_MARGIN);
+        let (x0, y0) = ((rect.left() * scale) as u32, (rect.top() * scale) as u32);
+        let (width, height) = (
+            (rect.width() * scale) as u32,
+            (rect.height() * scale) as u32,
+        );
+        for y in 0..height {
+            for x in 0..width {
+                canvas.put_pixel(
+                    left + x,
+                    FOCUS_CROP_TOP + y,
+                    *image.get_pixel(x0 + x, y0 + y),
+                );
+            }
+        }
+        left += width + FOCUS_CROP_GAP;
+    }
+    fs::create_dir_all(snapshot_dir()).unwrap();
+    canvas
+        .save(snapshot_dir().join("focus-states.png"))
+        .unwrap();
 }
 
 #[test]

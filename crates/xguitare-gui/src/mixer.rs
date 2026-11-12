@@ -310,7 +310,7 @@ fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendVie
             };
             let knob = widgets::rack_knob(
                 ui,
-                KnobSize::Small,
+                KnobSize::Strip,
                 send_fraction(send.level_db),
                 colour(accent),
             );
@@ -671,8 +671,10 @@ pub fn render_dialog(
                         });
                         ui.end_row();
                         let label = ui.label("Name");
-                        ui.add(TextEdit::singleline(&mut draft.name).desired_width(240.0))
-                            .labelled_by(label.id);
+                        ui.add(widgets::text_field(
+                            TextEdit::singleline(&mut draft.name).desired_width(240.0),
+                        ))
+                        .labelled_by(label.id);
                         ui.end_row();
                     });
             });

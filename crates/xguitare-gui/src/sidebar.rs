@@ -22,7 +22,7 @@ use crate::project::{knob_with_reset, lit_button, released_value};
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, RADIUS_PANEL, colour, palette};
-use crate::widgets::{accent, bank_row, outlined_button, primary_button};
+use crate::widgets::{accent, bank_row, outlined_button, primary_button, text_field};
 
 const NO_PRESET: &str = "no preset";
 const CABINET: &str = "cabinet";
@@ -202,7 +202,9 @@ fn section_body(
             save_buttons(ui, view.save_as_name).into_iter().collect()
         }
         Section::Bank => {
-            ui.add(TextEdit::singleline(view.query).hint_text(SEARCH_HINT));
+            ui.add(text_field(
+                TextEdit::singleline(view.query).hint_text(SEARCH_HINT),
+            ));
             bank_panel(ui, &filter_bank(view.rows, view.query))
                 .into_iter()
                 .collect()
@@ -258,7 +260,7 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
             let field = TextEdit::singleline(new_name)
                 .hint_text(NEW_PROJECT_HINT)
                 .desired_width(width);
-            let field = ui.add(field).labelled_by(label.id);
+            let field = ui.add(text_field(field)).labelled_by(label.id);
             (field, ui.add(outlined_button("New")).clicked())
         })
         .inner;
@@ -339,7 +341,9 @@ fn save_buttons(ui: &mut Ui, save_as_name: &mut Option<String>) -> Option<Comman
     let Some(name) = save_as_name else {
         return command;
     };
-    let field = ui.add(TextEdit::singleline(name).hint_text(SAVE_AS_HINT));
+    let field = ui.add(text_field(
+        TextEdit::singleline(name).hint_text(SAVE_AS_HINT),
+    ));
     let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
     let (confirm, cancel) = ui
         .horizontal(|ui| {
@@ -689,13 +693,13 @@ fn settings(
     ui.horizontal(|ui| {
         let label = ui.label("IR folder");
         let field = TextEdit::singleline(&mut edited.ir_dir).desired_width(ui.available_width());
-        ui.add(field).labelled_by(label.id);
+        ui.add(text_field(field)).labelled_by(label.id);
     });
     ui.horizontal(|ui| {
         let label = ui.label("Projects folder");
         let field =
             TextEdit::singleline(&mut edited.projects_dir).desired_width(ui.available_width());
-        ui.add(field).labelled_by(label.id);
+        ui.add(text_field(field)).labelled_by(label.id);
     });
     let apply = set_settings_command(&current, &edited);
     let clicked = ui
