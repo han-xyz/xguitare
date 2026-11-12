@@ -842,7 +842,7 @@ Errors: `no project open`.
 All but `item_delete` answer with the Items they changed or made, each as `items` lists it plus `track`, the zero-based index of its Track, so a client can follow a moved Item, both halves of a split or the new copies:
 
 ```json
-{"ok":true,"items":[{"track":0,"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":48000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]},{"track":0,"id":7,"position":144000,"bars_beats":"2.3","offset":48000,"length":144000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"]}]}
+{"ok":true,"items":[{"track":0,"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":48000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"],"take_frames":192000},{"track":0,"id":7,"position":144000,"bars_beats":"2.3","offset":48000,"length":144000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"],"take_frames":192000}]}
 ```
 
 Errors every Item edit can return:
@@ -962,7 +962,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"items":[{"track":1,"id":9,"position":192000,"bars_beats":"3.1","offset":0,"length":48000,"take":0,"takes":["takes/bass-1.wav"]}],"dropped":1}
+{"ok":true,"items":[{"track":1,"id":9,"position":192000,"bars_beats":"3.1","offset":0,"length":48000,"take":0,"takes":["takes/bass-1.wav"],"take_frames":48000}],"dropped":1}
 ```
 
 Errors, besides those above: `clipboard is empty` before any `item_copy` in the open Project; `no track '<track>'`; `cannot paste: take <file> no longer exists` when a Take file of an Item to place is gone from the Project folder (nothing is placed).
