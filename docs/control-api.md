@@ -997,7 +997,7 @@ Errors: `no project open`; `no such take: <file>` for a file that is not a loade
 
 ## takes_unused
 
-Lists the open Project's Take files that nothing uses any more: regular files `takes/<name>.wav` directly in its `takes/` folder that no Item names in any of its Takes (active or not), that the clipboard does not hold, and that are not being recorded or still being written. Symlinks, subfolders and other files are never listed. Sorted by name.
+Lists the open Project's Take files that nothing uses any more: regular files `takes/<name>.wav` directly in its `takes/` folder that no Item names in any of its Takes (active or not), that the clipboard does not hold, and that are not being recorded or still being written. Symlinks, subfolders, other files and names with a control character or a bidi override or isolate (U+202A–U+202E, U+2066–U+2069) are never listed. Sorted by name.
 
 Request:
 
@@ -1020,7 +1020,7 @@ Errors: `no project open`; `takes is not a directory` when `takes` is a symlink 
 
 ## takes_clean
 
-Deletes Take files that `takes_unused` lists. Every name is checked first, against the unused list as it is now: one refused name refuses the whole request and nothing is deleted. Then the Project is saved (`project.toml` written, the autosave removed), so no saved file names a deleted Take; the deleted Takes leave memory, the undo and redo histories and the clipboard are cleared, and the Revision goes up. Each file is checked again just before it is removed: a symlink or anything but a regular file is refused, never followed. Take files are deleted only by this request.
+Deletes Take files that `takes_unused` lists. Every name is checked first, against the unused list as it is now: one refused name refuses the whole request, and an error reply means nothing was deleted and nothing changed. Then the Project is saved (`project.toml` written, the autosave removed), so no saved file names a deleted Take; the named Takes leave memory, the undo and redo histories and the clipboard are cleared, and the Revision goes up. Then each file is checked again and removed: a symlink in `takes/` is never followed, and a file that is no longer a regular file or cannot be removed is listed in `failed` while the others are still deleted. Take files are deleted only by this request.
 
 Request:
 
@@ -1033,12 +1033,16 @@ Request:
 Response:
 
 ```json
-{"ok":true,"deleted":2,"bytes":1235367}
+{"ok":true,"deleted":1,"bytes":800,"failed":[{"file":"takes/guitar-2.wav","error":"Permission denied (os error 13)"}]}
 ```
 
-`deleted` is the number of files removed and `bytes` their total size.
+| Key | Value |
+| --- | --- |
+| `deleted` | The number of files removed. |
+| `bytes` | Their total size. |
+| `failed` | Each file that was not removed, with the reason: `not a regular file`, or the system's error; empty when every file went. |
 
-Errors: `no project open`; `cannot clean takes while recording` after `record`, until `stop` or `play`; `invalid take file '<file>'` for a name that is not `takes/<name>.wav` or holds `..` or a control character; `not an unused take: <file>` for a file that is not listed as unused (also one replaced by a symlink after listing); `takes is not a directory`; the errors of `project_save`; `cannot read <file>: <reason>`; `cannot delete <file>: <reason>`.
+Errors: `no project open`; `cannot clean takes while recording` after `record`, until `stop` or `play`; `invalid take file '<file>'` for a name that is not `takes/<name>.wav` or holds `..` or a control character; `not an unused take: <file>` for a file that is not listed as unused (also one replaced by a symlink after listing); `takes is not a directory`; the errors of `project_save`; `cannot remove <autosave>: <reason>`; `cannot read <path>: <reason>`. In `invalid take file`, control characters and bidi overrides and isolates are escaped as `\u{202e}`.
 
 ## track_add
 
