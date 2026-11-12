@@ -493,6 +493,11 @@ fn every_palette_token_is_in_a_declared_pair() {
         ("hover", c.hover),
         ("on_accent", c.on_accent),
         ("clip_off", c.clip_off),
+        ("ruler", c.ruler),
+        ("take_edge", c.take_edge),
+        ("grid_bar", c.grid_bar),
+        ("grid_beat", c.grid_beat),
+        ("recording_take", c.recording_take),
     ];
     let pairs = all_declared_pairs();
     for (name, token) in tokens {
@@ -502,5 +507,31 @@ fn every_palette_token_is_in_a_declared_pair() {
                 .any(|(_, pair)| pair.fore == token || pair.back == token),
             "{name} is drawn in no declared pair"
         );
+    }
+}
+
+#[test]
+fn the_timeline_and_transport_draw_in_declared_pairs() {
+    let c = palette();
+    let has = |pairs: &[ContrastPair], fore: Rgb, back: Rgb| {
+        pairs
+            .iter()
+            .any(|pair| (pair.fore, pair.back) == (fore, back))
+    };
+    let (text, boundary) = (text_pairs(), boundary_pairs());
+    assert!(has(&text, c.muted, c.ruler), "bar numbers on the ruler");
+    assert!(has(&text, c.text, c.panel_open), "Take name on its body");
+    assert!(has(&text, c.text, c.well), "bar.beat in the LCD well");
+    assert!(has(&text, c.lit, c.well), "seconds in the LCD well");
+    assert!(has(&boundary, c.take_edge, c.well), "Take edge on the lane");
+    assert!(
+        has(&boundary, c.danger, c.recording_take),
+        "recording Take edge"
+    );
+    assert!(has(&boundary, c.danger, c.ruler), "playhead on the ruler");
+    assert!(has(&boundary, c.lit, c.ruler), "loop edges on the ruler");
+    assert!(has(&boundary, c.go, c.well), "Track level bar");
+    for track in TRACK_COLOURS {
+        assert!(has(&boundary, track, c.panel_open), "Take top edge");
     }
 }

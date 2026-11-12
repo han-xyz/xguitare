@@ -1162,7 +1162,7 @@ fn project_snapshots() {
     ] {
         let (mut view, _, _dir) = harness_with(size, mixer_snapshot());
         write_png(&mut view, &format!("view-arrange-{suffix}"));
-        click_button(&mut view, "Rack");
+        view.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
         write_png(&mut view, &format!("view-rack-{suffix}"));
     }
 

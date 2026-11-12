@@ -1,8 +1,9 @@
 use egui::{
-    Align2, Button, Color32, ComboBox, CursorIcon, DragValue, Frame, Id, Key, Margin, Modal,
-    Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui, UiBuilder,
-    WidgetInfo, pos2, vec2,
+    Align2, Color32, ComboBox, CursorIcon, DragValue, Frame, Id, Key, Margin, Modal, Painter, Rect,
+    Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, TextStyle, TextWrapMode, Ui,
+    UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
+use serde_json::Value;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 
@@ -10,40 +11,59 @@ use std::time::Instant;
 
 use crate::mixer_model::ShownRack;
 use crate::model::{
-    Command, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB, Snapshot,
-    TrackEdit, knob_origin, port_choices,
+    Command, EAR_WIDTH, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB,
+    Snapshot, TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
     bars_beats_text, dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command,
-    project_tempo, sample_rate, snap_to_beat, time_text, track_colour, track_rows, transport_view,
+    project_tempo, recording_span, sample_rate, snap_to_beat, time_text, track_colour, track_rows,
+    transport_view,
 };
 use crate::rack::muted_text;
-use crate::theme::{self, RADIUS_CONTROL, colour, palette, translucent};
-use crate::widgets::{self, KnobSize, outlined_button, primary_button};
+use crate::theme::{self, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette, translucent};
+use crate::widgets::{
+    self, KnobSize, StyledButton, outlined_button, primary_button, switched_button,
+};
 
 pub const TRACK_LIST_WIDTH: f32 = 400.0;
 pub const TIMELINE_HEIGHT: f32 = 360.0;
 const TRACK_ROW_HEIGHT: f32 = 72.0;
 const RULER_HEIGHT: f32 = 26.0;
 const TRANSPORT_HEIGHT: f32 = 44.0;
-const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(48.0, 32.0);
+const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(44.0, 32.0);
 const PANEL_BUTTON: egui::Vec2 = egui::Vec2::new(56.0, 32.0);
 const VIEWS: [(&str, MainView); 3] = [
     ("Rack", MainView::Rack),
     ("Arrange", MainView::Arrange),
     ("Mixer", MainView::Mixer),
 ];
-const VIEW_SWITCH_GAP: f32 = 2.0;
+/// The transport faceplate: an ear and a gap at each side.
+const TRANSPORT_FACE_MARGIN: Margin = Margin {
+    left: EAR_WIDTH as i8 + 6,
+    right: EAR_WIDTH as i8 + 6,
+    top: 4,
+    bottom: 4,
+};
+/// The space between the transport's groups of controls.
+const GROUP_GAP: f32 = theme::SPACE_S;
+const LCD_MARGIN: Margin = Margin::symmetric(8, 0);
+const TAKE_DASH: f32 = 4.0;
+const TAKE_GAP: f32 = 3.0;
+const NUMBER_WIDTH: f32 = 20.0;
+const LEVEL_BAR_HEIGHT: f32 = 4.0;
+const LOOP_BAND_HEIGHT: f32 = 3.0;
 const VIEW_BUTTON: egui::Vec2 = egui::Vec2::new(0.0, 32.0);
-const NAME_WIDTH: f32 = 140.0;
-const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(28.0, 24.0);
+/// The Track header's name, switches, input and level bar column.
+const HEADER_WIDTH: f32 = 168.0;
+const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(26.0, 24.0);
+const SWITCH_GAP: f32 = 3.0;
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
-const METER_SIZE: egui::Vec2 = egui::Vec2::new(96.0, 6.0);
 const SWATCH_WIDTH: f32 = 5.0;
 const ITEM_INSET: f32 = 6.0;
-const ITEM_FILL_ALPHA: u8 = 150;
-const LOOP_ALPHA: u8 = 30;
+/// The loop region's lit tint over the lanes (project mockup: loop overlay, 13 %).
+const LOOP_ALPHA_ON: u8 = 33;
+const LOOP_ALPHA_OFF: u8 = 16;
 const SELECTED_OUTLINE: f32 = 2.0;
 const EDGE_GRAB_PX: f32 = 6.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
@@ -52,7 +72,8 @@ pub(crate) const PAN: (f64, f64) = (-1.0, 1.0);
 const NO_INPUT: &str = "no input";
 const NO_TRACKS: &str = "No Tracks yet: Add Track";
 const COUNT_IN_BARS: [u32; 3] = [0, 1, 2];
-const COUNT_IN_WIDTH: f32 = 84.0;
+const COUNT_IN_WIDTH: f32 = 76.0;
+const METER_WIDTH: f32 = 36.0;
 const AUTOSAVE_PROMPT: &str = "A newer autosave exists";
 
 /// An edge of the loop region being dragged: the region when the drag began and as it is now.
@@ -68,6 +89,8 @@ pub struct LoopDrag {
 pub struct ProjectView {
     pub timeline: Option<TimelineView>,
     pub loop_drag: Option<LoopDrag>,
+    /// Where the Take being recorded began ([`recording_from`]).
+    pub recording_from: Option<u64>,
 }
 
 /// Play, Stop, Record (a second click stops recording) with the count-in beats left, the view switch `Rack`, `Arrange`, `Mixer` (`shown` lit) and `Render`, Loop, Click with its count-in in bars, tempo, meter, then the position, left to right on one row. A meter that is no `<beats>/<note>` goes to `feedback`.
@@ -77,16 +100,44 @@ pub fn transport_bar(
     shown: MainView,
     (feedback, now): (&mut Feedback, Instant),
 ) -> Vec<Command> {
-    let mut commands = Vec::new();
     let Some(status) = snapshot.status.as_ref() else {
-        return commands;
+        return Vec::new();
     };
     let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
-        return commands;
+        return Vec::new();
     };
     let colours = palette();
-    ui.set_min_height(TRANSPORT_HEIGHT);
-    ui.horizontal_centered(|ui| {
+    let face = Frame::new()
+        .fill(colour(colours.panel))
+        .inner_margin(TRANSPORT_FACE_MARGIN)
+        .show(ui, |ui| {
+            ui.set_min_height(TRANSPORT_HEIGHT);
+            ui.set_min_width(ui.available_width());
+            transport_row(ui, status, &transport, (shown, tempo), (feedback, now))
+        });
+    let painter = ui.painter();
+    let rect = face.response.rect;
+    painter.hline(
+        rect.x_range(),
+        rect.top() + 0.5,
+        Stroke::new(1.0, colour(colours.hover)),
+    );
+    widgets::rack_ears(painter, rect, None);
+    face.inner
+}
+
+/// The transport faceplate's controls, wrapping onto a second row where the window is too narrow for one.
+fn transport_row(
+    ui: &mut Ui,
+    status: &Value,
+    transport: &TransportView,
+    (shown, tempo): (MainView, Tempo),
+    (feedback, now): (&mut Feedback, Instant),
+) -> Vec<Command> {
+    let mut commands = Vec::new();
+    let colours = palette();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
         let buttons = [
             (
                 "▶ Play",
@@ -107,7 +158,7 @@ pub fn transport_bar(
             ),
         ];
         for (text, lit, lit_colour, action) in buttons {
-            if ui.add(lit_button(text, lit, colour(lit_colour))).clicked() {
+            if ui.add(lit_button(text, lit, lit_colour)).clicked() {
                 commands.push(Command::Transport(action));
             }
         }
@@ -118,7 +169,7 @@ pub fn transport_bar(
                     .strong(),
             );
         }
-        ui.separator();
+        ui.add_space(GROUP_GAP);
         commands.extend(view_switch(ui, shown));
         if ui
             .add(outlined_button("Render").min_size(PANEL_BUTTON))
@@ -126,16 +177,13 @@ pub fn transport_bar(
         {
             commands.push(Command::OpenRenderDialog);
         }
-        ui.separator();
+        ui.add_space(GROUP_GAP);
         let loop_on = transport.loop_region.on;
-        if ui
-            .add(lit_button("Loop", loop_on, colour(colours.lit)))
-            .clicked()
-        {
+        if ui.add(lit_button("Loop", loop_on, colours.lit)).clicked() {
             commands.extend(project_key_to_command(KeyEvent::R, status, &[]));
         }
         if ui
-            .add(lit_button("Click", transport.click, colour(colours.lit)))
+            .add(lit_button("Click", transport.click, colours.lit))
             .clicked()
         {
             commands.push(Command::Click {
@@ -144,10 +192,10 @@ pub fn transport_bar(
             });
         }
         commands.extend(count_in_picker(ui, transport.count_in));
-        ui.separator();
+        ui.add_space(GROUP_GAP);
         commands.extend(tempo_fields(ui, tempo, (feedback, now)));
-        ui.separator();
-        position_readout(ui, &transport, sample_rate(status), tempo);
+        ui.add_space(GROUP_GAP);
+        position_readout(ui, transport, sample_rate(status), tempo);
         if let Some(warning) = transport.disk_warning() {
             ui.label(
                 RichText::new(warning)
@@ -161,32 +209,18 @@ pub fn transport_bar(
 
 fn view_switch(ui: &mut Ui, shown: MainView) -> Option<Command> {
     let mut chosen = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = VIEW_SWITCH_GAP;
-        for (text, view) in VIEWS {
-            let button =
-                lit_button(text, view == shown, colour(palette().lit)).min_size(VIEW_BUTTON);
-            if ui.add(button).clicked() {
-                chosen = Some(Command::ShowView(view));
-            }
+    for (text, view) in VIEWS {
+        let button = lit_button(text, view == shown, palette().lit).min_size(VIEW_BUTTON);
+        if ui.add(button).clicked() {
+            chosen = Some(Command::ShowView(view));
         }
-    });
+    }
     chosen
 }
 
-pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'static> {
-    let button = if lit {
-        Button::new(
-            RichText::new(text)
-                .strong()
-                .color(colour(palette().on_accent)),
-        )
-        .fill(lit_colour)
-        .stroke(Stroke::new(1.0, lit_colour))
-    } else {
-        Button::new(text.to_string())
-    };
-    button.selected(lit).min_size(TRANSPORT_BUTTON)
+/// A transport or Track switch: filled in `lit_colour` with dark text while lit.
+pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Rgb) -> StyledButton {
+    switched_button(text, lit, lit_colour).min_size(TRANSPORT_BUTTON)
 }
 
 fn count_in_text(bars: u32) -> String {
@@ -241,9 +275,8 @@ fn tempo_fields(
             meter: None,
         });
     }
-    let label = ui.label("Meter");
     let shown = format!("{}/{}", tempo.beats_per_bar, tempo.note);
-    if let Some(text) = edited_text(ui, Id::unique("meter"), &shown, 44.0, label.id) {
+    if let Some(text) = edited_text(ui, Id::unique("meter"), &shown, METER_WIDTH, "Meter") {
         match parse_meter(&text) {
             Some(meter) => commands.push(Command::Tempo {
                 bpm: None,
@@ -274,14 +307,13 @@ pub(crate) fn released_value(
 }
 
 /// A text field that holds its edit while focused and returns it on Enter.
-fn edited_text(ui: &mut Ui, id: Id, shown: &str, width: f32, label: Id) -> Option<String> {
+fn edited_text(ui: &mut Ui, id: Id, shown: &str, width: f32, name: &str) -> Option<String> {
     let draft = ui.data_mut(|data| data.remove_temp::<String>(id));
     let mut text = draft.unwrap_or_else(|| shown.to_string());
-    let edit = ui
-        .add(widgets::text_field(
-            TextEdit::singleline(&mut text).id(id).desired_width(width),
-        ))
-        .labelled_by(label);
+    let edit = ui.add(widgets::text_field(
+        TextEdit::singleline(&mut text).id(id).desired_width(width),
+    ));
+    edit.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, name));
     if edit.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, text));
         return None;
@@ -293,10 +325,42 @@ fn edited_text(ui: &mut Ui, id: Id, shown: &str, width: f32, label: Id) -> Optio
 fn position_readout(ui: &mut Ui, transport: &TransportView, rate: f64, tempo: Tempo) {
     let bars = bars_beats_text(transport.frames, rate, tempo);
     let time = time_text(transport.frames, rate);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(bars).font(theme::note()));
-        ui.label(muted_text(time).font(theme::value()));
-    });
+    let colours = palette();
+    let bars = RichText::new(bars)
+        .font(theme::timecode())
+        .color(colour(colours.text));
+    let time = RichText::new(time)
+        .font(theme::value())
+        .color(colour(colours.lit));
+    let width = [&bars, &time]
+        .map(|text| {
+            WidgetText::from((*text).clone())
+                .into_galley(
+                    ui,
+                    Some(TextWrapMode::Extend),
+                    f32::INFINITY,
+                    TextStyle::Body,
+                )
+                .size()
+                .x
+        })
+        .iter()
+        .sum::<f32>()
+        + ui.spacing().item_spacing.x
+        + f32::from(LCD_MARGIN.left + LCD_MARGIN.right);
+    if ui.available_width() < width {
+        ui.end_row();
+    }
+    Frame::new()
+        .fill(colour(colours.well))
+        .corner_radius(RADIUS_CONTROL)
+        .inner_margin(LCD_MARGIN)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(bars);
+                ui.label(time);
+            });
+        });
 }
 
 /// The ruler with the loop region, then one row per Track: its controls on the left, its lane of Items on the right.
@@ -309,7 +373,8 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         return commands;
     };
     let rate = sample_rate(status);
-    let full = ui.available_rect_before_wrap();
+    let face = ui.available_rect_before_wrap();
+    let full = face.shrink2(vec2(EAR_WIDTH, 0.0));
     let ruler = Rect::from_min_max(
         pos2(full.left() + TRACK_LIST_WIDTH, full.top()),
         pos2(full.right(), full.top() + RULER_HEIGHT),
@@ -325,6 +390,9 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
             .loop_drag
             .map_or(transport.loop_region, |drag| drag.now),
         playhead: transport.frames,
+        recording: view
+            .recording_from
+            .map(|from| recording_span(from, &transport)),
     };
     let add = Rect::from_min_size(full.min, vec2(TRACK_LIST_WIDTH - 8.0, RULER_HEIGHT));
     if ui.put(add, primary_button("+ Add Track")).clicked() {
@@ -358,7 +426,8 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
             }
         });
     });
-    ui.allocate_rect(full, Sense::hover());
+    widgets::rack_ears(ui.painter(), face, None);
+    ui.allocate_rect(face, Sense::hover());
     commands
 }
 
@@ -391,6 +460,8 @@ struct Scene {
     grid: Vec<GridLine>,
     loop_region: LoopRegion,
     playhead: u64,
+    /// The frames the Take being recorded covers so far.
+    recording: Option<(u64, u64)>,
 }
 
 impl Scene {
@@ -403,9 +474,9 @@ impl Scene {
         for line in &self.grid {
             let x = rect.left() + self.timeline.x_of(line.frame);
             let shade = if line.beat == 1 {
-                colours.boundary
+                colours.grid_bar
             } else {
-                colours.hover
+                colours.grid_beat
             };
             painter.vline(x, rect.y_range(), Stroke::new(1.0, colour(shade)));
         }
@@ -417,15 +488,33 @@ impl Scene {
         }
         let colours = palette();
         let alpha = if self.loop_region.on {
-            LOOP_ALPHA * 2
+            LOOP_ALPHA_ON
         } else {
-            LOOP_ALPHA
+            LOOP_ALPHA_OFF
         };
         let span = Rect::from_x_y_ranges(
             self.x(rect, self.loop_region.start)..=self.x(rect, self.loop_region.end),
             rect.y_range(),
         );
         painter.rect_filled(span, 0, translucent(colours.lit, alpha));
+    }
+
+    /// The loop region along the ruler's foot: lit while the loop is on, else in the boundary grey.
+    fn paint_loop_band(&self, painter: &Painter, ruler: Rect) {
+        if self.loop_region.start >= self.loop_region.end {
+            return;
+        }
+        let colours = palette();
+        let band = if self.loop_region.on {
+            colours.lit
+        } else {
+            colours.boundary
+        };
+        let span = Rect::from_x_y_ranges(
+            self.x(ruler, self.loop_region.start)..=self.x(ruler, self.loop_region.end),
+            ruler.bottom() - LOOP_BAND_HEIGHT..=ruler.bottom(),
+        );
+        painter.rect_filled(span, 0, colour(band));
     }
 
     fn paint_playhead(&self, painter: &Painter, rect: Rect) {
@@ -459,10 +548,14 @@ fn ruler_strip(
     }
     let painter = ui.painter_at(ruler);
     let colours = palette();
-    painter.rect_filled(ruler, 0, colour(colours.well));
-    scene.paint_loop(&painter, ruler);
-    scene.paint_grid(&painter, ruler);
+    painter.rect_filled(ruler, 0, colour(colours.ruler));
+    scene.paint_loop_band(&painter, ruler);
     for line in scene.grid.iter().filter(|line| line.beat == 1) {
+        painter.vline(
+            ruler.left() + scene.timeline.x_of(line.frame),
+            ruler.y_range(),
+            Stroke::new(1.0, colour(colours.grid_bar)),
+        );
         painter.text(
             pos2(
                 ruler.left() + scene.timeline.x_of(line.frame) + 3.0,
@@ -470,7 +563,7 @@ fn ruler_strip(
             ),
             Align2::LEFT_TOP,
             line.bar.to_string(),
-            theme::body(),
+            theme::legend(),
             colour(colours.muted),
         );
     }
@@ -564,10 +657,11 @@ fn track(
     } else {
         colours.panel
     };
+    let tab = track_colour(row.index);
     let painter = ui.painter_at(rect);
     painter.rect_filled(list, 0, colour(fill));
     let swatch = Rect::from_min_size(list.min, vec2(SWATCH_WIDTH, list.height()));
-    painter.rect_filled(swatch, 0, colour(track_colour(row.index)));
+    painter.rect_filled(swatch, 0, colour(tab));
     if row.selected {
         painter.rect_stroke(
             list.shrink(SELECTED_OUTLINE / 2.0),
@@ -583,7 +677,7 @@ fn track(
     );
     paint_lane(&ui.painter_at(lane), lane, row, items, scene);
     let controls = list
-        .shrink2(vec2(SWATCH_WIDTH + 6.0, 6.0))
+        .shrink2(vec2(SWATCH_WIDTH + 2.0, 6.0))
         .translate(vec2(SWATCH_WIDTH, 0.0));
     ui.scope_builder(UiBuilder::new().max_rect(controls), |ui| {
         commands.extend(track_controls(ui, row, ports));
@@ -593,63 +687,92 @@ fn track(
 
 fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock], scene: &Scene) {
     let colours = palette();
-    let ground = if row.selected {
-        colours.panel
-    } else {
-        colours.case
-    };
-    painter.rect_filled(lane, 0, colour(ground));
+    painter.rect_filled(lane, 0, colour(colours.well));
     scene.paint_loop(painter, lane);
     scene.paint_grid(painter, lane);
-    let track = track_colour(row.index);
+    let rows = lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET;
     for item in items.iter().filter(|item| item.track == row.name) {
         let span = Rect::from_x_y_ranges(
             scene.x(lane, item.position)..=scene.x(lane, item.end()),
-            lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET,
+            rows.clone(),
         );
-        painter.rect(
-            span,
-            RADIUS_CONTROL,
-            translucent(track, ITEM_FILL_ALPHA),
-            Stroke::new(1.0, colour(track)),
-            egui::StrokeKind::Inside,
-        );
-        painter.with_clip_rect(span.intersect(lane)).text(
-            span.left_top() + vec2(6.0, 4.0),
-            Align2::LEFT_TOP,
-            item.label(),
-            theme::body(),
-            colour(colours.text),
-        );
+        paint_take(painter, span.intersect(lane), item, track_colour(row.index));
+    }
+    if row.armed
+        && let Some((from, to)) = scene.recording
+    {
+        let span = Rect::from_x_y_ranges(scene.x(lane, from)..=scene.x(lane, to), rows);
+        paint_recording_take(painter, span.intersect(lane));
     }
     scene.paint_playhead(painter, lane);
 }
 
-/// Name and input on the left, Arm, Mute and Solo over the input meter, then volume and pan.
+/// A plate on the lane: the Take body with a top edge in the Track colour and the Take's name on the body.
+fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
+    let colours = palette();
+    painter.rect(
+        span,
+        RADIUS_CONTROL,
+        colour(colours.panel_open),
+        Stroke::new(1.0, colour(colours.take_edge)),
+        egui::StrokeKind::Inside,
+    );
+    let edge = Rect::from_min_size(span.min, vec2(span.width(), UNIT_EDGE_WIDTH));
+    painter.rect_filled(edge, 0, colour(track));
+    painter.with_clip_rect(span).text(
+        span.left_top() + vec2(6.0, UNIT_EDGE_WIDTH + 3.0),
+        Align2::LEFT_TOP,
+        item.label(),
+        theme::legend(),
+        colour(colours.text),
+    );
+}
+
+/// The Take being recorded: a dark red plate in a dashed danger outline, up to the playhead.
+fn paint_recording_take(painter: &Painter, span: Rect) {
+    let colours = palette();
+    painter.rect_filled(span, RADIUS_CONTROL, colour(colours.recording_take));
+    let corners = [
+        span.left_top(),
+        span.right_top(),
+        span.right_bottom(),
+        span.left_bottom(),
+        span.left_top(),
+    ];
+    painter.extend(egui::Shape::dashed_line(
+        &corners,
+        Stroke::new(1.0, colour(colours.danger)),
+        TAKE_DASH,
+        TAKE_GAP,
+    ));
+}
+
+/// The Track number, then the name with Arm, Mute and Solo over the input and its level bar, then volume and pan.
 fn track_controls(ui: &mut Ui, row: &TrackRow, ports: &[String]) -> Vec<Command> {
     let mut edit = TrackEdit::default();
     let mut refresh_ports = false;
+    let colours = palette();
     ui.horizontal(|ui| {
+        ui.add_sized(
+            vec2(NUMBER_WIDTH, ui.available_height()),
+            egui::Label::new(muted_text(format!("{}", row.index + 1)).font(theme::unit_name())),
+        );
         ui.vertical(|ui| {
-            ui.set_width(NAME_WIDTH);
-            let name_id = Id::unique(("track_name", row.index));
-            let label =
-                ui.label(muted_text(format!("Track {}", row.index + 1)).font(theme::body()));
-            edit.name = edited_text(ui, name_id, &row.name, NAME_WIDTH, label.id);
-            refresh_ports = input_picker(ui, row, ports, &mut edit.input);
-        });
-        ui.vertical(|ui| {
+            ui.set_width(HEADER_WIDTH);
+            ui.spacing_mut().item_spacing.y = theme::SPACE_XS;
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let colours = palette();
+                ui.spacing_mut().item_spacing.x = SWITCH_GAP;
+                let name_id = Id::unique(("track_name", row.index));
+                let name_width = HEADER_WIDTH - 3.0 * (SWITCH_SIZE.x + SWITCH_GAP);
+                let name = format!("Track {}", row.index + 1);
+                edit.name = edited_text(ui, name_id, &row.name, name_width, &name);
                 let switches = [
                     ("R", "Arm", row.armed, colours.danger, &mut edit.arm),
                     ("M", "Mute", row.mute, colours.lit, &mut edit.mute),
-                    ("S", "Solo", row.solo, colours.go, &mut edit.solo),
+                    ("S", "Solo", row.solo, colours.lit, &mut edit.solo),
                 ];
                 for (text, name, on, lit, change) in switches {
-                    let button = lit_button(text, on, colour(lit)).min_size(SWITCH_SIZE);
-                    let response = ui.add(button);
+                    let response = ui.add(lit_button(text, on, lit).min_size(SWITCH_SIZE));
                     response.widget_info(|| {
                         WidgetInfo::labeled(Role::Button, true, format!("{name} {}", row.name))
                     });
@@ -658,11 +781,20 @@ fn track_controls(ui: &mut Ui, row: &TrackRow, ports: &[String]) -> Vec<Command>
                     }
                 }
             });
+            refresh_ports = input_picker(ui, row, ports, &mut edit.input);
             input_meter(ui, row.input_peak_db);
         });
-        let volume = track_knob(ui, ("Volume", &row.name), row.volume_db, VOLUME_DB, " dB");
+        let accent = colour(track_colour(row.index));
+        let volume = track_knob(
+            ui,
+            ("Volume", &row.name),
+            row.volume_db,
+            VOLUME_DB,
+            " dB",
+            accent,
+        );
         edit.volume = volume.map(|db| db as f32);
-        let pan = track_knob(ui, ("Pan", &row.name), row.pan, PAN, "");
+        let pan = track_knob(ui, ("Pan", &row.name), row.pan, PAN, "", accent);
         edit.pan = pan.map(|pan| pan as f32);
     });
     let mut commands = Vec::new();
@@ -686,7 +818,7 @@ fn input_picker(
     change: &mut Option<String>,
 ) -> bool {
     let combo = ComboBox::from_id_salt(("track_input", row.index))
-        .width(NAME_WIDTH)
+        .width(HEADER_WIDTH)
         .truncate()
         .selected_text(row.input.as_deref().unwrap_or(NO_INPUT))
         .show_ui(ui, |ui| {
@@ -708,10 +840,11 @@ fn input_picker(
 
 fn input_meter(ui: &mut Ui, db: f64) {
     let colours = palette();
-    let (rect, response) = ui.allocate_exact_size(METER_SIZE, Sense::hover());
+    let size = vec2(HEADER_WIDTH, LEVEL_BAR_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Meter, true, format!("{db:.1} dB")));
     let painter = ui.painter();
-    painter.rect_filled(rect, 1, colour(colours.arc_track));
+    painter.rect_filled(rect, 1, colour(colours.well));
     let fraction = ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0) as f32;
     let lit = if db >= LADDER_RED_DB {
         colours.danger
@@ -724,15 +857,16 @@ fn input_meter(ui: &mut Ui, db: f64) {
     painter.rect_filled(level, 1, colour(lit));
 }
 
-/// A small knob over a number field; either returns its value when a drag ends or a value is typed, a double-click on the knob the middle (0 dB, centre).
+/// A small knob over a number field, its value arc in `accent`; either returns its value when a drag ends or a value is typed, a double-click on the knob the middle (0 dB, centre).
 pub(crate) fn track_knob(
     ui: &mut Ui,
     label: (&str, &str),
     value: f64,
     range: (f64, f64),
     suffix: &str,
+    accent: Color32,
 ) -> Option<f64> {
-    knob_with_reset(ui, label, value, range, suffix, 0.0, colour(palette().text))
+    knob_with_reset(ui, label, value, range, suffix, 0.0, accent)
 }
 
 /// [`track_knob`] whose double-click returns `reset`, its value arc in `accent`.

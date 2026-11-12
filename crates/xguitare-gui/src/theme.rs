@@ -34,6 +34,16 @@ pub struct Palette {
     pub on_accent: Rgb,
     /// An unlit clip LED (mixer mockup: clip off).
     pub clip_off: Rgb,
+    /// The timeline ruler's strip (project mockup: ruler).
+    pub ruler: Rgb,
+    /// A Take plate's outline on the lane (project mockup: take edge).
+    pub take_edge: Rgb,
+    /// The timeline's bar line (project mockup: grid bar).
+    pub grid_bar: Rgb,
+    /// The timeline's beat line (project mockup: grid beat).
+    pub grid_beat: Rgb,
+    /// The plate of the Take being recorded (project mockup: recording take).
+    pub recording_take: Rgb,
 }
 
 pub fn palette() -> Palette {
@@ -62,6 +72,11 @@ pub fn palette() -> Palette {
         hover: (0x3d, 0x44, 0x4c),
         on_accent: (0x15, 0x17, 0x1a),
         clip_off: (0x3a, 0x22, 0x20),
+        ruler: (0x1b, 0x1e, 0x22),
+        take_edge: (0x6d, 0x76, 0x7f),
+        grid_bar: (0x36, 0x3c, 0x43),
+        grid_beat: (0x1c, 0x20, 0x24),
+        recording_take: (0x3a, 0x22, 0x20),
     }
 }
 
@@ -191,10 +206,11 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("rack position on ear edge", c.on_accent, c.ear_edge),
         pair("rack position on ear centre", c.on_accent, c.ear_centre),
         pair(
-            "lit on well; also the edit border and the cents needle",
+            "lit on well; also the edit border, the cents needle and the transport's seconds",
             c.lit,
             c.well,
         ),
+        pair("bar numbers on the ruler", c.muted, c.ruler),
     ]
 }
 
@@ -247,10 +263,19 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("clip LED lit on clip off", c.danger, c.clip_off),
         pair("fader cap on panel", c.ear_edge, c.panel),
         pair("fader cap on well", c.ear_edge, c.well),
+        pair("Take edge on the lane", c.take_edge, c.well),
+        pair("recording Take edge", c.danger, c.recording_take),
+        pair("playhead on the ruler", c.danger, c.ruler),
+        pair("loop edges on the ruler", c.lit, c.ruler),
+        pair("Track level bar on its well", c.go, c.well),
     ];
     for track in TRACK_COLOURS {
         pairs.push(pair("Track edge and pan arc on panel", track, c.panel));
-        pairs.push(pair("Track swatch on panel open", track, c.panel_open));
+        pairs.push(pair(
+            "Track swatch on panel open; also the Take top edge on its body",
+            track,
+            c.panel_open,
+        ));
     }
     pairs
 }
@@ -290,6 +315,10 @@ pub fn decorative_pairs() -> Vec<ContrastPair> {
         pair("arc track on panel", c.arc_track, c.panel),
         pair("arc track on panel open", c.arc_track, c.panel_open),
         pair("unlit clip LED on panel", c.clip_off, c.panel),
+        pair("timeline bar line on the lane", c.grid_bar, c.well),
+        pair("timeline beat line on the lane", c.grid_beat, c.well),
+        pair("ruler bar line on the ruler", c.grid_bar, c.ruler),
+        pair("transport LCD well on panel", c.well, c.panel),
     ];
     pairs.extend(MODULE_ACCENTS.iter().map(|(_, accent)| {
         pair(

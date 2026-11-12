@@ -383,6 +383,22 @@ fn item_block(track: &str, item: &Value) -> Option<ItemBlock> {
     })
 }
 
+/// Where the Take being recorded began: the playhead the window first saw recording at once the count-in ended, kept while recording goes on; status names no such frame.
+pub fn recording_from(previous: Option<u64>, transport: &TransportView) -> Option<u64> {
+    let taking = transport.record_lit() && transport.count_in_remaining == 0;
+    taking.then(|| previous.unwrap_or(transport.frames))
+}
+
+/// The frames the Take being recorded covers so far, from `from` to the playhead; from the loop start once the playhead has wrapped back past `from`.
+pub fn recording_span(from: u64, transport: &TransportView) -> (u64, u64) {
+    let start = if transport.frames < from {
+        transport.loop_region.start
+    } else {
+        from
+    };
+    (start, transport.frames)
+}
+
 /// The end of the last Item or of the loop region, whichever is later.
 pub fn project_end(status: &Value, items: &[ItemBlock]) -> u64 {
     items

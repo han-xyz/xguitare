@@ -27,7 +27,7 @@ use crate::model::{
 use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
 use crate::project_model::{
     AutosaveOffer, MainView, ViewSwitch, item_blocks, key_active, project_key_to_command,
-    project_name, restored_view,
+    project_name, recording_from, restored_view, transport_view,
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
@@ -43,6 +43,18 @@ const SIDEBAR_MARGIN: Margin = Margin {
 };
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const MIXER_MARGIN: Margin = Margin::same(8);
+const TRANSPORT_MARGIN: Margin = Margin {
+    left: 8,
+    right: 8,
+    top: 8,
+    bottom: 4,
+};
+const TIMELINE_MARGIN: Margin = Margin {
+    left: 8,
+    right: 8,
+    top: 0,
+    bottom: 4,
+};
 /// The least the split under the Tracks and timeline leaves the Rack, which scrolls inside it.
 const RACK_MIN_HEIGHT: f32 = 120.0;
 /// The Tracks and timeline's default share of the height below the transport bar, up to [`TIMELINE_HEIGHT`].
@@ -575,10 +587,17 @@ fn project_panels(
 ) -> Vec<Command> {
     let mut commands = Vec::new();
     Panel::top("transport")
-        .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(12, 6)))
+        .frame(
+            Frame::new()
+                .fill(colour(palette().case))
+                .inner_margin(TRANSPORT_MARGIN),
+        )
         .show(ui, |ui| {
             commands.extend(transport_bar(ui, snapshot, main_view, feedback));
         });
+    if let Some(transport) = snapshot.status.as_ref().and_then(transport_view) {
+        view.recording_from = recording_from(view.recording_from, &transport);
+    }
     if main_view != MainView::Arrange {
         return commands;
     }
@@ -588,7 +607,11 @@ fn project_panels(
         .resizable(true)
         .default_size(TIMELINE_HEIGHT.min(below * TIMELINE_SHARE))
         .size_range(0.0..=max_height)
-        .frame(Frame::new().fill(colour(palette().case)))
+        .frame(
+            Frame::new()
+                .fill(colour(palette().case))
+                .inner_margin(TIMELINE_MARGIN),
+        )
         .show(ui, |ui| commands.extend(tracks_view(ui, snapshot, view)));
     commands
 }

@@ -10,8 +10,9 @@ use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, LoopEdge, MainView, ProjectRow, Tempo, TimelineView,
     TrackRow, TransportState, TransportView, ViewSwitch, autosave_offer, bars_beats_text,
     dragged_loop, grid_lines, item_blocks, key_active, parse_meter, project_end,
-    project_key_to_command, project_name, project_rows, project_tempo, restored_view, snap_to_beat,
-    still_closing, time_text, track_rows, transport_view,
+    project_key_to_command, project_name, project_rows, project_tempo, recording_from,
+    recording_span, restored_view, snap_to_beat, still_closing, time_text, track_rows,
+    transport_view,
 };
 
 const RATE: f64 = 48_000.0;
@@ -823,4 +824,26 @@ fn undo_goes_back_to_the_track_the_module_left() {
     assert_eq!(tracks, [bass.clone(), bass]);
     let preset_rack = restore(&rack, "cabinet").unwrap();
     assert_eq!(preset_rack.track, None);
+}
+
+#[test]
+fn a_recording_take_starts_where_recording_was_first_seen() {
+    let recording = transport_view(&project_status("recording")).unwrap();
+    assert_eq!(recording_from(None, &recording), Some(36_000));
+    assert_eq!(recording_from(Some(12_000), &recording), Some(12_000));
+    let stopped = transport_view(&project_status("stopped")).unwrap();
+    assert_eq!(recording_from(Some(12_000), &stopped), None);
+    let mut counting = project_status("recording");
+    counting["count_in_remaining"] = json!(2);
+    assert_eq!(
+        recording_from(None, &transport_view(&counting).unwrap()),
+        None
+    );
+}
+
+#[test]
+fn a_recording_take_reaches_the_playhead_and_after_a_loop_wraps_starts_at_the_loop() {
+    let recording = transport_view(&project_status("recording")).unwrap();
+    assert_eq!(recording_span(12_000, &recording), (12_000, 36_000));
+    assert_eq!(recording_span(100_000, &recording), (0, 36_000));
 }
