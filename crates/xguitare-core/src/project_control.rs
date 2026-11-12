@@ -651,7 +651,12 @@ pub(crate) fn track_add(state: &mut EngineState, name: Option<&str>) -> Result<V
     open.selected = index;
     open.history.push(Entry {
         label: format!("add Track {name}"),
-        change: Change::TrackAdded(PlacedTrack { index, id, track }),
+        change: Change::TrackAdded(PlacedTrack {
+            index,
+            id,
+            track,
+            selected: true,
+        }),
     });
     Ok(json!({"index": index, "name": name}))
 }
@@ -678,6 +683,7 @@ fn remove_track_at(state: &mut EngineState, index: usize) -> Result<PlacedTrack,
     let track = project.tracks.remove(index);
     let mut track_ids = open.track_ids.clone();
     let id = track_ids.remove(index);
+    let selected = open.selected == index;
     let moved_from = (index, MAX_BUSES);
     swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())?;
     let open = open_project_mut(state);
@@ -689,29 +695,64 @@ fn remove_track_at(state: &mut EngineState, index: usize) -> Result<PlacedTrack,
         .min(open.project.tracks.len().saturating_sub(1));
     let inputs = track_inputs(&open.project);
     state.projects.events.push(ProjectEvent::Inputs(inputs));
-    Ok(PlacedTrack { index, id, track })
+    Ok(PlacedTrack {
+        index,
+        id,
+        track,
+        selected,
+    })
 }
 
-/// Puts a Track back at its index with its id, loading its Takes not in memory, and rebuilds the Arrangement.
-fn restore_track(state: &mut EngineState, placed: &PlacedTrack) -> Result<(), String> {
+/// Puts a Track back at its index with its id, loading its Takes not in memory, and rebuilds the Arrangement. Its Sends to Buses removed since are dropped, and a name another Track has taken since becomes a free one, both written back to `placed`.
+fn restore_track(state: &mut EngineState, placed: &mut PlacedTrack) -> Result<(), String> {
     let open = open_project(state);
     let mut project = open.project.clone();
-    project.tracks.insert(placed.index, placed.track.clone());
+    let track = &mut placed.track;
+    track
+        .sends
+        .retain(|send| project.buses.iter().any(|bus| bus.id == send.bus));
+    track.name = free_name(&project.tracks, &track.name);
+    project.tracks.insert(placed.index, track.clone());
     check_project(&project).map_err(|err| err.to_string())?;
     let mut track_ids = open.track_ids.clone();
     track_ids.insert(placed.index, placed.id);
     let had_tracks = !open.project.tracks.is_empty();
     let missing = missing_takes(&open.dir, &open.takes, &project)?;
+    let loaded: Vec<String> = missing.keys().cloned().collect();
     open_project_mut(state).takes.extend(missing);
     let moved_from = (placed.index, MAX_BUSES);
-    swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())?;
+    if let Err(err) = swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())
+    {
+        let takes = &mut open_project_mut(state).takes;
+        for file in &loaded {
+            takes.remove(file);
+        }
+        return Err(err);
+    }
     let open = open_project_mut(state);
-    if had_tracks && placed.index <= open.selected {
+    if placed.selected {
+        open.selected = placed.index;
+    } else if had_tracks && placed.index <= open.selected {
         open.selected += 1;
     }
     let inputs = track_inputs(&open.project);
     state.projects.events.push(ProjectEvent::Inputs(inputs));
     Ok(())
+}
+
+/// `name` when no Track of `tracks` has it, else the first of `<name> 2`, `<name> 3`, … that none has.
+#[allow(
+    clippy::maybe_infinite_iter,
+    reason = "a Project has at most 16 Tracks, so some number is free"
+)]
+fn free_name(tracks: &[Track], name: &str) -> String {
+    if checked_name(tracks, name, None).is_ok() {
+        return name.to_string();
+    }
+    (2..)
+        .map(|n| format!("{name} {n}"))
+        .find(|name| checked_name(tracks, name, None).is_ok())
+        .expect("a Project has at most 16 Tracks, so some number is free")
 }
 
 /// The values of a `track_set` request; `None` leaves that value as it is.
@@ -1022,8 +1063,7 @@ pub(crate) fn project_undo(state: &mut EngineState) -> Result<Value, String> {
         History::next_undo,
         NOTHING_TO_UNDO,
     )?;
-    let done = apply_change(state, entry.change.inverse())?;
-    let label = entry.label;
+    let (done, label) = apply_change(state, entry.change.inverse(), entry.label)?;
     open_project_mut(state).history.undone(Entry {
         label: label.clone(),
         change: done.inverse(),
@@ -1039,8 +1079,7 @@ pub(crate) fn project_redo(state: &mut EngineState) -> Result<Value, String> {
         History::next_redo,
         NOTHING_TO_REDO,
     )?;
-    let done = apply_change(state, entry.change)?;
-    let label = entry.label;
+    let (done, label) = apply_change(state, entry.change, entry.label)?;
     open_project_mut(state).history.redone(Entry {
         label: label.clone(),
         change: done,
@@ -1064,8 +1103,12 @@ fn history_entry(
         .ok_or_else(|| nothing.to_string())
 }
 
-/// Does `change` to the open Project and returns it as done.
-fn apply_change(state: &mut EngineState, change: Change) -> Result<Change, String> {
+/// Does `change` to the open Project; returns it as done and `label`, naming the Track by the name it came back under.
+fn apply_change(
+    state: &mut EngineState,
+    change: Change,
+    label: String,
+) -> Result<(Change, String), String> {
     match change {
         Change::Items(tracks) => {
             let open = open_project(state);
@@ -1075,20 +1118,25 @@ fn apply_change(state: &mut EngineState, change: Change) -> Result<Change, Strin
                 project.tracks[index].items.clone_from(&items.after);
             }
             apply_items(state, project)?;
-            Ok(Change::Items(tracks))
+            Ok((Change::Items(tracks), label))
         }
-        Change::TrackAdded(placed) => {
-            restore_track(state, &placed)?;
-            Ok(Change::TrackAdded(placed))
+        Change::TrackAdded(mut placed) => {
+            let name = placed.track.name.clone();
+            restore_track(state, &mut placed)?;
+            let label = match label.strip_suffix(&name) {
+                Some(verb) if name != placed.track.name => format!("{verb}{}", placed.track.name),
+                _ => label,
+            };
+            Ok((Change::TrackAdded(placed), label))
         }
         Change::TrackRemoved(placed) => {
             let index = track_index(open_project(state), placed.id)?;
-            remove_track_at(state, index).map(Change::TrackRemoved)
+            let removed = remove_track_at(state, index)?;
+            Ok((Change::TrackRemoved(removed), label))
         }
     }
 }
 
-/// The index of the Track with the id `track_id`.
 fn track_index(open: &OpenProject, track_id: u64) -> Result<usize, String> {
     open.track_ids
         .iter()

@@ -201,6 +201,33 @@ fn rack_add(track: usize) -> Request {
     }
 }
 
+/// The Tracks (mixer values and Sends) and the selected Track of `status`.
+fn project_status(state: &mut EngineState) -> Value {
+    let status = status(state);
+    json!([status["tracks"], status["selected"]])
+}
+
+fn bus_add(name: &str) -> Request {
+    Request::BusAdd {
+        name: Some(name.to_string()),
+    }
+}
+
+fn send_set(track: usize, bus: &str) -> Request {
+    Request::SendSet {
+        track: TrackRef::Index(track),
+        bus: TrackRef::Name(bus.to_string()),
+        level: Some(SendLevel::Db(-6.0)),
+        pre: None,
+    }
+}
+
+fn remove_track(name: &str) -> Request {
+    Request::TrackRemove {
+        track: TrackRef::Name(name.to_string()),
+    }
+}
+
 fn trim(id: u64, start: u64) -> Request {
     Request::ItemTrim {
         id,
@@ -280,7 +307,9 @@ fn each_item_edit_undoes_and_redoes_to_an_identical_project() {
         assert!(state.revision > revision);
         assert_eq!(items(&mut state), before, "{label} undone");
         assert_eq!(labels(&mut state).1, json!(label));
+        let revision = state.revision;
         assert_eq!(redo(&mut state), json!({ "label": label }));
+        assert!(state.revision > revision);
         assert_eq!(items(&mut state), after, "{label} redone");
         drain(&mut audio);
     }
@@ -448,8 +477,26 @@ fn a_removed_track_undone_comes_back_with_its_rack_mixer_and_items_in_its_place(
     let (mut state, mut audio, _dir) = state("remove");
     open_song(&mut state);
     ok(handle(&mut state, rack_add(1)));
+    ok(handle(
+        &mut state,
+        Request::Set {
+            param: "drive.drive".to_string(),
+            value: 7.5,
+            track: Some(TrackRef::Index(1)),
+            bus: None,
+            master: false,
+        },
+    ));
     ok(handle(&mut state, track_set(1, Some(-6.0), None)));
-    let before = (items(&mut state), status(&mut state)["tracks"].clone());
+    ok(handle(&mut state, bus_add("Verb")));
+    ok(handle(&mut state, send_set(1, "Verb")));
+    ok(handle(
+        &mut state,
+        Request::TrackSelect {
+            track: TrackRef::Index(1),
+        },
+    ));
+    let before = (items(&mut state), project_status(&mut state));
     let bass_rack = rack(&mut state, 1);
     drain(&mut audio);
     ok(handle(
@@ -461,10 +508,7 @@ fn a_removed_track_undone_comes_back_with_its_rack_mixer_and_items_in_its_place(
     let after = items(&mut state);
     assert_eq!(labels(&mut state).0, json!("remove Track Bass"));
     assert_eq!(undo(&mut state), json!({"label": "remove Track Bass"}));
-    assert_eq!(
-        (items(&mut state), status(&mut state)["tracks"].clone()),
-        before
-    );
+    assert_eq!((items(&mut state), project_status(&mut state)), before);
     assert_eq!(rack(&mut state, 1), bass_rack);
     assert_eq!(redo(&mut state), json!({"label": "remove Track Bass"}));
     assert_eq!(items(&mut state), after);
@@ -575,5 +619,182 @@ fn a_recorded_take_undone_keeps_its_file_and_redone_plays_again() {
         swapped,
         [vec![], vec![0.75]],
         "undone to nothing, redone to the Take"
+    );
+}
+
+#[test]
+fn an_undone_track_removal_drops_its_sends_to_a_bus_removed_since() {
+    let (mut state, _audio, _dir) = state("send-gone");
+    open_song(&mut state);
+    ok(handle(&mut state, bus_add("Verb")));
+    ok(handle(&mut state, bus_add("Delay")));
+    ok(handle(&mut state, send_set(1, "Verb")));
+    ok(handle(&mut state, send_set(1, "Delay")));
+    ok(handle(&mut state, trim(3, 100)));
+    ok(handle(&mut state, remove_track("Bass")));
+    ok(handle(
+        &mut state,
+        Request::BusRemove {
+            bus: TrackRef::Name("Verb".to_string()),
+        },
+    ));
+    assert_eq!(undo(&mut state), json!({"label": "remove Track Bass"}));
+    let sends = &status(&mut state)["tracks"][1]["sends"];
+    assert_eq!(
+        sends,
+        &json!([{"bus": 0, "level_db": -6.0, "pre": false}]),
+        "only the Send to Delay, now Bus 0, is back"
+    );
+    assert_eq!(undo(&mut state), json!({"label": "trim"}));
+    assert_eq!(items(&mut state)["tracks"][1]["items"][0]["position"], 0);
+}
+
+#[test]
+fn a_restored_track_whose_name_is_taken_comes_back_under_a_free_one() {
+    let (mut state, _audio, _dir) = state("name-taken");
+    open_song(&mut state);
+    ok(handle(&mut state, trim(3, 100)));
+    ok(handle(&mut state, remove_track("Bass")));
+    let mut rename = track_set(1, None, None);
+    if let Request::TrackSet {
+        name, pan, mute, ..
+    } = &mut rename
+    {
+        *name = Some("Bass".to_string());
+        *pan = None;
+        *mute = None;
+    }
+    ok(handle(&mut state, rename));
+    assert_eq!(undo(&mut state), json!({"label": "remove Track Bass 2"}));
+    let names: Vec<Value> = items(&mut state)["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["name"].clone())
+        .collect();
+    assert_eq!(names, [json!("Guitar"), json!("Bass 2"), json!("Bass")]);
+    assert_eq!(labels(&mut state).1, json!("remove Track Bass 2"));
+    assert_eq!(undo(&mut state), json!({"label": "trim"}));
+    assert_eq!(
+        items(&mut state)["tracks"][1]["items"][0]["position"],
+        0,
+        "the Items entry finds the Track by its id"
+    );
+}
+
+#[test]
+fn a_busy_engine_leaves_an_undone_track_removal_and_the_loaded_takes_alone() {
+    let (mut state, mut audio, _dir) = state("busy-restore");
+    open_song(&mut state);
+    ok(handle(&mut state, remove_track("Bass")));
+    drain(&mut audio);
+    let before = (
+        items(&mut state),
+        labels(&mut state),
+        status(&mut state)["loaded_audio_bytes"].clone(),
+    );
+    fill_commands_to(&mut state, 0);
+    assert_eq!(
+        error(handle(&mut state, Request::ProjectUndo)),
+        "engine busy"
+    );
+    assert_eq!(
+        (
+            items(&mut state),
+            labels(&mut state),
+            status(&mut state)["loaded_audio_bytes"].clone()
+        ),
+        before
+    );
+}
+
+fn finished(track_id: u64, file: &str, start: u64) -> FinishedTake {
+    FinishedTake {
+        track_id,
+        file: file.to_string(),
+        span: TakeSpan {
+            start,
+            frames: 2400,
+            loop_take: false,
+        },
+    }
+}
+
+#[test]
+fn undoing_an_item_edit_keeps_mixer_and_rack_changes_made_after_it() {
+    let (mut state, _audio, _dir) = state("keeps-mixer");
+    open_song(&mut state);
+    ok(handle(&mut state, trim(2, 3200)));
+    ok(handle(&mut state, track_set(0, Some(-3.0), None)));
+    ok(handle(&mut state, rack_add(0)));
+    let rack_after = rack(&mut state, 0);
+    undo(&mut state);
+    assert_eq!(status(&mut state)["tracks"][0]["volume_db"], -3.0);
+    assert_eq!(rack(&mut state, 0), rack_after);
+}
+
+#[test]
+fn an_item_edit_on_another_track_after_a_removal_undoes_in_order() {
+    let (mut state, _audio, _dir) = state("interleaved");
+    open_song(&mut state);
+    let before = items(&mut state);
+    ok(handle(&mut state, remove_track("Keys")));
+    ok(handle(&mut state, trim(2, 3200)));
+    assert_eq!(undo(&mut state), json!({"label": "trim"}));
+    assert_eq!(undo(&mut state), json!({"label": "remove Track Keys"}));
+    assert_eq!(items(&mut state), before);
+}
+
+#[test]
+fn takes_added_after_an_undo_clear_redo_and_each_is_its_own_entry() {
+    let (mut state, mut audio, _dir) = state("two-takes");
+    open_song(&mut state);
+    let before = items(&mut state);
+    let ids: Vec<u64> = before["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["id"].as_u64().unwrap())
+        .collect();
+    for file in ["takes/keys-1.wav", "takes/bass-1.wav"] {
+        write_take(&folder(&state).join(file), &vec![0.75; 2400]);
+    }
+    ok(handle(&mut state, trim(2, 3200)));
+    undo(&mut state);
+    let trimmed_back = items(&mut state);
+    assert_eq!(
+        add_finished_takes(
+            &mut state,
+            &[
+                finished(ids[2], "takes/keys-1.wav", 9600),
+                finished(ids[1], "takes/bass-1.wav", 9600),
+            ],
+            |_| Latency::default()
+        ),
+        Vec::<String>::new()
+    );
+    drain(&mut audio);
+    assert_eq!(labels(&mut state), (json!("record Bass"), Value::Null));
+    assert_eq!(undo(&mut state), json!({"label": "record Bass"}));
+    assert_eq!(
+        items(&mut state)["tracks"][1]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        items(&mut state)["tracks"][2]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(undo(&mut state), json!({"label": "record Keys"}));
+    assert_eq!(items(&mut state), trimmed_back);
+    assert_eq!(
+        error(handle(&mut state, Request::ProjectUndo)),
+        "nothing to undo",
+        "the trim was undone before the Takes came"
     );
 }

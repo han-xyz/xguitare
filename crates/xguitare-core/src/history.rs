@@ -34,12 +34,13 @@ pub(crate) struct TrackItems {
     pub after: Vec<Item>,
 }
 
-/// A whole Track with its id and its index in the Project.
+/// A whole Track with its id, its index in the Project and whether it was the selected one.
 #[derive(Clone)]
 pub(crate) struct PlacedTrack {
     pub index: usize,
     pub id: u64,
     pub track: Track,
+    pub selected: bool,
 }
 
 impl Change {

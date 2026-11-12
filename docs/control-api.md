@@ -744,9 +744,9 @@ The history holds, per open Project, the last 200 of these edits, each one entry
 | `item_take` | `take <n>`, the Take counted from 1 |
 | A Take added after recording | `record <Track>` |
 | `track_add` | `add Track <name>` |
-| `track_remove` | `remove Track <name>`; undone, the Track comes back at its place with its Rack, mixer values, Sends and Items |
+| `track_remove` | `remove Track <name>`; undone, the Track comes back at its place with its Rack, mixer values, Sends and Items, selected if it was |
 
-Mixer, Rack, tempo, loop, click, Bus and Track rename requests do not enter the history and leave it as it is. A new edit clears the redo history. The history is not saved and is cleared when the Project closes. Undoing a recorded Take removes its Item and keeps its file in `takes/`; a Take that is not in memory is loaded before an undo or redo that plays it. An Item keeps its id through undo and redo, and a new Item never gets the id of one that undo took away.
+Mixer, Rack, tempo, loop, click, Bus and Track rename requests do not enter the history and leave it as it is. A new edit clears the redo history. The history is not saved and is cleared when the Project closes. A Track that comes back (an undone `track_remove` or a redone `track_add`) drops its Sends to Buses removed since, and when another Track has taken its name since, it comes back as `<name> 2` (or the next free number); the reply and the label then name it so. A recording enters the history once its Takes are added, about a second after `stop` (when they show up in `items`). Undoing a recorded Take removes its Item and keeps its file in `takes/`; Takes stay in memory until the Project closes, and one that is not is loaded before an undo or redo that plays it. When that fails (`cannot load take <file>: <reason>`, e.g. after the file was deleted outside the Daemon), the entry stays where it is and undo (or redo) answers the same until the file is back, so older entries cannot be undone meanwhile. An Item keeps its id through undo and redo, and a new Item never gets the id of one that undo took away.
 
 Request:
 
