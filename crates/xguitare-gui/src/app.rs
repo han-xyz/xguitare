@@ -17,11 +17,11 @@ use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
 use crate::mixer::{MixerView, RenderDraft, mixer_panel, render_dialog};
 use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands, shown_rack_column};
 use crate::model::{
-    BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
-    RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
-    bank_rows_for_rack, esc_dismisses_toast, forget_removed_units, key_to_command,
-    open_units_from_string, open_units_to_string, param_rows, peak_db, quit_commands,
-    remember_removes,
+    BankRow, ClipLatch, Command, Feedback, HiddenFixed, KeyEvent, KeyModifiers, Link, PeakHold,
+    PortSelection, RackLayout, RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot,
+    Throttle, bank_kind, bank_rows, bank_rows_for_rack, esc_dismisses_toast, forget_removed_units,
+    key_to_command, open_units_from_string, open_units_to_string, param_rows, peak_db,
+    quit_commands, remember_removes,
 };
 use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
 use crate::project_model::{
@@ -60,6 +60,7 @@ const RACK_MIN_HEIGHT: f32 = 120.0;
 const TIMELINE_SHARE: f32 = 0.45;
 const OPEN_UNITS_KEY: &str = "open_units";
 const VIEW_KEY: &str = "view";
+const RACK_LAYOUT_KEY: &str = "rack_layout";
 const DIGIT_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -89,6 +90,8 @@ pub struct App {
     open_units: BTreeSet<String>,
     removing: BTreeSet<String>,
     removed: Option<RemovedUnit>,
+    rack_layout: RackLayout,
+    hidden: Option<HiddenFixed>,
     bank_query: String,
     save_as_name: Option<String>,
     add_draft: AddDraft,
@@ -161,6 +164,11 @@ impl App {
             .map(|stored| open_units_from_string(&stored))
             .unwrap_or_default();
         let stored_view = cc.storage.and_then(|storage| storage.get_string(VIEW_KEY));
+        let rack_layout = cc
+            .storage
+            .and_then(|storage| storage.get_string(RACK_LAYOUT_KEY))
+            .map(|stored| RackLayout::from_stored(&stored))
+            .unwrap_or_default();
         cc.egui_ctx.set_theme(Theme::Dark);
         cc.egui_ctx.set_fonts(theme::fonts());
         cc.egui_ctx
@@ -202,6 +210,8 @@ impl App {
             open_units,
             removing: BTreeSet::new(),
             removed: None,
+            rack_layout,
+            hidden: None,
             bank_query: String::new(),
             save_as_name: None,
             add_draft: AddDraft::default(),
@@ -266,6 +276,7 @@ impl App {
                             aim_restore(&mut removed.restore, status, target);
                         }
                         self.removed = Some(removed);
+                        self.hidden = None;
                     }
                 }
                 Command::Load(_)
@@ -380,12 +391,26 @@ impl eframe::App for App {
                 && let Some(params) = &snapshot.params
             {
                 forget_removed_units(&mut self.open_units, &mut self.removing, params);
+                let ids = |params: Option<&Value>| -> Vec<String> {
+                    params
+                        .map(param_rows)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(id, _)| id)
+                        .collect()
+                };
+                self.rack_layout
+                    .follow(&ids(self.snapshot.params.as_ref()), &ids(Some(params)));
             }
             self.beat_light = beat_light(self.snapshot.status.as_ref(), snapshot.status.as_ref());
             self.snapshot = snapshot;
         }
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the window's panels laid out in drawing order"
+    )]
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let snapshot = &self.snapshot;
         let now = Instant::now();
@@ -406,7 +431,8 @@ impl eframe::App for App {
             .collect();
         commands.extend(self.throttle.tick(now));
         Panel::bottom("status").show(ui, |ui| {
-            commands.extend(footer(ui, snapshot, &self.feedback, &mut self.removed, now));
+            let undo = (&mut self.removed, &mut self.hidden, &mut self.rack_layout);
+            commands.extend(footer(ui, snapshot, &self.feedback, undo, now));
         });
         let mut tuner = Tuner {
             open: &mut self.tuner_open,
@@ -469,13 +495,19 @@ impl eframe::App for App {
             clips: &mut self.clips,
             holds: &self.holds,
             open_units: &mut self.open_units,
+            layout: &mut self.rack_layout,
+            hidden: &mut self.hidden,
         };
+        let hidden_before = view.hidden.clone();
         let central = CentralPanel::default()
             .frame(Frame::central_panel(ui.style()).inner_margin(central_margin(main_view)))
             .show(ui, |ui| {
                 central_view(ui, snapshot, main_view, &mut self.mixer, &mut view)
             });
         commands.extend(central.inner);
+        if self.hidden.is_some() && self.hidden != hidden_before {
+            self.removed = None;
+        }
         widgets::paint_focus_ring(ui.ctx());
         let commands = self.keep_window_commands(commands);
         remember_removes(&mut self.removing, &commands);
@@ -493,6 +525,7 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(OPEN_UNITS_KEY, open_units_to_string(&self.open_units));
         storage.set_string(VIEW_KEY, self.views.shown.stored().to_string());
+        storage.set_string(RACK_LAYOUT_KEY, self.rack_layout.to_stored());
     }
 
     fn on_exit(&mut self) {

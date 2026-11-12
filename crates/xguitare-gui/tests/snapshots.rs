@@ -526,6 +526,13 @@ fn unit_top(harness: &Harness<App>, unit: &str) -> f32 {
     harness.get_by_label(&format!("{unit} unit")).rect().top()
 }
 
+/// The fixed unit `name` (`Tuner` or `Meters`), whose accessible name also gives its position.
+fn fixed_unit_rect(harness: &Harness<App>, name: &str) -> egui::Rect {
+    harness
+        .get_by_label_contains(&format!("{name} unit, "))
+        .rect()
+}
+
 fn tile_centre(harness: &Harness<App>, label: &str) -> Pos2 {
     harness
         .get_by_role_and_label(Role::Button, label)
@@ -1824,14 +1831,14 @@ fn units_have_fixed_heights() {
 #[test]
 fn tuner_unit_switch_opens_and_closes_the_tuner_view_and_its_mute() {
     let (mut harness, sent, _dir) = harness();
-    assert_eq!(unit_height(&harness, "Tuner unit"), 64.0);
+    assert_eq!(unit_height(&harness, "Tuner unit, 2 of 8"), 64.0);
     assert!(!switch_is_on(&harness, "Tuner"));
     click_unit_switch(&mut harness, "Tuner");
-    assert_eq!(unit_height(&harness, "Tuner unit"), 168.0);
+    assert_eq!(unit_height(&harness, "Tuner unit, 2 of 8"), 168.0);
     assert!(switch_is_on(&harness, "Tuner"));
     assert_eq!(sent_now(&sent), [Command::Mute(true)]);
     click_unit_switch(&mut harness, "Tuner");
-    assert_eq!(unit_height(&harness, "Tuner unit"), 64.0);
+    assert_eq!(unit_height(&harness, "Tuner unit, 2 of 8"), 64.0);
     assert_eq!(sent_now(&sent), [Command::Mute(false)]);
 }
 
@@ -2414,4 +2421,49 @@ fn clicking_the_selected_track_shows_its_rack_again() {
     assert!(sent_now(&sent).contains(&Command::ShowRack(ShownRack::Track)));
     assert!(harness.query_by_label("Bass DI — Rack").is_some());
     assert!(harness.query_by_label("Room — Rack").is_none());
+}
+
+#[test]
+fn tuner_dragged_below_the_second_module_sits_there() {
+    let (mut harness, sent, _dir) = harness();
+    let tuner = fixed_unit_rect(&harness, "Tuner");
+    let from = pos2(tuner.left() + 130.0, tuner.center().y);
+    let to = pos2(from.x, unit_top(&harness, "tonestack") + 10.0);
+    drag_and_release(&mut harness, from, to);
+    let tuner = harness.get_by_label("Tuner unit, 4 of 8").rect();
+    assert!(tuner.top() > unit_top(&harness, "preamp"));
+    assert!(tuner.bottom() < unit_top(&harness, "tonestack"));
+    assert_eq!(sent_now(&sent), []);
+}
+
+#[test]
+fn meters_dragged_out_of_the_rack_hide_and_undo_shows_them() {
+    let (mut harness, sent, _dir) = harness();
+    let meters = fixed_unit_rect(&harness, "Meters");
+    let ear = pos2(meters.left() + 15.0, meters.center().y);
+    drag_and_release(&mut harness, ear, pos2(100.0, 400.0));
+    assert!(harness.query_by_label_contains("Meters unit").is_none());
+    harness.get_by_label("Hid meters \u{2014}");
+    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.run_steps(2);
+    harness.get_by_label("Meters unit, 1 of 8");
+    assert!(harness.query_by_label("Undo").is_none());
+    assert_eq!(sent_now(&sent), []);
+}
+
+#[test]
+fn a_fixed_unit_hides_by_its_button_and_moves_by_its_arrows() {
+    let (mut harness, sent, _dir) = harness();
+    click_button(&mut harness, "Hide Tuner");
+    assert!(harness.query_by_label_contains("Tuner unit").is_none());
+    harness.get_by_label("Hid Tuner \u{2014}");
+    let meters = fixed_unit_rect(&harness, "Meters");
+    harness
+        .get_all_by_role_and_label(Role::Button, "↓")
+        .find(|button| meters.contains(button.rect().center()))
+        .unwrap()
+        .click();
+    harness.run_steps(2);
+    harness.get_by_label("Meters unit, 2 of 7");
+    assert_eq!(sent_now(&sent), []);
 }

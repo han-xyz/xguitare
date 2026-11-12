@@ -14,10 +14,11 @@ use crate::metronome_model::{
 };
 use crate::metronome_model::{BeatDot, beat_dots, bpm_text};
 use crate::model::{
-    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, ModuleType, PortSelection,
-    RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places,
-    chip_columns, engine_readout, filter_bank, param_rows, port_choices, rack_channels,
-    set_ports_command, set_settings_command, settings_draft, shown_undo, tuner_toggle,
+    AddPlace, BankRow, CHIP_GAP, ChoiceKey, Command, Dragged, Feedback, HiddenFixed, ModuleType,
+    PortSelection, RackLayout, RemovedUnit, SECTIONS, Section, SettingsDraft, Snapshot,
+    add_command, add_place, add_places, chip_columns, engine_readout, filter_bank, param_rows,
+    port_choices, rack_channels, set_ports_command, set_settings_command, settings_draft,
+    shown_undo, tuner_toggle,
 };
 use crate::project::{knob_with_reset, released_value};
 use crate::project_model::{project_name, project_rows, transport_view};
@@ -817,12 +818,16 @@ fn bank_panel(ui: &mut Ui, rows: &[BankRow]) -> Option<Command> {
     clicked
 }
 
-/// `Undo` puts the last removed Module back, once.
+/// `Undo` puts the last removed Module or hidden fixed unit back, once.
 pub fn footer(
     ui: &mut Ui,
     snapshot: &Snapshot,
     feedback: &Feedback,
-    removed: &mut Option<RemovedUnit>,
+    (removed, hidden, layout): (
+        &mut Option<RemovedUnit>,
+        &mut Option<HiddenFixed>,
+        &mut RackLayout,
+    ),
     now: Instant,
 ) -> Option<Command> {
     let mut undo = None;
@@ -830,8 +835,18 @@ pub fn footer(
         if let Some(text) = feedback.notice(now) {
             ui.label(text);
         }
+        if hidden.as_ref().is_some_and(|hidden| !hidden.is_shown(now)) {
+            *hidden = None;
+        }
         let status = snapshot.status.as_ref();
-        if let Some(id) = shown_undo(removed, status, now).map(|shown| shown.id.clone()) {
+        if let Some(shown) = hidden.take() {
+            ui.label(format!("Hid {} \u{2014}", shown.unit.in_prose()));
+            if ui.add(outlined_button("Undo")).clicked() {
+                layout.undo_hide(&shown);
+            } else {
+                *hidden = Some(shown);
+            }
+        } else if let Some(id) = shown_undo(removed, status, now).map(|shown| shown.id.clone()) {
             ui.label(format!("Removed {id} \u{2014}"));
             if ui.add(outlined_button("Undo")).clicked() {
                 undo = removed

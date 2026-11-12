@@ -17,15 +17,16 @@ use crate::eq_model::{
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CHEVRON_WIDTH, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged,
-    EAR_WIDTH, Feedback, HEADER_GAP, KnobKey, Link, METER_FLOOR_DB, MOVE_BUTTON_GAP,
-    MOVE_BUTTON_SIDE, Message, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
-    RULE_WIDTH, RackItem, SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading,
-    UNIT_NAME_WIDTH, autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text,
-    chip_click, choice_buttons, choice_step, choice_text, closed_knobs_width, closed_unit_rows,
-    drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_origin,
-    knob_param_value, link_banner, module_title, move_target, mute_banner, open_knob_rows,
-    open_knobs_width, open_unit_height, param_label, param_rows, paused, peak_db, peak_text,
-    rack_ear_labels, tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
+    EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP, HiddenFixed, KnobKey, LayoutDrop, Link,
+    METER_FLOOR_DB, MOVE_BUTTON_GAP, MOVE_BUTTON_SIDE, MOVE_BUTTONS_WIDTH, Message, NO_SIGNAL,
+    OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, RULE_WIDTH, RackItem, RackLayout,
+    SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH,
+    autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text, chip_click, choice_buttons,
+    choice_step, choice_text, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
+    format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value, layout_drop,
+    link_banner, module_title, move_target, mute_banner, open_knob_rows, open_knobs_width,
+    open_unit_height, param_label, param_rows, paused, peak_db, peak_text, rack_ear_labels,
+    tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
@@ -57,8 +58,9 @@ const OPEN_CHEVRON: &str = "▼";
 const CLOSED_CHEVRON: &str = "▶";
 const DROP_LINE_WIDTH: f32 = 3.0;
 const GRIP: &str = "⠿";
-const TUNER_LABEL: &str = "Tuner";
-const METER_BRIDGE_LABEL: &str = "Meter bridge";
+const HIDE_BUTTON_WIDTH: f32 = 48.0;
+/// The ↑, ↓ and `Hide` buttons at the right of a fixed unit.
+const FIXED_BUTTONS_WIDTH: f32 = MOVE_BUTTONS_WIDTH + MOVE_BUTTON_GAP + HIDE_BUTTON_WIDTH;
 const VALUE_FIELD_WIDTH: f32 = 64.0;
 const RULE_HEIGHT: f32 = 30.0;
 const METER_SCALE_HEIGHT: f32 = 14.0;
@@ -105,11 +107,24 @@ pub struct RackView<'a, 'b> {
     pub clips: &'a mut [ClipLatch; 2],
     pub holds: &'a [PeakHold; 2],
     pub open_units: &'a mut BTreeSet<String>,
+    /// Where the Tuner and the meters sit, shared by every Rack the window shows.
+    pub layout: &'a mut RackLayout,
+    /// The footer's Undo of the last fixed unit hidden.
+    pub hidden: &'a mut Option<HiddenFixed>,
+}
+
+/// What a fixed unit's own controls asked for.
+enum FixedAction {
+    Step(FixedUnit, Direction),
+    Hide(FixedUnit),
+    ToggleTuner,
 }
 
 pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Command> {
     let mut commands = Vec::new();
     let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
+    let ids: Vec<String> = modules.iter().map(|(id, _)| id.clone()).collect();
+    let order = view.layout.order(&ids);
     let muted_by_tuner = *view.tuner.open && *view.tuner.muted_by_us;
     let paused = snapshot.link != Link::Connected;
     if let Some((title, detail)) = link_banner(&snapshot.link, view.knobs.now) {
@@ -134,20 +149,149 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
                 .inner_margin(Margin::symmetric(RAIL_WIDTH, 0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = UNIT_GAP;
-                    meter_bridge(ui, snapshot, view.clips, view.holds);
-                    if tuner_unit(ui, snapshot, *view.tuner.open) {
-                        let muted = muted_now(snapshot).unwrap_or_default();
-                        commands.extend(view.tuner.toggle(muted));
-                    }
-                    let (unit_commands, placed) =
-                        module_units(ui, snapshot, &modules, view.knobs, view.open_units);
-                    commands.extend(unit_commands);
-                    placed
+                    rack_units(ui, snapshot, &modules, &order, view)
                 });
-            commands.extend(drag_and_drop(ui, &modules, &rack.inner));
+            let (unit_commands, placed, action) = rack.inner;
+            commands.extend(unit_commands);
+            let (command, drop) = drag_and_drop(ui, &modules, &order, &placed);
+            commands.extend(command);
+            match drop {
+                Some(LayoutDrop::Place(unit, slot)) => view.layout.place(unit, slot, &ids),
+                Some(LayoutDrop::Hide(unit)) => hide(view, unit),
+                None => {}
+            }
+            match action {
+                Some(FixedAction::Step(unit, direction)) => {
+                    view.layout.step(unit, direction, &ids);
+                }
+                Some(FixedAction::Hide(unit)) => hide(view, unit),
+                Some(FixedAction::ToggleTuner) => {
+                    let muted = muted_now(snapshot).unwrap_or_default();
+                    commands.extend(view.tuner.toggle(muted));
+                }
+                None => {}
+            }
         });
     });
     commands
+}
+
+fn hide(view: &mut RackView, unit: FixedUnit) {
+    if let Some(hidden) = view.layout.hide(unit, view.knobs.now) {
+        *view.hidden = Some(hidden);
+    }
+}
+
+/// Every unit in `order`: its commands, its rect with its drag response, and what a fixed unit's controls asked for.
+fn rack_units(
+    ui: &mut Ui,
+    snapshot: &Snapshot,
+    modules: &[(String, Vec<ParamRow>)],
+    order: &[RackItem],
+    view: &mut RackView,
+) -> (Vec<Command>, Vec<(Rect, Response)>, Option<FixedAction>) {
+    let mut commands = Vec::new();
+    let mut placed = Vec::with_capacity(order.len());
+    let mut action = None;
+    let mut index = 0;
+    for (slot, (item, position)) in order.iter().zip(rack_ear_labels(order)).enumerate() {
+        let place = (slot, order.len());
+        match item {
+            RackItem::Fixed(unit) => {
+                let (rect, handle, asked) = fixed_unit(ui, *unit, place, snapshot, view);
+                placed.push((rect, handle));
+                action = action.or(asked);
+            }
+            RackItem::Module(_) => {
+                let position = position.unwrap_or_default();
+                let unit = module_unit_of(snapshot, modules, index, &position);
+                let (unit_commands, rect, handle) =
+                    module_unit(ui, &unit, view.knobs, view.open_units);
+                commands.extend(unit_commands);
+                placed.push((rect, handle));
+                index += 1;
+            }
+        }
+    }
+    (commands, placed, action)
+}
+
+/// The meter bridge or the Tuner unit at drawn `place` (index, unit count), dragged anywhere on it but its own controls.
+fn fixed_unit(
+    ui: &mut Ui,
+    unit: FixedUnit,
+    place: (usize, usize),
+    snapshot: &Snapshot,
+    view: &mut RackView,
+) -> (Rect, Response, Option<FixedAction>) {
+    let open = *view.tuner.open;
+    let (height, header_height) = match unit {
+        FixedUnit::Meters => (
+            METER_BRIDGE_HEIGHT,
+            METER_BRIDGE_HEIGHT - 2.0 * f32::from(UNIT_MARGIN),
+        ),
+        FixedUnit::Tuner if open => (OPEN_UNIT_HEIGHT, HEADER_HEIGHT),
+        FixedUnit::Tuner => (UNIT_HEIGHT, HEADER_HEIGHT),
+    };
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), height));
+    let handle = ui
+        .interact(
+            rect,
+            ui.scope_id().with(("fixed unit", unit.label())),
+            Sense::drag(),
+        )
+        .on_hover_cursor(CursorIcon::Grab);
+    if handle.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+    }
+    let label = format!("{} unit, {} of {}", unit.label(), place.0 + 1, place.1);
+    let action = ui
+        .scope(|ui| {
+            ui.style_mut().interaction.selectable_labels = false;
+            match unit {
+                FixedUnit::Meters => {
+                    meter_bridge(ui, &label, snapshot, (view.clips, view.holds), place)
+                }
+                FixedUnit::Tuner => tuner_unit(ui, &label, snapshot, open, place),
+            }
+        })
+        .inner;
+    let side = f32::from(UNIT_SIDE_MARGIN);
+    let header = Rect::from_min_size(
+        pos2(rect.left() + side, rect.top() + f32::from(UNIT_MARGIN)),
+        vec2(0.0, header_height),
+    );
+    grip(ui, header);
+    (rect, handle, action)
+}
+
+/// Added right to left, so that they read ↑ ↓ `Hide` at the right of the unit.
+fn fixed_buttons(
+    ui: &mut Ui,
+    unit: FixedUnit,
+    (index, len): (usize, usize),
+) -> Option<FixedAction> {
+    ui.spacing_mut().item_spacing.x = MOVE_BUTTON_GAP;
+    let name = format!("Hide {}", unit.label());
+    let hide = ui.add(
+        widgets::outlined_button("Hide").min_size(vec2(HIDE_BUTTON_WIDTH, MOVE_BUTTON_SIZE.y)),
+    );
+    hide.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));
+    let mut action = hide.clicked().then_some(FixedAction::Hide(unit));
+    for (text, direction) in [("↓", Direction::Down), ("↑", Direction::Up)] {
+        let enabled = move_target(index, direction, len).is_some();
+        if ui
+            .add_enabled(
+                enabled,
+                widgets::outlined_button(RichText::new(text).font(theme::heading()))
+                    .min_size(MOVE_BUTTON_SIZE),
+            )
+            .clicked()
+        {
+            action = Some(FixedAction::Step(unit, direction));
+        }
+    }
+    action
 }
 
 /// Red, as wide as the rack and above it, outside its scroll area so that it stays in view.
@@ -356,26 +500,41 @@ pub fn muted_text(text: impl Into<String>) -> RichText {
         .color(colour(palette().muted))
 }
 
-/// A click on either ladder clears both clip lamps.
+/// A click on either ladder clears both clip lamps; also what its ↑, ↓ and `Hide` buttons asked for.
 fn meter_bridge(
     ui: &mut Ui,
+    label: &str,
     snapshot: &Snapshot,
-    clips: &mut [ClipLatch; 2],
-    holds: &[PeakHold; 2],
-) {
+    (clips, holds): (&mut [ClipLatch; 2], &[PeakHold; 2]),
+    place: (usize, usize),
+) -> Option<FixedAction> {
     let mut cleared = false;
     let face = Faceplate {
         fill: palette().panel,
         edge: colour(palette().hover),
         position: None,
     };
-    rack_unit(ui, METER_BRIDGE_LABEL, &face, METER_BRIDGE_HEIGHT, |ui| {
+    let action = rack_unit(ui, label, &face, METER_BRIDGE_HEIGHT, |ui| {
+        let content = ui.max_rect();
+        let buttons = Rect::from_min_max(
+            pos2(content.right() - FIXED_BUTTONS_WIDTH, content.top()),
+            content.max,
+        );
+        let action = fixed_buttons(
+            &mut ui.new_child(
+                UiBuilder::new()
+                    .max_rect(buttons)
+                    .layout(Layout::right_to_left(Align::Center)),
+            ),
+            FixedUnit::Meters,
+            place,
+        );
         ui.spacing_mut().item_spacing = vec2(METER_ITEM_GAP, METER_ROW_GAP);
-        let ladder_width =
-            ui.available_width() - METER_LABEL_WIDTH - PEAK_WIDTH - 2.0 * METER_ITEM_GAP;
+        let row_width = ui.available_width() - FIXED_BUTTONS_WIDTH - METER_ITEM_GAP;
+        let ladder_width = row_width - METER_LABEL_WIDTH - PEAK_WIDTH - 2.0 * METER_ITEM_GAP;
         let mut ladder_x = None;
         for (((label, key), clip), hold) in METERS.iter().zip(clips.iter()).zip(holds) {
-            let row = vec2(ui.available_width(), METER_ROW_HEIGHT);
+            let row = vec2(row_width, METER_ROW_HEIGHT);
             ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
                 fixed_width_label(
                     ui,
@@ -407,10 +566,13 @@ fn meter_bridge(
         if let Some(range) = ladder_x {
             meter_scale(ui, range);
         }
-    });
+        action
+    })
+    .inner;
     if cleared {
         clips.iter_mut().for_each(ClipLatch::reset);
     }
+    action
 }
 
 /// The dB marks under the ladders, each where its level lights the ladder up to.
@@ -433,8 +595,14 @@ fn meter_scale(ui: &mut Ui, range: egui::Rangef) {
     }
 }
 
-/// The Tuner's readout and its switch, which opens or closes the Tuner view like the left panel's Tuner toggle; whether the switch was clicked.
-fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) -> bool {
+/// The Tuner's readout and its switch, which opens or closes the Tuner view like the left panel's Tuner toggle; what the switch or its ↑, ↓ and `Hide` buttons asked for.
+fn tuner_unit(
+    ui: &mut Ui,
+    label: &str,
+    snapshot: &Snapshot,
+    open: bool,
+    place: (usize, usize),
+) -> Option<FixedAction> {
     let colours = palette();
     let (fill, height) = if open {
         (colours.panel_open, OPEN_UNIT_HEIGHT)
@@ -447,26 +615,37 @@ fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) -> bool {
         position: None,
     };
     let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
-    rack_unit(ui, "Tuner unit", &face, height, |ui| {
-        let switched = unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
+    let name = FixedUnit::Tuner.label();
+    rack_unit(ui, label, &face, height, |ui| {
+        let action = unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
-            let switched = widgets::footswitch(ui, TUNER_LABEL, open, colour(colours.go)).clicked();
-            unit_name(ui, TUNER_LABEL, None);
+            let switched = widgets::footswitch(ui, name, open, colour(colours.go)).clicked();
+            unit_name(ui, name, None);
             unit_rule(ui);
-            tuner_readout(ui, reading.as_ref());
-            switched
+            let action = tuner_readout(ui, reading.as_ref(), |ui| {
+                fixed_buttons(ui, FixedUnit::Tuner, place)
+            });
+            if switched {
+                Some(FixedAction::ToggleTuner)
+            } else {
+                action
+            }
         })
         .inner;
         if open {
             tuner_view(ui, reading.as_ref());
         }
-        switched
+        action
     })
     .inner
 }
 
-/// The note and cents, then the cents strip filling the rest of the row.
-fn tuner_readout(ui: &mut Ui, reading: Option<&TunerReading>) {
+/// The note and cents, then at the right `buttons` and before them the cents strip filling the rest of the row.
+fn tuner_readout<R>(
+    ui: &mut Ui,
+    reading: Option<&TunerReading>,
+    buttons: impl FnOnce(&mut Ui) -> R,
+) -> R {
     let colours = palette();
     let readout = ui
         .horizontal(|ui| {
@@ -488,12 +667,16 @@ fn tuner_readout(ui: &mut Ui, reading: Option<&TunerReading>) {
         })
         .response;
     readout.widget_info(|| WidgetInfo::labeled(Role::Label, true, tuner_header_text(reading)));
-    let width = ui.available_width().min(CENTS_STRIP_MAX_WIDTH);
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let pressed = buttons(ui);
+        ui.add_space(HEADER_GAP - MOVE_BUTTON_GAP);
+        let width = ui.available_width().min(CENTS_STRIP_MAX_WIDTH);
         let (rect, _) = ui.allocate_exact_size(vec2(width, CENTS_STRIP_HEIGHT), Sense::hover());
         let fraction = reading.map(|reading| cents_fraction(reading.cents));
         widgets::cents_strip(ui.painter(), rect, fraction, colour(colours.lit));
-    });
+        pressed
+    })
+    .inner
 }
 
 fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
@@ -520,78 +703,80 @@ fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
     });
 }
 
-/// Each unit's commands, and its rect with the drag response of its header and ears.
-fn module_units(
-    ui: &mut Ui,
-    snapshot: &Snapshot,
-    modules: &[(String, Vec<ParamRow>)],
-    knobs: &mut Knobs,
-    open_units: &mut BTreeSet<String>,
-) -> (Vec<Command>, Vec<(Rect, Response)>) {
-    let mut commands = Vec::new();
-    let mut placed = Vec::with_capacity(modules.len());
-    let order: Vec<RackItem> = modules
-        .iter()
-        .map(|(id, _)| RackItem::Module(id.clone()))
-        .collect();
-    let positions: Vec<String> = rack_ear_labels(&order).into_iter().flatten().collect();
-    for (index, ((module, rows), position)) in modules.iter().zip(&positions).enumerate() {
-        let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
-        let unit = ModuleUnit {
-            module,
-            rows,
-            bypassed: snapshot
-                .params
-                .as_ref()
-                .is_some_and(|params| bypassed(params, module)),
-            paused: snapshot.link != Link::Connected,
-            place: (index, modules.len()),
-            position,
-            ir_choice: snapshot
-                .params
-                .as_ref()
-                .filter(|_| is_cabinet)
-                .map(|params| IrChoice {
-                    current: cabinet_ir(params, module),
-                    irs: &snapshot.irs,
-                }),
-            sample_rate: snapshot
-                .status
-                .as_ref()
-                .map(|status| sample_rate(status) as f32),
-        };
-        let (unit_commands, rect, handle) = module_unit(ui, &unit, knobs, open_units);
-        commands.extend(unit_commands);
-        placed.push((rect, handle));
+/// The Module at `index` of the Rack, its ears showing `position`.
+fn module_unit_of<'a>(
+    snapshot: &'a Snapshot,
+    modules: &'a [(String, Vec<ParamRow>)],
+    index: usize,
+    position: &'a str,
+) -> ModuleUnit<'a> {
+    let (module, rows) = &modules[index];
+    let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
+    ModuleUnit {
+        module,
+        rows,
+        bypassed: snapshot
+            .params
+            .as_ref()
+            .is_some_and(|params| bypassed(params, module)),
+        paused: snapshot.link != Link::Connected,
+        place: (index, modules.len()),
+        position,
+        ir_choice: snapshot
+            .params
+            .as_ref()
+            .filter(|_| is_cabinet)
+            .map(|params| IrChoice {
+                current: cabinet_ir(params, module),
+                irs: &snapshot.irs,
+            }),
+        sample_rate: snapshot
+            .status
+            .as_ref()
+            .map(|status| sample_rate(status) as f32),
     }
-    (commands, placed)
 }
 
-/// A unit dragged by its header or ears, or a Module tile dragged from the left panel: while the pointer is over the Rack's view, a line in the dragged type's colour marks the gap it drops into and the Rack scrolls near the top or bottom of the view; the release sends its [`drag_outcome`].
+/// A unit dragged by its header or ears, a Module tile or a fixed unit's chip dragged from the left panel: while the pointer is over the Rack's view, a line in the dragged type's colour marks the gap it drops into and the Rack scrolls near the top or bottom of the view; the release sends its [`drag_outcome`] or makes its [`layout_drop`].
 fn drag_and_drop(
     ui: &mut Ui,
     modules: &[(String, Vec<ParamRow>)],
+    order: &[RackItem],
     placed: &[(Rect, Response)],
-) -> Option<Command> {
+) -> (Option<Command>, Option<LayoutDrop>) {
     let area = ui.clip_rect();
-    let dragged = placed
+    let from_rack = placed
         .iter()
         .position(|(_, handle)| handle.dragged() || handle.drag_stopped())
-        .map(Dragged::Unit)
-        .or_else(|| DragAndDrop::payload::<Dragged>(ui.ctx()).map(|tile| (*tile).clone()))?;
-    let (type_name, released) = match &dragged {
-        Dragged::Unit(index) => (
+        .map(|slot| {
+            let dragged = match &order[slot] {
+                RackItem::Fixed(unit) => Dragged::Fixed(*unit),
+                RackItem::Module(_) => Dragged::Unit(
+                    order[..slot]
+                        .iter()
+                        .filter(|item| item.module_id().is_some())
+                        .count(),
+                ),
+            };
+            (dragged, placed[slot].1.drag_stopped())
+        });
+    let Some((dragged, released)) = from_rack.or_else(|| {
+        DragAndDrop::payload::<Dragged>(ui.ctx()).map(|payload| {
+            let released = ui.input(|input| input.pointer.any_released());
+            ((*payload).clone(), released)
+        })
+    }) else {
+        return (None, None);
+    };
+    let line = match &dragged {
+        Dragged::Unit(index) => widgets::accent(
             modules[*index]
                 .1
                 .first()
                 .map_or("", |row| row.module_type.as_str()),
-            placed[*index].1.drag_stopped(),
         ),
-        Dragged::Tile(type_name) => (
-            type_name.as_str(),
-            ui.input(|input| input.pointer.any_released()),
-        ),
-        Dragged::Fixed(_) | Dragged::FixedChip(_) => return None,
+        Dragged::Tile(type_name) => widgets::accent(type_name),
+        Dragged::Fixed(_) | Dragged::FixedChip(_) => colour(palette().text),
     };
     let edges: Vec<f32> = placed
         .iter()
@@ -605,27 +790,17 @@ fn drag_and_drop(
             ui.scroll_with_delta(vec2(0.0, -delta));
             ui.ctx().request_repaint();
         }
-        insert_line(
-            ui,
-            placed,
-            drop_slot(pos.y, &edges),
-            widgets::accent(type_name),
-        );
+        insert_line(ui, placed, drop_slot(pos.y, &edges), line);
     }
     if !released {
-        return None;
+        return (None, None);
     }
-    let order: Vec<RackItem> = modules
-        .iter()
-        .map(|(id, _)| RackItem::Module(id.clone()))
-        .collect();
-    drag_outcome(
-        &dragged,
-        pointer.map(|pos| (pos.x, pos.y)),
-        &screen_rect(ui.ctx().content_rect()),
-        &screen_rect(area),
-        &edges,
-        &order,
+    let pointer = pointer.map(|pos| (pos.x, pos.y));
+    let window = screen_rect(ui.ctx().content_rect());
+    let area = screen_rect(area);
+    (
+        drag_outcome(&dragged, pointer, &window, &area, &edges, order),
+        layout_drop(&dragged, pointer, &window, &area, &edges),
     )
 }
 
