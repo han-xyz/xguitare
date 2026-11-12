@@ -314,7 +314,7 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
     for track in TRACK_COLOURS {
         pairs.push(pair("Track edge and pan arc on panel", track, c.panel));
         pairs.push(pair(
-            "Track swatch on panel open; also the Take top edge on its body",
+            "Track swatch on panel open; also the Take top edge and waveform on its body",
             track,
             c.panel_open,
         ));

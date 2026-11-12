@@ -190,6 +190,7 @@ impl App {
                 settings: None,
                 projects: None,
                 items: None,
+                peaks: HashMap::new(),
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,

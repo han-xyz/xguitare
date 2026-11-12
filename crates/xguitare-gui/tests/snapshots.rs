@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -18,6 +19,7 @@ use xguitare_core::control::TrackRef;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 use xguitare_core::render::{RenderBits, RenderRange};
+use xguitare_core::take_peaks::FRAMES_PER_PEAK;
 use xguitare_core::{BankKind, Config, ModuleRegistry};
 use xguitare_gui::app::App;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
@@ -171,6 +173,7 @@ fn funk_snapshot() -> Snapshot {
         refused_remove: None,
         refused_render: None,
         items: None,
+        peaks: HashMap::new(),
         autosave_offer: None,
     }
 }
@@ -206,11 +209,11 @@ fn project_snapshot(transport: &str) -> Snapshot {
         "loop": {"start": 96_000, "end": 384_000, "on": true},
         "click": {"on": true, "count_in": 1},
         "tracks": [
-            {"name": "Guitar", "input": CAPTURE, "volume_db": -3.0, "pan": -0.25,
+            {"id": 0, "name": "Guitar", "input": CAPTURE, "volume_db": -3.0, "pan": -0.25,
              "mute": false, "solo": false, "armed": true, "input_peak_db": -14.0},
-            {"name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0,
+            {"id": 1, "name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0,
              "mute": true, "solo": false, "armed": false, "input_peak_db": -120.0},
-            {"name": "Keys", "input": null, "volume_db": -6.0, "pan": 0.5,
+            {"id": 2, "name": "Keys", "input": null, "volume_db": -6.0, "pan": 0.5,
              "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0},
         ],
     });
@@ -218,14 +221,52 @@ fn project_snapshot(transport: &str) -> Snapshot {
         status[key] = value.clone();
     }
     snapshot.items = Some(json!({"sample_rate": 48000, "tracks": [
-        {"id": 0, "name": "Guitar", "items": [{"position": 96_000, "bars_beats": "2.1",
+        {"id": 0, "name": "Guitar", "items": [{"id": 1, "position": 96_000, "bars_beats": "2.1",
          "offset": 0, "length": 288_000, "take": 1,
          "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"]}]},
-        {"id": 1, "name": "Bass", "items": [{"position": 0, "bars_beats": "1.1", "offset": 0,
+        {"id": 1, "name": "Bass", "items": [{"id": 2, "position": 0, "bars_beats": "1.1", "offset": 0,
          "length": 480_000, "take": 0, "takes": ["takes/bass-1.wav"]}]},
         {"id": 2, "name": "Keys", "items": []},
     ]}));
+    snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
     snapshot
+}
+
+/// Frames between two plucked notes in the waveform fixture: one beat at 120 bpm.
+const NOTE_FRAMES: usize = 24_000;
+
+/// A peak table for each active Take of `items`, as long as the frames its Item plays: a plucked note on every beat, decaying, its loudness changing from note to note.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    reason = "peaks within ±127"
+)]
+fn fixture_peaks(items: &Value) -> HashMap<String, Arc<[i8]>> {
+    let mut peaks = HashMap::new();
+    for item in items["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|track| track["items"].as_array().unwrap())
+    {
+        let file = item["takes"][item["take"].as_u64().unwrap() as usize]
+            .as_str()
+            .unwrap();
+        let frames = (item["offset"].as_u64().unwrap() + item["length"].as_u64().unwrap()) as usize;
+        let table: Vec<i8> = (0..frames.div_ceil(FRAMES_PER_PEAK))
+            .flat_map(|bucket| {
+                let frame = bucket * FRAMES_PER_PEAK;
+                let note = frame / NOTE_FRAMES;
+                let seconds = (frame % NOTE_FRAMES) as f32 / 48_000.0;
+                let loudness = 0.55 + 0.4 * ((note * 7 % 5) as f32 / 4.0);
+                let level = loudness * (-seconds * 9.0).exp() * 127.0;
+                let wobble = 0.8 + 0.2 * (bucket as f32 * 0.9).sin();
+                [-(level * wobble) as i8, level as i8]
+            })
+            .collect();
+        peaks.insert(file.to_string(), table.into());
+    }
+    peaks
 }
 
 /// The Project with the brief's mixer content and two Buses: Bass DI clipped and sending pre-fader to Room, Bass Amp muted and sending to Delay, Click not to Master and sending to Room, Room soloed.
@@ -240,6 +281,7 @@ fn mixer_snapshot() -> Snapshot {
     let items = snapshot.items.as_mut().unwrap();
     items["tracks"][0]["items"][0]["takes"] = json!(["takes/bass-di-1.wav", "takes/bass-di-2.wav"]);
     items["tracks"][1]["items"][0]["takes"] = json!(["takes/bass-amp-1.wav"]);
+    snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
     let status = snapshot.status.as_mut().unwrap();
     let mixer = [
         (
@@ -1231,6 +1273,24 @@ const PLAYHEAD: u64 = 230_400;
 /// The eq among the closed units of [`bass_di_rack_snapshot`].
 const BASS_DI_EQ_CLOSED_INDEX: usize = 1;
 
+/// The timeline zoom factors of the zoomed snapshots: under one 256-frame peak per pixel, and many.
+const ZOOM_IN: f32 = 16.0;
+const ZOOM_OUT: f32 = 0.125;
+/// Where the zoomed snapshots zoom about, right of the ruler's left edge: the first Item's start at the default zoom.
+const ZOOM_ANCHOR_X: f32 = 200.0;
+
+/// Ctrl+wheel over the ruler by `factor` about [`ZOOM_ANCHOR_X`].
+fn zoom_timeline(harness: &mut Harness<App>, factor: f32) {
+    let ruler = harness.get_by_label("Timeline ruler").rect();
+    harness.event(Event::PointerMoved(pos2(
+        ruler.left() + ZOOM_ANCHOR_X,
+        ruler.center().y,
+    )));
+    harness.run_steps(1);
+    harness.event(Event::Zoom(factor));
+    harness.run_steps(2);
+}
+
 #[test]
 fn project_snapshots() {
     write_png(&mut project_harness("playing").0, "project");
@@ -1256,6 +1316,14 @@ fn project_snapshots() {
             open_unit(&mut view, BASS_DI_EQ_CLOSED_INDEX);
         }
         write_png(&mut view, &format!("view-rack-{suffix}"));
+    }
+
+    for (size, suffix) in [(MIN_WINDOW, "1024x640"), (DEFAULT_WINDOW, "1280x800")] {
+        for (factor, zoom) in [(ZOOM_IN, "zoomed-in"), (ZOOM_OUT, "zoomed-out")] {
+            let (mut view, _, _dir) = harness_with(size, bass_di_rack_snapshot());
+            zoom_timeline(&mut view, factor);
+            write_png(&mut view, &format!("view-arrange-{zoom}-{suffix}"));
+        }
     }
 
     let (mut section, _, _dir) = harness();

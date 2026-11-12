@@ -359,3 +359,121 @@ fn refused_undo_sends_nothing_more() {
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();
 }
+
+/// Answers every request line by the request itself and passes on each request as sent.
+fn serve_requests(
+    listener: UnixListener,
+    mut reply: impl FnMut(&Value) -> Value + Send + 'static,
+) -> Receiver<Value> {
+    let (requests, received) = mpsc::channel();
+    thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(&stream);
+        let mut writer = &stream;
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            let request: Value = serde_json::from_str(&line).unwrap();
+            writer
+                .write_all(format!("{}\n", reply(&request)).as_bytes())
+                .unwrap();
+            if requests.send(request).is_err() {
+                return;
+            }
+            line.clear();
+        }
+    });
+    received
+}
+
+/// A Project "Song" with one Item per Take file in `files`, `None` with no Project open.
+fn items_of(files: &[&str]) -> Value {
+    let items: Vec<Value> = files
+        .iter()
+        .enumerate()
+        .map(|(id, file)| {
+            json!({"id": id, "position": 0, "offset": 0, "length": 100, "take": 0, "takes": [file]})
+        })
+        .collect();
+    json!({"ok": true, "sample_rate": 48000, "tracks": [{"id": 0, "name": "Guitar", "items": items}]})
+}
+
+/// A page of `take_peaks` for a Take of `total` pairs, each pair `[-1, 1]`.
+fn peak_page(request: &Value, total: u64) -> Value {
+    let first = request["first"].as_u64().unwrap_or(0);
+    let count = request["count"].as_u64().unwrap_or(16_384);
+    let pairs = count.min(total.saturating_sub(first));
+    let peaks: Vec<i64> = (0..pairs).flat_map(|_| [-1, 1]).collect();
+    json!({"ok": true, "frames_per_peak": 256, "total": total, "first": first, "peaks": peaks})
+}
+
+#[test]
+fn peaks_are_fetched_in_pages_once_per_take_and_dropped_on_close() {
+    let dir = temp_dir("peaks");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let mut statuses = 0;
+    let received = serve_requests(listener, move |request| {
+        let stage = statuses / 3;
+        match request["cmd"].as_str().unwrap() {
+            "status" => {
+                statuses += 1;
+                let project = if stage < 2 {
+                    json!("Song")
+                } else {
+                    Value::Null
+                };
+                json!({"ok": true, "preset": "Clean", "program": 0, "revision": stage + 1, "project": project})
+            }
+            "items" if stage == 0 => items_of(&["takes/a.wav"]),
+            "items" => items_of(&["takes/a.wav", "takes/b.wav"]),
+            "take_peaks" if request["file"] == "takes/a.wav" => peak_page(request, 20_000),
+            "take_peaks" => peak_page(request, 3),
+            cmd => serde_json::from_str(reply(cmd)).unwrap(),
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let deadline = Instant::now() + WAIT;
+    let mut lengths_seen = Vec::new();
+    loop {
+        assert!(Instant::now() < deadline, "saw peaks {lengths_seen:?}");
+        let snapshot = snapshots.recv_timeout(WAIT).unwrap();
+        let mut lengths: Vec<(String, usize)> = snapshot
+            .peaks
+            .iter()
+            .map(|(file, peaks)| (file.clone(), peaks.len()))
+            .collect();
+        lengths.sort();
+        if lengths.is_empty() && !lengths_seen.is_empty() {
+            break;
+        }
+        if !lengths.is_empty() && lengths_seen.last() != Some(&lengths) {
+            lengths_seen.push(lengths);
+        }
+    }
+    assert_eq!(
+        lengths_seen,
+        [
+            vec![("takes/a.wav".to_string(), 40_000)],
+            vec![
+                ("takes/a.wav".to_string(), 40_000),
+                ("takes/b.wav".to_string(), 6)
+            ],
+        ]
+    );
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    let pages: Vec<(Value, Value)> = received
+        .try_iter()
+        .filter(|request| request["cmd"] == "take_peaks")
+        .map(|request| (request["file"].clone(), request["first"].clone()))
+        .collect();
+    assert_eq!(
+        pages,
+        [
+            (json!("takes/a.wav"), json!(0)),
+            (json!("takes/a.wav"), json!(16_384)),
+            (json!("takes/b.wav"), json!(0)),
+        ]
+    );
+}

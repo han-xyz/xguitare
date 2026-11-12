@@ -8,11 +8,11 @@ use xguitare_gui::model::{
 };
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, LoopEdge, MainView, ProjectRow, Tempo, TimelineView,
-    TrackRow, TransportState, TransportView, ViewSwitch, autosave_offer, bars_beats_text,
-    dragged_loop, grid_lines, item_blocks, key_active, parse_meter, project_end,
+    TrackRow, TransportState, TransportView, ViewSwitch, VisibleTake, autosave_offer,
+    bars_beats_text, dragged_loop, grid_lines, item_blocks, key_active, parse_meter, project_end,
     project_key_to_command, project_name, project_rows, project_tempo, recording_from,
     recording_span, restored_view, snap_to_beat, still_closing, time_text, track_rows,
-    transport_view,
+    transport_view, waveform_columns,
 };
 
 const RATE: f64 = 48_000.0;
@@ -32,9 +32,9 @@ fn project_status(transport: &str) -> Value {
         "count_in_remaining": 0, "disk_overflows": 0, "loaded_audio_bytes": 3_840_000,
         "selected": 1,
         "tracks": [
-            {"name": "Guitar", "input": "in A", "volume_db": -3.0, "pan": -0.25, "mute": false,
+            {"id": 4, "name": "Guitar", "input": "in A", "volume_db": -3.0, "pan": -0.25, "mute": false,
              "solo": false, "armed": true, "input_peak_db": -20.5},
-            {"name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": true,
+            {"id": 7, "name": "Bass", "input": null, "volume_db": 0.0, "pan": 0.0, "mute": true,
              "solo": false, "armed": false, "input_peak_db": -120.0},
         ],
     })
@@ -44,10 +44,10 @@ fn project_items() -> Value {
     json!({
         "sample_rate": 48000,
         "tracks": [
-            {"id": 0, "name": "Guitar", "items": [{"position": 48_000, "bars_beats": "1.3",
-             "offset": 0, "length": 96_000, "take": 1,
+            {"id": 4, "name": "Guitar", "items": [{"id": 3, "position": 48_000, "bars_beats": "1.3",
+             "offset": 512, "length": 96_000, "take": 1,
              "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"]}]},
-            {"id": 1, "name": "Bass", "items": [{"position": 0, "bars_beats": "1.1",
+            {"id": 7, "name": "Bass", "items": [{"id": 1, "position": 0, "bars_beats": "1.1",
              "offset": 0, "length": 240_000, "take": 0, "takes": ["takes/bass-1.wav"]}]},
         ],
     })
@@ -236,6 +236,7 @@ fn track_rows_from_status() {
         [
             TrackRow {
                 index: 0,
+                id: 4,
                 name: "Guitar".to_string(),
                 input: Some("in A".to_string()),
                 volume_db: -3.0,
@@ -248,6 +249,7 @@ fn track_rows_from_status() {
             },
             TrackRow {
                 index: 1,
+                id: 7,
                 name: "Bass".to_string(),
                 input: None,
                 volume_db: 0.0,
@@ -269,17 +271,23 @@ fn items_show_their_active_take() {
         blocks,
         [
             ItemBlock {
-                track: "Guitar".to_string(),
+                id: 3,
+                track_id: 4,
                 position: 48_000,
+                offset: 512,
                 length: 96_000,
+                file: "takes/guitar-2.wav".to_string(),
                 take_name: "guitar-2".to_string(),
                 take: 1,
                 takes: 2,
             },
             ItemBlock {
-                track: "Bass".to_string(),
+                id: 1,
+                track_id: 7,
                 position: 0,
+                offset: 0,
                 length: 240_000,
+                file: "takes/bass-1.wav".to_string(),
                 take_name: "bass-1".to_string(),
                 take: 0,
                 takes: 1,
@@ -848,4 +856,106 @@ fn a_recording_take_reaches_the_playhead_and_after_a_loop_wraps_starts_at_the_lo
     let recording = transport_view(&project_status("recording")).unwrap();
     assert_eq!(recording_span(12_000, &recording), (12_000, 36_000));
     assert_eq!(recording_span(100_000, &recording), (0, 36_000));
+}
+
+/// `[min, max]` per 256-frame bucket.
+fn table(pairs: &[(i8, i8)]) -> Vec<i8> {
+    pairs.iter().flat_map(|&(min, max)| [min, max]).collect()
+}
+
+#[test]
+fn zoomed_out_a_column_holds_the_min_of_mins_and_max_of_maxes() {
+    let peaks = table(&[
+        (-10, 20),
+        (-50, 5),
+        (-3, 90),
+        (0, 1),
+        (-1, 2),
+        (-2, 3),
+        (-127, 4),
+        (-4, 30),
+    ]);
+    assert_eq!(
+        waveform_columns(&peaks, 0..2048, 2),
+        [(-50, 90), (-127, 30)]
+    );
+}
+
+#[test]
+fn zoomed_in_a_column_repeats_its_bucket() {
+    let peaks = table(&[(-10, 20), (-50, 5)]);
+    assert_eq!(
+        waveform_columns(&peaks, 0..512, 8),
+        [
+            (-10, 20),
+            (-10, 20),
+            (-10, 20),
+            (-10, 20),
+            (-50, 5),
+            (-50, 5),
+            (-50, 5),
+            (-50, 5)
+        ]
+    );
+    assert_eq!(
+        waveform_columns(&peaks, 384..512, 2),
+        [(-50, 5), (-50, 5)],
+        "frames from the middle of the table"
+    );
+}
+
+#[test]
+fn columns_stop_at_the_end_of_the_table_and_empty_input_draws_none() {
+    let peaks = table(&[(-10, 20), (-50, 5)]);
+    assert_eq!(waveform_columns(&peaks, 0..1024, 4), [(-10, 20), (-50, 5)]);
+    assert_eq!(waveform_columns(&[], 0..1024, 4), []);
+    assert_eq!(waveform_columns(&peaks, 0..1024, 0), []);
+    assert_eq!(waveform_columns(&peaks, 256..256, 4), []);
+}
+
+#[test]
+fn the_visible_take_frames_are_the_items_played_range_inside_the_view() {
+    let item = ItemBlock {
+        id: 1,
+        track_id: 0,
+        position: 1024,
+        offset: 256,
+        length: 512,
+        file: "takes/a.wav".to_string(),
+        take_name: "a".to_string(),
+        take: 0,
+        takes: 1,
+    };
+    let view = |first_frame| TimelineView {
+        first_frame,
+        frames_per_px: 64.0,
+    };
+    assert_eq!(
+        item.visible_take(view(0.0), 1000.0),
+        Some(VisibleTake {
+            x: 16.0,
+            width: 8,
+            frames: 256..768
+        }),
+        "offset to offset + length"
+    );
+    assert_eq!(
+        item.visible_take(view(1280.0), 1000.0),
+        Some(VisibleTake {
+            x: 0.0,
+            width: 4,
+            frames: 512..768
+        }),
+        "the start scrolled off the left"
+    );
+    assert_eq!(
+        item.visible_take(view(0.0), 20.0),
+        Some(VisibleTake {
+            x: 16.0,
+            width: 4,
+            frames: 256..512
+        }),
+        "the end past the right"
+    );
+    assert_eq!(item.visible_take(view(2048.0), 1000.0), None);
 }

@@ -7,6 +7,8 @@ use serde_json::Value;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::mixer_model::ShownRack;
@@ -18,7 +20,7 @@ use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
     bars_beats_text, dragged_loop, grid_lines, item_blocks, parse_meter, project_key_to_command,
     project_tempo, recording_span, sample_rate, snap_to_beat, time_text, track_colour, track_rows,
-    transport_view,
+    transport_view, waveform_columns,
 };
 use crate::rack::muted_text;
 use crate::theme::{self, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette, translucent};
@@ -61,6 +63,8 @@ const SWITCH_GAP: f32 = 3.0;
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
 const SWATCH_WIDTH: f32 = 5.0;
 const ITEM_INSET: f32 = 6.0;
+/// Where a Take's waveform starts below its plate's top: under the top edge and the Take's name.
+const WAVE_TOP: f32 = UNIT_EDGE_WIDTH + theme::SPACE_XS + theme::SPACE_L;
 /// The loop region's lit tint over the lanes (project mockup: loop overlay, 13 %).
 const LOOP_ALPHA_ON: u8 = 33;
 const LOOP_ALPHA_OFF: u8 = 16;
@@ -431,7 +435,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         ScrollArea::vertical().id_salt("tracks").show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for row in &rows {
-                commands.extend(track(ui, row, &items, &ports, &scene));
+                commands.extend(track(ui, row, &items, &snapshot.peaks, &ports, &scene));
             }
         });
     });
@@ -664,6 +668,7 @@ fn track(
     ui: &mut Ui,
     row: &TrackRow,
     items: &[ItemBlock],
+    peaks: &HashMap<String, Arc<[i8]>>,
     ports: &[String],
     scene: &Scene,
 ) -> Vec<Command> {
@@ -704,7 +709,7 @@ fn track(
         rect.bottom() - 0.5,
         Stroke::new(1.0, colour(colours.well)),
     );
-    paint_lane(&ui.painter_at(lane), lane, row, items, scene);
+    paint_lane(&ui.painter_at(lane), lane, row, items, peaks, scene);
     let controls = list
         .shrink2(vec2(SWATCH_WIDTH + 2.0, 6.0))
         .translate(vec2(SWATCH_WIDTH, 0.0));
@@ -714,18 +719,34 @@ fn track(
     commands
 }
 
-fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock], scene: &Scene) {
+fn paint_lane(
+    painter: &Painter,
+    lane: Rect,
+    row: &TrackRow,
+    items: &[ItemBlock],
+    peaks: &HashMap<String, Arc<[i8]>>,
+    scene: &Scene,
+) {
     let colours = palette();
     painter.rect_filled(lane, 0, colour(colours.well));
     scene.paint_loop(painter, lane);
     scene.paint_grid(painter, lane);
     let rows = lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET;
-    for item in items.iter().filter(|item| item.track == row.name) {
+    for item in items.iter().filter(|item| item.track_id == row.id) {
         let span = Rect::from_x_y_ranges(
             scene.x(lane, item.position)..=scene.x(lane, item.end()),
             rows.clone(),
         );
-        paint_take(painter, span.intersect(lane), item, track_colour(row.index));
+        let span = span.intersect(lane);
+        let track = track_colour(row.index);
+        paint_take(painter, span, item, track);
+        if let Some(visible) = item.visible_take(scene.timeline, lane.width())
+            && let Some(peaks) = peaks.get(&item.file)
+        {
+            let columns = waveform_columns(peaks, visible.frames, visible.width);
+            let left = lane.left() + visible.x;
+            paint_waveform(&painter.with_clip_rect(span), span, left, &columns, track);
+        }
     }
     if row.armed
         && let Some((from, to)) = scene.recording
@@ -749,6 +770,26 @@ fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
         egui::StrokeKind::Inside,
     );
     paint_plate_top(painter, span, track, &item.label());
+}
+
+/// Min/max columns in `track` from `left`, one per pixel, over the plate body below the Take's name.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "a column index below the window width"
+)]
+fn paint_waveform(painter: &Painter, span: Rect, left: f32, columns: &[(i8, i8)], track: Rgb) {
+    let body = Rect::from_x_y_ranges(
+        span.x_range(),
+        span.top() + WAVE_TOP..=span.bottom() - theme::SPACE_XS,
+    );
+    let centre = body.center().y;
+    let scale = body.height() / 2.0 / f32::from(i8::MAX);
+    let stroke = Stroke::new(1.0, colour(track));
+    for (index, &(min, max)) in columns.iter().enumerate() {
+        let top = centre - f32::from(max) * scale;
+        let bottom = (centre - f32::from(min) * scale).max(top + 1.0);
+        painter.vline(left + index as f32 + 0.5, top..=bottom, stroke);
+    }
 }
 
 /// A Take plate's top edge in `edge` and `name` on the body below it.

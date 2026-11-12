@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -61,6 +62,8 @@ pub struct Snapshot {
     pub settings: Option<Value>,
     pub projects: Option<Value>,
     pub items: Option<Value>,
+    /// The peak table of each active Take of the open Project's Items fetched so far, keyed by Take file, as `take_peaks` pages it.
+    pub peaks: HashMap<String, Arc<[i8]>>,
     pub module_types: Vec<ModuleType>,
     pub irs: Vec<String>,
     pub last_message: Option<(Message, Instant)>,

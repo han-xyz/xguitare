@@ -1,8 +1,11 @@
+use std::ops::Range;
+
 use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_core::control::{Request, Response, SILENCE_DB, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_core::project_control::STILL_CLOSING;
+use xguitare_core::take_peaks::FRAMES_PER_PEAK;
 
 use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
 use crate::theme::{Rgb, TRACK_COLOURS};
@@ -291,6 +294,8 @@ fn loop_region(status: &Value) -> LoopRegion {
 )]
 pub struct TrackRow {
     pub index: usize,
+    /// The id `items` names the Track by.
+    pub id: u64,
     pub name: String,
     pub input: Option<String>,
     pub volume_db: f64,
@@ -311,6 +316,7 @@ pub fn track_rows(status: &Value) -> Vec<TrackRow> {
         .enumerate()
         .map(|(index, track)| TrackRow {
             index,
+            id: track["id"].as_u64().unwrap_or_default(),
             name: track["name"].as_str().unwrap_or_default().to_string(),
             input: track["input"].as_str().map(str::to_string),
             volume_db: track["volume_db"].as_f64().unwrap_or_default(),
@@ -324,16 +330,28 @@ pub fn track_rows(status: &Value) -> Vec<TrackRow> {
         .collect()
 }
 
-/// One Item on the timeline: its Track's name, where it sits and the name of its active Take, its file name without folder and `.wav`.
+/// One Item on the timeline: its id, its Track's id, where it sits, the part of its active Take it plays from `offset`, and that Take's file and name, the file name without folder and `.wav`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemBlock {
-    pub track: String,
+    pub id: u64,
+    pub track_id: u64,
     pub position: u64,
+    pub offset: u64,
     pub length: u64,
+    /// The active Take's file, as `take_peaks` names it.
+    pub file: String,
     pub take_name: String,
     /// The active Take's index among `takes`.
     pub take: usize,
     pub takes: usize,
+}
+
+/// The part of an Item's Take that a lane shows: from `x` pixels right of the timeline's left edge, `width` whole pixels wide, the Take's `frames`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VisibleTake {
+    pub x: f32,
+    pub width: usize,
+    pub frames: Range<u64>,
 }
 
 impl ItemBlock {
@@ -349,34 +367,98 @@ impl ItemBlock {
     pub fn end(&self) -> u64 {
         self.position.saturating_add(self.length)
     }
+
+    /// The Take frames it plays that lie inside `0..width_px` of `view`, on whole pixels; `None` when none do.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        reason = "non-negative pixel and frame counts far below the limits of each type"
+    )]
+    pub fn visible_take(&self, view: TimelineView, width_px: f32) -> Option<VisibleTake> {
+        let left = view.x_of(self.position as f64).max(0.0).round();
+        let right = view.x_of(self.end() as f64).min(width_px).round();
+        if right <= left {
+            return None;
+        }
+        let played = |x: f32| {
+            let frame = view.first_frame + f64::from(x) * view.frames_per_px - self.position as f64;
+            self.offset + (frame.max(0.0).round() as u64).min(self.length)
+        };
+        Some(VisibleTake {
+            x: left,
+            width: (right - left) as usize,
+            frames: played(left)..played(right),
+        })
+    }
 }
 
-/// The Items of every Track in an `items` payload. Items name their Track, so that a reply older than the latest `status` never draws on a row that moved.
+/// One `(min, max)` per pixel for `width` pixels spanning the Take `frames`, from a peak table of `[min, max, …]` per [`FRAMES_PER_PEAK`] frames: the lowest min and highest max of the buckets a pixel covers, or the one bucket it lies in. Columns end where the table does.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "non-negative bucket indices far below usize::MAX"
+)]
+pub fn waveform_columns(peaks: &[i8], frames: Range<u64>, width: usize) -> Vec<(i8, i8)> {
+    let buckets = peaks.len() / 2;
+    if width == 0 || frames.is_empty() {
+        return Vec::new();
+    }
+    let bucket_frames = FRAMES_PER_PEAK as f64;
+    let per_px = (frames.end - frames.start) as f64 / width as f64;
+    (0..width)
+        .map_while(|px| {
+            let from = frames.start as f64 + px as f64 * per_px;
+            let first = (from / bucket_frames).floor() as usize;
+            if first >= buckets {
+                return None;
+            }
+            let last = (((from + per_px) / bucket_frames).ceil() as usize)
+                .max(first + 1)
+                .min(buckets);
+            Some(
+                peaks[first * 2..last * 2]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .fold((i8::MAX, i8::MIN), |(min, max), &[low, high]| {
+                        (min.min(low), max.max(high))
+                    }),
+            )
+        })
+        .collect()
+}
+
+/// The Items of every Track in an `items` payload. Items name their Track by id, so that a reply older than the latest `status` never draws on a row that moved.
 pub fn item_blocks(items_payload: &Value) -> Vec<ItemBlock> {
     let tracks = items_payload["tracks"].as_array().map(Vec::as_slice);
     tracks
         .unwrap_or_default()
         .iter()
         .flat_map(|entry| {
-            let track = entry["name"].as_str().unwrap_or_default();
+            let track_id = entry["id"].as_u64();
             entry["items"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter_map(move |item| item_block(track, item))
+                .filter_map(move |item| item_block(track_id?, item))
         })
         .collect()
 }
 
-fn item_block(track: &str, item: &Value) -> Option<ItemBlock> {
+fn item_block(track_id: u64, item: &Value) -> Option<ItemBlock> {
     let takes = item["takes"].as_array()?;
     let take = usize::try_from(item["take"].as_u64()?).ok()?;
     let path = takes.get(take)?.as_str()?;
     let file = path.rsplit('/').next().unwrap_or(path);
     Some(ItemBlock {
-        track: track.to_string(),
+        id: item["id"].as_u64()?,
+        track_id,
         position: item["position"].as_u64()?,
+        offset: item["offset"].as_u64().unwrap_or_default(),
         length: item["length"].as_u64()?,
+        file: path.to_string(),
         take_name: file.strip_suffix(".wav").unwrap_or(file).to_string(),
         take,
         takes: takes.len(),

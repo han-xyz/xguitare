@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::io;
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ use crate::model::{
     failed_set, failure_title, ir_names, module_types, param_rows, refresh_decision,
     refused_remove, refused_render, requests_until_quit, response_message, spawn_policy,
 };
-use crate::project_model::{autosave_offer, project_name, still_closing};
+use crate::project_model::{autosave_offer, item_blocks, project_name, still_closing};
 use serde_json::Value;
 use tracing::{info, warn};
 use xguitare_client::{ClientError, Connection};
@@ -64,6 +65,8 @@ struct Client {
     tuner_answered: bool,
     /// The Rack the window last named; a Track stands for the selected one.
     shown_rack: Option<ShownRack>,
+    /// The Project the cached peak tables belong to.
+    peaks_project: Option<String>,
     snapshot: Snapshot,
 }
 
@@ -87,6 +90,7 @@ impl Client {
             projects_fetched: false,
             tuner_answered: false,
             shown_rack: None,
+            peaks_project: None,
             snapshot: Snapshot {
                 link: Link::Disconnected {
                     since: Instant::now(),
@@ -99,6 +103,7 @@ impl Client {
                 settings: None,
                 projects: None,
                 items: None,
+                peaks: HashMap::new(),
                 module_types: Vec::new(),
                 irs: Vec::new(),
                 last_message: None,
@@ -514,6 +519,12 @@ impl Client {
         } else {
             None
         };
+        let project = project_name(self.snapshot.status.as_ref()).map(str::to_string);
+        if project != self.peaks_project {
+            self.snapshot.peaks.clear();
+            self.peaks_project = project;
+        }
+        self.fetch_peaks();
         if self.connection.is_none() {
             return;
         }
@@ -521,6 +532,46 @@ impl Client {
             info!("revision {previous} → {revision}, refreshed");
         }
         self.revision = Some(revision);
+    }
+
+    /// Fetches the peak table of each active Take of the Items not yet cached; a Take whose pages do not all arrive is asked for again at the next refresh.
+    fn fetch_peaks(&mut self) {
+        let items = self
+            .snapshot
+            .items
+            .as_ref()
+            .map(item_blocks)
+            .unwrap_or_default();
+        for item in items {
+            if self.snapshot.peaks.contains_key(&item.file) {
+                continue;
+            }
+            if let Some(table) = self.fetch_peak_table(&item.file) {
+                self.snapshot.peaks.insert(item.file, table.into());
+            }
+        }
+    }
+
+    fn fetch_peak_table(&mut self, file: &str) -> Option<Vec<i8>> {
+        let mut table = Vec::new();
+        loop {
+            let page = self.payload(&Request::TakePeaks {
+                file: file.to_string(),
+                first: Some(table.len() / 2),
+                count: None,
+            })?;
+            let peaks = page["peaks"].as_array()?;
+            table.extend(
+                peaks
+                    .iter()
+                    .filter_map(Value::as_i64)
+                    .filter_map(|peak| i8::try_from(peak).ok()),
+            );
+            let total = usize::try_from(page["total"].as_u64()?).ok()?;
+            if peaks.is_empty() || table.len() / 2 >= total {
+                return Some(table);
+            }
+        }
     }
 
     fn payload(&mut self, req: &Request) -> Option<Value> {
