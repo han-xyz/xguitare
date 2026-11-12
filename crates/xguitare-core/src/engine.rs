@@ -7,6 +7,7 @@ use xguitare_dsp::Rack;
 use xguitare_dsp::crossfade::Crossfader;
 
 use crate::arrangement::{Arrangement, ArrangementCommand, Transport};
+use crate::flatten::PlacedTake;
 use crate::metronome::{MetronomeSettings, PracticeMetronome};
 use crate::project::{MAX_BUSES, MAX_TRACKS};
 
@@ -164,13 +165,14 @@ pub enum Command {
     CloseArrangement,
     /// The Metronome played with no Arrangement running.
     Metronome(MetronomeSettings),
-    /// A Rack change (`Param`, `Bypass` and their Bus and Master forms) applies to the newest Arrangement the switcher holds, as its Module indices are; any other to every one it holds; ignored while none runs.
+    /// A Rack change (`Param`, `Bypass` and their Bus and Master forms) and `SetTrackItems` apply to the newest Arrangement the switcher holds, as its Module indices and Items are; any other to every one it holds; ignored while none runs, an Item list then coming straight back.
     Arrangement(ArrangementCommand),
 }
 
 pub enum FromAudio {
     Retired(Box<Rack>),
     RetiredArrangement(Box<Arrangement>),
+    RetiredItems(Vec<PlacedTake>),
     ProgramChange(u8),
 }
 
@@ -190,6 +192,8 @@ pub struct AudioQueues {
 }
 
 const PROGRAM_CHANGE_SLOTS: usize = 16;
+/// Item lists an Arrangement can let go of with no further command: per Track, the one fading out and the one a waiting list will replace, in each of the three Arrangements the switcher holds.
+const ITEM_LIST_SLOTS: usize = 3 * 2 * MAX_TRACKS;
 const TAP_CAPACITY: usize = 16384;
 const MUTE_RAMP_MS: f32 = 10.0;
 
@@ -252,8 +256,9 @@ pub(crate) fn set_module_bypass(rack: &mut Rack, module: usize, on: bool) {
 /// The control side, the audio side, and the control thread's end of the input tap.
 pub fn engine_queues(capacity: usize) -> (EngineQueues, AudioQueues, Consumer<f32>) {
     let (commands_tx, commands_rx) = RingBuffer::new(capacity);
-    // At most every queued SwapRack, SwapArrangement or CloseArrangement plus the current, the fading-in and the pending Rack (minus the one left current) and the current, fading-in and pending Arrangement can be retired between two drains, and the control side drains before each such push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack.
-    let (from_audio_tx, from_audio_rx) = RingBuffer::new(capacity + 5 + PROGRAM_CHANGE_SLOTS);
+    // At most every queued SwapRack, SwapArrangement, CloseArrangement or SetTrackItems plus the current, the fading-in and the pending Rack (minus the one left current), the current, fading-in and pending Arrangement and the Item lists of ITEM_LIST_SLOTS can be retired between two drains, and the control side drains before each such push; program changes may only use the slots beyond that, so the audio thread never finds the queue full when it retires a Rack or an Item list.
+    let (from_audio_tx, from_audio_rx) =
+        RingBuffer::new(capacity + 5 + ITEM_LIST_SLOTS + PROGRAM_CHANGE_SLOTS);
     let (tap_tx, tap_rx) = RingBuffer::new(TAP_CAPACITY);
     (
         EngineQueues {
@@ -286,6 +291,7 @@ impl EngineQueues {
             match message {
                 FromAudio::Retired(rack) => drop(rack),
                 FromAudio::RetiredArrangement(arrangement) => drop(arrangement),
+                FromAudio::RetiredItems(items) => drop(items),
                 FromAudio::ProgramChange(program) => self.program_changes.push(program),
             }
         }
@@ -413,6 +419,9 @@ impl RackSwitcher {
                     self.shared.count_in_remaining.store(0, Ordering::Relaxed);
                     self.shared.mix_meters.clear();
                 }
+                Command::Arrangement(ArrangementCommand::SetTrackItems { track, items }) => {
+                    self.set_track_items(track, items);
+                }
                 Command::Arrangement(
                     command @ (ArrangementCommand::Param { .. }
                     | ArrangementCommand::Bypass { .. }
@@ -439,10 +448,25 @@ impl RackSwitcher {
                     .into_iter()
                     .flatten()
                     {
-                        arrangement.apply(command);
+                        arrangement.apply(command.clone());
                     }
                 }
             }
+        }
+    }
+
+    fn set_track_items(&mut self, track: usize, items: Vec<PlacedTake>) {
+        let newest = self
+            .pending_arrangement
+            .as_mut()
+            .or(self.incoming_arrangement.as_mut())
+            .or(self.arrangement.as_mut());
+        let let_go = match newest {
+            Some(newest) => newest.apply(ArrangementCommand::SetTrackItems { track, items }),
+            None => Some(items),
+        };
+        if let Some(items) = let_go {
+            retire_items(&mut self.queues.from_audio, items);
         }
     }
 
@@ -553,6 +577,13 @@ impl RackSwitcher {
         }
         if faded && let Some(new) = self.incoming_arrangement.take() {
             self.finish_arrangement_fade(new);
+        }
+        for arrangement in [&mut self.arrangement, &mut self.incoming_arrangement]
+            .into_iter()
+            .flatten()
+        {
+            arrangement
+                .take_retired_items(|items| retire_items(&mut self.queues.from_audio, items));
         }
         if let Some(running) = self.arrangement.as_deref() {
             self.shared
@@ -697,5 +728,13 @@ impl RackSwitcher {
             // Leaking beats freeing on the audio thread; the queue sizing in engine_queues and the reserve in push_program_change make this unreachable.
             mem::forget(unretired);
         }
+    }
+}
+
+fn retire_items(from_audio: &mut Producer<FromAudio>, items: Vec<PlacedTake>) {
+    let pushed = from_audio.push(FromAudio::RetiredItems(items));
+    debug_assert!(pushed.is_ok(), "from_audio queue full");
+    if let Err(unretired) = pushed {
+        mem::forget(unretired);
     }
 }

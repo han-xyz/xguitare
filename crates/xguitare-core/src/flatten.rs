@@ -10,7 +10,7 @@ use crate::project::Item;
 pub const ITEM_FADE: Duration = Duration::from_millis(5);
 
 /// One stretch of an Item's active Take as it is heard: `len` frames of `samples` from `offset`, at `position`, ramping in over its first `fade_in` frames and out over its last `fade_out`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlacedTake {
     pub position: u64,
     pub offset: usize,

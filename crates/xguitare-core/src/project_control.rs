@@ -1189,11 +1189,11 @@ pub(crate) fn send(state: &mut EngineState, commands: &[ArrangementCommand]) -> 
     if state.queues.commands.slots() < commands.len() {
         return Err(ENGINE_BUSY.to_string());
     }
-    for &command in commands {
+    for command in commands {
         state
             .queues
             .commands
-            .push(Command::Arrangement(command))
+            .push(Command::Arrangement(command.clone()))
             .map_err(|_| ENGINE_BUSY.to_string())?;
     }
     Ok(())

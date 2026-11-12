@@ -6,6 +6,7 @@ use xguitare_core::arrangement::{Arrangement, ArrangementCommand, TakeNotLoaded,
 use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, engine_queues,
 };
+use xguitare_core::flatten::{PlacedTake, flatten, item_fade_frames};
 use xguitare_core::project::{Item, LoopRegion, Master, Project, Take, Track};
 use xguitare_core::take_capture::{ReadStop, TakeReader, TakeSpan};
 use xguitare_dsp::{Gain, Module, Rack, StereoRack};
@@ -1234,4 +1235,172 @@ fn stop_and_click_off_forget_the_last_click_beat() {
         0,
         "after Click off, until the next beat"
     );
+}
+
+fn placed(items: &[Item], takes: &HashMap<String, Arc<[f32]>>) -> Vec<PlacedTake> {
+    flatten(items, takes, item_fade_frames(RATE as f32)).expect("takes loaded")
+}
+
+fn steepest_step(samples: &[f32]) -> f32 {
+    samples
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs())
+        .fold(0.0, f32::max)
+}
+
+/// Four Takes on one 48 000-frame Item each: DC 1.0, 0.5 and 0.25, and [`frame_ramp`].
+fn four_takes() -> (Vec<Item>, HashMap<String, Arc<[f32]>>) {
+    let files = [
+        "takes/t-1.wav",
+        "takes/t-2.wav",
+        "takes/t-3.wav",
+        "takes/t-4.wav",
+    ];
+    let audio: [Vec<f32>; 4] = [
+        vec![1.0; 48_000],
+        vec![0.5; 48_000],
+        vec![0.25; 48_000],
+        frame_ramp(48_000),
+    ];
+    let items = files.iter().map(|file| item(0, file, 48_000)).collect();
+    let takes = files
+        .iter()
+        .zip(audio)
+        .map(|(file, samples)| ((*file).to_string(), Arc::from(samples)))
+        .collect();
+    (items, takes)
+}
+
+/// What a fresh build of one Track playing `items` gives over `frames` frames from `from`.
+fn fresh_render(
+    items: Vec<Item>,
+    takes: &HashMap<String, Arc<[f32]>>,
+    from: u64,
+    frames: usize,
+) -> Vec<f32> {
+    let mut t = track("t");
+    t.items = items;
+    let mut fresh = arrangement(&project(vec![t]), takes);
+    fresh.apply(ArrangementCommand::Locate(from));
+    fresh.apply(ArrangementCommand::Play);
+    run(&mut fresh, &[&[0.0; BLOCK]], frames).0
+}
+
+fn assert_same_from(heard: &[f32], expected: &[f32], from: usize) {
+    for (frame, (a, b)) in heard.iter().zip(expected).enumerate().skip(from) {
+        assert!(close(*a, *b), "frame {frame}: {a} vs {b}");
+    }
+}
+
+#[test]
+fn set_track_items_crossfades_mid_note_then_plays_like_a_fresh_build() {
+    let (items, takes) = four_takes();
+    let mut t = track("t");
+    t.items = vec![items[0].clone()];
+    let mut a = arrangement(&project(vec![t]), &takes);
+    a.apply(ArrangementCommand::Play);
+    let mut heard = run(&mut a, &[&[0.0; BLOCK]], 1000).0;
+    let swap = ArrangementCommand::SetTrackItems {
+        track: 0,
+        items: placed(&items[3..], &takes),
+    };
+    assert!(a.apply(swap).is_none(), "nothing to hand back yet");
+    heard.extend(run(&mut a, &[&[0.0; BLOCK]], 1000).0);
+    let slope = 1.0 / FADE_FRAMES as f32;
+    let steepest = steepest_step(&heard);
+    assert!(
+        steepest <= slope + TOLERANCE,
+        "step {steepest} above {slope}"
+    );
+    assert!(close(heard[999], 1.0), "{}", heard[999]);
+    let expected = fresh_render(vec![items[3].clone()], &takes, 1000, 1000);
+    assert_same_from(&heard[1000..], &expected, FADE_FRAMES);
+}
+
+#[test]
+fn set_track_items_during_a_fade_waits_and_the_newest_replaces_a_waiting_list() {
+    let (items, takes) = four_takes();
+    let mut t = track("t");
+    t.items = vec![items[0].clone()];
+    let mut a = arrangement(&project(vec![t]), &takes);
+    a.apply(ArrangementCommand::Play);
+    let mut heard = run(&mut a, &[&[0.0; BLOCK]], 1000).0;
+    let swap = |index: usize| ArrangementCommand::SetTrackItems {
+        track: 0,
+        items: placed(&items[index..=index], &takes),
+    };
+    assert!(a.apply(swap(1)).is_none());
+    heard.extend(run(&mut a, &[&[0.0; BLOCK]], 100).0);
+    assert!(a.apply(swap(2)).is_none(), "waits for the running fade");
+    let replaced = a.apply(swap(3)).expect("the waiting list comes back");
+    assert!(close(replaced[0].samples[0], 0.25));
+    heard.extend(run(&mut a, &[&[0.0; BLOCK]], 1000).0);
+    let slope = 1.0 / FADE_FRAMES as f32;
+    let steepest = steepest_step(&heard);
+    assert!(
+        steepest <= slope + TOLERANCE,
+        "step {steepest} above {slope}"
+    );
+    assert!(
+        close(heard[1300], 0.5),
+        "the first fade ran to its end: {}",
+        heard[1300]
+    );
+    let expected = fresh_render(vec![items[3].clone()], &takes, 1600, 500);
+    assert_same_from(&heard[1600..], &expected, 0);
+}
+
+#[test]
+fn set_track_items_for_a_track_out_of_range_hands_the_list_back() {
+    let (items, takes) = four_takes();
+    let mut a = arrangement(&project(vec![track("t")]), &takes);
+    let swap = ArrangementCommand::SetTrackItems {
+        track: 1,
+        items: placed(&items[..1], &takes),
+    };
+    assert_eq!(a.apply(swap).map(|list| list.len()), Some(1));
+}
+
+#[test]
+fn the_switcher_hands_the_replaced_item_list_back_after_the_fade() {
+    let (mut control, audio, _tap) = engine_queues(16);
+    let fades = FadeLengths::at(RATE as f32, 20.0);
+    let mut switcher = RackSwitcher::new(empty_rack(), BLOCK, fades, audio, Arc::default());
+    let (items, takes) = four_takes();
+    let input = [0.0; BLOCK];
+    let (mut left, mut right) = ([0.0; BLOCK], [0.0; BLOCK]);
+    let swap = |index: usize| {
+        Command::Arrangement(ArrangementCommand::SetTrackItems {
+            track: 0,
+            items: placed(&items[index..=index], &takes),
+        })
+    };
+    assert!(control.commands.push(swap(1)).is_ok());
+    switcher.apply_commands();
+    assert!(
+        matches!(control.from_audio.pop(), Ok(FromAudio::RetiredItems(_))),
+        "with no Arrangement the list comes straight back"
+    );
+
+    let mut t = track("t");
+    t.items = vec![items[0].clone()];
+    let first = arrangement(&project(vec![t]), &takes);
+    for command in [
+        Command::SwapArrangement(Box::new(first)),
+        Command::Arrangement(ArrangementCommand::Play),
+    ] {
+        assert!(control.commands.push(command).is_ok());
+    }
+    switcher.apply_commands();
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    assert!(control.commands.push(swap(1)).is_ok());
+    switcher.apply_commands();
+    assert!(control.from_audio.pop().is_err(), "retired before the fade");
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    let Ok(FromAudio::RetiredItems(old)) = control.from_audio.pop() else {
+        panic!("expected the replaced Item list");
+    };
+    assert!(close(old[0].samples[0], 1.0));
+    switcher.process_tracks(&input, &[], &mut left, &mut right);
+    assert!(close(left[BLOCK - 1], 0.5), "{}", left[BLOCK - 1]);
 }

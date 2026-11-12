@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_4, SQRT_2};
 use std::fmt;
 use std::hash::BuildHasher;
+use std::mem;
 use std::sync::Arc;
 
 use xguitare_dsp::smooth::Smoother;
@@ -30,7 +31,7 @@ pub enum Transport {
 }
 
 /// A change the audio thread applies to the running Arrangement without a rebuild.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ArrangementCommand {
     Volume {
         track: usize,
@@ -135,6 +136,11 @@ pub enum ArrangementCommand {
         module: usize,
         on: bool,
     },
+    /// The Track plays `items` (from [`flatten`]) instead, crossfading over [`crate::flatten::ITEM_FADE`]; one arriving during that fade waits for its end, replacing any list already waiting.
+    SetTrackItems {
+        track: usize,
+        items: Vec<PlacedTake>,
+    },
 }
 
 /// An Item's active Take was not in the preloaded buffers given to [`Arrangement::new`].
@@ -182,6 +188,14 @@ pub struct Arrangement {
 struct TrackPlayer {
     rack: Rack,
     items: Vec<PlacedTake>,
+    /// The list `items` replaced, fading out until `item_fade_done` reaches `item_fade`.
+    outgoing_items: Option<Vec<PlacedTake>>,
+    /// The list to fade to once the running fade ends.
+    waiting_items: Option<Vec<PlacedTake>>,
+    /// A faded-out list for the control thread to drop.
+    retired_items: Option<Vec<PlacedTake>>,
+    item_fade: usize,
+    item_fade_done: usize,
     volume_db: f32,
     pan: f32,
     mute: bool,
@@ -200,6 +214,7 @@ struct TrackPlayer {
     sends: Vec<SendPlayer>,
     peak: [f32; 2],
     source: Vec<f32>,
+    outgoing_source: Vec<f32>,
     left: Vec<f32>,
     right: Vec<f32>,
     post_l: Vec<f32>,
@@ -402,9 +417,15 @@ impl Arrangement {
         self.beats_played = previous.beats_played;
     }
 
-    /// Applies `command`; a Track, Module or Parameter index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored.
-    pub fn apply(&mut self, command: ArrangementCommand) {
+    /// Applies `command`; a Track, Module or Parameter index out of range, a non-finite volume or pan, a tempo or meter a Project file would reject, and a count-in above two bars are ignored. Returns the Item list a `SetTrackItems` lets go of at once (the waiting list it replaces, or its own for a Track out of range), which the caller drops off the audio thread.
+    pub fn apply(&mut self, command: ArrangementCommand) -> Option<Vec<PlacedTake>> {
         match command {
+            ArrangementCommand::SetTrackItems { track, items } => {
+                return match self.tracks.get_mut(track) {
+                    Some(track) => track.set_items(items),
+                    None => Some(items),
+                };
+            }
             ArrangementCommand::Volume { track, db } if db.is_finite() => {
                 self.with_track(track, |t| {
                     t.volume_db = db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB);
@@ -473,13 +494,23 @@ impl Arrangement {
             | ArrangementCommand::Loop(_)
             | ArrangementCommand::Tempo { .. }
             | ArrangementCommand::CountIn(_) => {}
-            mixer => self.apply_mixer(mixer),
+            mixer => self.apply_mixer(&mixer),
+        }
+        None
+    }
+
+    /// Hands each Item list a finished fade let go of to `retire`, to be dropped off the audio thread.
+    pub(crate) fn take_retired_items(&mut self, mut retire: impl FnMut(Vec<PlacedTake>)) {
+        for track in &mut self.tracks {
+            if let Some(items) = track.retired_items.take() {
+                retire(items);
+            }
         }
     }
 
     /// Applies a Send, Bus or Master command, or `ToMaster`; an index out of range or a non-finite value but a `-inf` level is ignored.
-    fn apply_mixer(&mut self, command: ArrangementCommand) {
-        match command {
+    fn apply_mixer(&mut self, command: &ArrangementCommand) {
+        match *command {
             ArrangementCommand::ToMaster { track, on } => {
                 self.with_track(track, |t| t.to_master = on);
             }
@@ -637,9 +668,14 @@ impl Arrangement {
             self.max_frames
         );
         for track in &mut self.tracks {
+            track.start_waiting_items();
             track.source[..frames].fill(0.0);
+            track.outgoing_source[..frames].fill(0.0);
         }
         self.advance(inputs, frames);
+        for track in &mut self.tracks {
+            track.cross_items(frames);
+        }
         self.update_audible();
         for bus in &mut self.buses {
             bus.in_l[..frames].fill(0.0);
@@ -767,7 +803,8 @@ impl TrackPlayer {
         sample_rate: f32,
         max_frames: usize,
     ) -> Result<TrackPlayer, TakeNotLoaded> {
-        let items = flatten(&track.items, takes, item_fade_frames(sample_rate))?;
+        let item_fade = item_fade_frames(sample_rate);
+        let items = flatten(&track.items, takes, item_fade)?;
         let sends = buses
             .iter()
             .map(|bus| {
@@ -783,6 +820,11 @@ impl TrackPlayer {
         Ok(TrackPlayer {
             rack,
             items,
+            outgoing_items: None,
+            waiting_items: None,
+            retired_items: None,
+            item_fade: usize::try_from(item_fade).unwrap_or(usize::MAX).max(1),
+            item_fade_done: 0,
             volume_db: track.volume_db.clamp(MIN_VOLUME_DB, MAX_VOLUME_DB),
             pan: track.pan.clamp(-1.0, 1.0),
             mute: track.mute,
@@ -799,6 +841,7 @@ impl TrackPlayer {
             sends,
             peak: [0.0; 2],
             source: vec![0.0; max_frames],
+            outgoing_source: vec![0.0; max_frames],
             left: vec![0.0; max_frames],
             right: vec![0.0; max_frames],
             post_l: vec![0.0; max_frames],
@@ -872,23 +915,78 @@ impl TrackPlayer {
         }
     }
 
-    /// Adds the heard stretches of the Items over the timeline frames `playhead..playhead + run` into `source[offset..offset + run]`, with their fades.
+    /// Adds the heard stretches of the Items over the timeline frames `playhead..playhead + run` into `source[offset..offset + run]`, with their fades, and those of a list fading out into `outgoing_source`.
     fn write_items(&mut self, playhead: u64, offset: usize, run: usize) {
-        let stretch_end = playhead + run as u64;
-        for item in &self.items {
-            let from = item.position.max(playhead);
-            let to = (item.position + item.len as u64).min(stretch_end);
-            if from >= to {
-                continue;
-            }
-            let first = (from - item.position) as usize;
-            let last = (to - item.position) as usize;
-            let take = &item.samples[item.offset + first..item.offset + last];
-            let at = offset + (from - playhead) as usize;
-            let out = &mut self.source[at..at + take.len()];
-            for (frame, (out, &sample)) in (first..).zip(out.iter_mut().zip(take)) {
-                *out += sample * item.gain(frame);
-            }
+        add_items(&self.items, &mut self.source, playhead, offset, run);
+        if let Some(outgoing) = self.outgoing_items.as_deref()
+            && self.item_fade_done < self.item_fade
+        {
+            add_items(outgoing, &mut self.outgoing_source, playhead, offset, run);
+        }
+    }
+
+    fn set_items(&mut self, items: Vec<PlacedTake>) -> Option<Vec<PlacedTake>> {
+        if self.outgoing_items.is_some() {
+            return self.waiting_items.replace(items);
+        }
+        self.outgoing_items = Some(mem::replace(&mut self.items, items));
+        self.item_fade_done = 0;
+        None
+    }
+
+    /// Starts the fade to the waiting list once the last one has ended and its list is retired; only at a block start, as the block is written with the lists in place.
+    fn start_waiting_items(&mut self) {
+        self.retire_faded_items();
+        if self.outgoing_items.is_none()
+            && let Some(items) = self.waiting_items.take()
+        {
+            self.set_items(items);
+        }
+    }
+
+    /// Crossfades `outgoing_source` into `source` over the block's `frames`, linearly from the outgoing list to the new one.
+    fn cross_items(&mut self, frames: usize) {
+        if self.outgoing_items.is_none() {
+            return;
+        }
+        let fading = frames.min(self.item_fade - self.item_fade_done.min(self.item_fade));
+        let fade = self.item_fade as f32;
+        for (idx, (new, &old)) in self.source[..fading]
+            .iter_mut()
+            .zip(&self.outgoing_source[..fading])
+            .enumerate()
+        {
+            let gain = (self.item_fade_done + idx + 1) as f32 / fade;
+            *new = old + (*new - old) * gain;
+        }
+        self.item_fade_done += fading;
+        self.retire_faded_items();
+    }
+
+    /// Moves a fully faded-out list to `retired_items` once the last one there has been taken.
+    fn retire_faded_items(&mut self) {
+        if self.item_fade_done >= self.item_fade && self.retired_items.is_none() {
+            self.retired_items = self.outgoing_items.take();
+        }
+    }
+}
+
+/// Adds the heard stretches of `items` over the timeline frames `playhead..playhead + run` into `source[offset..offset + run]`, with their fades.
+fn add_items(items: &[PlacedTake], source: &mut [f32], playhead: u64, offset: usize, run: usize) {
+    let stretch_end = playhead + run as u64;
+    for item in items {
+        let from = item.position.max(playhead);
+        let to = (item.position + item.len as u64).min(stretch_end);
+        if from >= to {
+            continue;
+        }
+        let first = (from - item.position) as usize;
+        let last = (to - item.position) as usize;
+        let take = &item.samples[item.offset + first..item.offset + last];
+        let at = offset + (from - playhead) as usize;
+        let out = &mut source[at..at + take.len()];
+        for (frame, (out, &sample)) in (first..).zip(out.iter_mut().zip(take)) {
+            *out += sample * item.gain(frame);
         }
     }
 }

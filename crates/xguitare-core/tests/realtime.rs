@@ -10,6 +10,7 @@ use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, MeterPoint, RackSwitcher, SWITCHER_MAX_FRAMES,
     block_peak, engine_queues, raise_peak, tap_block,
 };
+use xguitare_core::flatten::{flatten, item_fade_frames};
 use xguitare_core::metronome::MetronomeSettings;
 use xguitare_core::project::{Bus, Item, LoopRegion, Master, Project, Send, Take, Track};
 use xguitare_core::{ModuleRegistry, PresetModule};
@@ -520,6 +521,62 @@ fn a_set_on_a_module_added_during_a_crossfade_does_not_allocate() {
             switcher.process_tracks(&input, &inputs, &mut left, &mut right);
         }
     });
+    drop(switcher);
+}
+
+#[test]
+fn set_track_items_while_playing_and_during_a_fade_does_not_allocate() {
+    let (mut control, audio, _tap) = engine_queues(64);
+    let mut switcher = RackSwitcher::new(gain_rack(), BLOCK, fades(), audio, Arc::default());
+    let (project, takes) = playing_project(16);
+    let lists: [_; 5] = std::array::from_fn(|n| {
+        let track = &project.tracks[n % 2 + 1];
+        let items = flatten(&track.items[n % 3..], &takes, item_fade_frames(48_000.0))
+            .expect("takes loaded");
+        ArrangementCommand::SetTrackItems {
+            track: if n == 4 { 99 } else { 2 },
+            items,
+        }
+    });
+    let mut arrangement = sixteen_track_arrangement();
+    arrangement.apply(ArrangementCommand::Play);
+    let input = [0.25; BLOCK];
+    let inputs = [&input[..]; 16];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    assert_no_alloc(|| {
+        let [unheard, first, waiting, newest, out_of_range] = lists;
+        assert!(control.commands.push(Command::Arrangement(unheard)).is_ok());
+        switcher.apply_commands();
+        assert!(
+            control
+                .commands
+                .push(Command::SwapArrangement(arrangement))
+                .is_ok()
+        );
+        switcher.apply_commands();
+        switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        assert!(control.commands.push(Command::Arrangement(first)).is_ok());
+        switcher.apply_commands();
+        switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        for command in [waiting, newest, out_of_range] {
+            assert!(control.commands.push(Command::Arrangement(command)).is_ok());
+        }
+        switcher.apply_commands();
+        for _ in 0..20 {
+            switcher.process_tracks(&input, &inputs, &mut left, &mut right);
+        }
+    });
+    let mut retired_lists = 0;
+    while let Ok(message) = control.from_audio.pop() {
+        if matches!(message, FromAudio::RetiredItems(_)) {
+            retired_lists += 1;
+        }
+    }
+    assert_eq!(
+        retired_lists, 5,
+        "the unheard, the replaced waiting, the out-of-range and both faded-out lists"
+    );
     drop(switcher);
 }
 
