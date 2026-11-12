@@ -17,16 +17,17 @@ use crate::eq_model::{
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged, EAR_WIDTH,
-    Feedback, KnobKey, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, Rgb,
+    Feedback, KnobKey, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
     ScreenRect, Snapshot, Throttle, TunerReading, autoscroll_delta, bypassed, cabinet_ir,
     cents_fraction, chip_click, choice_buttons, choice_step, choice_text, closed_unit_rows,
     drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_param_value,
-    module_title, move_target, mute_banner, open_knob_rows, open_unit_height, palette, param_label,
+    module_title, move_target, mute_banner, open_knob_rows, open_unit_height, param_label,
     param_rows, peak_db, peak_text, tuner_header_text, tuner_reading, typed_text, typed_value,
     unit_style,
 };
 use crate::project_model::sample_rate;
-use crate::widgets::{self, KnobSize, colour};
+use crate::theme::{self, Rgb, TEXT_DISPLAY, colour, palette};
+use crate::widgets::{self, KnobSize};
 
 const NO_IR: &str = "none";
 const CABINET: &str = "cabinet";
@@ -39,12 +40,8 @@ const UNIT_HEIGHT: f32 = 64.0;
 const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const UNIT_NAME_WIDTH: f32 = 120.0;
-const UNIT_NAME_SIZE: f32 = 18.0;
-const SMALL_TEXT_SIZE: f32 = 13.0;
 const LAMP_SLOT: f32 = 18.0;
 const BANNER_HEIGHT: f32 = 40.0;
-const BANNER_TEXT_SIZE: f32 = 18.0;
-const BANNER_RADIUS: u8 = 3;
 const METER_LABEL_WIDTH: f32 = 52.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
 const METER_ROW_GAP: f32 = 8.0;
@@ -61,8 +58,6 @@ const DROP_LINE_WIDTH: f32 = 3.0;
 const GRIP: &str = "⠿";
 const TUNER_LABEL: &str = "Tuner";
 const METER_BRIDGE_LABEL: &str = "Meter bridge";
-const NOTE_SIZE: f32 = 96.0;
-const NO_SIGNAL_SIZE: f32 = 40.0;
 const VALUE_FIELD_WIDTH: f32 = 64.0;
 const STRIPE_WIDTH: f32 = 3.0;
 const STRIPE_INSET: f32 = 10.0;
@@ -127,8 +122,8 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
         let column = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, f32::INFINITY));
         ui.scope_builder(UiBuilder::new().max_rect(column), |ui| {
             let rack = Frame::new()
-                .fill(colour(palette().rail))
-                .stroke(Stroke::new(1.0, colour(palette().outline)))
+                .fill(colour(palette().case))
+                .stroke(Stroke::new(1.0, colour(palette().hover)))
                 .inner_margin(Margin::symmetric(RAIL_WIDTH, 0))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = UNIT_GAP;
@@ -153,13 +148,13 @@ fn mute_banner_strip(ui: &mut Ui, text: &str) {
     let response = ui.allocate_rect(rect, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, text));
     let painter = ui.painter();
-    painter.rect_filled(rect, BANNER_RADIUS, colour(palette().mute_red));
+    painter.rect_filled(rect, theme::RADIUS_CONTROL, colour(palette().danger));
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,
         text,
-        FontId::proportional(BANNER_TEXT_SIZE),
-        Color32::WHITE,
+        theme::heading(),
+        colour(palette().on_accent),
     );
 }
 
@@ -189,12 +184,12 @@ fn rack_unit<R>(
     painter.hline(
         rect.x_range(),
         rect.top(),
-        Stroke::new(1.0, colour(colours.edge_light)),
+        Stroke::new(1.0, colour(colours.hover)),
     );
     painter.hline(
         rect.x_range(),
         rect.bottom(),
-        Stroke::new(1.0, colour(colours.edge_dark)),
+        Stroke::new(1.0, colour(colours.well)),
     );
     widgets::rack_ears(painter, rect);
     InnerResponse::new(inner, response)
@@ -237,7 +232,7 @@ fn unit_lamp(ui: &mut Ui, lit_colour: Color32, lit: bool) {
 
 /// The unit's name, its `(type)` after it in small text; the name is truncated first so that the type stays.
 fn unit_name(ui: &mut Ui, name: &str, type_name: Option<&str>) {
-    let name = Label::new(RichText::new(name).strong().size(UNIT_NAME_SIZE)).truncate();
+    let name = Label::new(RichText::new(name).font(theme::unit_name())).truncate();
     let Some(type_name) = type_name else {
         fixed_width_label(ui, UNIT_NAME_WIDTH, name);
         return;
@@ -272,13 +267,12 @@ fn fixed_width_label(ui: &mut Ui, width: f32, label: Label) {
 fn unit_stripe(ui: &mut Ui) {
     let size = vec2(STRIPE_WIDTH, ui.available_height() - 2.0 * STRIPE_INSET);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 0, colour(palette().edge_light));
+    ui.painter().rect_filled(rect, 0, colour(palette().hover));
 }
 
 pub fn muted_text(text: impl Into<String>) -> RichText {
     RichText::new(text)
-        .size(SMALL_TEXT_SIZE)
+        .font(theme::body())
         .color(colour(palette().muted))
 }
 
@@ -293,7 +287,7 @@ fn meter_bridge(
     rack_unit(
         ui,
         METER_BRIDGE_LABEL,
-        palette().meter_bridge,
+        palette().panel,
         METER_BRIDGE_HEIGHT,
         |ui| {
             ui.spacing_mut().item_spacing = vec2(METER_ITEM_GAP, METER_ROW_GAP);
@@ -324,18 +318,18 @@ fn meter_bridge(
 /// The Tuner's readout; the left panel's Tuner toggle opens it to the Tuner view.
 fn tuner_unit(ui: &mut Ui, snapshot: &Snapshot, open: bool) {
     let (fill, height) = if open {
-        (palette().unit_open, OPEN_UNIT_HEIGHT)
+        (palette().panel_open, OPEN_UNIT_HEIGHT)
     } else {
-        (palette().unit, UNIT_HEIGHT)
+        (palette().panel, UNIT_HEIGHT)
     };
     let reading = snapshot.tuner.as_ref().and_then(tuner_reading);
     rack_unit(ui, "Tuner unit", fill, height, |ui| {
         unit_header(ui, Sense::hover(), HEADER_HEIGHT, |ui| {
             ui.spacing_mut().item_spacing.x = HEADER_GAP;
-            unit_lamp(ui, colour(palette().green), open);
+            unit_lamp(ui, colour(palette().go), open);
             unit_name(ui, TUNER_LABEL, None);
             unit_stripe(ui);
-            ui.label(RichText::new(tuner_header_text(reading.as_ref())).strong());
+            ui.label(RichText::new(tuner_header_text(reading.as_ref())).font(theme::note()));
         });
         if open {
             tuner_view(ui, reading.as_ref());
@@ -347,14 +341,18 @@ fn tuner_view(ui: &mut Ui, reading: Option<&TunerReading>) {
     ui.horizontal(|ui| {
         if let Some(reading) = reading {
             let colour = widgets::tune_colour(in_tune(reading.cents));
-            ui.label(RichText::new(&reading.note).size(NOTE_SIZE).color(colour));
+            ui.label(
+                RichText::new(&reading.note)
+                    .font(FontId::monospace(TEXT_DISPLAY))
+                    .color(colour),
+            );
             ui.vertical(|ui| {
                 widgets::cents_arc(ui, Some(cents_fraction(reading.cents)), colour);
                 ui.label(RichText::new(format!("{:.1} Hz", reading.hz)).color(colour));
             });
         } else {
-            ui.label(RichText::new(NO_SIGNAL).size(NO_SIGNAL_SIZE));
-            widgets::cents_arc(ui, None, Color32::GRAY);
+            ui.label(RichText::new(NO_SIGNAL).font(theme::heading()));
+            widgets::cents_arc(ui, None, colour(palette().muted));
         }
     });
 }
@@ -522,11 +520,11 @@ fn module_unit(
         open_unit_height(open_rows.len())
     };
     let (fill, height, header_height) = if open {
-        (palette().unit_open, open_height, HEADER_HEIGHT)
+        (palette().panel_open, open_height, HEADER_HEIGHT)
     } else {
         let height = UNIT_HEIGHT * rows;
         (
-            palette().unit,
+            palette().panel,
             height,
             height - 2.0 * f32::from(UNIT_MARGIN),
         )
@@ -673,7 +671,7 @@ fn grip(ui: &Ui, header: Rect) {
         pos2(header.left() - HEADER_GAP / 2.0, header.center().y),
         Align2::CENTER_CENTER,
         GRIP,
-        FontId::proportional(SMALL_TEXT_SIZE),
+        theme::body(),
         colour(palette().text),
     );
 }
@@ -851,13 +849,13 @@ fn eq_band_column(
             title.left_center(),
             Align2::LEFT_CENTER,
             band.title,
-            FontId::proportional(SMALL_TEXT_SIZE),
+            theme::body(),
             colour(colours.text),
         );
         ui.painter().hline(
             title.left()..=title.right() - KNOB_FIELD_GAP,
             title.bottom(),
-            Stroke::new(1.0, colour(colours.edge_light)),
+            Stroke::new(1.0, colour(colours.hover)),
         );
         for knob in &band.knobs {
             let row = &rows[knob.index];

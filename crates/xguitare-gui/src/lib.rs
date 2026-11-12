@@ -10,4 +10,5 @@ mod project;
 pub mod project_model;
 mod rack;
 mod sidebar;
+pub mod theme;
 pub mod widgets;

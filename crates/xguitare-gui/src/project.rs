@@ -1,7 +1,7 @@
 use egui::{
-    Align2, Button, Color32, ComboBox, CursorIcon, DragValue, FontId, Frame, Id, Key, Margin,
-    Modal, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui,
-    UiBuilder, WidgetInfo, pos2, vec2,
+    Align2, Button, Color32, ComboBox, CursorIcon, DragValue, Frame, Id, Key, Margin, Modal,
+    Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, Ui, UiBuilder,
+    WidgetInfo, pos2, vec2,
 };
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use crate::model::{
     Command, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB, Snapshot,
-    TrackEdit, palette, port_choices,
+    TrackEdit, port_choices,
 };
 use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text,
@@ -18,7 +18,8 @@ use crate::project_model::{
     sample_rate, snap_to_beat, time_text, track_colour, track_rows, transport_view,
 };
 use crate::rack::muted_text;
-use crate::widgets::{self, KnobSize, colour, outlined_button, primary_button};
+use crate::theme::{self, RADIUS_CONTROL, colour, palette, translucent};
+use crate::widgets::{self, KnobSize, outlined_button, primary_button};
 
 pub const TRACK_LIST_WIDTH: f32 = 400.0;
 pub const TIMELINE_HEIGHT: f32 = 360.0;
@@ -26,7 +27,6 @@ const TRACK_ROW_HEIGHT: f32 = 72.0;
 const RULER_HEIGHT: f32 = 26.0;
 const TRANSPORT_HEIGHT: f32 = 44.0;
 const TRANSPORT_BUTTON: egui::Vec2 = egui::Vec2::new(64.0, 32.0);
-const POSITION_SIZE: f32 = 20.0;
 const PANEL_BUTTON: egui::Vec2 = egui::Vec2::new(56.0, 32.0);
 /// The Tracks and timeline's height while the mixer panel is open below them: the ruler and three Track rows.
 pub const TIMELINE_HEIGHT_WITH_MIXER: f32 = RULER_HEIGHT + 3.0 * TRACK_ROW_HEIGHT;
@@ -36,13 +36,11 @@ const KNOB_COLUMN_WIDTH: f32 = 64.0;
 const METER_SIZE: egui::Vec2 = egui::Vec2::new(96.0, 6.0);
 const SWATCH_WIDTH: f32 = 5.0;
 const ITEM_INSET: f32 = 6.0;
-const ITEM_RADIUS: u8 = 3;
 const ITEM_FILL_ALPHA: u8 = 150;
 const LOOP_ALPHA: u8 = 30;
 const SELECTED_OUTLINE: f32 = 2.0;
 const EDGE_GRAB_PX: f32 = 6.0;
 const PLAYHEAD_WIDTH: f32 = 2.0;
-const LABEL_SIZE: f32 = 12.0;
 const VOLUME_DB: (f64, f64) = (-60.0, 6.0);
 pub(crate) const PAN: (f64, f64) = (-1.0, 1.0);
 const NO_INPUT: &str = "no input";
@@ -87,14 +85,14 @@ pub fn transport_bar(
             (
                 "▶ Play",
                 transport.play_lit(),
-                colours.green,
+                colours.go,
                 TransportAction::Play,
             ),
             ("■ Stop", false, colours.text, TransportAction::Stop),
             (
                 "● Record",
                 transport.record_lit(),
-                colours.red,
+                colours.danger,
                 if transport.record_lit() {
                     TransportAction::Stop
                 } else {
@@ -108,7 +106,11 @@ pub fn transport_bar(
             }
         }
         if let Some(count_in) = transport.count_in_text() {
-            ui.label(RichText::new(count_in).color(colour(colours.red)).strong());
+            ui.label(
+                RichText::new(count_in)
+                    .color(colour(colours.danger))
+                    .strong(),
+            );
         }
         ui.separator();
         let mixer = lit_button("Mixer", mixer_open, colour(colours.text)).min_size(PANEL_BUTTON);
@@ -124,13 +126,13 @@ pub fn transport_bar(
         ui.separator();
         let loop_on = transport.loop_region.on;
         if ui
-            .add(lit_button("Loop", loop_on, colour(colours.yellow)))
+            .add(lit_button("Loop", loop_on, colour(colours.lit)))
             .clicked()
         {
             commands.extend(project_key_to_command(KeyEvent::R, status, &[]));
         }
         if ui
-            .add(lit_button("Click", transport.click, colour(colours.yellow)))
+            .add(lit_button("Click", transport.click, colour(colours.lit)))
             .clicked()
         {
             commands.push(Command::Click {
@@ -144,7 +146,11 @@ pub fn transport_bar(
         ui.separator();
         position_readout(ui, &transport, sample_rate(status), tempo);
         if let Some(warning) = transport.disk_warning() {
-            ui.label(RichText::new(warning).color(colour(colours.red)).strong());
+            ui.label(
+                RichText::new(warning)
+                    .color(colour(colours.danger))
+                    .strong(),
+            );
         }
     });
     commands
@@ -152,9 +158,13 @@ pub fn transport_bar(
 
 pub(crate) fn lit_button(text: &str, lit: bool, lit_colour: Color32) -> Button<'static> {
     let button = if lit {
-        Button::new(RichText::new(text).strong().color(colour(palette().ground)))
-            .fill(lit_colour)
-            .stroke(Stroke::new(1.0, lit_colour))
+        Button::new(
+            RichText::new(text)
+                .strong()
+                .color(colour(palette().on_accent)),
+        )
+        .fill(lit_colour)
+        .stroke(Stroke::new(1.0, lit_colour))
     } else {
         outlined_button(text)
     };
@@ -264,8 +274,8 @@ fn position_readout(ui: &mut Ui, transport: &TransportView, rate: f64, tempo: Te
     let bars = bars_beats_text(transport.frames, rate, tempo);
     let time = time_text(transport.frames, rate);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(bars).monospace().size(POSITION_SIZE).strong());
-        ui.label(muted_text(time).monospace().size(POSITION_SIZE * 0.7));
+        ui.label(RichText::new(bars).font(theme::note()));
+        ui.label(muted_text(time).font(theme::value()));
     });
 }
 
@@ -373,9 +383,9 @@ impl Scene {
         for line in &self.grid {
             let x = rect.left() + self.timeline.x_of(line.frame);
             let shade = if line.beat == 1 {
-                colours.button_border
+                colours.boundary
             } else {
-                colours.outline
+                colours.hover
             };
             painter.vline(x, rect.y_range(), Stroke::new(1.0, colour(shade)));
         }
@@ -391,12 +401,11 @@ impl Scene {
         } else {
             LOOP_ALPHA
         };
-        let (r, g, b) = colours.yellow;
         let span = Rect::from_x_y_ranges(
             self.x(rect, self.loop_region.start)..=self.x(rect, self.loop_region.end),
             rect.y_range(),
         );
-        painter.rect_filled(span, 0, Color32::from_rgba_unmultiplied(r, g, b, alpha));
+        painter.rect_filled(span, 0, translucent(colours.lit, alpha));
     }
 
     fn paint_playhead(&self, painter: &Painter, rect: Rect) {
@@ -404,7 +413,7 @@ impl Scene {
         painter.vline(
             x,
             rect.y_range(),
-            Stroke::new(PLAYHEAD_WIDTH, colour(palette().red)),
+            Stroke::new(PLAYHEAD_WIDTH, colour(palette().danger)),
         );
     }
 }
@@ -430,7 +439,7 @@ fn ruler_strip(
     }
     let painter = ui.painter_at(ruler);
     let colours = palette();
-    painter.rect_filled(ruler, 0, colour(colours.section_header));
+    painter.rect_filled(ruler, 0, colour(colours.well));
     scene.paint_loop(&painter, ruler);
     scene.paint_grid(&painter, ruler);
     for line in scene.grid.iter().filter(|line| line.beat == 1) {
@@ -441,7 +450,7 @@ fn ruler_strip(
             ),
             Align2::LEFT_TOP,
             line.bar.to_string(),
-            FontId::proportional(LABEL_SIZE),
+            theme::body(),
             colour(colours.muted),
         );
     }
@@ -459,7 +468,7 @@ fn ruler_strip(
             .interact(grab, Id::unique(("loop_edge", name)), Sense::drag())
             .on_hover_cursor(CursorIcon::ResizeHorizontal);
         handle.widget_info(|| WidgetInfo::labeled(Role::Slider, true, name));
-        painter.vline(x, ruler.y_range(), Stroke::new(2.0, colour(colours.yellow)));
+        painter.vline(x, ruler.y_range(), Stroke::new(2.0, colour(colours.lit)));
         commands.extend(loop_edge_drag(
             &handle,
             edge,
@@ -527,9 +536,9 @@ fn track(
     let list = Rect::from_min_size(rect.min, vec2(TRACK_LIST_WIDTH, rect.height()));
     let lane = Rect::from_min_max(pos2(list.right(), rect.top()), rect.max);
     let fill = if row.selected {
-        colours.row_active
+        colours.panel_open
     } else {
-        colours.unit
+        colours.panel
     };
     let painter = ui.painter_at(rect);
     painter.rect_filled(list, 0, colour(fill));
@@ -546,7 +555,7 @@ fn track(
     painter.hline(
         rect.x_range(),
         rect.bottom() - 0.5,
-        Stroke::new(1.0, colour(colours.edge_dark)),
+        Stroke::new(1.0, colour(colours.well)),
     );
     paint_lane(&ui.painter_at(lane), lane, row, items, scene);
     let controls = list
@@ -561,14 +570,14 @@ fn track(
 fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock], scene: &Scene) {
     let colours = palette();
     let ground = if row.selected {
-        colours.meter_bridge
+        colours.panel
     } else {
-        colours.ground
+        colours.case
     };
     painter.rect_filled(lane, 0, colour(ground));
     scene.paint_loop(painter, lane);
     scene.paint_grid(painter, lane);
-    let (r, g, b) = track_colour(row.index);
+    let track = track_colour(row.index);
     for item in items.iter().filter(|item| item.track == row.name) {
         let span = Rect::from_x_y_ranges(
             scene.x(lane, item.position)..=scene.x(lane, item.end()),
@@ -576,16 +585,16 @@ fn paint_lane(painter: &Painter, lane: Rect, row: &TrackRow, items: &[ItemBlock]
         );
         painter.rect(
             span,
-            ITEM_RADIUS,
-            Color32::from_rgba_unmultiplied(r, g, b, ITEM_FILL_ALPHA),
-            Stroke::new(1.0, Color32::from_rgb(r, g, b)),
+            RADIUS_CONTROL,
+            translucent(track, ITEM_FILL_ALPHA),
+            Stroke::new(1.0, colour(track)),
             egui::StrokeKind::Inside,
         );
         painter.with_clip_rect(span.intersect(lane)).text(
             span.left_top() + vec2(6.0, 4.0),
             Align2::LEFT_TOP,
             item.label(),
-            FontId::proportional(LABEL_SIZE),
+            theme::body(),
             colour(colours.text),
         );
     }
@@ -600,7 +609,8 @@ fn track_controls(ui: &mut Ui, row: &TrackRow, ports: &[String]) -> Vec<Command>
         ui.vertical(|ui| {
             ui.set_width(NAME_WIDTH);
             let name_id = Id::unique(("track_name", row.index));
-            let label = ui.label(muted_text(format!("Track {}", row.index + 1)).size(LABEL_SIZE));
+            let label =
+                ui.label(muted_text(format!("Track {}", row.index + 1)).font(theme::body()));
             edit.name = edited_text(ui, name_id, &row.name, NAME_WIDTH, label.id);
             refresh_ports = input_picker(ui, row, ports, &mut edit.input);
         });
@@ -609,9 +619,9 @@ fn track_controls(ui: &mut Ui, row: &TrackRow, ports: &[String]) -> Vec<Command>
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let colours = palette();
                 let switches = [
-                    ("R", "Arm", row.armed, colours.red, &mut edit.arm),
-                    ("M", "Mute", row.mute, colours.yellow, &mut edit.mute),
-                    ("S", "Solo", row.solo, colours.green, &mut edit.solo),
+                    ("R", "Arm", row.armed, colours.danger, &mut edit.arm),
+                    ("M", "Mute", row.mute, colours.lit, &mut edit.mute),
+                    ("S", "Solo", row.solo, colours.go, &mut edit.solo),
                 ];
                 for (text, name, on, lit, change) in switches {
                     let button = lit_button(text, on, colour(lit)).min_size(SWITCH_SIZE);
@@ -677,14 +687,14 @@ fn input_meter(ui: &mut Ui, db: f64) {
     let (rect, response) = ui.allocate_exact_size(METER_SIZE, Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(Role::Meter, true, format!("{db:.1} dB")));
     let painter = ui.painter();
-    painter.rect_filled(rect, 1, colour(colours.led_off));
+    painter.rect_filled(rect, 1, colour(colours.arc_track));
     let fraction = ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0) as f32;
     let lit = if db >= LADDER_RED_DB {
-        colours.red
+        colours.danger
     } else if db >= LADDER_YELLOW_DB {
-        colours.yellow
+        colours.lit
     } else {
-        colours.green
+        colours.go
     };
     let level = Rect::from_min_size(rect.min, vec2(rect.width() * fraction, rect.height()));
     painter.rect_filled(level, 1, colour(lit));

@@ -1,12 +1,13 @@
 use egui::{
-    Align2, Button, Color32, EventFilter, FontId, Mesh, Painter, Pos2, Rect, Response, RichText,
-    Role, Sense, Stroke, StrokeKind, Ui, Vec2, Visuals, WidgetInfo, pos2, vec2,
+    Align2, Button, Color32, EventFilter, Mesh, Painter, Pos2, Rect, Response, RichText, Role,
+    Sense, Stroke, StrokeKind, Ui, Vec2, Visuals, WidgetInfo, pos2, vec2,
 };
 
 use crate::model::{
-    Band, EAR_HOLE_RADIUS, EAR_WIDTH, LADDER_SEGMENTS, Rgb, accent_for, ear_holes, knob_points,
-    knob_value_from_drag, ladder_segments, palette,
+    Band, EAR_HOLE_RADIUS, EAR_WIDTH, LADDER_SEGMENTS, ear_holes, knob_points,
+    knob_value_from_drag, ladder_segments,
 };
+use crate::theme::{self, RADIUS_CONTROL, RADIUS_LED, accent_for, colour, palette};
 
 const ARC_SEGMENTS: usize = 48;
 const CENTS_ARC_DIAMETER: f32 = 160.0;
@@ -23,26 +24,19 @@ const RACK_KNOB_POINTER_WIDTH: f32 = 0.075;
 const RACK_KNOB_ARC_WIDTH: f32 = 0.05;
 const FOCUS_RING_GAP: f32 = 2.0;
 const FOCUS_RING_WIDTH: f32 = 1.5;
-const CHOICE_TEXT_SIZE: f32 = 13.0;
 const LAMP_RADIUS: f32 = 5.0;
 const LAMP_GLOW_RADIUS: f32 = 9.0;
 const LAMP_GLOW_ALPHA: f32 = 0.3;
 const LADDER_SEGMENT_SIZE: Vec2 = Vec2::new(14.0, 10.0);
 const LADDER_GAP: f32 = 3.0;
-const LADDER_SEGMENT_RADIUS: u8 = 1;
-const CORNER_RADIUS: u8 = 3;
 const BANK_ROW_HEIGHT: f32 = 40.0;
 const BANK_ROW_BORDER: f32 = 3.0;
 const BANK_ROW_PADDING: f32 = 10.0;
 const BANK_NUMBER_WIDTH: f32 = 18.0;
-const BANK_ROW_TEXT_SIZE: f32 = 15.0;
 pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(36.0, 40.0);
 const FOOTSWITCH_LED_TOP: f32 = 11.0;
 const FOOTSWITCH_TEXT_BOTTOM: f32 = 6.0;
-const FOOTSWITCH_TEXT_SIZE: f32 = 12.0;
 const FOOTSWITCH_FOCUS_EDGE_WIDTH: f32 = 2.0;
-const IN_TUNE_COLOUR: Color32 = Color32::GREEN;
-const OUT_OF_TUNE_COLOUR: Color32 = Color32::from_rgb(255, 176, 0);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KnobSize {
@@ -66,10 +60,6 @@ pub struct RackKnob {
     pub reset: bool,
 }
 
-pub fn colour((r, g, b): Rgb) -> Color32 {
-    Color32::from_rgb(r, g, b)
-}
-
 pub fn accent(type_name: &str) -> Color32 {
     colour(accent_for(type_name))
 }
@@ -77,22 +67,22 @@ pub fn accent(type_name: &str) -> Color32 {
 pub fn visuals() -> Visuals {
     let colours = palette();
     let mut visuals = Visuals::dark();
-    visuals.panel_fill = colour(colours.ground);
-    visuals.window_fill = colour(colours.sidebar);
-    visuals.extreme_bg_color = colour(colours.knob_body);
-    visuals.faint_bg_color = colour(colours.unit);
+    visuals.panel_fill = colour(colours.case);
+    visuals.window_fill = colour(colours.panel);
+    visuals.extreme_bg_color = colour(colours.well);
+    visuals.faint_bg_color = colour(colours.panel);
     visuals.override_text_color = Some(colour(colours.text));
-    visuals.selection.bg_fill = colour(colours.button_border);
+    visuals.selection.bg_fill = colour(colours.arc_track);
     let widgets = &mut visuals.widgets;
-    widgets.noninteractive.bg_fill = colour(colours.unit);
-    widgets.noninteractive.bg_stroke.color = colour(colours.edge_light);
+    widgets.noninteractive.bg_fill = colour(colours.panel);
+    widgets.noninteractive.bg_stroke.color = colour(colours.hover);
     widgets.noninteractive.fg_stroke.color = colour(colours.muted);
     for state in [
         &mut widgets.inactive,
         &mut widgets.hovered,
         &mut widgets.active,
     ] {
-        state.bg_stroke.color = colour(colours.button_border);
+        state.bg_stroke.color = colour(colours.boundary);
         state.fg_stroke.color = colour(colours.text);
     }
     for state in [
@@ -102,19 +92,21 @@ pub fn visuals() -> Visuals {
         &mut widgets.active,
         &mut widgets.open,
     ] {
-        state.corner_radius = CORNER_RADIUS.into();
+        state.corner_radius = RADIUS_CONTROL.into();
     }
-    widgets.inactive.bg_fill = colour(colours.unit_open);
-    widgets.inactive.weak_bg_fill = colour(colours.unit_open);
-    widgets.hovered.weak_bg_fill = colour(colours.edge_light);
-    widgets.active.weak_bg_fill = colour(colours.button_border);
+    widgets.inactive.bg_fill = colour(colours.panel_open);
+    widgets.inactive.weak_bg_fill = colour(colours.panel_open);
+    widgets.hovered.bg_fill = colour(colours.hover);
+    widgets.hovered.weak_bg_fill = colour(colours.hover);
+    widgets.active.bg_fill = colour(colours.arc_track);
+    widgets.active.weak_bg_fill = colour(colours.arc_track);
     visuals
 }
 
 /// Light fill and dark text: the one action a group of buttons is for.
 pub fn primary_button(text: &str) -> Button<'static> {
     let colours = palette();
-    Button::new(RichText::new(text).color(colour(colours.ground)))
+    Button::new(RichText::new(text).color(colour(colours.on_accent)))
         .fill(colour(colours.text))
         .stroke(Stroke::NONE)
 }
@@ -122,12 +114,12 @@ pub fn primary_button(text: &str) -> Button<'static> {
 pub fn outlined_button(text: &str) -> Button<'static> {
     Button::new(text.to_string())
         .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(1.0, colour(palette().button_border)))
+        .stroke(Stroke::new(1.0, colour(palette().boundary)))
 }
 
 /// Outlined in the clip red, for an action that removes something.
 pub fn warning_button(text: &str) -> Button<'static> {
-    let red = colour(palette().red);
+    let red = colour(palette().danger);
     Button::new(RichText::new(text).color(red))
         .fill(Color32::TRANSPARENT)
         .stroke(Stroke::new(1.0, red))
@@ -147,19 +139,18 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
     response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, active, &label));
     let painter = ui.painter();
     if active {
-        painter.rect_filled(rect, 0, colour(colours.row_active));
+        painter.rect_filled(rect, 0, colour(colours.panel_open));
         let border = Rect::from_min_size(rect.min, vec2(BANK_ROW_BORDER, rect.height()));
-        painter.rect_filled(border, 0, colour(colours.yellow));
+        painter.rect_filled(border, 0, colour(colours.lit));
     } else if enabled && response.hovered() {
-        painter.rect_filled(rect, 0, colour(colours.unit));
+        painter.rect_filled(rect, 0, colour(colours.hover));
     }
-    let font = FontId::proportional(BANK_ROW_TEXT_SIZE);
     let number_left = rect.left() + BANK_ROW_BORDER + BANK_ROW_PADDING;
     painter.text(
         pos2(number_left, rect.center().y),
         Align2::LEFT_CENTER,
         number,
-        font.clone(),
+        theme::value(),
         colour(colours.muted),
     );
     let name_colour = if enabled { colours.text } else { colours.muted };
@@ -170,7 +161,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
         ),
         Align2::LEFT_CENTER,
         name,
-        font,
+        theme::list_item(),
         colour(name_colour),
     );
     response
@@ -183,16 +174,16 @@ pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
     let text = if on { "On" } else { "Off" };
     response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, text));
     let (face, edge, text_colour) = if on {
-        (colours.unit_open, accent, colour(colours.text))
+        (colours.panel_open, accent, colour(colours.text))
     } else {
         (
-            colours.knob_body,
-            colour(colours.button_border),
+            colours.well,
+            colour(colours.boundary),
             colour(colours.muted),
         )
     };
     let edge = if response.hovered() || response.has_focus() {
-        colour(colours.text)
+        colour(colours.focus_ring)
     } else {
         edge
     };
@@ -204,7 +195,7 @@ pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
     let painter = ui.painter();
     painter.rect(
         rect,
-        CORNER_RADIUS,
+        RADIUS_CONTROL,
         colour(face),
         Stroke::new(edge_width, edge),
         StrokeKind::Inside,
@@ -219,7 +210,7 @@ pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
         pos2(rect.center().x, rect.bottom() - FOOTSWITCH_TEXT_BOTTOM),
         Align2::CENTER_BOTTOM,
         text,
-        FontId::proportional(FOOTSWITCH_TEXT_SIZE),
+        theme::body(),
         text_colour,
     );
     response
@@ -255,7 +246,7 @@ pub fn rack_knob(ui: &mut Ui, size: KnobSize, fraction: f32, accent: Color32) ->
         ui.painter().circle_stroke(
             rect.center(),
             rect.width() / 2.0 + FOCUS_RING_GAP,
-            Stroke::new(FOCUS_RING_WIDTH, colour(palette().text)),
+            Stroke::new(FOCUS_RING_WIDTH, colour(palette().focus_ring)),
         );
     }
     RackKnob {
@@ -279,12 +270,12 @@ fn paint_rack_knob(painter: &Painter, rect: Rect, fraction: f32, accent: Color32
     let rim = if hovered {
         colours.muted
     } else {
-        colours.knob_rim
+        colours.boundary
     };
     painter.circle(
         centre,
         outer * RACK_KNOB_BODY,
-        colour(colours.knob_body),
+        colour(colours.well),
         Stroke::new(diameter * RACK_KNOB_RIM_WIDTH, colour(rim)),
     );
     if fraction > 0.0 {
@@ -329,17 +320,13 @@ fn paint_ear(painter: &Painter, ear: Rect) {
     }
     painter.add(mesh);
     for (x, y) in ear_holes(ear.height()) {
-        painter.circle_filled(
-            ear.min + vec2(x, y),
-            EAR_HOLE_RADIUS,
-            colour(colours.ear_hole),
-        );
+        painter.circle_filled(ear.min + vec2(x, y), EAR_HOLE_RADIUS, colour(colours.well));
     }
 }
 
 pub fn lamp(painter: &Painter, centre: Pos2, colour_lit: Color32, lit: bool) {
     if !lit {
-        painter.circle_filled(centre, LAMP_RADIUS, colour(palette().led_off));
+        painter.circle_filled(centre, LAMP_RADIUS, colour(palette().arc_track));
         return;
     }
     painter.circle_filled(
@@ -362,14 +349,14 @@ pub fn led_ladder(ui: &mut Ui, db: f64, clipped: bool) -> Response {
     for (index, segment) in ladder_segments(db, clipped).iter().enumerate() {
         let left = rect.left() + index as f32 * (LADDER_SEGMENT_SIZE.x + LADDER_GAP);
         let fill = match (segment.lit, segment.band) {
-            (false, _) => colours.led_off,
-            (true, Band::Green) => colours.green,
-            (true, Band::Yellow) => colours.yellow,
-            (true, Band::Red) => colours.red,
+            (false, _) => colours.arc_track,
+            (true, Band::Green) => colours.go,
+            (true, Band::Yellow) => colours.lit,
+            (true, Band::Red) => colours.danger,
         };
         painter.rect_filled(
             Rect::from_min_size(pos2(left, rect.top()), LADDER_SEGMENT_SIZE),
-            LADDER_SEGMENT_RADIUS,
+            RADIUS_LED,
             colour(fill),
         );
     }
@@ -377,11 +364,8 @@ pub fn led_ladder(ui: &mut Ui, db: f64, clipped: bool) -> Response {
 }
 
 pub fn tune_colour(in_tune: bool) -> Color32 {
-    if in_tune {
-        IN_TUNE_COLOUR
-    } else {
-        OUT_OF_TUNE_COLOUR
-    }
+    let colours = palette();
+    colour(if in_tune { colours.go } else { colours.lit })
 }
 
 /// A half circle from −50 cents at the left to +50 at the right; the needle only when `fraction` is `Some`.
@@ -448,16 +432,16 @@ pub fn choice_button(
     let colours = palette();
     let painter = ui.painter();
     let (fill, text_colour) = if lit {
-        (accent, colour(colours.knob_body))
+        (accent, colour(colours.on_accent))
     } else {
         (Color32::TRANSPARENT, colour(colours.muted))
     };
-    painter.rect_filled(rect, CORNER_RADIUS, fill);
+    painter.rect_filled(rect, RADIUS_CONTROL, fill);
     if !lit {
         painter.rect_stroke(
             rect.shrink(0.5),
-            CORNER_RADIUS,
-            Stroke::new(1.0, colour(colours.ear_edge)),
+            RADIUS_CONTROL,
+            Stroke::new(1.0, colour(colours.boundary)),
             StrokeKind::Inside,
         );
     }
@@ -465,14 +449,14 @@ pub fn choice_button(
         rect.center(),
         Align2::CENTER_CENTER,
         text,
-        FontId::proportional(CHOICE_TEXT_SIZE),
+        theme::value(),
         text_colour,
     );
     if response.has_focus() {
         painter.rect_stroke(
             rect.expand(FOCUS_RING_GAP),
-            CORNER_RADIUS,
-            Stroke::new(FOCUS_RING_WIDTH, colour(colours.text)),
+            RADIUS_CONTROL,
+            Stroke::new(FOCUS_RING_WIDTH, colour(colours.focus_ring)),
             StrokeKind::Outside,
         );
     }

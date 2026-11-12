@@ -32,7 +32,6 @@ pub const LADDER_RED_DB: f64 = -3.0;
 pub const EAR_WIDTH: f32 = 30.0;
 pub const EAR_HOLE_RADIUS: f32 = 4.0;
 pub const EAR_HOLE_INSET: f32 = 22.0;
-pub const NEUTRAL_ACCENT: (u8, u8, u8) = (120, 120, 120);
 pub const CLIP_DB: f64 = 0.0;
 pub const PEAK_HOLD_FOR: Duration = Duration::from_secs(2);
 pub const CENTS_SPAN: i64 = 50;
@@ -726,88 +725,6 @@ pub fn ear_holes(height: f32) -> [(f32, f32); 2] {
     let inset = EAR_HOLE_INSET.min(height / 3.0);
     let x = EAR_WIDTH / 2.0;
     [(x, inset), (x, height - inset)]
-}
-
-pub type Rgb = (u8, u8, u8);
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Palette {
-    pub ground: Rgb,
-    pub sidebar: Rgb,
-    pub unit: Rgb,
-    pub unit_open: Rgb,
-    pub meter_bridge: Rgb,
-    pub rail: Rgb,
-    pub edge_light: Rgb,
-    pub edge_dark: Rgb,
-    pub button_border: Rgb,
-    pub outline: Rgb,
-    pub row_active: Rgb,
-    pub text: Rgb,
-    pub muted: Rgb,
-    pub knob_body: Rgb,
-    pub knob_rim: Rgb,
-    pub ear_edge: Rgb,
-    pub ear_centre: Rgb,
-    pub ear_hole: Rgb,
-    pub led_off: Rgb,
-    pub green: Rgb,
-    pub yellow: Rgb,
-    pub red: Rgb,
-    pub section_header: Rgb,
-    pub mute_red: Rgb,
-}
-
-pub fn palette() -> Palette {
-    Palette {
-        ground: (0x1a, 0x1d, 0x20),
-        sidebar: (0x22, 0x26, 0x2a),
-        unit: (0x26, 0x2a, 0x2e),
-        unit_open: (0x30, 0x35, 0x3a),
-        meter_bridge: (0x2a, 0x2e, 0x33),
-        rail: (0x0f, 0x11, 0x13),
-        edge_light: (0x3d, 0x44, 0x4b),
-        edge_dark: (0x11, 0x13, 0x16),
-        button_border: (0x4a, 0x52, 0x5a),
-        outline: (0x34, 0x3a, 0x40),
-        row_active: (0x2d, 0x32, 0x37),
-        text: (0xe4, 0xe7, 0xea),
-        muted: (0xa9, 0xb0, 0xb7),
-        knob_body: (0x15, 0x17, 0x1a),
-        knob_rim: (0x5a, 0x63, 0x6c),
-        ear_edge: (0x8c, 0x93, 0x9a),
-        ear_centre: (0xc2, 0xc8, 0xcd),
-        ear_hole: (0x0b, 0x0c, 0x0d),
-        led_off: (0x33, 0x38, 0x3d),
-        green: (0x46, 0xb4, 0x50),
-        yellow: (0xf0, 0xb4, 0x32),
-        red: (0xe5, 0x48, 0x3f),
-        section_header: (0x15, 0x17, 0x1a),
-        mute_red: (0xc6, 0x28, 0x28),
-    }
-}
-
-pub fn accent_for(type_name: &str) -> (u8, u8, u8) {
-    match type_name {
-        "gain" => (170, 175, 185),
-        "gate" => (100, 120, 175),
-        "drive" => (235, 130, 40),
-        "fuzz" => (210, 50, 45),
-        "preamp" => (240, 180, 50),
-        "tonestack" => (215, 195, 150),
-        "compressor" => (40, 170, 160),
-        "cabinet" => (140, 95, 60),
-        "delay" => (60, 120, 220),
-        "reverb" => (150, 90, 210),
-        "chorus" => (70, 180, 80),
-        "flanger" => (50, 200, 220),
-        "autowah" => (195, 240, 60),
-        "eq" => (240, 108, 154),
-        "blend" => (108, 240, 194),
-        "limiter" => (108, 174, 240),
-        "shaper" => (240, 128, 108),
-        _ => NEUTRAL_ACCENT,
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

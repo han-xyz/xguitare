@@ -4,17 +4,8 @@ use xguitare_core::control::{Request, Response, SILENCE_DB, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_core::project_control::STILL_CLOSING;
 
-use crate::model::{Command, KeyEvent, Rgb, shortcuts_active};
-
-/// Track colours in Track order, repeating after the last.
-pub const TRACK_COLOURS: [Rgb; 6] = [
-    (60, 120, 220),
-    (235, 130, 40),
-    (70, 180, 80),
-    (150, 90, 210),
-    (40, 170, 160),
-    (210, 50, 45),
-];
+use crate::model::{Command, KeyEvent, shortcuts_active};
+use crate::theme::{Rgb, TRACK_COLOURS};
 
 pub fn track_colour(index: usize) -> Rgb {
     TRACK_COLOURS[index % TRACK_COLOURS.len()]

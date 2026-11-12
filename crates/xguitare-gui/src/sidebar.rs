@@ -3,9 +3,9 @@ use std::time::Instant;
 use egui::collapsing_header::CollapsingState;
 use egui::style::ScrollStyle;
 use egui::{
-    Align2, Button, Color32, ComboBox, CornerRadius, CursorIcon, DragAndDrop, DragValue, FontId,
-    Frame, Grid, Id, Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role,
-    ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, vec2,
+    Align2, Button, ComboBox, CornerRadius, CursorIcon, DragAndDrop, DragValue, Frame, Grid, Id,
+    Key, LayerId, Margin, Order, Painter, Pos2, Rect, Response, RichText, Role, ScrollArea, Sense,
+    Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, vec2,
 };
 use xguitare_core::BankKind;
 
@@ -15,24 +15,22 @@ use crate::metronome_model::{
 use crate::model::{
     AddPlace, BankRow, Command, Dragged, Feedback, Link, ModuleType, PortSelection, RemovedUnit,
     SECTIONS, Section, SettingsDraft, Snapshot, add_command, add_place, add_places, engine_readout,
-    filter_bank, link_text, palette, param_rows, port_choices, rack_channels, set_ports_command,
+    filter_bank, link_text, param_rows, port_choices, rack_channels, set_ports_command,
     set_settings_command, settings_draft, shown_undo, tuner_toggle,
 };
 use crate::project::{knob_with_reset, lit_button, released_value};
 use crate::project_model::{project_name, project_rows, transport_view};
 use crate::rack::muted_text;
-use crate::widgets::{accent, bank_row, colour, outlined_button, primary_button};
+use crate::theme::{self, RADIUS_CONTROL, RADIUS_PANEL, colour, palette};
+use crate::widgets::{accent, bank_row, outlined_button, primary_button};
 
 const NO_PRESET: &str = "no preset";
 const CABINET: &str = "cabinet";
 /// The Daemon's `rack_add` error for a cabinet on a Bus or Master Rack.
 const CABINET_REFUSED: &str = "a cabinet is not allowed on a Bus or Master";
-const PRESET_NAME_SIZE: f32 = 30.0;
-const SECTION_TITLE_SIZE: f32 = 16.0;
 const SIDEBAR_SPACING: Vec2 = vec2(8.0, 4.0);
 const SIDEBAR_BUTTON_HEIGHT: f32 = 40.0;
 const SECTION_GAP: f32 = 8.0;
-const SECTION_RADIUS: u8 = 6;
 const SECTION_HEADER_HEIGHT: f32 = 34.0;
 const SECTION_PADDING: i8 = 8;
 const ARROW_SIZE: f32 = 10.0;
@@ -44,10 +42,8 @@ const CHOOSE: &str = "choose";
 const RACK_RULES: &str = "by the Rack rules";
 const TILE_COLUMNS: usize = 2;
 const TILE_HEIGHT: f32 = 30.0;
-const TILE_RADIUS: u8 = 3;
 const TILE_SWATCH_WIDTH: f32 = 6.0;
 const TILE_TEXT_INSET: f32 = 14.0;
-const TILE_TEXT_SIZE: f32 = 14.0;
 const NO_PORTS: &str = "no port list from the Daemon";
 const NO_SETTINGS: &str = "no settings from the Daemon";
 const NO_PROJECT: &str = "No Project open";
@@ -57,7 +53,6 @@ const NO_PROJECTS: &str = "no Projects yet";
 const NO_METRONOME: &str = "no Metronome from the Daemon";
 const FOLLOWS_PROJECT: &str = "follows the Project";
 const BEAT_LIGHT_SIZE: f32 = 28.0;
-const BEAT_TEXT_SIZE: f32 = 14.0;
 const BANK_KINDS: [(BankKind, &str); 2] = [(BankKind::Guitar, "Guitar"), (BankKind::Bass, "Bass")];
 
 pub struct Tuner<'a> {
@@ -134,14 +129,14 @@ fn arrow_points(centre: Pos2, open: bool) -> Vec<Pos2> {
 /// A framed section: a header strip holding the title and the collapse arrow, which a click opens or closes, over the body.
 fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mut Ui)) {
     let colours = palette();
-    let border = Stroke::new(1.0, colour(colours.edge_light));
+    let border = Stroke::new(1.0, colour(colours.hover));
     let id = ui.make_persistent_id(("section", section as u8));
     let mut state =
         CollapsingState::load_with_default_open(ui.ctx(), id, section.open_by_default());
     Frame::new()
-        .fill(colour(colours.unit))
+        .fill(colour(colours.panel))
         .stroke(border)
-        .corner_radius(SECTION_RADIUS)
+        .corner_radius(RADIUS_PANEL)
         .inner_margin(Margin::same(1))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -152,7 +147,7 @@ fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mu
                 state.toggle(ui);
             }
             let open = state.is_open();
-            let inner_radius = SECTION_RADIUS - 1;
+            let inner_radius = RADIUS_PANEL - 1;
             let corners = if open {
                 CornerRadius {
                     nw: inner_radius,
@@ -164,7 +159,7 @@ fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mu
                 CornerRadius::same(inner_radius)
             };
             let painter = ui.painter();
-            painter.rect_filled(rect, corners, colour(colours.section_header));
+            painter.rect_filled(rect, corners, colour(colours.well));
             if open {
                 painter.hline(rect.x_range(), rect.bottom(), border);
             }
@@ -173,7 +168,7 @@ fn section_box(ui: &mut Ui, section: Section, title: &str, body: impl FnOnce(&mu
                 rect.left_center() + vec2(padding, 0.0),
                 Align2::LEFT_CENTER,
                 title,
-                FontId::proportional(SECTION_TITLE_SIZE),
+                theme::unit_name(),
                 colour(colours.text),
             );
             let arrow_centre = rect.right_center() - vec2(padding + ARROW_SIZE / 2.0, 0.0);
@@ -234,7 +229,7 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
     );
     let mut commands = Vec::new();
     if let Some(name) = project_name(snapshot.status.as_ref()) {
-        ui.label(RichText::new(name).size(SECTION_TITLE_SIZE * 1.5).strong());
+        ui.label(RichText::new(name).font(theme::heading()));
         let transport = snapshot.status.as_ref().and_then(transport_view);
         if let Some(transport) = transport {
             ui.label(muted_text(transport.loaded_audio_text()));
@@ -306,11 +301,7 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
 fn preset_heading(ui: &mut Ui, snapshot: &Snapshot) {
     let status = snapshot.status.as_ref();
     let preset = status.and_then(|status| status["preset"].as_str());
-    ui.label(
-        RichText::new(preset.unwrap_or(NO_PRESET))
-            .size(PRESET_NAME_SIZE)
-            .strong(),
-    );
+    ui.label(RichText::new(preset.unwrap_or(NO_PRESET)).font(theme::preset_name()));
     let program = status
         .and_then(|status| status["program"].as_u64())
         .map(|program| format!("Program {program}"));
@@ -460,19 +451,19 @@ fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
     let border = if hovered {
         colours.text
     } else {
-        colours.button_border
+        colours.boundary
     };
     painter.rect(
         rect,
-        TILE_RADIUS,
-        colour(colours.knob_body),
+        RADIUS_CONTROL,
+        colour(colours.well),
         Stroke::new(1.0, colour(border)),
         StrokeKind::Inside,
     );
     let swatch = Rect::from_min_size(rect.min, vec2(TILE_SWATCH_WIDTH, rect.height()));
     let swatch_corners = CornerRadius {
-        nw: TILE_RADIUS,
-        sw: TILE_RADIUS,
+        nw: RADIUS_CONTROL,
+        sw: RADIUS_CONTROL,
         ne: 0,
         se: 0,
     };
@@ -481,7 +472,7 @@ fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
         rect.left_center() + vec2(TILE_TEXT_INSET, 0.0),
         Align2::LEFT_CENTER,
         type_name,
-        FontId::proportional(TILE_TEXT_SIZE),
+        theme::body(),
         colour(colours.text),
     );
 }
@@ -506,8 +497,8 @@ fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Co
         }
         let on = muted.unwrap_or_default();
         let mute_button = if on {
-            let red = colour(palette().mute_red);
-            Button::new(RichText::new("Mute").strong().color(Color32::WHITE))
+            let red = colour(palette().danger);
+            Button::new(RichText::new("Mute").color(colour(palette().on_accent)))
                 .fill(red)
                 .stroke(Stroke::new(1.0, red))
         } else {
@@ -540,7 +531,7 @@ fn metronome_section(ui: &mut Ui, snapshot: &Snapshot, light: BeatLight) -> Vec<
     let mut commands = Vec::new();
     ui.horizontal(|ui| {
         let text = if view.on { "On" } else { "Off" };
-        let switch = ui.add(lit_button(text, view.on, colour(palette().yellow)));
+        let switch = ui.add(lit_button(text, view.on, colour(palette().lit)));
         switch.widget_info(|| WidgetInfo::selected(Role::Button, true, view.on, "Metronome"));
         if switch.clicked() {
             commands.push(change(Some(!view.on), None, None, None));
@@ -610,22 +601,22 @@ fn paint_beat_light(ui: &mut Ui, light: BeatLight) {
         flash,
     } = light
     else {
-        painter.circle_filled(rect.center(), radius, colour(colours.led_off));
+        painter.circle_filled(rect.center(), radius, colour(colours.arc_track));
         response.widget_info(|| WidgetInfo::labeled(Role::Label, true, "Beat off"));
         return;
     };
-    let lit = colour(if accent { colours.yellow } else { colours.text });
+    let lit = colour(if accent { colours.lit } else { colours.text });
     let (fill, text) = if flash {
-        (lit, colour(colours.ground))
+        (lit, colour(colours.on_accent))
     } else {
-        (colour(colours.led_off), lit)
+        (colour(colours.arc_track), lit)
     };
     painter.circle(rect.center(), radius, fill, Stroke::new(1.0, lit));
     painter.text(
         rect.center(),
         Align2::CENTER_CENTER,
         beat.to_string(),
-        FontId::proportional(BEAT_TEXT_SIZE),
+        theme::list_item(),
         text,
     );
     response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("Beat {beat}")));

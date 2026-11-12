@@ -631,3 +631,5 @@ When the audio server changes the sample rate while the Daemon runs, the Daemon 
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+The GUI bundles the IBM Plex fonts (Sans, Sans Condensed, Mono), licensed under the SIL Open Font License 1.1; the licence text is in `crates/xguitare-gui/assets/fonts/OFL.txt`.

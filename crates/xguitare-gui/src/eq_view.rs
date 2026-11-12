@@ -1,11 +1,10 @@
-use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, pos2};
+use egui::{Align2, Color32, Painter, Pos2, Rect, Stroke, pos2};
 
 use crate::eq_model::{
     Clip, CurvePoint, DotPoint, EQ_FREQ_LINES, EQ_GRID_DB, EQ_GUTTER, EQ_PLOT_HEIGHT, EQ_RANGE_DB,
     eq_x, eq_y,
 };
-use crate::model::palette;
-use crate::widgets::colour;
+use crate::theme::{self, colour, palette};
 
 const CURVE_WIDTH: f32 = 2.0;
 const MINI_CURVE_WIDTH: f32 = 1.5;
@@ -13,7 +12,6 @@ const EDGE_TICK_WIDTH: f32 = 2.0;
 const DOT_RADIUS: f32 = 4.0;
 const RING_RADIUS: f32 = 7.0;
 const RING_WIDTH: f32 = 2.0;
-const AXIS_TEXT_SIZE: f32 = 13.0;
 const AXIS_TEXT_GAP: f32 = 4.0;
 const AXIS_TEXT_TOP: f32 = 1.0;
 
@@ -60,7 +58,7 @@ pub fn paint_mini(
 ) {
     painters
         .painter
-        .rect_filled(rect, 0, colour(palette().knob_body));
+        .rect_filled(rect, 0, colour(palette().well));
     paint_zero_line(painters.zero_line, rect);
     if let Some(curve) = curve {
         paint_curve(painters.painter, rect, curve, MINI_CURVE_WIDTH, accent);
@@ -76,17 +74,11 @@ fn at(frame: Rect, x: f32, y: f32) -> Pos2 {
 
 fn paint_grid(painter: &Painter, frame: Rect) {
     let colours = palette();
-    let grid = Stroke::new(1.0, colour(colours.edge_light));
+    let grid = Stroke::new(1.0, colour(colours.hover));
     let text = |pos: Pos2, align: Align2, label: &str| {
-        painter.text(
-            pos,
-            align,
-            label,
-            FontId::proportional(AXIS_TEXT_SIZE),
-            colour(colours.muted),
-        );
+        painter.text(pos, align, label, theme::value(), colour(colours.muted));
     };
-    painter.rect_filled(frame, 0, colour(colours.knob_body));
+    painter.rect_filled(frame, 0, colour(colours.well));
     let steps = (EQ_RANGE_DB / EQ_GRID_DB) as i32;
     for step in -steps..=steps {
         let db = step as f32 * EQ_GRID_DB;

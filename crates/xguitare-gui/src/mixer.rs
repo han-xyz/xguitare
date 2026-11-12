@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use egui::{
-    Color32, DragValue, Frame, Id, Margin, Modal, ProgressBar, Rect, RichText, Role, ScrollArea,
-    Sense, Stroke, TextEdit, Ui, WidgetInfo, pos2, vec2,
+    DragValue, Frame, Id, Margin, Modal, ProgressBar, Rect, RichText, Role, ScrollArea, Sense,
+    Stroke, TextEdit, Ui, WidgetInfo, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::SendLevel;
@@ -14,11 +14,12 @@ use crate::mixer_model::{
     SendView, ShownRack, StereoPeakHold, default_render_name, fader_db, fader_position,
     mixer_columns, render_view, send_fraction, send_level, send_text,
 };
-use crate::model::{Command, LADDER_RED_DB, LADDER_YELLOW_DB, Snapshot, TrackEdit, palette};
+use crate::model::{Command, LADDER_RED_DB, LADDER_YELLOW_DB, Snapshot, TrackEdit};
 use crate::project::{PAN, lit_button, released_value, track_knob};
 use crate::project_model::{track_colour, transport_view};
 use crate::rack::muted_text;
-use crate::widgets::{self, KnobSize, colour, outlined_button, primary_button};
+use crate::theme::{self, colour, palette, translucent};
+use crate::widgets::{self, KnobSize, outlined_button, primary_button};
 
 const COLUMN_WIDTH: f32 = 118.0;
 const COLUMN_GAP: f32 = 4.0;
@@ -36,7 +37,6 @@ const METER_BAR_WIDTH: f32 = 7.0;
 const METER_GAP: f32 = 2.0;
 const CLIP_LED: egui::Vec2 = egui::Vec2::new(16.0, 8.0);
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(30.0, 22.0);
-const SMALL_TEXT: f32 = 11.0;
 const VALUE_FIELD_HEIGHT: f32 = 20.0;
 /// The gap between a column's rows: egui's default item spacing.
 const ROW_GAP: f32 = 3.0;
@@ -185,13 +185,13 @@ fn mixer_column(
     let mut commands = Vec::new();
     let colours = palette();
     let fill = if shape.open {
-        colours.row_active
+        colours.panel_open
     } else {
-        colours.unit
+        colours.panel
     };
     Frame::new()
         .fill(colour(fill))
-        .stroke(Stroke::new(1.0, colour(colours.outline)))
+        .stroke(Stroke::new(1.0, colour(colours.hover)))
         .inner_margin(Margin::same(4))
         .show(ui, |ui| {
             ui.set_width(COLUMN_WIDTH);
@@ -264,7 +264,7 @@ fn track_routing(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec
         return commands;
     };
     let colours = palette();
-    let toggle = lit_button("to Master", to_master, colour(colours.green))
+    let toggle = lit_button("to Master", to_master, colour(colours.go))
         .min_size(vec2(COLUMN_WIDTH - 8.0, TO_MASTER_HEIGHT - 6.0));
     let response = ui.add(toggle);
     response.widget_info(|| {
@@ -298,7 +298,7 @@ fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendVie
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let accent = if send.level_db.is_some() {
-                colours.yellow
+                colours.lit
             } else {
                 colours.muted
             };
@@ -325,11 +325,11 @@ fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendVie
                     SendLevel::Off => None,
                 });
             ui.vertical(|ui| {
-                ui.label(RichText::new(bus).size(SMALL_TEXT).strong());
+                ui.label(RichText::new(bus).font(theme::legend()));
                 let shown = dragged.unwrap_or(send.level_db);
-                ui.label(muted_text(send_text(shown)).size(SMALL_TEXT));
+                ui.label(muted_text(send_text(shown)).font(theme::legend()));
             });
-            let pre = lit_button("pre", send.pre, colour(colours.yellow)).min_size(PRE_SIZE);
+            let pre = lit_button("pre", send.pre, colour(colours.lit)).min_size(PRE_SIZE);
             let pre = ui.add(pre);
             pre.widget_info(|| {
                 WidgetInfo::labeled(Role::Button, true, format!("pre {name} {bus}"))
@@ -429,9 +429,9 @@ fn fader_and_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold) -> V
             });
             let colours = palette();
             let lit = if column.clip {
-                colours.red
+                colours.danger
             } else {
-                colours.led_off
+                colours.arc_track
             };
             ui.painter().rect_filled(led, 1, colour(lit));
             if response.clicked() {
@@ -471,19 +471,19 @@ fn fader(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     let colours = palette();
     let painter = ui.painter();
     let slot = Rect::from_center_size(rect.center(), vec2(4.0, travel));
-    painter.rect_filled(slot, 2, colour(colours.knob_body));
+    painter.rect_filled(slot, 2, colour(colours.well));
     let unity_y = rect.top() + FADER_CAP.y / 2.0 + travel * (1.0 - fader_position(0.0));
     painter.hline(
         rect.x_range(),
         unity_y,
-        Stroke::new(1.0, colour(colours.button_border)),
+        Stroke::new(1.0, colour(colours.boundary)),
     );
     let cap_y = rect.top() + FADER_CAP.y / 2.0 + travel * (1.0 - position);
     let cap = Rect::from_center_size(pos2(rect.center().x, cap_y), FADER_CAP);
     let rim = if response.hovered() || response.dragged() {
         colours.text
     } else {
-        colours.knob_rim
+        colours.boundary
     };
     painter.rect(
         cap,
@@ -492,11 +492,7 @@ fn fader(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
         Stroke::new(1.0, colour(rim)),
         egui::StrokeKind::Inside,
     );
-    painter.hline(
-        cap.x_range(),
-        cap_y,
-        Stroke::new(1.0, colour(colours.edge_dark)),
-    );
+    painter.hline(cap.x_range(), cap_y, Stroke::new(1.0, colour(colours.well)));
     command
 }
 
@@ -516,14 +512,14 @@ fn stereo_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold, width: 
     for side in 0..2 {
         let left_edge = rect.left() + side as f32 * (METER_BAR_WIDTH + METER_GAP);
         let bar = Rect::from_min_size(pos2(left_edge, rect.top()), vec2(METER_BAR_WIDTH, height));
-        painter.rect_filled(bar, 1, colour(colours.led_off));
+        painter.rect_filled(bar, 1, colour(colours.arc_track));
         let db = column.peak_db[side];
         let lit = if db >= LADDER_RED_DB {
-            colours.red
+            colours.danger
         } else if db >= LADDER_YELLOW_DB {
-            colours.yellow
+            colours.lit
         } else {
-            colours.green
+            colours.go
         };
         let top = bar.bottom() - bar.height() * fader_position(db);
         painter.rect_filled(
@@ -572,7 +568,7 @@ fn mute_and_solo(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
         ui.add_space((COLUMN_WIDTH - 2.0 * SWITCH_SIZE.x - 4.0) / 2.0);
         ui.spacing_mut().item_spacing.x = 4.0;
         let response =
-            ui.add(lit_button("M", column.mute, colour(colours.yellow)).min_size(SWITCH_SIZE));
+            ui.add(lit_button("M", column.mute, colour(colours.lit)).min_size(SWITCH_SIZE));
         response.widget_info(|| {
             WidgetInfo::labeled(Role::Button, true, format!("Mute {}", column.name))
         });
@@ -580,16 +576,15 @@ fn mute_and_solo(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
             mute = Some(!column.mute);
         }
         let response = if column.audibility == Audibility::SoloInPlace && !column.solo {
-            let (r, g, b) = colours.green;
-            let dim = Color32::from_rgba_unmultiplied(r, g, b, SOLO_IN_PLACE_ALPHA);
+            let dim = translucent(colours.go, SOLO_IN_PLACE_ALPHA);
             ui.add(
                 egui::Button::new(RichText::new("S").strong())
                     .fill(dim)
-                    .stroke(Stroke::new(1.0, colour(colours.green)))
+                    .stroke(Stroke::new(1.0, colour(colours.go)))
                     .min_size(SWITCH_SIZE),
             )
         } else {
-            ui.add(lit_button("S", column.solo, colour(colours.green)).min_size(SWITCH_SIZE))
+            ui.add(lit_button("S", column.solo, colour(colours.go)).min_size(SWITCH_SIZE))
         };
         response.widget_info(|| {
             WidgetInfo::labeled(Role::Button, true, format!("Solo {}", column.name))
@@ -646,7 +641,7 @@ pub fn render_dialog(
     let modal = Modal::new(Id::unique("render_dialog")).show(ctx, |ui| {
         Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
             ui.set_width(DIALOG_WIDTH);
-            ui.label(RichText::new("Render").size(18.0).strong());
+            ui.label(RichText::new("Render").font(theme::heading()));
             ui.add_enabled_ui(!running, |ui| {
                 egui::Grid::new("render_fields")
                     .num_columns(2)
@@ -724,11 +719,11 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
             cancel.then_some(Command::RenderCancel)
         }
         RenderView::Done(file) => {
-            ui.label(RichText::new(format!("rendered {file}")).color(colour(colours.green)));
+            ui.label(RichText::new(format!("rendered {file}")).color(colour(colours.go)));
             None
         }
         RenderView::Failed(error) => {
-            ui.label(RichText::new(error).color(colour(colours.red)).strong());
+            ui.label(RichText::new(error).color(colour(colours.danger)).strong());
             None
         }
         RenderView::Cancelled => {

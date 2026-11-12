@@ -22,7 +22,7 @@ use crate::model::{
     BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
     bank_rows_for_rack, forget_removed_units, key_to_command, open_units_from_string,
-    open_units_to_string, palette, param_rows, peak_db, quit_commands, remember_removes,
+    open_units_to_string, param_rows, peak_db, quit_commands, remember_removes,
 };
 use crate::project::{
     ProjectView, TIMELINE_HEIGHT, TIMELINE_HEIGHT_WITH_MIXER, autosave_prompt, tracks_view,
@@ -33,13 +33,13 @@ use crate::project_model::{
 };
 use crate::rack::{Knobs, METERS, RackView, rack_view};
 use crate::sidebar::{AddDraft, SidebarView, Tuner, footer, sidebar};
+use crate::theme::{self, colour, palette};
 use crate::widgets;
 
 const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_MARGIN: Margin = Margin::symmetric(20, 24);
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const MIXER_MARGIN: Margin = Margin::same(8);
-const RACK_HEADING_SIZE: f32 = 18.0;
 const MIXER_GAP: i8 = 4;
 const MIXER_MIN_HEIGHT: f32 = 60.0;
 /// The least the split under the mixer panel leaves the Rack, which scrolls inside it.
@@ -135,6 +135,9 @@ impl App {
             .map(|stored| open_units_from_string(&stored))
             .unwrap_or_default();
         cc.egui_ctx.set_theme(Theme::Dark);
+        cc.egui_ctx.set_fonts(theme::fonts());
+        cc.egui_ctx
+            .all_styles_mut(|style| style.text_styles = theme::text_styles());
         cc.egui_ctx.set_visuals_of(Theme::Dark, widgets::visuals());
         App {
             commands,
@@ -392,7 +395,7 @@ impl eframe::App for App {
             beat_light: self.beat_light,
         };
         let sidebar_frame = Frame::side_top_panel(ui.style())
-            .fill(widgets::colour(palette().sidebar))
+            .fill(colour(palette().case))
             .inner_margin(SIDEBAR_MARGIN);
         Panel::left("sidebar")
             .exact_size(SIDEBAR_WIDTH)
@@ -572,7 +575,7 @@ fn project_panels(
     Panel::top(timeline_id)
         .resizable(true)
         .default_size(timeline_height)
-        .frame(Frame::new().fill(widgets::colour(palette().rail)))
+        .frame(Frame::new().fill(colour(palette().case)))
         .show(ui, |ui| commands.extend(tracks_view(ui, snapshot, view)));
     commands
 }
@@ -659,7 +662,7 @@ fn rack_heading(ui: &mut Ui, status: &Value, target: MixerTarget) {
         MixerTarget::Master => Some(MASTER),
     };
     let heading = format!("{} — Rack", name.unwrap_or_default());
-    ui.label(RichText::new(heading).size(RACK_HEADING_SIZE).strong());
+    ui.label(RichText::new(heading).font(theme::heading()));
 }
 
 fn revision(snapshot: &Snapshot) -> u64 {

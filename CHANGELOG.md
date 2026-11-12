@@ -32,6 +32,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Changed
 
+- GUI: new "Faceplate" look, part 1: one theme for every colour and text size, the IBM Plex fonts bundled in the binary, and a new set of seventeen Module colours, each distinct from the others and readable with dark text on it.
 - The Project click has an accent: beat 1 is 6 dB louder than the other beats, and the click plays at the Metronome volume (default −12 dB), quieter than before.
 - Cabinet IRs are normalised to unit energy on load, so Banks created before this change sound about 12 dB quieter. Raise the cabinet `level` in your Presets (about 12, maximum 20); the starter Presets carry `level = 12`.
 - A stereo Cabinet IR is normalised over both channels, so it plays as loud in total as a mono IR; a right-only IR is no longer boosted.

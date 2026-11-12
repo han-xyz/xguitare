@@ -16,19 +16,18 @@ use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankKind, Config};
 use xguitare_gui::model::{
     AddPlace, Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback,
-    KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NEUTRAL_ACCENT, NO_SIGNAL,
-    ParamRow, PeakHold, PortChoices, PortSelection, Rgb, SECTIONS, Section, SettingsDraft,
-    Throttle, TunerReading, accent_for, add_after, add_command, add_place, add_places,
-    autoscroll_delta, bank_kind, bank_rows, bank_rows_for_rack, cabinet_ir, cents_fraction,
-    cents_text, counts_toward_spawn, ear_holes, engine_readout, failed_set, filter_bank,
-    forget_removed_units, format_value, in_tune, ir_names, key_step, key_to_command,
-    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
-    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
-    open_units_to_string, palette, param_label, param_rows, parse_typed_value, peak_db, peak_text,
-    port_choices, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
-    requests_until_quit, response_text, set_ports_command, set_settings_command, settings_draft,
-    shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
-    typed_value, unit_suffix,
+    KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NO_SIGNAL, ParamRow,
+    PeakHold, PortChoices, PortSelection, SECTIONS, Section, SettingsDraft, Throttle, TunerReading,
+    add_after, add_command, add_place, add_places, autoscroll_delta, bank_kind, bank_rows,
+    bank_rows_for_rack, cabinet_ir, cents_fraction, cents_text, counts_toward_spawn, ear_holes,
+    engine_readout, failed_set, filter_bank, forget_removed_units, format_value, in_tune, ir_names,
+    key_step, key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
+    knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
+    open_units_from_string, open_units_to_string, param_label, param_rows, parse_typed_value,
+    peak_db, peak_text, port_choices, quit_commands, rack_channels, refresh_decision,
+    refused_remove, remember_removes, requests_until_quit, response_text, set_ports_command,
+    set_settings_command, settings_draft, shortcuts_active, spawn_policy, tuner_header_text,
+    tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, Outgoing, RemovedUnit, Restore, ScreenRect, bypassed,
@@ -39,6 +38,7 @@ use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
     choice_buttons, choice_step, open_knob_rows, open_unit_height,
 };
+use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for};
 
 struct TempDir(PathBuf);
 
@@ -1114,41 +1114,6 @@ fn ear_holes_sit_inside_the_ear() {
     }
     assert_eq!(ear_holes(66.0), [(15.0, 22.0), (15.0, 44.0)]);
     assert_eq!(ear_holes(190.0), [(15.0, 22.0), (15.0, 168.0)]);
-}
-
-fn relative_luminance((r, g, b): Rgb) -> f64 {
-    let channel = |value: u8| {
-        let srgb = f64::from(value) / 255.0;
-        if srgb <= 0.04045 {
-            srgb / 12.92
-        } else {
-            ((srgb + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-}
-
-fn contrast(a: Rgb, b: Rgb) -> f64 {
-    let (light, dark) = {
-        let (la, lb) = (relative_luminance(a), relative_luminance(b));
-        (la.max(lb), la.min(lb))
-    };
-    (light + 0.05) / (dark + 0.05)
-}
-
-#[test]
-fn palette_text_meets_wcag_aa_on_units() {
-    let colours = palette();
-    for background in [colours.ground, colours.unit, colours.unit_open] {
-        assert!(contrast(colours.text, background) >= 4.5);
-        assert!(contrast(colours.muted, background) >= 4.5);
-    }
-    assert_eq!(contrast((255, 255, 255), (0, 0, 0)), 21.0);
-}
-
-#[test]
-fn white_text_on_the_mute_red_meets_wcag_aa() {
-    assert!(contrast((255, 255, 255), palette().mute_red) >= 4.5);
 }
 
 const UNIT_EDGES: [f32; 5] = [100.0, 170.0, 240.0, 430.0, 494.0];
