@@ -5,8 +5,9 @@ use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
     Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, STRIP_MAX_WIDTH,
     STRIP_MIN_WIDTH, SendView, ShownRack, StereoPeakHold, StripFit, StripRow, aim_rack_commands,
-    default_render_name, fader_db, fader_position, mixer_columns, rack_selectors, render_view,
-    send_fraction, send_level, send_text, shown_rack_column, strip_fit, strip_ladder, strip_row,
+    default_render_name, fader_db, fader_position, mixer_columns, progress_text_place,
+    rack_selectors, render_view, send_fraction, send_level, send_text, shown_rack_column,
+    strip_fit, strip_ladder, strip_row,
 };
 use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command};
 use xguitare_gui::project_model::{MainView, project_key_to_command};
@@ -570,4 +571,24 @@ fn whole_strips_fill_the_width_beside_master() {
     assert_eq!(few.shown, 6);
     let narrow = strip_row(100.0, 8.0, 10);
     assert_eq!((narrow.shown, narrow.width), (1, STRIP_MIN_WIDTH));
+}
+
+#[test]
+fn the_render_percentage_sits_on_one_side_of_the_lit_edge() {
+    let bar = 348.0;
+    let text = 30.0;
+    for fraction in [0.0, 0.05, 0.09, 0.5, 0.95, 1.0] {
+        let lit = bar * fraction;
+        let (left, on_lit) = progress_text_place(lit, text);
+        if on_lit {
+            assert!(
+                left + text <= lit,
+                "{fraction}: on the lit part past its edge"
+            );
+        } else {
+            assert!(left >= lit, "{fraction}: on the well across the lit part");
+        }
+    }
+    assert!(!progress_text_place(bar * 0.05, text).1);
+    assert!(progress_text_place(bar * 0.95, text).1);
 }

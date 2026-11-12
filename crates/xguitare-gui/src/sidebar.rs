@@ -25,7 +25,7 @@ use crate::rack::choice_keys;
 use crate::rack::muted_text;
 use crate::theme::{
     self, CONTROL_HEIGHT, RADIUS_CONTROL, RADIUS_PANEL, SECTION_HEADER_HEIGHT, SPACE_S, SPACE_XS,
-    colour, palette,
+    TOAST_DOT_RADIUS, TOAST_EDGE_WIDTH, TOAST_MARGIN, TOAST_OFFSET, TOAST_WIDTH, colour, palette,
 };
 use crate::widgets::{
     accent, bank_row, choice_button, outlined_button, primary_button, switched_button, text_field,
@@ -56,17 +56,6 @@ const NO_PROJECTS: &str = "no Projects yet";
 const NO_METRONOME: &str = "no Metronome from the Daemon";
 const FOLLOWS_PROJECT: &str = "follows the Project";
 const BEAT_DOT_SIZE: f32 = 10.0;
-const TOAST_WIDTH: f32 = 330.0;
-const TOAST_EDGE_WIDTH: f32 = 4.0;
-const TOAST_DOT_RADIUS: f32 = 4.0;
-const TOAST_MARGIN: Margin = Margin {
-    left: 16,
-    right: 10,
-    top: 10,
-    bottom: 10,
-};
-/// How far the toast sits from the window's right edge and above its bottom, clear of the footer.
-const TOAST_OFFSET: Vec2 = vec2(-12.0, -40.0);
 const DISMISS: &str = "Dismiss";
 const BEAT_DOT_RING_WIDTH: f32 = 1.5;
 /// How far a new beat's halo sits outside its dot.
@@ -854,9 +843,12 @@ pub fn footer(
     undo
 }
 
-/// The error message, in the text colour on the open panel with a red edge and dot, at the bottom right of the window until it times out or `Dismiss` is pressed.
-pub fn error_toast(ctx: &egui::Context, feedback: &mut Feedback, now: Instant) {
-    let Some(text) = feedback.error(now).map(str::to_string) else {
+/// The error on the open panel with a red edge and a red dot before its title, the detail under it in the value role, at the bottom right of the window until `Dismiss` is pressed.
+pub fn error_toast(ctx: &egui::Context, feedback: &mut Feedback) {
+    let Some((title, detail)) = feedback
+        .error()
+        .map(|(title, detail)| (title.to_string(), detail.to_string()))
+    else {
         return;
     };
     let colours = palette();
@@ -872,9 +864,11 @@ pub fn error_toast(ctx: &egui::Context, feedback: &mut Feedback, now: Instant) {
                 .inner_margin(TOAST_MARGIN)
                 .show(ui, |ui| {
                     ui.set_width(TOAST_WIDTH - TOAST_MARGIN.sum().x);
-                    ui.horizontal(|ui| {
+                    ui.horizontal_top(|ui| {
+                        let title_height =
+                            ui.fonts_mut(|fonts| fonts.row_height(&theme::dialog_title()));
                         let (dot, _) = ui.allocate_exact_size(
-                            Vec2::splat(2.0 * TOAST_DOT_RADIUS),
+                            vec2(2.0 * TOAST_DOT_RADIUS, title_height),
                             Sense::hover(),
                         );
                         ui.painter().circle_filled(
@@ -884,12 +878,24 @@ pub fn error_toast(ctx: &egui::Context, feedback: &mut Feedback, now: Instant) {
                         );
                         let dismiss_width = CONTROL_HEIGHT + ui.spacing().item_spacing.x;
                         let text_width = ui.available_width() - dismiss_width;
-                        ui.allocate_ui(vec2(text_width, 0.0), |ui| {
-                            ui.set_width(text_width);
-                            ui.add(
-                                egui::Label::new(RichText::new(&text).color(colour(colours.text)))
+                        let text = ui.allocate_ui_with_layout(
+                            vec2(text_width, 0.0),
+                            Layout::top_down(Align::LEFT),
+                            |ui| {
+                                ui.set_width(text_width);
+                                ui.label(RichText::new(&title).font(theme::dialog_title()));
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&detail)
+                                            .font(theme::value())
+                                            .color(colour(colours.muted)),
+                                    )
                                     .wrap(),
-                            );
+                                );
+                            },
+                        );
+                        text.response.widget_info(|| {
+                            WidgetInfo::labeled(Role::Alert, true, format!("{title}. {detail}"))
                         });
                         let dismiss = ui
                             .add(outlined_button("\u{2715}").min_size(Vec2::splat(CONTROL_HEIGHT)));

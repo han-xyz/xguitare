@@ -3,8 +3,8 @@ use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, Tran
 use xguitare_core::project::LoopRegion;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{
-    Command, KeyEvent, KeyModifiers, Outgoing, RemovedUnit, TrackEdit, requests_until_quit,
-    response_text, restore,
+    Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
+    requests_until_quit, response_message, restore,
 };
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, LoopEdge, MainView, ProjectRow, Tempo, TimelineView,
@@ -761,8 +761,10 @@ fn only_a_closing_project_is_retried() {
 fn project_save_reports_its_path() {
     let saved = Ok(Response::Ok(json!({"path": "/x/demo-song/project.toml"})));
     assert_eq!(
-        response_text(&Request::ProjectSave, saved).as_deref(),
-        Some("saved /x/demo-song/project.toml")
+        response_message(&Request::ProjectSave, saved),
+        Some(Message::Notice(
+            "saved /x/demo-song/project.toml".to_string()
+        ))
     );
 }
 

@@ -12,7 +12,7 @@ use std::time::Instant;
 use crate::mixer_model::ShownRack;
 use crate::model::{
     Command, EAR_WIDTH, Feedback, KeyEvent, LADDER_RED_DB, LADDER_YELLOW_DB, METER_FLOOR_DB,
-    Snapshot, TrackEdit, knob_origin, port_choices,
+    Message, Snapshot, TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
     GridLine, ItemBlock, LoopEdge, MainView, Tempo, TimelineView, TrackRow, TransportView,
@@ -285,7 +285,13 @@ fn tempo_fields(
                 bpm: None,
                 meter: Some(meter),
             }),
-            None => feedback.show(format!("error: '{text}' is not a meter like 3/4"), now),
+            None => feedback.show(
+                Message::Error {
+                    title: "Could not set the meter",
+                    detail: format!("'{text}' is not a meter like 3/4"),
+                },
+                now,
+            ),
         }
     }
     commands

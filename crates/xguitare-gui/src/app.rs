@@ -19,8 +19,9 @@ use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands, show
 use crate::model::{
     BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
     RemovedUnit, Restore, SET_INTERVAL, SettingsDraft, Snapshot, Throttle, bank_kind, bank_rows,
-    bank_rows_for_rack, forget_removed_units, key_to_command, open_units_from_string,
-    open_units_to_string, param_rows, peak_db, quit_commands, remember_removes,
+    bank_rows_for_rack, esc_dismisses_toast, forget_removed_units, key_to_command,
+    open_units_from_string, open_units_to_string, param_rows, peak_db, quit_commands,
+    remember_removes,
 };
 use crate::project::{ProjectView, TIMELINE_HEIGHT, autosave_prompt, tracks_view, transport_bar};
 use crate::project_model::{
@@ -353,9 +354,9 @@ impl eframe::App for App {
         }
         if let Some(snapshot) = latest {
             if snapshot.last_message != self.snapshot.last_message
-                && let Some((text, at)) = &snapshot.last_message
+                && let Some((message, at)) = &snapshot.last_message
             {
-                self.feedback.show(text.clone(), *at);
+                self.feedback.show(message.clone(), *at);
             }
             self.release_stale_holds(&snapshot);
             if snapshot.refused_remove != self.snapshot.refused_remove
@@ -398,6 +399,7 @@ impl eframe::App for App {
             .as_ref()
             .filter(|status| project_name(Some(status)).is_some())
             .map(|_| self.views.shown);
+        let text_edit_focused = ui.ctx().text_edit_focused();
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
             .filter_map(|key| key_command(key, snapshot, &rows))
@@ -443,7 +445,8 @@ impl eframe::App for App {
             self.project_view = ProjectView::default();
             self.mixer = MixerView::default();
         }
-        error_toast(ui.ctx(), &mut self.feedback, now);
+        let dialog_open = self.mixer.render.is_some() || self.autosave_prompt.is_some();
+        show_error_toast(ui, &mut self.feedback, text_edit_focused, dialog_open);
         commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)
@@ -687,4 +690,14 @@ fn revision(snapshot: &Snapshot) -> u64 {
         .as_ref()
         .and_then(|status| status["revision"].as_u64())
         .unwrap_or_default()
+}
+
+/// The error toast, closed first by Esc when [`esc_dismisses_toast`] lets it.
+fn show_error_toast(ui: &Ui, feedback: &mut Feedback, text_edit_focused: bool, dialog_open: bool) {
+    if ui.input(|input| input.key_pressed(Key::Escape))
+        && esc_dismisses_toast(text_edit_focused, dialog_open)
+    {
+        feedback.dismiss();
+    }
+    error_toast(ui.ctx(), feedback);
 }

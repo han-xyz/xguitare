@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, TextStyle};
+use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Margin, TextStyle, Vec2, vec2};
 
 pub type Rgb = (u8, u8, u8);
 
@@ -166,14 +166,18 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         ),
         pair("text on panel open", c.text, c.panel_open),
         pair(
-            "text on well; also the pressed edge, the cents centre mark and the mixer scroll bar handle",
+            "text on well; also the pressed edge, the cents centre mark, the mixer scroll bar handle and the Render progress percentage past the lit part",
             c.text,
             c.well,
         ),
         pair("text on hover; also the selection stroke", c.text, c.hover),
         pair("muted on case", c.muted, c.case),
         pair("muted on panel", c.muted, c.panel),
-        pair("muted on panel open", c.muted, c.panel_open),
+        pair(
+            "muted on panel open; also the error toast's detail",
+            c.muted,
+            c.panel_open,
+        ),
         pair("muted on well", c.muted, c.well),
         pair("muted on hover", c.muted, c.hover),
         pair("bypass text on bypass panel", c.bypass_text, c.bypass_panel),
@@ -198,7 +202,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
             c.panel,
         ),
         pair(
-            "lit on panel open; also the lit lamp ring, the loop edges over a Take and the disconnected banner's edge and ring",
+            "lit on panel open; also the lit lamp ring, the loop edges over a Take, the disconnected banner's edge and ring and a selected radio's dot",
             c.lit,
             c.panel_open,
         ),
@@ -255,8 +259,17 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
             c.danger,
             c.panel_open,
         ),
-        pair("hover boundary on hover", c.hover_boundary, c.hover),
-        pair("hover boundary on well", c.hover_boundary, c.well),
+        pair(
+            "hover boundary on hover; also a hovered unit chevron",
+            c.hover_boundary,
+            c.hover,
+        ),
+        pair(
+            "hover boundary on well; also a pressed unit chevron",
+            c.hover_boundary,
+            c.well,
+        ),
+        pair("a hovered selected radio's dot", c.lit, c.hover),
         pair(
             "bypassed pointer on knob highlight",
             c.bypass_text,
@@ -389,6 +402,31 @@ pub const FOCUS_RING_GAP: f32 = 2.0;
 pub const FOCUS_RING_WIDTH: f32 = 2.0;
 pub const EDIT_BORDER_WIDTH: f32 = 2.0;
 pub const CARET_WIDTH: f32 = 2.0;
+
+/// Inside a dialog's edge.
+pub const DIALOG_MARGIN: Margin = Margin::same(SPACE_M as i8);
+pub const PROGRESS_HEIGHT: f32 = CONTROL_HEIGHT;
+/// The width of a drawn icon's lines: the Mute banner's speaker, the disconnected banner's ring.
+pub const ICON_STROKE_WIDTH: f32 = 1.5;
+/// The Mute banner's struck-through speaker: its height, and the room it takes before the text.
+pub const MUTED_ICON_SIZE: f32 = SPACE_L;
+pub const MUTED_ICON_WIDTH: f32 = MUTED_ICON_SIZE * 1.5;
+/// The disconnected banner: two text lines, its lit edge and the ring before them.
+pub const LINK_BANNER_HEIGHT: f32 = 2.0 * CONTROL_HEIGHT + SPACE_S;
+pub const LINK_BANNER_EDGE_WIDTH: f32 = 2.0;
+pub const LINK_RING_RADIUS: f32 = SPACE_S;
+pub const TOAST_WIDTH: f32 = 330.0;
+pub const TOAST_EDGE_WIDTH: f32 = SPACE_XS;
+pub const TOAST_DOT_RADIUS: f32 = SPACE_XS;
+/// Inside the error toast, wider at the left for its red edge.
+pub const TOAST_MARGIN: Margin = Margin {
+    left: SPACE_L as i8,
+    right: SPACE_M as i8,
+    top: SPACE_M as i8,
+    bottom: SPACE_M as i8,
+};
+/// How far the toast sits from the window's right edge and above its bottom, clear of the footer.
+pub const TOAST_OFFSET: Vec2 = vec2(-SPACE_M, -(SPACE_XL + SPACE_L));
 
 const PLEX: &str = "plex";
 const PLEX_MEDIUM: &str = "plex-medium";

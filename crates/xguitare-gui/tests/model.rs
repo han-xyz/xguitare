@@ -16,18 +16,19 @@ use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankKind, Config};
 use xguitare_gui::model::{
     AddPlace, Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback,
-    KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, ModuleType, NO_SIGNAL, ParamRow,
-    PeakHold, PortChoices, PortSelection, SECTIONS, Section, SettingsDraft, Throttle, TunerReading,
-    add_after, add_command, add_place, add_places, autoscroll_delta, bank_kind, bank_rows,
-    bank_rows_for_rack, cabinet_ir, cents_fraction, cents_text, chip_columns, counts_toward_spawn,
-    ear_holes, engine_readout, failed_set, filter_bank, forget_removed_units, format_value,
-    in_tune, ir_names, key_step, key_to_command, knob_angle_deg, knob_fraction, knob_param_value,
-    knob_points, knob_value_from_drag, ladder_segments, latency_ms, module_types, move_target,
-    open_units_from_string, open_units_to_string, param_label, param_rows, parse_typed_value,
-    peak_db, peak_text, port_choices, quit_commands, rack_channels, refresh_decision,
-    refused_remove, remember_removes, requests_until_quit, response_text, set_ports_command,
-    set_settings_command, settings_draft, shortcuts_active, spawn_policy, tuner_header_text,
-    tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
+    KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, Message, ModuleType, NO_SIGNAL,
+    ParamRow, PeakHold, PortChoices, PortSelection, SECTIONS, Section, SettingsDraft, Throttle,
+    TunerReading, add_after, add_command, add_place, add_places, autoscroll_delta, bank_kind,
+    bank_rows, bank_rows_for_rack, cabinet_ir, cents_fraction, cents_text, chip_columns,
+    counts_toward_spawn, ear_holes, engine_readout, esc_dismisses_toast, failed_set, filter_bank,
+    forget_removed_units, format_value, in_tune, ir_names, key_step, key_to_command,
+    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
+    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
+    open_units_to_string, param_label, param_rows, parse_typed_value, peak_db, peak_text,
+    port_choices, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
+    requests_until_quit, response_message, set_ports_command, set_settings_command, settings_draft,
+    shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
+    typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RemovedUnit, Restore, ScreenRect, UnitStyle,
@@ -222,18 +223,21 @@ fn refresh_decision_on_revision_change() {
 #[test]
 fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
     let now = Instant::now();
-    let since = now.checked_sub(Duration::from_millis(12_400)).unwrap();
     assert_eq!(
         xguitare_gui::model::link_banner(&Link::Connected, now),
         None
     );
-    assert_eq!(
-        xguitare_gui::model::link_banner(&Link::Disconnected { since }, now),
-        Some((
-            "Daemon disconnected",
-            "Retrying for 12 s. Controls are paused.".to_string()
-        ))
-    );
+    for (millis, detail) in [
+        (0, "Reconnecting\u{2026} Controls are paused."),
+        (1_200, "Reconnecting for 1 s. Controls are paused."),
+        (12_400, "Reconnecting for 12 s. Controls are paused."),
+    ] {
+        let since = now.checked_sub(Duration::from_millis(millis)).unwrap();
+        assert_eq!(
+            xguitare_gui::model::link_banner(&Link::Disconnected { since }, now),
+            Some(("Daemon disconnected", detail.to_string()))
+        );
+    }
     assert_eq!(
         xguitare_gui::model::link_banner(
             &Link::Starting {
@@ -243,7 +247,7 @@ fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
         ),
         Some((
             "Starting the Daemon",
-            "Waiting 3 s for it. Controls are paused.".to_string()
+            "Waited 3 s so far. Controls are paused.".to_string()
         ))
     );
 }
@@ -252,14 +256,90 @@ fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
 fn feedback_tells_an_error_from_a_notice_and_drops_a_dismissed_one() {
     let now = Instant::now();
     let mut feedback = Feedback::default();
-    feedback.show("saved bank/funk.toml".to_string(), now);
+    feedback.show(Message::Notice("saved bank/funk.toml".to_string()), now);
     assert_eq!(feedback.notice(now), Some("saved bank/funk.toml"));
-    assert_eq!(feedback.error(now), None);
-    feedback.show("error: permission denied".to_string(), now);
-    assert_eq!(feedback.notice(now), None);
-    assert_eq!(feedback.error(now), Some("error: permission denied"));
+    assert_eq!(feedback.error(), None);
+    feedback.show(
+        Message::Error {
+            title: "Could not save Preset",
+            detail: "permission denied".to_string(),
+        },
+        now,
+    );
+    assert_eq!(
+        feedback.error(),
+        Some(("Could not save Preset", "permission denied"))
+    );
     feedback.dismiss();
-    assert_eq!(feedback.error(now), None);
+    assert_eq!(feedback.error(), None);
+}
+
+#[test]
+fn an_error_stays_until_dismissed_or_replaced_and_a_notice_expires() {
+    let now = Instant::now();
+    let mut feedback = Feedback::default();
+    feedback.show(
+        Message::Error {
+            title: "Could not load Preset",
+            detail: "no preset 'x'".to_string(),
+        },
+        now,
+    );
+    feedback.show(Message::Notice("saved bank/funk.toml".to_string()), now);
+    assert_eq!(feedback.notice(now + Duration::from_secs(3)), None);
+    assert_eq!(
+        feedback.error(),
+        Some(("Could not load Preset", "no preset 'x'"))
+    );
+    feedback.show(
+        Message::Error {
+            title: "Could not save Preset",
+            detail: "disk full".to_string(),
+        },
+        now + Duration::from_secs(60),
+    );
+    assert_eq!(
+        feedback.error(),
+        Some(("Could not save Preset", "disk full"))
+    );
+}
+
+#[test]
+fn esc_dismisses_the_toast_unless_a_dialog_or_text_field_takes_it() {
+    assert!(esc_dismisses_toast(false, false));
+    assert!(!esc_dismisses_toast(true, false));
+    assert!(!esc_dismisses_toast(false, true));
+}
+
+#[test]
+fn a_failed_command_names_its_action() {
+    let refused = || {
+        Ok(Response::Err {
+            error: "refused".to_string(),
+        })
+    };
+    let at = |preset: &str| Request::Load {
+        preset: preset.to_string(),
+        track: None,
+        bus: None,
+        master: false,
+    };
+    for (request, title) in [
+        (Request::Save { name: None }, "Could not save Preset"),
+        (at("1"), "Could not load Preset"),
+        (Request::ProjectSave, "Could not save the Project"),
+        (Request::IrList, "Could not list the Cabinet IRs"),
+        (Request::Modules, "Command failed"),
+    ] {
+        assert_eq!(
+            response_message(&request, refused()),
+            Some(Message::Error {
+                title,
+                detail: "refused".to_string()
+            }),
+            "{request:?}"
+        );
+    }
 }
 
 #[test]
@@ -478,21 +558,24 @@ fn hold_local_until_newer_revision() {
 fn feedback_expires_after_3s() {
     let now = Instant::now();
     let mut feedback = Feedback::default();
-    assert_eq!(feedback.text(now), None);
-    feedback.show("saved /bank/01-clean.toml".to_string(), now);
+    assert_eq!(feedback.notice(now), None);
+    feedback.show(
+        Message::Notice("saved /bank/01-clean.toml".to_string()),
+        now,
+    );
     assert_eq!(
-        feedback.text(now + Duration::from_millis(2_999)),
+        feedback.notice(now + Duration::from_millis(2_999)),
         Some("saved /bank/01-clean.toml")
     );
-    assert_eq!(feedback.text(now + Duration::from_secs(3)), None);
+    assert_eq!(feedback.notice(now + Duration::from_secs(3)), None);
 }
 
 #[test]
 fn feedback_only_save_and_errors() {
     let saved = Ok(Response::Ok(json!({"path": "/bank/01-clean.toml"})));
     assert_eq!(
-        response_text(&Request::Save { name: None }, saved).as_deref(),
-        Some("saved /bank/01-clean.toml")
+        response_message(&Request::Save { name: None }, saved),
+        Some(Message::Notice("saved /bank/01-clean.toml".to_string()))
     );
     let busy = Ok(Response::Err {
         error: "engine busy".to_string(),
@@ -505,18 +588,21 @@ fn feedback_only_save_and_errors() {
         master: false,
     };
     assert_eq!(
-        response_text(&set, busy).as_deref(),
-        Some("error: engine busy")
+        response_message(&set, busy),
+        Some(Message::Error {
+            title: "Could not set the Parameter",
+            detail: "engine busy".to_string()
+        })
     );
     let gone = Err(ClientError::NotRunning(PathBuf::from("/tmp/xgv/x.sock")));
     assert!(
-        response_text(&Request::Save { name: None }, gone)
-            .is_some_and(|text| text.starts_with("error: "))
+        response_message(&Request::Save { name: None }, gone)
+            .is_some_and(|message| matches!(message, Message::Error { .. }))
     );
     let applied = Ok(Response::Ok(
         json!({"param": "preamp.gain", "value": 42.0, "clamped": false}),
     ));
-    assert_eq!(response_text(&set, applied), None);
+    assert_eq!(response_message(&set, applied), None);
     let loaded = Ok(Response::Ok(json!({"program": 1, "name": "Crunch"})));
     let load = Request::Load {
         preset: "1".to_string(),
@@ -524,7 +610,7 @@ fn feedback_only_save_and_errors() {
         bus: None,
         master: false,
     };
-    assert_eq!(response_text(&load, loaded), None);
+    assert_eq!(response_message(&load, loaded), None);
 }
 
 #[test]
@@ -2033,7 +2119,7 @@ fn typed_value_refuses_text_that_is_no_number() {
     assert_eq!(typed_value("\u{2212}30 dB"), Ok(-30.0));
     assert_eq!(
         typed_value("loud"),
-        Err("error: 'loud' is not a number".to_string())
+        Err("'loud' is not a number".to_string())
     );
 }
 

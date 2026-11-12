@@ -928,7 +928,7 @@ pub fn render_dialog(
                 .spacing(vec2(SPACE_M, SPACE_S))
                 .show(ui, |ui| {
                     ui.label(field_label("Range"));
-                    ui.horizontal(|ui| {
+                    widgets::lit_radios(ui, |ui| {
                         ui.radio_value(&mut draft.range, RenderRange::Project, "Project");
                         ui.add_enabled_ui(has_loop, |ui| {
                             ui.radio_value(&mut draft.range, RenderRange::Loop, "Loop");
@@ -938,7 +938,7 @@ pub fn render_dialog(
                     });
                     ui.end_row();
                     ui.label(field_label("Bits"));
-                    ui.horizontal(|ui| {
+                    widgets::lit_radios(ui, |ui| {
                         for (bits, text) in BITS {
                             ui.radio_value(&mut draft.bits, bits, text);
                         }
@@ -1009,7 +1009,8 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
             None
         }
         RenderView::Failed(error) => {
-            ui.label(RichText::new(format!("\u{26a0} {error}")).color(colour(colours.danger_text)));
+            ui.label(RichText::new(format!("\u{26a0} {error}")).color(colour(colours.danger_text)))
+                .widget_info(|| WidgetInfo::labeled(Role::Alert, true, error));
             None
         }
         RenderView::Cancelled => {

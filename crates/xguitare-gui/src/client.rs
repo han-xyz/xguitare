@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::model::{
-    Command, Link, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn, failed_set,
-    ir_names, module_types, param_rows, refresh_decision, refused_remove, refused_render,
-    requests_until_quit, response_text, spawn_policy,
+    Command, Link, Message, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn,
+    failed_set, failure_title, ir_names, module_types, param_rows, refresh_decision,
+    refused_remove, refused_render, requests_until_quit, response_message, spawn_policy,
 };
 use crate::project_model::{autosave_offer, project_name, still_closing};
 use serde_json::Value;
@@ -242,8 +242,8 @@ impl Client {
             Ok(Response::Ok(payload)) => Some(payload.clone()),
             _ => None,
         };
-        if let Some(text) = response_text(req, response) {
-            self.snapshot.last_message = Some((text, Instant::now()));
+        if let Some(message) = response_message(req, response) {
+            self.snapshot.last_message = Some((message, Instant::now()));
         }
         payload
     }
@@ -331,15 +331,21 @@ impl Client {
         for _ in 0..REOPEN_TRIES {
             let response = self.request(&open);
             if !still_closing(&response) {
-                if let Some(text) = response_text(&open, response) {
-                    self.snapshot.last_message = Some((text, Instant::now()));
+                if let Some(message) = response_message(&open, response) {
+                    self.snapshot.last_message = Some((message, Instant::now()));
                 }
                 return;
             }
             thread::sleep(TICK);
         }
         warn!("project_open: still closing after {REOPEN_TRIES} tries");
-        self.snapshot.last_message = Some((format!("error: {STILL_CLOSING}"), Instant::now()));
+        self.snapshot.last_message = Some((
+            Message::Error {
+                title: failure_title(&open),
+                detail: STILL_CLOSING.to_string(),
+            },
+            Instant::now(),
+        ));
     }
 
     fn poll(&mut self, now: Instant) {
@@ -473,8 +479,8 @@ impl Client {
             }
             Ok(Response::Err { .. }) => {
                 self.snapshot.irs.clear();
-                if let Some(text) = response_text(&Request::IrList, response) {
-                    self.snapshot.last_message = Some((text, Instant::now()));
+                if let Some(message) = response_message(&Request::IrList, response) {
+                    self.snapshot.last_message = Some((message, Instant::now()));
                 }
             }
             Err(_) => {}

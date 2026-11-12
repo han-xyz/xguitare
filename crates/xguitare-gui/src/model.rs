@@ -63,7 +63,7 @@ pub struct Snapshot {
     pub items: Option<Value>,
     pub module_types: Vec<ModuleType>,
     pub irs: Vec<String>,
-    pub last_message: Option<(String, Instant)>,
+    pub last_message: Option<(Message, Instant)>,
     pub failed_set: Option<(String, Instant)>,
     pub refused_remove: Option<(String, Instant)>,
     /// The error of the last `render` the Daemon refused.
@@ -1405,11 +1405,17 @@ pub fn link_banner(link: &Link, now: Instant) -> Option<(&'static str, String)> 
         Link::Connected => None,
         Link::Disconnected { since } => Some((
             "Daemon disconnected",
-            format!("Retrying for {} s. {PAUSED}", seconds_since(*since, now)),
+            match seconds_since(*since, now) {
+                0 => format!("Reconnecting\u{2026} {PAUSED}"),
+                seconds => format!("Reconnecting for {seconds} s. {PAUSED}"),
+            },
         )),
         Link::Starting { since } => Some((
             "Starting the Daemon",
-            format!("Waiting {} s for it. {PAUSED}", seconds_since(*since, now)),
+            match seconds_since(*since, now) {
+                0 => format!("Waiting for it\u{2026} {PAUSED}"),
+                seconds => format!("Waited {seconds} s so far. {PAUSED}"),
+            },
         )),
     }
 }
@@ -1483,7 +1489,8 @@ pub const CLOSED_KNOB_WIDTH: f32 = 114.0;
 pub const HEADER_GAP: f32 = 10.0;
 pub const UNIT_NAME_WIDTH: f32 = 90.0;
 pub const FOOTSWITCH_WIDTH: f32 = 42.0;
-pub const CHEVRON_WIDTH: f32 = 20.0;
+/// The open/close triangle: a whole pointer target.
+pub const CHEVRON_WIDTH: f32 = theme::CONTROL_HEIGHT;
 pub const RULE_WIDTH: f32 = 1.0;
 pub const MOVE_BUTTON_SIDE: f32 = 30.0;
 pub const MOVE_BUTTON_GAP: f32 = 8.0;
@@ -1712,13 +1719,13 @@ pub fn typed_text(spec: &ParamRow, value: f64) -> String {
     number_text(value)
 }
 
-/// The value typed into a value field, or the footer message for text that is no number.
+/// The value typed into a value field.
 ///
 /// # Errors
 ///
-/// The footer message `error: '<text>' is not a number` when `text` does not parse.
+/// The error toast's detail `'<text>' is not a number` when `text` does not parse.
 pub fn typed_value(text: &str) -> Result<f64, String> {
-    parse_typed_value(text).ok_or_else(|| format!("error: '{}' is not a number", text.trim()))
+    parse_typed_value(text).ok_or_else(|| format!("'{}' is not a number", text.trim()))
 }
 
 /// Two decimals at most, trailing zeros dropped: `0.71`, `2.5`, `3`.
@@ -1966,40 +1973,52 @@ fn set_command(address: &str, value: f64) -> Command {
     }
 }
 
-/// How [`response_text`] and the typed-value checks begin an error message.
-const ERROR_PREFIX: &str = "error: ";
+/// What the window tells about a command it sent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Message {
+    /// A result for the footer, such as a saved path.
+    Notice(String),
+    /// A failure for the error toast: the action that failed, and the reason.
+    Error { title: &'static str, detail: String },
+}
 
+/// The footer's notice for [`FEEDBACK_FOR`], and the error toast's error until it is dismissed or the next error replaces it.
 #[derive(Debug, Default)]
 pub struct Feedback {
-    message: Option<(String, Instant)>,
+    notice: Option<(String, Instant)>,
+    error: Option<(&'static str, String)>,
 }
 
 impl Feedback {
-    pub fn show(&mut self, text: String, at: Instant) {
-        self.message = Some((text, at));
+    pub fn show(&mut self, message: Message, at: Instant) {
+        match message {
+            Message::Notice(text) => self.notice = Some((text, at)),
+            Message::Error { title, detail } => self.error = Some((title, detail)),
+        }
     }
 
-    pub fn text(&self, now: Instant) -> Option<&str> {
-        self.message
+    pub fn notice(&self, now: Instant) -> Option<&str> {
+        self.notice
             .as_ref()
             .filter(|(_, at)| now.saturating_duration_since(*at) < FEEDBACK_FOR)
             .map(|(text, _)| text.as_str())
     }
 
-    /// The message for the footer: anything but an error.
-    pub fn notice(&self, now: Instant) -> Option<&str> {
-        self.text(now)
-            .filter(|text| !text.starts_with(ERROR_PREFIX))
-    }
-
-    /// The message for the error toast.
-    pub fn error(&self, now: Instant) -> Option<&str> {
-        self.text(now).filter(|text| text.starts_with(ERROR_PREFIX))
+    /// The error toast's title and detail.
+    pub fn error(&self) -> Option<(&str, &str)> {
+        self.error
+            .as_ref()
+            .map(|(title, detail)| (*title, detail.as_str()))
     }
 
     pub fn dismiss(&mut self) {
-        self.message = None;
+        self.error = None;
     }
+}
+
+/// Esc closes the error toast unless a dialog closes with it or a text field puts its value back with it.
+pub fn esc_dismisses_toast(text_edit_focused: bool, dialog_open: bool) -> bool {
+    !text_edit_focused && !dialog_open
 }
 
 /// The id of a `rack remove` that the Daemon refused or that never reached it.
@@ -2020,18 +2039,56 @@ pub fn refused_render(req: &Request, response: &Result<Response, ClientError>) -
     }
 }
 
-/// The status bar message for a command's response: a saved path or an error; other successes are silent.
-pub fn response_text(req: &Request, response: Result<Response, ClientError>) -> Option<String> {
-    match (req, response) {
-        (Request::Save { .. } | Request::ProjectSave, Ok(Response::Ok(payload))) => Some(format!(
-            "saved {}",
-            payload["path"].as_str().unwrap_or_default()
-        )),
-        (_, Ok(Response::Ok(_))) => None,
-        (_, Ok(Response::Err { error })) => Some(format!("error: {error}")),
-        (_, Err(err)) => Some(format!("error: {err}")),
+/// The message for a command's response: a saved path, or an error titled by [`failure_title`]; other successes are silent.
+pub fn response_message(req: &Request, response: Result<Response, ClientError>) -> Option<Message> {
+    let detail = match (req, response) {
+        (Request::Save { .. } | Request::ProjectSave, Ok(Response::Ok(payload))) => {
+            return Some(Message::Notice(format!(
+                "saved {}",
+                payload["path"].as_str().unwrap_or_default()
+            )));
+        }
+        (_, Ok(Response::Ok(_))) => return None,
+        (_, Ok(Response::Err { error })) => error,
+        (_, Err(err)) => err.to_string(),
+    };
+    Some(Message::Error {
+        title: failure_title(req),
+        detail,
+    })
+}
+
+/// The error toast's title for a failed `req`: the action that failed.
+pub fn failure_title(req: &Request) -> &'static str {
+    match req {
+        Request::Load { .. } => "Could not load Preset",
+        Request::Save { .. } => "Could not save Preset",
+        Request::Set { .. } => SET_FAILED,
+        Request::Bypass { .. } => "Could not switch the bypass",
+        Request::RackAdd { .. } => "Could not add the Module",
+        Request::RackRemove { .. } => "Could not remove the Module",
+        Request::RackMove { .. } => "Could not move the Module",
+        Request::RackIr { .. } => "Could not load the Cabinet IR",
+        Request::IrList => "Could not list the Cabinet IRs",
+        Request::Mute { .. } => "Could not switch Mute",
+        Request::SetPorts { .. } => "Could not connect the ports",
+        Request::SetSettings { .. } => "Could not apply the settings",
+        Request::ProjectNew { .. } => "Could not create the Project",
+        Request::ProjectOpen { .. } => "Could not open the Project",
+        Request::ProjectSave => "Could not save the Project",
+        Request::ProjectClose => "Could not close the Project",
+        Request::TrackAdd { .. } => "Could not add the Track",
+        Request::TrackRemove { .. } => "Could not remove the Track",
+        Request::TrackSet { .. } => "Could not change the Track",
+        Request::BusAdd { .. } => "Could not add the Bus",
+        Request::BusRemove { .. } => "Could not remove the Bus",
+        Request::Render { .. } => "Could not start the Render",
+        _ => "Command failed",
     }
 }
+
+/// The error toast's title for a refused `set` or a typed value that is no number.
+pub const SET_FAILED: &str = "Could not set the Parameter";
 
 /// The address of a `set` that the Daemon refused or that never reached it.
 pub fn failed_set(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {

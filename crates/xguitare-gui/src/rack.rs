@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Align2, Button, Color32, ComboBox, CursorIcon, DragAndDrop, FontSelection, Frame, Id,
+    Align, Align2, Color32, ComboBox, CursorIcon, DragAndDrop, FontSelection, Frame, Id,
     InnerResponse, Key, Label, Layout, Margin, Modifiers, Painter, Pos2, Rect, Response, RichText,
     Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
     WidgetInfo, WidgetText, pos2, vec2,
@@ -18,18 +18,21 @@ use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CHEVRON_WIDTH, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged,
     EAR_WIDTH, Feedback, HEADER_GAP, KnobKey, Link, METER_FLOOR_DB, MOVE_BUTTON_GAP,
-    MOVE_BUTTON_SIDE, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, RULE_WIDTH,
-    ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH,
-    autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text, chip_click, choice_buttons,
-    choice_step, choice_text, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
-    format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value, link_banner,
-    module_title, move_target, mute_banner, open_knob_rows, open_knobs_width, open_unit_height,
-    param_label, param_rows, paused, peak_db, peak_text, rack_position_labels, tuner_header_text,
-    tuner_reading, typed_text, typed_value, unit_style,
+    MOVE_BUTTON_SIDE, Message, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
+    RULE_WIDTH, SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading,
+    UNIT_NAME_WIDTH, autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text,
+    chip_click, choice_buttons, choice_step, choice_text, closed_knobs_width, closed_unit_rows,
+    drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_origin,
+    knob_param_value, link_banner, module_title, move_target, mute_banner, open_knob_rows,
+    open_knobs_width, open_unit_height, param_label, param_rows, paused, peak_db, peak_text,
+    rack_position_labels, tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
-use crate::theme::{self, Rgb, colour, palette};
+use crate::theme::{
+    self, ICON_STROKE_WIDTH, LINK_BANNER_EDGE_WIDTH, LINK_BANNER_HEIGHT, LINK_RING_RADIUS,
+    MUTED_ICON_SIZE, MUTED_ICON_WIDTH, Rgb, colour, palette,
+};
 use crate::widgets::{self, KnobSize};
 
 const NO_IR: &str = "none";
@@ -43,11 +46,6 @@ const UNIT_HEIGHT: f32 = 64.0;
 const HEADER_HEIGHT: f32 = UNIT_HEIGHT - 2.0 * UNIT_MARGIN as f32;
 const METER_BRIDGE_HEIGHT: f32 = 70.0;
 const BANNER_HEIGHT: f32 = 40.0;
-const MUTED_ICON_SIZE: f32 = 14.0;
-const LINK_BANNER_HEIGHT: f32 = 56.0;
-const LINK_BANNER_EDGE_WIDTH: f32 = 2.0;
-const LINK_RING_RADIUS: f32 = 7.0;
-const LINK_RING_WIDTH: f32 = 1.5;
 const METER_LABEL_WIDTH: f32 = 44.0;
 const METER_ROW_HEIGHT: f32 = 16.0;
 const METER_ROW_GAP: f32 = theme::SPACE_XS;
@@ -163,11 +161,10 @@ fn mute_banner_strip(ui: &mut Ui, text: &str) {
     let painter = ui.painter();
     painter.rect_filled(rect, theme::RADIUS_CONTROL, colour(palette().danger));
     let galley = painter.layout_no_wrap(text.to_string(), theme::banner(), ink);
-    let icon_width = MUTED_ICON_SIZE * 1.6;
-    let left = rect.center().x - (icon_width + theme::SPACE_S + galley.size().x) / 2.0;
+    let left = rect.center().x - (MUTED_ICON_WIDTH + theme::SPACE_S + galley.size().x) / 2.0;
     paint_muted_icon(painter, pos2(left, rect.center().y), ink);
     let text_pos = pos2(
-        left + icon_width + theme::SPACE_S,
+        left + MUTED_ICON_WIDTH + theme::SPACE_S,
         rect.center().y - galley.size().y / 2.0,
     );
     painter.galley(text_pos, galley, ink);
@@ -193,7 +190,7 @@ fn paint_muted_icon(painter: &Painter, left: Pos2, ink: Color32) {
     ));
     let cross = pos2(left.x + half * 1.3 + MUTED_ICON_SIZE * 0.15, left.y);
     let arm = MUTED_ICON_SIZE * 0.15;
-    let stroke = Stroke::new(1.5, ink);
+    let stroke = Stroke::new(ICON_STROKE_WIDTH, ink);
     painter.line_segment(
         [cross + vec2(0.0, -arm), cross + vec2(2.0 * arm, arm)],
         stroke,
@@ -230,7 +227,7 @@ fn link_banner_strip(ui: &mut Ui, title: &str, detail: &str) {
     painter.circle_stroke(
         ring,
         LINK_RING_RADIUS,
-        Stroke::new(LINK_RING_WIDTH, colour(colours.lit)),
+        Stroke::new(ICON_STROKE_WIDTH, colour(colours.lit)),
     );
     let text_left = ring.x + LINK_RING_RADIUS + theme::SPACE_M;
     painter.text(
@@ -856,7 +853,7 @@ fn chevron(ui: &mut Ui, open: bool) -> Response {
         .color(colour(palette().hover_boundary));
     ui.add_sized(
         vec2(CHEVRON_WIDTH, CHEVRON_WIDTH),
-        Button::new(glyph).frame(false),
+        widgets::frameless_button(glyph),
     )
 }
 
@@ -1389,6 +1386,14 @@ fn value_field(
         return None;
     }
     typed_value(&text)
-        .map_err(|message| feedback.show(message, now))
+        .map_err(|detail| {
+            feedback.show(
+                Message::Error {
+                    title: SET_FAILED,
+                    detail,
+                },
+                now,
+            );
+        })
         .ok()
 }

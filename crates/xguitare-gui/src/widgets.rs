@@ -1,23 +1,22 @@
 use egui::{
-    Align2, Button, Color32, Context, CornerRadius, EventFilter, Frame, Id, Margin, Mesh, Modal,
-    Painter, Pos2, Rect, Response, RichText, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2,
-    Visuals, Widget, WidgetInfo, pos2, vec2,
+    Align2, Button, Color32, Context, CornerRadius, EventFilter, Frame, Id, Mesh, Modal, Painter,
+    Pos2, Rect, Response, RichText, Role, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2, Visuals,
+    Widget, WidgetInfo, pos2, vec2,
 };
 
+use crate::mixer_model::progress_text_place;
 use crate::model::{
     Band, EAR_HOLE_RADIUS, EAR_WIDTH, FOOTSWITCH_WIDTH, KNOB_ARC_SWEEP_DEG, LADDER_SEGMENTS,
     ScreenRect, ear_holes, focus_ring_rects, knob_arcs, knob_points, knob_value_from_drag,
     ladder_segments,
 };
 use crate::theme::{
-    self, CARET_WIDTH, CONTROL_HEIGHT, EDIT_BORDER_WIDTH, FOCUS_RING_GAP, FOCUS_RING_WIDTH,
-    RADIUS_CONTROL, RADIUS_LED, RADIUS_PANEL, RADIUS_PILL, SPACE_S, accent_for, colour, palette,
+    self, CARET_WIDTH, CONTROL_HEIGHT, DIALOG_MARGIN, EDIT_BORDER_WIDTH, FOCUS_RING_GAP,
+    FOCUS_RING_WIDTH, PROGRESS_HEIGHT, RADIUS_CONTROL, RADIUS_LED, RADIUS_PANEL, RADIUS_PILL,
+    SPACE_S, accent_for, colour, palette,
 };
 
 const ARC_SEGMENTS: usize = 48;
-const DIALOG_MARGIN: Margin = Margin::symmetric(14, 12);
-const PROGRESS_HEIGHT: f32 = 22.0;
-const PROGRESS_TEXT_INSET: f32 = 8.0;
 const CENTS_ARC_DIAMETER: f32 = 160.0;
 const CENTS_ARC_WIDTH: f32 = 4.0;
 const CENTS_NEEDLE_WIDTH: f32 = 3.0;
@@ -256,6 +255,30 @@ pub fn warning_button(text: &str) -> StyledButton {
     }
 }
 
+/// A glyph with no frame at rest; on hover and while pressed it takes the [`outlined_button`] fill and edge.
+pub fn frameless_button(text: impl Into<RichText>) -> StyledButton {
+    StyledButton {
+        button: Button::new(text.into()).frame_when_inactive(false),
+        kind: ButtonKind::Outlined,
+    }
+}
+
+/// Lays out radio buttons in a row whose selected dot is lit, as every other selection is.
+pub fn lit_radios(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    ui.horizontal(|ui| {
+        let lit = colour(palette().lit);
+        let widgets = &mut ui.visuals_mut().widgets;
+        for state in [
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+        ] {
+            state.fg_stroke.color = lit;
+        }
+        add(ui);
+    });
+}
+
 /// A toggle reading `text`: while `lit` filled in `lit_colour` with dark text, else an [`outlined_button`].
 pub fn switched_button(text: &str, lit: bool, lit_colour: theme::Rgb) -> StyledButton {
     let button = if lit {
@@ -351,7 +374,7 @@ pub fn modal(id: Id) -> Modal {
         .backdrop_color(theme::scrim())
 }
 
-/// A rounded well edged in the boundary colour, lit from the left as far as `fraction`, with the percentage in dark text on the lit part, or in the text colour on the well while the lit part is too short for it.
+/// A rounded well edged in the boundary colour, lit from the left as far as `fraction`, with the percentage in dark text on the lit part, or in the text colour on the well after it while the lit part is too short for it.
 pub fn progress_bar(ui: &mut Ui, fraction: f32, width: f32) -> Response {
     let colours = palette();
     let (rect, response) = ui.allocate_exact_size(vec2(width, PROGRESS_HEIGHT), Sense::hover());
@@ -376,16 +399,13 @@ pub fn progress_bar(ui: &mut Ui, fraction: f32, width: f32) -> Response {
         StrokeKind::Inside,
     );
     let galley = painter.layout_no_wrap(percent, theme::value(), Color32::PLACEHOLDER);
-    let fits_lit = lit.width() >= galley.size().x + 2.0 * PROGRESS_TEXT_INSET;
-    let text_colour = if fits_lit {
+    let (left, on_lit) = progress_text_place(lit.width(), galley.size().x);
+    let text_colour = if on_lit {
         colours.on_accent
     } else {
         colours.text
     };
-    let pos = pos2(
-        rect.left() + PROGRESS_TEXT_INSET,
-        rect.center().y - galley.size().y / 2.0,
-    );
+    let pos = pos2(rect.left() + left, rect.center().y - galley.size().y / 2.0);
     painter.galley(pos, galley, colour(text_colour));
     response
 }

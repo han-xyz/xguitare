@@ -21,7 +21,7 @@ use xguitare_core::render::{RenderBits, RenderRange};
 use xguitare_core::{BankKind, Config, ModuleRegistry};
 use xguitare_gui::app::App;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
-use xguitare_gui::model::{Command, Link, ModuleType, Restore, Snapshot, TrackEdit};
+use xguitare_gui::model::{Command, Link, Message, ModuleType, Restore, Snapshot, TrackEdit};
 use xguitare_gui::project_model::AutosaveOffer;
 use xguitare_gui::theme::palette;
 
@@ -547,9 +547,11 @@ fn gui_snapshots() {
     click_unit_switch(&mut tuner, "Tuner");
     write_png(&mut tuner, "tuner-open");
 
-    let (mut save_as, _, _dir) = harness();
-    save_as.get_by_label("Save as new").click();
-    write_png(&mut save_as, "save-as-open");
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let (mut save_as, _, _dir) = harness_sized(size);
+        save_as.get_by_label("Save as new").click();
+        write_png(&mut save_as, &format!("save-as-open-{suffix}"));
+    }
 
     let (mut sections, _, _dir) = harness();
     for title in ["Audio", "Settings"] {
@@ -1927,13 +1929,14 @@ fn typed_value_is_sent_on_enter() {
 }
 
 #[test]
-fn invalid_typed_value_reverts_with_a_footer_message() {
+fn invalid_typed_value_reverts_with_an_error_toast() {
     let (mut harness, sent, _dir) = harness();
     edit_value(&mut harness, "Threshold", "loud");
     harness.key_press(Key::Enter);
     harness.run_steps(2);
     assert_eq!(sent_now(&sent), []);
-    harness.get_by_label("error: 'loud' is not a number");
+    harness.get_by_label("Could not set the Parameter");
+    harness.get_by_label("'loud' is not a number");
     let field = harness.get_by_role_and_label(Role::TextInput, "Threshold");
     assert_eq!(field.value().as_deref(), Some("\u{2212}24 dB"));
 }
@@ -2105,15 +2108,21 @@ fn mixer_snapshots() {
     let file = "/home/you/Music/xguitare/demo-song/renders/demo-song.wav";
     let running = json!({"name": "demo-song", "range": "project", "progress": 0.42,
         "state": "running", "file": file});
-    let (mut dialog, _, _dir) = harness_with(WINDOW, render_snapshot(running));
-    dialog.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::R);
-    write_png(&mut dialog, "render-running");
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let (mut dialog, _, _dir) = harness_with(size, render_snapshot(running.clone()));
+        dialog.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::R);
+        write_png(&mut dialog, &format!("render-running-{suffix}"));
+        let (mut idle, _, _dir) = harness_with(size, mixer_snapshot());
+        idle.key_press_modifiers(Modifiers::COMMAND | Modifiers::ALT, Key::R);
+        write_png(&mut idle, &format!("render-idle-{suffix}"));
+    }
 
     let failed = json!({"name": "demo-song", "range": "project", "progress": 0.42,
         "state": "failed", "file": file, "error": "No space left on device (os error 28)"});
     let (mut dialog, _, _dir) = harness_with(WINDOW, render_snapshot(failed));
     click_button(&mut dialog, "Render");
     dialog.run_steps(2);
+    dialog.get_by_role_and_label(Role::Alert, "No space left on device (os error 28)");
     write_png(&mut dialog, "render-failed");
 }
 
@@ -2130,21 +2139,53 @@ fn transport_bar_fits_one_row_at_1280() {
     }
 }
 
-const PERMISSION_ERROR: &str = "error: bank/funk.toml: permission denied (os error 13)";
+const PERMISSION_ERROR: &str = "bank/funk.toml: permission denied (os error 13)";
+const SAVE_FAILED: &str = "Could not save Preset";
+
+fn error_snapshot() -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    snapshot.last_message = Some((
+        Message::Error {
+            title: SAVE_FAILED,
+            detail: PERMISSION_ERROR.to_string(),
+        },
+        std::time::Instant::now(),
+    ));
+    snapshot
+}
 
 #[test]
 fn an_error_shows_as_a_toast_at_the_bottom_right_until_dismissed() {
-    let mut snapshot = funk_snapshot();
-    snapshot.last_message = Some((PERMISSION_ERROR.to_string(), std::time::Instant::now()));
-    let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, snapshot);
-    let toast = harness.get_by_label(PERMISSION_ERROR).rect();
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let (mut harness, _, _dir) = harness_with(size, error_snapshot());
+        let toast = harness.get_by_label(PERMISSION_ERROR).rect();
+        assert!(
+            toast.left() > size.x / 2.0 && toast.bottom() > size.y / 2.0,
+            "the toast is at {toast:?}"
+        );
+        harness.get_by_role_and_label(Role::Alert, &format!("{SAVE_FAILED}. {PERMISSION_ERROR}"));
+        write_png(&mut harness, &format!("error-toast-{suffix}"));
+        click_button(&mut harness, "Dismiss");
+        assert!(harness.query_by_label(PERMISSION_ERROR).is_none());
+    }
+}
+
+#[test]
+fn esc_dismisses_the_error_toast() {
+    let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, error_snapshot());
+    harness.key_press(Key::Escape);
+    harness.run_steps(2);
+    assert!(harness.query_by_label(SAVE_FAILED).is_none());
+}
+
+#[test]
+fn a_unit_chevron_is_a_full_pointer_target() {
+    let (harness, _, _dir) = harness();
+    let chevron = harness.get_all_by_label(CLOSED).next().unwrap().rect();
     assert!(
-        toast.left() > DEFAULT_WINDOW.x / 2.0 && toast.bottom() > DEFAULT_WINDOW.y / 2.0,
-        "the toast is at {toast:?}"
+        chevron.width() >= 24.0 && chevron.height() >= 24.0,
+        "the chevron is {chevron:?}"
     );
-    write_png(&mut harness, "error-toast");
-    click_button(&mut harness, "Dismiss");
-    assert!(harness.query_by_label(PERMISSION_ERROR).is_none());
 }
 
 #[test]
@@ -2155,9 +2196,11 @@ fn a_lost_daemon_shows_its_banner_and_pauses_the_rack() {
     };
     snapshot.status = None;
     snapshot.tuner = None;
+    let (mut small, _, _dir) = harness_with(MIN_WINDOW, snapshot.clone());
+    write_png(&mut small, "disconnected-1024x640");
     let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, snapshot);
     harness.get_by_label_contains("Daemon disconnected");
-    write_png(&mut harness, "disconnected");
+    write_png(&mut harness, "disconnected-1280x800");
     harness
         .get_by_role_and_label(Role::Switch, "Compressor")
         .click();
@@ -2195,7 +2238,10 @@ fn mixer_faders_and_switches_show_whole_in_the_mixer_view() {
         (DEFAULT_WINDOW, eight_buses_snapshot(), "Delay", 232.0),
     ] {
         let mut snapshot = snapshot;
-        snapshot.last_message = Some((SAVED.to_string(), std::time::Instant::now()));
+        snapshot.last_message = Some((
+            Message::Notice(SAVED.to_string()),
+            std::time::Instant::now(),
+        ));
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
         let footer_top = footer_top(&harness);
