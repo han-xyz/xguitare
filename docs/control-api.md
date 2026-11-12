@@ -19,7 +19,7 @@ Errors any request can return:
 
 | `error` | When |
 | --- | --- |
-| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `metronome`, `metronome_tap`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `render`, `render_cancel`, `clip_reset`, `item_move`, `item_trim`, `item_split`, `item_delete`, `item_take` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
+| `invalid request: <parser message>` | The line is not a valid request, e.g. `invalid request: expected ident at line 1 column 2` for `not json`, ``invalid request: unknown variant `reboot`, expected one of `status`, `list`, `load`, `set`, `get`, `save`, `modules`, `rack_add`, `rack_remove`, `rack_move`, `tuner`, `mute`, `bypass`, `ir_list`, `rack_ir`, `ports`, `set_ports`, `settings`, `set_settings`, `project_new`, `project_open`, `project_save`, `project_close`, `project_list`, `project_undo`, `project_redo`, `items`, `track_add`, `track_remove`, `track_set`, `track_select`, `transport`, `loop`, `tempo`, `click`, `metronome`, `metronome_tap`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `render`, `render_cancel`, `clip_reset`, `item_move`, `item_trim`, `item_split`, `item_delete`, `item_take` at line 1 column 15``, ``invalid request: missing field `preset` ``. |
 | `request too long` | The line exceeds 64 KiB; the connection is then closed. |
 | `too many connections` | Sent unasked on connect when 32 connections are already open; the connection is then closed. |
 
@@ -63,7 +63,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
@@ -73,7 +73,7 @@ Response:
 | `sample_rate` | JACK sample rate in Hz; follows a rate change while the Daemon runs, and the Rack and the Tuner are rebuilt at the new rate. An open Project stops playing while the rate differs from its own (see `project_warning`) and plays again once they match. |
 | `buffer_size` | JACK buffer size in frames, as currently granted. |
 | `prepared_frames` | Block size in frames the running Rack was prepared for. The Daemon re-prepares the Rack, and an open Project's Tracks, within a second when `buffer_size` differs. |
-| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare; with Projects also on `project_new`, `project_open`, `project_close`, `track_add`, `track_remove`, `track_set`, `track_select`, `loop`, `tempo`, `click`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `metronome`, `metronome_tap` (from its second tap), a Rack request on a Track, Bus or Master, each Take added to the open Project, and when a Render starts (`render`) and when it ends. A client refreshes when it changes. `mute` does not change it. |
+| `revision` | The Revision: starts at 1 and increments on every successful `load`, `set`, `bypass`, `save`, `rack_add`, `rack_remove`, `rack_move` and `rack_ir`, on a hot reload of the active Preset, on a Bank re-index and on a re-prepare; with Projects also on `project_new`, `project_open`, `project_close`, `project_undo`, `project_redo`, `track_add`, `track_remove`, `track_set`, `track_select`, `loop`, `tempo`, `click`, `bus_add`, `bus_remove`, `bus_set`, `send_set`, `master_set`, `metronome`, `metronome_tap` (from its second tap), a Rack request on a Track, Bus or Master, each Take added to the open Project, and when a Render starts (`render`) and when it ends. A client refreshes when it changes. `mute` does not change it. |
 | `modified` | Whether the live Rack has been changed since the active Preset was last loaded, reloaded or saved: `true` after a successful `set`, `bypass`, `rack_add`, `rack_remove`, `rack_move` or `rack_ir`; `false` after a `load`, a `save` (with or without `as`) or a hot reload of the active Preset, and when no Preset is loaded. |
 | `muted` | Whether Mute is on (see `mute`). |
 | `input_peak_db` | Largest input sample since the previous `status` on the same connection (for the first `status` on a connection, since the previous `status` on any connection), in dB (`20·log10`), one decimal; `-120.0` for silence. Each `status` resets it for its own connection only. |
@@ -95,6 +95,7 @@ Response:
 | `loop` | The loop region: `start` and `end` in frames, and whether it is `on`. |
 | `click` | Whether the click is `on`, and `count_in` bars before recording. |
 | `selected` | Index of the selected Track. |
+| `undo`, `redo` | The label of what `project_undo` and `project_redo` would take back or do again, e.g. `move 2 Items` or `record Bass DI`; `null` when there is none. |
 | `tracks` | One entry per Track in order: `name`, `input` (capture port or `null`), `volume_db`, `pan`, `mute`, `solo`, `armed`, `input_peak_db` of its input port, measured as `input_peak_db`, `to_master`, `sends`, `peak_db` and `clip`. `sends` lists the Track's Sends that are not off, each `{"bus": <Bus index>, "level_db": <dB>, "pre": <bool>}`. `peak_db` is `[left, right]`, the Track's output after its volume and pan, measured as `input_peak_db` (one decimal, `-120.0` for silence, reset per connection by each `status`). `clip` is `true` once a side has reached 0 dBFS, until `clip_reset`. |
 | `buses` | One entry per Bus in order: `id` (stays the Bus's while others are added or removed, and is not given to a later Bus while the Project is open; `project.toml` names it in each Send), `name`, `volume_db`, `pan`, `mute`, `solo`, and `peak_db` and `clip` as for a Track, after the Bus's Rack, volume and pan. |
 | `master` | `volume_db` (`null` when off), and `peak_db` and `clip` as for a Track, after the Master Rack and volume, before the click. |
@@ -727,6 +728,55 @@ Response:
 ```
 
 Errors: `no project open`; `<path>: <reason>` when `project.toml` cannot be written (the Project stays open); `engine busy`.
+
+## project_undo
+
+Takes back the newest edit of the open Project's undo history and puts it on the redo history; `project_redo` does the newest undone edit again. Each answers with the edit's label and bumps the Revision; while playing, Item changes cross over in 5 ms as an edit does.
+
+The history holds, per open Project, the last 200 of these edits, each one entry:
+
+| Edit | Label |
+| --- | --- |
+| `item_move` | `move Item`, `move <n> Items` |
+| `item_trim` | `trim` |
+| `item_split` | `split` |
+| `item_delete` | `delete Item`, `delete <n> Items` |
+| `item_take` | `take <n>`, the Take counted from 1 |
+| A Take added after recording | `record <Track>` |
+| `track_add` | `add Track <name>` |
+| `track_remove` | `remove Track <name>`; undone, the Track comes back at its place with its Rack, mixer values, Sends and Items |
+
+Mixer, Rack, tempo, loop, click, Bus and Track rename requests do not enter the history and leave it as it is. A new edit clears the redo history. The history is not saved and is cleared when the Project closes. Undoing a recorded Take removes its Item and keeps its file in `takes/`; a Take that is not in memory is loaded before an undo or redo that plays it. An Item keeps its id through undo and redo, and a new Item never gets the id of one that undo took away.
+
+Request:
+
+```json
+{"cmd":"project_undo"}
+```
+
+Response:
+
+```json
+{"ok":true,"label":"move 2 Items"}
+```
+
+Errors: `no project open`; `cannot undo while recording` (`cannot redo while recording`) after `record`, until `stop` or `play`; `nothing to undo` (`nothing to redo`); `engine busy` (nothing changed, both histories stay; retry); `cannot load take <file>: <reason>`.
+
+## project_redo
+
+Does the newest undone edit again; see `project_undo`.
+
+Request:
+
+```json
+{"cmd":"project_redo"}
+```
+
+Response:
+
+```json
+{"ok":true,"label":"move 2 Items"}
+```
 
 ## project_list
 

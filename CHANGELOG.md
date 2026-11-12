@@ -6,6 +6,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Added
 
+- Project undo and redo: CLI `project undo|redo` and Control API `project_undo` and `project_redo` take back and do again the last 200 Item edits, recorded Takes and Track adds and removes of the open Project (a removed Track comes back with its Rack, mixer values and Items); `status` shows the `undo` and `redo` labels.
 - Editing Items: CLI `item list|move|trim|split|delete|take` and Control API `item_move`, `item_trim`, `item_split`, `item_delete` and `item_take`; moved Items go on top, a split keeps all Takes on both halves, and while playing the changed Tracks cross over to the edit in 5 ms without rebuilding their Racks.
 - Items have an id (Control API `items` `id`, first on each `project items` line) and may have a `length`; where Items overlap on a Track the one on top (the newest) is heard, and Item edges fade over 5 ms with a crossfade where one Item cuts into another. A `project.toml` without Item ids loads with ids in file order.
 - `autowah` Module, an envelope filter for bass and guitar: the input's envelope sweeps a low-, band- or high-pass filter between `freq_low` and `freq_high`, up or down, with `sensitivity`, `attack`, `decay`, `q`, `dry` and `wet`.

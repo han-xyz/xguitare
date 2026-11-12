@@ -267,6 +267,10 @@ enum ProjectCmd {
     List,
     /// List the open Project's Items: Track, bar.beat, length, active Take
     Items,
+    /// Undo the last Item edit, recorded Take or Track add or remove
+    Undo,
+    /// Redo what the last undo took back
+    Redo,
 }
 
 /// An Item is named by its id from `item list`; a time is <bar>.<beat>, <bar> or <seconds>s, as for locate.

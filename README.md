@@ -389,7 +389,7 @@ $ xguitare project close
 closed Live
 ```
 
-- `project new|open|save|close|list|items`: `open <name> --restore` loads the autosave; `close` saves, and saves again once the Takes still being written are added (after a recording, a `project new` or `open` meanwhile answers `a project is still closing; try again`). A sample rate other than the audio server's is refused; if the audio server's rate changes while a Project is open, the Project stops and `play` and `record` are refused until the rates match again.
+- `project new|open|save|close|list|items|undo|redo`: `open <name> --restore` loads the autosave; `close` saves, and saves again once the Takes still being written are added (after a recording, a `project new` or `open` meanwhile answers `a project is still closing; try again`). A sample rate other than the audio server's is refused; if the audio server's rate changes while a Project is open, the Project stops and `play` and `record` are refused until the rates match again.
 - `project items` prints one line per Item: its id, its Track, where it starts as `<bar>.<beat>`, its length in seconds (the Item's own length if it has one, else its active Take's frames minus the frames its `offset` skips) and which Take plays, e.g. `3 Guitar 2.1 4.00s take 2/2`. Right after `stop` the new Takes are not listed yet: they show up about a second later, once the disk thread has finished writing them.
 - `track add [name]` adds a Track with the active Preset's Modules and selects it. `track remove|select <track>` and `track edit <track>` take a zero-based index or a name (a name cannot be only digits); `edit` takes `--input <port>` (`""` disconnects; port names as the Control API `ports` lists them), `--volume <dB>` (−60 to 6), `--pan <−1..1>`, `--mute|--solo|--arm on|off`, `--to-master on|off` and `--name`.
 - An armed Track monitors its input through its Rack, also while stopped, and records while recording; an unarmed Track plays its Items.
@@ -422,6 +422,10 @@ deleted 3
 - `item move [--track <track>] <id>… <±time>` moves the Items by one amount, cut so that none starts before the Project start, and puts them on top of their Track. `--track` (an index or a name, given before the ids) puts the first on that Track and the others keep their distance to it.
 - `item trim <id> [--start <time>] [--end <time>]` moves an Item's edges, each kept within its Take. `item split [<id>…] --at <time>` splits those Items, or the Items under that time on the selected Track, into two that keep all the Takes. `item delete <id>…` removes Items; their Take files stay. `item take <id> <n>` plays Take `n`, counted from 1.
 - Each edit prints the Items it changed: id, Track index, start, length in frames and Take. While playing, the change is heard after a 5 ms crossfade. Items cannot be edited while recording (`cannot edit items while recording`).
+
+#### Undo
+
+`xguitare project undo` takes back the last Item edit, recorded Take, or Track add or remove, and prints what it undid (`undid move 2 Items`); `xguitare project redo` does it again (`redid move 2 Items`). The last 200 are kept while the Project is open; closing it clears them, and a new edit clears what could be redone. Mixer, Rack, tempo and loop changes are not undone this way. An undone Take keeps its file in `takes/`. `xguitare status` shows the next undo and redo (`undo: trim, redo: -`). Neither works while recording.
 
 ### Mixer
 

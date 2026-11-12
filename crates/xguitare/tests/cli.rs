@@ -786,12 +786,12 @@ fn status_prints_the_open_project() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","connections":[],"disk_overflows":1,"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"tracks":[{"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04,"to_master":true,"sends":[{"bus":1,"level_db":-6.0,"pre":false},{"bus":0,"level_db":-12.5,"pre":true}],"peak_db":[-12.04,-12.0],"clip":false},{"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0,"to_master":false,"sends":[],"peak_db":[-120.0,-120.0],"clip":true}],"buses":[{"id":3,"name":"Verb","volume_db":-3.0,"pan":0.0,"mute":false,"solo":true,"peak_db":[-20.0,-21.5],"clip":false},{"id":1,"name":"Delay","volume_db":0.0,"pan":0.25,"mute":false,"solo":false,"peak_db":[0.0,-0.4],"clip":true}],"master":{"volume_db":-1.5,"peak_db":[-9.0,-9.24],"clip":false}}"#,
+            r#"{"ok":true,"preset":"Clean","connections":[],"disk_overflows":1,"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"undo":"trim","redo":null,"tracks":[{"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04,"to_master":true,"sends":[{"bus":1,"level_db":-6.0,"pre":false},{"bus":0,"level_db":-12.5,"pre":true}],"peak_db":[-12.04,-12.0],"clip":false},{"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0,"to_master":false,"sends":[],"peak_db":[-120.0,-120.0],"clip":true}],"buses":[{"id":3,"name":"Verb","volume_db":-3.0,"pan":0.0,"mute":false,"solo":true,"peak_db":[-20.0,-21.5],"clip":false},{"id":1,"name":"Delay","volume_db":0.0,"pan":0.25,"mute":false,"solo":false,"peak_db":[0.0,-0.4],"clip":true}],"master":{"volume_db":-1.5,"peak_db":[-9.0,-9.24],"clip":false}}"#,
         ),
     );
     assert!(
         out.stdout.ends_with(
-            "connections:\ndisk_overflows: 1\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB; out -12.0/-12.0 dB\n      send Delay: -6 dB, post\n      send Verb: -12.5 dB, pre\n  1* Bass: muted, not to master; input -; 0 dB, pan -0.5; peak -120.0 dB; out -120.0/-120.0 dB, clip\nbuses:\n  0 Verb: solo; -3 dB, pan 0; out -20.0/-21.5 dB\n  1 Delay: -; 0 dB, pan 0.25; out 0.0/-0.4 dB, clip\nmaster: -1.5 dB; out -9.0/-9.2 dB\n"
+            "connections:\ndisk_overflows: 1\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\nundo: trim, redo: -\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB; out -12.0/-12.0 dB\n      send Delay: -6 dB, post\n      send Verb: -12.5 dB, pre\n  1* Bass: muted, not to master; input -; 0 dB, pan -0.5; peak -120.0 dB; out -120.0/-120.0 dB, clip\nbuses:\n  0 Verb: solo; -3 dB, pan 0; out -20.0/-21.5 dB\n  1 Delay: -; 0 dB, pan 0.25; out 0.0/-0.4 dB, clip\nmaster: -1.5 dB; out -9.0/-9.2 dB\n"
         ),
         "{}",
         out.stdout
@@ -800,7 +800,7 @@ fn status_prints_the_open_project() {
 
 #[test]
 fn project_commands_send_their_requests_and_print_the_answer() {
-    let cases: [(&[&str], Request, &str, &str); 6] = [
+    let cases: [(&[&str], Request, &str, &str); 8] = [
         (
             &["project", "new", "My Song"],
             Request::ProjectNew {
@@ -844,6 +844,18 @@ fn project_commands_send_their_requests_and_print_the_answer() {
             Request::ProjectList,
             r#"{"ok":true,"projects":[{"name":"A Song","folder":"a-song","valid":true},{"name":"bad","folder":"bad","valid":false,"error":"line 1:8: invalid string"}]}"#,
             "A Song\nbad! (line 1:8: invalid string)\n",
+        ),
+        (
+            &["project", "undo"],
+            Request::ProjectUndo,
+            r#"{"ok":true,"label":"move 2 Items"}"#,
+            "undid move 2 Items\n",
+        ),
+        (
+            &["project", "redo"],
+            Request::ProjectRedo,
+            r#"{"ok":true,"label":"record Bass DI"}"#,
+            "redid record Bass DI\n",
         ),
     ];
     for (argv, request, answer, printed) in cases {
@@ -1014,6 +1026,12 @@ fn project_errors_print_one_line() {
         reply(r#"{"ok":false,"error":"cannot remove a track while recording"}"#),
     );
     assert_eq!(out.stderr, "error: cannot remove a track while recording\n");
+    assert_eq!(out.code, 1);
+    let out = cli(
+        &["project", "undo"],
+        reply(r#"{"ok":false,"error":"nothing to undo"}"#),
+    );
+    assert_eq!(out.stderr, "error: nothing to undo\n");
     assert_eq!(out.code, 1);
     let out = cli_with(
         &["tempo", "120", "3-4"],

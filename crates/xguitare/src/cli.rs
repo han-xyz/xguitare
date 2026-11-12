@@ -481,6 +481,8 @@ fn project_request(cmd: ProjectCmd) -> Request {
         ProjectCmd::Close => Request::ProjectClose,
         ProjectCmd::List => Request::ProjectList,
         ProjectCmd::Items => Request::Items,
+        ProjectCmd::Undo => Request::ProjectUndo,
+        ProjectCmd::Redo => Request::ProjectRedo,
     }
 }
 
@@ -920,6 +922,8 @@ fn render_project_status(lines: &mut String, payload: &Value) {
         text(&looped["end"])
     );
     let _ = writeln!(lines, "{}", click_text(&payload["click"]));
+    let (undo, redo) = (text(&payload["undo"]), text(&payload["redo"]));
+    let _ = writeln!(lines, "undo: {undo}, redo: {redo}");
     lines.push_str("tracks:\n");
     for (index, track) in items(&payload["tracks"]).enumerate() {
         let selected = if payload["selected"] == index {
