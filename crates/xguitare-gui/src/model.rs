@@ -141,6 +141,12 @@ pub enum Command {
         at: u64,
     },
     ItemDelete(Vec<u64>),
+    /// Moves the Item `id`'s start or end, or both, to those timeline frames.
+    ItemTrim {
+        id: u64,
+        start: Option<u64>,
+        end: Option<u64>,
+    },
     /// Sends nothing itself: the client thread fetches `project_list` again on its next tick.
     RefreshProjects,
     TrackAdd,
@@ -1444,6 +1450,7 @@ pub fn requests_until_quit(
             },
             Command::ItemSplit { ids, at } => Request::ItemSplit { ids, at },
             Command::ItemDelete(ids) => Request::ItemDelete { ids },
+            Command::ItemTrim { id, start, end } => Request::ItemTrim { id, start, end },
             Command::TrackAdd => Request::TrackAdd { name: None },
             Command::TrackSet { track, edit } => track_set_request(track, edit),
             Command::TrackSelect(index) => {

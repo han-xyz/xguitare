@@ -223,9 +223,9 @@ fn project_snapshot(transport: &str) -> Snapshot {
     snapshot.items = Some(json!({"sample_rate": 48000, "tracks": [
         {"id": 0, "name": "Guitar", "items": [{"id": 1, "position": 96_000, "bars_beats": "2.1",
          "offset": 0, "length": 288_000, "take": 1,
-         "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"]}]},
+         "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000}]},
         {"id": 1, "name": "Bass", "items": [{"id": 2, "position": 0, "bars_beats": "1.1", "offset": 0,
-         "length": 480_000, "take": 0, "takes": ["takes/bass-1.wav"]}]},
+         "length": 480_000, "take": 0, "takes": ["takes/bass-1.wav"], "take_frames": 480_000}]},
         {"id": 2, "name": "Keys", "items": []},
     ]}));
     snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
@@ -255,7 +255,8 @@ fn fixture_peaks(items: &Value) -> HashMap<String, Arc<[i8]>> {
         let file = item["takes"][item["take"].as_u64().unwrap() as usize]
             .as_str()
             .unwrap();
-        let frames = (item["offset"].as_u64().unwrap() + item["length"].as_u64().unwrap()) as usize;
+        let played = item["offset"].as_u64().unwrap() + item["length"].as_u64().unwrap();
+        let frames = item["take_frames"].as_u64().unwrap_or(played).max(played) as usize;
         let table: Vec<i8> = (0..frames.div_ceil(FRAMES_PER_PEAK))
             .flat_map(|bucket| {
                 let frame = bucket * FRAMES_PER_PEAK;
@@ -1792,6 +1793,52 @@ fn a_focused_item_lets_space_play_and_ignores_arrows_under_other_modifiers() {
     harness.run_steps(1);
     assert_eq!(sent_now(&sent), [Command::Transport(TransportAction::Play)]);
     assert!(item_selected(&harness, BASS_ITEM));
+}
+
+#[test]
+fn dragging_an_item_edge_trims_it_on_release() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let plate = item_rect(&harness, GUITAR_ITEM);
+    let from = pos2(plate.left() - 1.0, plate.center().y);
+    drag_and_release(
+        &mut harness,
+        from,
+        from + Vec2::new(2.0 * BEAT_PX + 3.0, 0.0),
+    );
+    assert_eq!(
+        sent_now(&sent),
+        [Command::ItemTrim {
+            id: 1,
+            start: Some(144_000),
+            end: None,
+        }]
+    );
+}
+
+#[test]
+fn shift_arrows_trim_a_focused_item() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness.get_by_label(BASS_ITEM).focus();
+    harness.run_steps(2);
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::ArrowLeft);
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::ArrowRight);
+    harness.run_steps(1);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::ItemTrim {
+                id: 2,
+                start: None,
+                end: Some(456_000),
+            },
+            Command::ItemTrim {
+                id: 2,
+                start: Some(24_000),
+                end: None,
+            },
+        ]
+    );
 }
 
 #[test]

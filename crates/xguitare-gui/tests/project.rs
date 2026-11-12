@@ -7,7 +7,7 @@ use xguitare_gui::model::{
     requests_until_quit, response_message, restore,
 };
 use xguitare_gui::project_model::{
-    AutosaveOffer, GridLine, ItemBlock, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
+    AutosaveOffer, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
     ItemSelection, KeyFocus, LoopEdge, MainView, MoveDrag, MovePointer, ProjectRow, Tempo,
     TimelineView, TrackRow, TransportState, TransportView, ViewSwitch, VisibleTake, autosave_offer,
     bars_beats_text, dragged_loop, esc_clears_selection, grid_lines, hit_test, item_blocks,
@@ -16,6 +16,7 @@ use xguitare_gui::project_model::{
     recording_from, recording_span, restored_view, snap_to_beat, still_closing, time_text,
     track_rows, transport_view, undo_text, waveform_columns,
 };
+use xguitare_gui::project_model::{TrimDrag, trim_preview, trim_step_command};
 
 const RATE: f64 = 48_000.0;
 const FOUR_FOUR: Tempo = Tempo {
@@ -1441,4 +1442,143 @@ fn a_focused_item_takes_its_keys_only_with_their_own_modifiers() {
     ] {
         assert_eq!(press(key, modifiers), None, "{key:?} {modifiers:?}");
     }
+}
+
+/// Plays frames 12 000 to 60 000 of a 120 000-frame Take from 48 000: the Take reaches from 36 000 to 156 000 on the timeline.
+fn trimmed_item() -> ItemBlock {
+    ItemBlock {
+        offset: 12_000,
+        take_frames: 120_000,
+        ..block(5, GUITAR, 48_000, 48_000)
+    }
+}
+
+fn trim(edge: ItemEdge, to: f64, snap: bool) -> (u64, u64, Option<u64>) {
+    let item = trimmed_item();
+    let grid = grid_lines(EDIT_VIEW, 1000.0, RATE, FOUR_FOUR);
+    let grabbed = match edge {
+        ItemEdge::Start => 48_000.0,
+        ItemEdge::End => 96_000.0,
+    };
+    let drag = TrimDrag::new(5, edge, grabbed);
+    let preview = trim_preview(&drag, &[item], &grid, to, snap).unwrap();
+    (preview.start, preview.end, preview.snap_line)
+}
+
+#[test]
+fn a_trim_snaps_its_edge_to_the_grid_unless_free() {
+    assert_eq!(
+        trim(ItemEdge::Start, 78_000.0, true),
+        (72_000, 96_000, Some(72_000))
+    );
+    assert_eq!(
+        trim(ItemEdge::Start, 78_000.0, false),
+        (78_000, 96_000, None)
+    );
+    assert_eq!(
+        trim(ItemEdge::End, 115_000.0, true),
+        (48_000, 120_000, Some(120_000))
+    );
+}
+
+#[test]
+fn a_trim_stays_inside_the_take_and_keeps_one_frame() {
+    assert_eq!(
+        trim(ItemEdge::Start, -90_000.0, true),
+        (36_000, 96_000, None)
+    );
+    assert_eq!(
+        trim(ItemEdge::Start, 200_000.0, false),
+        (95_999, 96_000, None)
+    );
+    assert_eq!(
+        trim(ItemEdge::End, 900_000.0, true),
+        (48_000, 156_000, None)
+    );
+    assert_eq!(trim(ItemEdge::End, 0.0, false), (48_000, 48_001, None));
+}
+
+#[test]
+fn a_trim_sends_the_moved_edge_and_previews_the_trimmed_item() {
+    let item = trimmed_item();
+    let grid = grid_lines(EDIT_VIEW, 1000.0, RATE, FOUR_FOUR);
+    let start = TrimDrag::new(5, ItemEdge::Start, 48_000.0);
+    let preview = trim_preview(&start, std::slice::from_ref(&item), &grid, 78_000.0, true).unwrap();
+    assert_eq!(
+        preview.command(&item),
+        Some(Command::ItemTrim {
+            id: 5,
+            start: Some(72_000),
+            end: None,
+        })
+    );
+    assert_eq!(
+        preview.apply(&item),
+        ItemBlock {
+            position: 72_000,
+            offset: 36_000,
+            length: 24_000,
+            ..item.clone()
+        }
+    );
+    let end = TrimDrag::new(5, ItemEdge::End, 96_000.0);
+    let still = trim_preview(&end, std::slice::from_ref(&item), &grid, 96_000.0, false).unwrap();
+    assert_eq!(still.command(&item), None);
+    let grown = trim_preview(&end, std::slice::from_ref(&item), &grid, 100_000.0, false).unwrap();
+    assert_eq!(
+        grown.command(&item),
+        Some(Command::ItemTrim {
+            id: 5,
+            start: None,
+            end: Some(100_000),
+        })
+    );
+    assert_eq!(
+        trim_preview(
+            &TrimDrag::new(9, ItemEdge::End, 0.0),
+            &[item],
+            &grid,
+            0.0,
+            true
+        ),
+        None
+    );
+}
+
+#[test]
+fn trim_keys_step_an_edge_inside_the_take() {
+    let item = trimmed_item();
+    assert_eq!(
+        trim_step_command(&item, ItemEdge::End, 24_000.0),
+        Some(Command::ItemTrim {
+            id: 5,
+            start: None,
+            end: Some(120_000),
+        })
+    );
+    assert_eq!(
+        trim_step_command(&item, ItemEdge::Start, -24_000.0),
+        Some(Command::ItemTrim {
+            id: 5,
+            start: Some(36_000),
+            end: None,
+        })
+    );
+    let at_take_end = ItemBlock {
+        length: 108_000,
+        ..trimmed_item()
+    };
+    assert_eq!(
+        trim_step_command(&at_take_end, ItemEdge::End, 24_000.0),
+        None
+    );
+    assert_eq!(
+        press(ItemKey::Left, (false, true, false)),
+        Some(ItemNodeAction::Trim(ItemEdge::End, -1))
+    );
+    assert_eq!(
+        press(ItemKey::Right, (true, true, false)),
+        Some(ItemNodeAction::Trim(ItemEdge::Start, 1))
+    );
+    assert_eq!(press(ItemKey::Right, (false, true, true)), None);
 }

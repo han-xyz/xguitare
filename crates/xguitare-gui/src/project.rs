@@ -17,12 +17,13 @@ use crate::model::{
     Message, Snapshot, TrackEdit, knob_origin, port_choices,
 };
 use crate::project_model::{
-    EDGE_GRAB_PX, GridLine, ItemBlock, ItemKey, ItemKeyPress, ItemNodeAction, ItemSelection,
-    LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView, TrackRow,
-    TransportView, bars_beats_text, dragged_loop, grid_lines, grid_step, hit_test, item_blocks,
-    item_name, item_node_action, items_in_box, move_preview, nudge_command, parse_meter,
-    project_key_to_command, project_tempo, recording_span, sample_rate, snap_to_beat, time_text,
-    track_colour, track_rows, track_step_command, transport_view, waveform_columns,
+    EDGE_GRAB_PX, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
+    ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView,
+    TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, dragged_loop, grid_lines,
+    grid_step, hit_test, item_blocks, item_name, item_node_action, items_in_box, move_preview,
+    nudge_command, parse_meter, project_key_to_command, project_tempo, recording_span, sample_rate,
+    snap_to_beat, time_text, track_colour, track_rows, track_step_command, transport_view,
+    trim_preview, trim_step_command, waveform_columns,
 };
 use crate::rack::muted_text;
 use crate::theme::{
@@ -104,12 +105,16 @@ pub struct LoopDrag {
     now: LoopRegion,
 }
 
-/// A drag on the lanes: the selected Items being moved, or a selection box from one corner (a timeline frame and a screen y) to the other.
+/// A drag on the lanes: the selected Items being moved, an Item's edge being trimmed, or a selection box from one corner (a timeline frame and a screen y) to the other.
 #[derive(Debug, Clone)]
 enum LaneDrag {
     Move {
         drag: MoveDrag,
         preview: MovePreview,
+    },
+    Trim {
+        drag: TrimDrag,
+        preview: Option<TrimPreview>,
     },
     Box {
         from: (f64, f32),
@@ -505,11 +510,12 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         ScrollArea::vertical().id_salt("tracks").show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut lanes = Vec::new();
+            let shown = trim_shown(&items, view.lane_drag.as_ref());
             for row in &rows {
                 commands.extend(track(
                     ui,
                     row,
-                    &items,
+                    &shown,
                     &snapshot.peaks,
                     &ports,
                     &scene,
@@ -524,6 +530,27 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
     widgets::rack_ears(ui.painter(), face, None);
     ui.allocate_rect(face, Sense::hover());
     commands
+}
+
+/// The Items as drawn: during a trim, the trimmed Item at its preview edges.
+fn trim_shown(items: &[ItemBlock], drag: Option<&LaneDrag>) -> Vec<ItemBlock> {
+    let Some(LaneDrag::Trim {
+        preview: Some(preview),
+        ..
+    }) = drag
+    else {
+        return items.to_vec();
+    };
+    items
+        .iter()
+        .map(|item| {
+            if item.id == preview.id {
+                preview.apply(item)
+            } else {
+                item.clone()
+            }
+        })
+        .collect()
 }
 
 /// Ctrl+wheel zooms about the pointer, a sideways wheel (or Shift+wheel) scrolls, while the pointer is over the timeline.
@@ -989,6 +1016,9 @@ fn item_nodes(
                 Some(ItemNodeAction::TrackStep(rows)) => {
                     command = track_step_command(items, &view.selection, &track_ids, rows);
                 }
+                Some(ItemNodeAction::Trim(edge, direction)) => {
+                    command = trim_step_command(item, edge, direction as f64 * step);
+                }
                 None => {}
             }
         }
@@ -1038,7 +1068,7 @@ fn pressed(ui: &Ui) -> Vec<(Key, Modifiers)> {
     })
 }
 
-/// A click on an Item selects it (Ctrl: in or out), on the empty lane clears the selection (Ctrl: keeps it); both select the lane's Track. A drag from an Item moves the selected Items, sent as `item_move` on release; a drag from the empty lane draws a selection box (Ctrl: adds to the selection).
+/// A click on an Item selects it (Ctrl: in or out), on the empty lane clears the selection (Ctrl: keeps it); both select the lane's Track. A drag from an Item moves the selected Items, sent as `item_move` on release; from within [`EDGE_GRAB_PX`] of its edge it trims that edge, sent as `item_trim`, with the resize cursor over the edge; a drag from the empty lane draws a selection box (Ctrl: adds to the selection).
 fn lane_pointer(
     ui: &Ui,
     lanes: &[Lane],
@@ -1057,6 +1087,17 @@ fn lane_pointer(
     let toggle = modifiers.command;
     for lane in lanes {
         let response = &lane.response;
+        if let Some(at) = response.hover_pos() {
+            edge_cursor(
+                ui,
+                hit_test(
+                    items,
+                    lane.track_id,
+                    scene.timeline,
+                    at.x - lane.rect.left(),
+                ),
+            );
+        }
         if response.clicked()
             && let Some(at) = response.interact_pointer_pos()
         {
@@ -1079,21 +1120,8 @@ fn lane_pointer(
         {
             let x = origin.x - lane.rect.left();
             let frame = scene.timeline.frame_at(x);
-            view.lane_drag = Some(
-                match hit_test(items, lane.track_id, scene.timeline, x).item() {
-                    Some(id) => {
-                        view.selection.grab(id, toggle);
-                        LaneDrag::Move {
-                            drag: MoveDrag::new(id, &view.selection, frame, lane.row),
-                            preview: MovePreview::default(),
-                        }
-                    }
-                    None => LaneDrag::Box {
-                        from: (frame, origin.y),
-                        to: (frame, origin.y),
-                    },
-                },
-            );
+            let hit = hit_test(items, lane.track_id, scene.timeline, x);
+            view.lane_drag = Some(drag_from(hit, (frame, origin.y), lane.row, view, toggle));
         }
     }
     let Some(lane) = lanes
@@ -1117,14 +1145,37 @@ fn lane_pointer(
                 };
                 *preview = move_preview(drag, items, &track_ids, &scene.grid, pointer);
             }
+            LaneDrag::Trim { drag, preview } => {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+                *preview = trim_preview(drag, items, &scene.grid, frame, snap);
+            }
             LaneDrag::Box { to, .. } => *to = (frame, at.y),
         }
     }
     if !lane.response.drag_stopped() {
         return commands;
     }
-    match view.lane_drag.take() {
-        Some(LaneDrag::Move { drag, preview }) => commands.extend(preview.command(&drag)),
+    let drag = view.lane_drag.take();
+    commands.extend(released(drag, lanes, items, view, toggle));
+    commands
+}
+
+/// What a lane drag does on release: the `item_move` or `item_trim` to send, or the selection box taken into the selection (Ctrl: added).
+fn released(
+    drag: Option<LaneDrag>,
+    lanes: &[Lane],
+    items: &[ItemBlock],
+    view: &mut ProjectView,
+    toggle: bool,
+) -> Option<Command> {
+    match drag {
+        Some(LaneDrag::Move { drag, preview }) => preview.command(&drag),
+        Some(LaneDrag::Trim { drag, preview }) => {
+            let item = items.iter().find(|item| item.id == drag.id);
+            preview
+                .zip(item)
+                .and_then(|(preview, item)| preview.command(item))
+        }
         Some(LaneDrag::Box { from, to }) => {
             let (top, bottom) = (from.1.min(to.1), from.1.max(to.1));
             let tracks: Vec<u64> = lanes
@@ -1137,10 +1188,46 @@ fn lane_pointer(
             let frames = from.0.min(to.0)..from.0.max(to.0);
             view.selection
                 .select_box(&items_in_box(items, &tracks, frames), toggle);
+            None
         }
-        None => {}
+        None => None,
     }
-    commands
+}
+
+/// The resize cursor over an Item's edge.
+fn edge_cursor(ui: &Ui, hit: ItemHit) {
+    if matches!(hit, ItemHit::StartEdge(_) | ItemHit::EndEdge(_)) {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+    }
+}
+
+/// The drag a press on `hit` at a timeline frame and screen y starts on the lane of `row`; an Item pressed is grabbed into the selection.
+fn drag_from(
+    hit: ItemHit,
+    (frame, y): (f64, f32),
+    row: usize,
+    view: &mut ProjectView,
+    toggle: bool,
+) -> LaneDrag {
+    if let Some(id) = hit.item() {
+        view.selection.grab(id, toggle);
+    }
+    let trim = |id, edge| LaneDrag::Trim {
+        drag: TrimDrag::new(id, edge, frame),
+        preview: None,
+    };
+    match hit {
+        ItemHit::StartEdge(id) => trim(id, ItemEdge::Start),
+        ItemHit::EndEdge(id) => trim(id, ItemEdge::End),
+        ItemHit::Body(id) => LaneDrag::Move {
+            drag: MoveDrag::new(id, &view.selection, frame, row),
+            preview: MovePreview::default(),
+        },
+        ItemHit::Lane => LaneDrag::Box {
+            from: (frame, y),
+            to: (frame, y),
+        },
+    }
 }
 
 /// The row of the lane under the screen `y`: the first above it, the last below it.
@@ -1152,7 +1239,7 @@ fn row_at(lanes: &[Lane], y: f32) -> usize {
         .map_or(0, |lane| lane.row)
 }
 
-/// Over the lanes during a drag: a ghost plate of each moved Item at its preview place with the snap line down every lane, or the selection box on a `well` halo.
+/// Over the lanes during a drag: a ghost plate of each moved Item at its preview place with the snap line down every lane, the snap line of a trimmed edge, or the selection box on a `well` halo.
 fn paint_lane_drag(
     ui: &Ui,
     lanes: &[Lane],
@@ -1185,6 +1272,19 @@ fn paint_lane_drag(
                 );
             }
             if let Some(line) = preview.snap_line {
+                for lane in lanes {
+                    paint_haloed_line(
+                        &painter,
+                        scene.x(lane.rect, line),
+                        lane.rect,
+                        1.0,
+                        colours.text,
+                    );
+                }
+            }
+        }
+        LaneDrag::Trim { preview, .. } => {
+            if let Some(line) = preview.and_then(|preview| preview.snap_line) {
                 for lane in lanes {
                     paint_haloed_line(
                         &painter,

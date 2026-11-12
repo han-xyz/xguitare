@@ -638,9 +638,11 @@ pub enum ItemNodeAction {
     Nudge(isize),
     /// The selected Items move to the next Track.
     TrackStep(isize),
+    /// This Item's edge moves by one grid step.
+    Trim(ItemEdge, isize),
 }
 
-/// Enter selects, Ctrl+Enter toggles, ← and → nudge, Alt+↑ and Alt+↓ change the Track; under any other modifiers these keys do nothing.
+/// Enter selects, Ctrl+Enter toggles, ← and → nudge, Shift+← and Shift+→ trim the end, Ctrl+Shift+← and Ctrl+Shift+→ the start, Alt+↑ and Alt+↓ change the Track; under any other modifiers these keys do nothing.
 pub fn item_node_action(press: ItemKeyPress) -> Option<ItemNodeAction> {
     let modifiers = (press.ctrl, press.shift, press.alt);
     match (press.key, modifiers) {
@@ -648,6 +650,10 @@ pub fn item_node_action(press: ItemKeyPress) -> Option<ItemNodeAction> {
         (ItemKey::Enter, (true, false, false)) => Some(ItemNodeAction::Toggle),
         (ItemKey::Left, (false, false, false)) => Some(ItemNodeAction::Nudge(-1)),
         (ItemKey::Right, (false, false, false)) => Some(ItemNodeAction::Nudge(1)),
+        (ItemKey::Left, (false, true, false)) => Some(ItemNodeAction::Trim(ItemEdge::End, -1)),
+        (ItemKey::Right, (false, true, false)) => Some(ItemNodeAction::Trim(ItemEdge::End, 1)),
+        (ItemKey::Left, (true, true, false)) => Some(ItemNodeAction::Trim(ItemEdge::Start, -1)),
+        (ItemKey::Right, (true, true, false)) => Some(ItemNodeAction::Trim(ItemEdge::Start, 1)),
         (ItemKey::Up, (false, false, true)) => Some(ItemNodeAction::TrackStep(-1)),
         (ItemKey::Down, (false, false, true)) => Some(ItemNodeAction::TrackStep(1)),
         _ => None,
@@ -1072,6 +1078,134 @@ pub fn move_preview(
         rows,
         snap_line,
     }
+}
+
+/// An Item's start or end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemEdge {
+    Start,
+    End,
+}
+
+/// The edge of `item` moved to `frame`, kept on the Item's active Take and at least one frame from the other edge.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "frames far below 2^52; negative frames clamp to the Take's start"
+)]
+fn trimmed_edge(item: &ItemBlock, edge: ItemEdge, frame: f64) -> u64 {
+    let take_start = item.position.saturating_sub(item.offset);
+    let take_end = take_start.saturating_add(item.take_frames);
+    let frame = frame.max(0.0).round() as u64;
+    match edge {
+        ItemEdge::Start => frame.max(take_start).min(item.end() - 1),
+        ItemEdge::End => frame.min(take_end).max(item.position + 1),
+    }
+}
+
+/// A drag of an Item's edge: the Item, the edge and the timeline frame the pointer was pressed at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrimDrag {
+    pub id: u64,
+    pub edge: ItemEdge,
+    grab_frame: f64,
+}
+
+impl TrimDrag {
+    pub fn new(id: u64, edge: ItemEdge, grab_frame: f64) -> TrimDrag {
+        TrimDrag {
+            id,
+            edge,
+            grab_frame,
+        }
+    }
+}
+
+/// The edges a [`TrimDrag`] would give its Item, and the grid line the moved edge snapped to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrimPreview {
+    pub id: u64,
+    pub start: u64,
+    pub end: u64,
+    pub snap_line: Option<u64>,
+}
+
+impl TrimPreview {
+    /// The `item_trim` to send on release, naming only the edges that moved; `None` when none did.
+    pub fn command(&self, item: &ItemBlock) -> Option<Command> {
+        let start = (self.start != item.position).then_some(self.start);
+        let end = (self.end != item.end()).then_some(self.end);
+        (start.is_some() || end.is_some()).then_some(Command::ItemTrim {
+            id: self.id,
+            start,
+            end,
+        })
+    }
+
+    /// `item` as it would be after the trim: from `start` to `end`, playing its Take from where `start` falls on it.
+    pub fn apply(&self, item: &ItemBlock) -> ItemBlock {
+        ItemBlock {
+            position: self.start,
+            offset: (item.offset + self.start).saturating_sub(item.position),
+            length: self.end - self.start,
+            ..item.clone()
+        }
+    }
+}
+
+/// Where `drag` puts its Item's edge with the pointer at the timeline `frame`: moved as far as the pointer, onto the nearest of the `grid` lines when `snap`, then kept on the Item's Take and at least one frame long; `None` when the Item is not in `items`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "grid lines lie on whole non-negative frames far below 2^52"
+)]
+pub fn trim_preview(
+    drag: &TrimDrag,
+    items: &[ItemBlock],
+    grid: &[GridLine],
+    frame: f64,
+    snap: bool,
+) -> Option<TrimPreview> {
+    let item = items.iter().find(|item| item.id == drag.id)?;
+    let from = match drag.edge {
+        ItemEdge::Start => item.position,
+        ItemEdge::End => item.end(),
+    };
+    let wanted = from as f64 + frame - drag.grab_frame;
+    let line = grid
+        .iter()
+        .map(|line| line.frame.round())
+        .filter(|_| snap)
+        .min_by(|a, b| (a - wanted).abs().total_cmp(&(b - wanted).abs()));
+    let moved = trimmed_edge(item, drag.edge, line.unwrap_or(wanted));
+    let snap_line = line.map(|line| line as u64).filter(|line| *line == moved);
+    let (start, end) = match drag.edge {
+        ItemEdge::Start => (moved, item.end()),
+        ItemEdge::End => (item.position, moved),
+    };
+    Some(TrimPreview {
+        id: item.id,
+        start,
+        end,
+        snap_line,
+    })
+}
+
+/// The `item_trim` that moves `item`'s `edge` by `step` frames, kept as [`trim_preview`] keeps it; `None` when the edge stays.
+#[allow(clippy::cast_precision_loss, reason = "frames far below 2^52")]
+pub fn trim_step_command(item: &ItemBlock, edge: ItemEdge, step: f64) -> Option<Command> {
+    let from = match edge {
+        ItemEdge::Start => item.position,
+        ItemEdge::End => item.end(),
+    };
+    let moved = trimmed_edge(item, edge, from as f64 + step);
+    (moved != from).then(|| Command::ItemTrim {
+        id: item.id,
+        start: (edge == ItemEdge::Start).then_some(moved),
+        end: (edge == ItemEdge::End).then_some(moved),
+    })
 }
 
 /// An empty region turns on as the first [`DEFAULT_LOOP_BARS`] bars.
