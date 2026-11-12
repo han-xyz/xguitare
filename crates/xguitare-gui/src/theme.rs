@@ -224,7 +224,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("rack position on ear edge", c.on_accent, c.ear_edge),
         pair("rack position on ear centre", c.on_accent, c.ear_centre),
         pair(
-            "lit on well; also the edit border, the cents needle, the transport's seconds, the loop edges on a lane, the Render progress fill, the selected Item's outline and the selection box on its halo",
+            "lit on well; also the edit border, the cents needle, the transport's seconds, the loop edges on a lane, the Render progress fill, the selected Item's ring and corners and the selection box, each on its own halo, so that they hold beside any plate",
             c.lit,
             c.well,
         ),

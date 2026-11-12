@@ -1223,6 +1223,8 @@ pub enum KeyEvent {
     CtrlShiftZ,
     Left,
     Right,
+    AltUp,
+    AltDown,
 }
 
 /// Digits and Ctrl+S act unless a text field has focus; a focused knob consumes only its own arrow, page and Home/End keys.
@@ -1312,7 +1314,9 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
         | KeyEvent::CtrlZ
         | KeyEvent::CtrlShiftZ
         | KeyEvent::Left
-        | KeyEvent::Right => None,
+        | KeyEvent::Right
+        | KeyEvent::AltUp
+        | KeyEvent::AltDown => None,
     }
 }
 

@@ -626,6 +626,9 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         if input.consume_key(Modifiers::COMMAND, Key::M) {
             keys.push(KeyEvent::CtrlM);
         }
+        if text_edit_focused {
+            return keys;
+        }
         if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) {
             keys.push(KeyEvent::CtrlShiftZ);
         }
@@ -639,7 +642,7 @@ fn pressed_keys(ui: &Ui) -> Vec<KeyEvent> {
         .collect()
 }
 
-/// Digits with their modifiers; Space, R, Home, End, M, T, S, Delete or Backspace, ← and → only without one.
+/// Digits with their modifiers; Alt+↑ and Alt+↓; Space, R, Home, End, M, T, S, Delete or Backspace, ← and → only without a modifier.
 fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
     if let Some((digit, _)) = (1..)
         .zip(DIGIT_KEYS)
@@ -652,6 +655,13 @@ fn key_event(key: Key, modifiers: Modifiers) -> Option<KeyEvent> {
                 alt: modifiers.alt,
             },
         ));
+    }
+    if modifiers == Modifiers::ALT {
+        return match key {
+            Key::ArrowUp => Some(KeyEvent::AltUp),
+            Key::ArrowDown => Some(KeyEvent::AltDown),
+            _ => None,
+        };
     }
     if !modifiers.is_none() {
         return None;

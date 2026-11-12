@@ -1,7 +1,7 @@
 use egui::{
-    Align2, Color32, ComboBox, CursorIcon, DragValue, EventFilter, Frame, Id, Key, Margin, Painter,
-    Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit, TextStyle, TextWrapMode,
-    Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
+    Align2, Color32, ComboBox, CursorIcon, DragValue, EventFilter, Frame, Id, Key, Margin,
+    Modifiers, Painter, Rect, Response, RichText, Role, ScrollArea, Sense, Stroke, TextEdit,
+    TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::TransportAction;
@@ -21,10 +21,14 @@ use crate::project_model::{
     MovePreview, Tempo, TimelineView, TrackRow, TransportView, bars_beats_text, dragged_loop,
     grid_lines, grid_step, hit_test, item_blocks, item_name, items_in_box, move_preview,
     nudge_command, parse_meter, project_key_to_command, project_tempo, recording_span, sample_rate,
-    snap_to_beat, time_text, track_colour, track_rows, transport_view, waveform_columns,
+    snap_to_beat, time_text, track_colour, track_rows, track_step_command, transport_view,
+    waveform_columns,
 };
 use crate::rack::muted_text;
-use crate::theme::{self, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette, translucent};
+use crate::theme::{
+    self, FOCUS_RING_GAP, FOCUS_RING_WIDTH, RADIUS_CONTROL, Rgb, UNIT_EDGE_WIDTH, colour, palette,
+    translucent,
+};
 use crate::widgets::{
     self, KnobSize, StyledButton, outlined_button, primary_button, switched_button,
 };
@@ -70,6 +74,9 @@ const WAVE_TOP: f32 = UNIT_EDGE_WIDTH + theme::SPACE_XS + theme::SPACE_L;
 const LOOP_ALPHA_ON: u8 = 33;
 const LOOP_ALPHA_OFF: u8 = 16;
 const SELECTED_OUTLINE: f32 = 2.0;
+/// A selected Item's corners: this much thicker than its ring, and this long along each side.
+const SELECTED_CORNER_WIDTH: f32 = 2.0 * SELECTED_OUTLINE;
+const SELECTED_CORNER_LENGTH: f32 = theme::SPACE_S;
 const SNAP_BUTTON_WIDTH: f32 = 56.0;
 /// The selection box's outline, on a [`HALO_WIDTH`] halo each side.
 const BOX_EDGE_WIDTH: f32 = 1.0;
@@ -827,9 +834,8 @@ fn track(
     let controls = list
         .shrink2(vec2(SWATCH_WIDTH + 2.0, 6.0))
         .translate(vec2(SWATCH_WIDTH, 0.0));
-    ui.scope_builder(UiBuilder::new().max_rect(controls), |ui| {
-        commands.extend(track_controls(ui, row, ports));
-    });
+    let mut controls_ui = ui.new_child(UiBuilder::new().max_rect(controls));
+    commands.extend(track_controls(&mut controls_ui, row, ports));
     commands
 }
 
@@ -858,14 +864,6 @@ fn paint_lane(
             let inner = span.shrink(TAKE_EDGE_WIDTH);
             paint_waveform(&painter.with_clip_rect(inner), inner, left, &columns, track);
         }
-        if scene.selected.contains(item.id) {
-            painter.rect_stroke(
-                span,
-                RADIUS_CONTROL,
-                Stroke::new(SELECTED_OUTLINE, colour(colours.lit)),
-                egui::StrokeKind::Inside,
-            );
-        }
     }
     if row.armed
         && let Some((from, to)) = scene.recording
@@ -876,9 +874,69 @@ fn paint_lane(
     }
     scene.paint_loop_edges(painter, lane);
     scene.paint_lane_playhead(painter, lane);
+    for item in items
+        .iter()
+        .filter(|item| item.track_id == row.id && scene.selected.contains(item.id))
+    {
+        paint_selection(painter, scene.plate(lane, item.position, item.length));
+    }
 }
 
-/// One focusable node per Item, after every Track header and in time order, named by [`item_name`] with its selected state; focus selects the Item, and ← and → on it move the selected Items by one grid step.
+/// A selected Item's mark around its plate, over the loop edges and the playhead so that it stays one closed shape: a [`SELECTED_OUTLINE`] `lit` ring a [`HALO_WIDTH`] `well` gap outside the plate with thicker corners, all on a `well` halo, so that it holds against the lane and any plate next to it and reads by its shape as well as its colour.
+fn paint_selection(painter: &Painter, plate: Rect) {
+    let colours = palette();
+    let ring = plate.expand(HALO_WIDTH);
+    let corner_band = ring.expand(SELECTED_CORNER_WIDTH);
+    let corners = [
+        (ring.left_top(), corner_band.left_top()),
+        (ring.right_top(), corner_band.right_top()),
+        (ring.left_bottom(), corner_band.left_bottom()),
+        (ring.right_bottom(), corner_band.right_bottom()),
+    ];
+    let corner_marks = corners.iter().flat_map(|&(inner, outer)| {
+        let along_x = if inner.x < plate.center().x {
+            1.0
+        } else {
+            -1.0
+        };
+        let along_y = if inner.y < plate.center().y {
+            1.0
+        } else {
+            -1.0
+        };
+        [
+            Rect::from_two_pos(
+                outer,
+                pos2(inner.x + along_x * SELECTED_CORNER_LENGTH, inner.y),
+            ),
+            Rect::from_two_pos(
+                outer,
+                pos2(inner.x, inner.y + along_y * SELECTED_CORNER_LENGTH),
+            ),
+        ]
+    });
+    let corner_marks: Vec<Rect> = corner_marks.collect();
+    let halo = Stroke::new(
+        HALO_WIDTH + SELECTED_OUTLINE + HALO_WIDTH,
+        colour(colours.well),
+    );
+    painter.rect_stroke(plate, RADIUS_CONTROL, halo, egui::StrokeKind::Outside);
+    for mark in &corner_marks {
+        painter.rect_filled(mark.expand(HALO_WIDTH), 0, colour(colours.well));
+    }
+    let lit = colour(colours.lit);
+    painter.rect_stroke(
+        ring,
+        RADIUS_CONTROL,
+        Stroke::new(SELECTED_OUTLINE, lit),
+        egui::StrokeKind::Outside,
+    );
+    for mark in &corner_marks {
+        painter.rect_filled(*mark, 0, lit);
+    }
+}
+
+/// One focusable node per Item, after every Track header and in time order, named by [`item_name`] with its selected state. Focus leaves the selection alone and rings the plate inside its edge, apart from the selection mark outside it. On a focused Item, Enter selects only it, Ctrl+Enter takes it in or out, ← and → move the selected Items by one grid step, Alt+↑ and Alt+↓ to the Track above or below.
 fn item_nodes(
     ui: &Ui,
     items: &[ItemBlock],
@@ -895,43 +953,67 @@ fn item_nodes(
         })
         .collect();
     placed.sort_by_key(|(item, lane)| (item.position, lane.row));
-    let mut nudge = None;
+    let track_ids: Vec<u64> = lanes.iter().map(|lane| lane.track_id).collect();
+    let mut command = None;
     for (item, lane) in placed {
         let plate = scene.plate(lane.rect, item.position, item.length);
         if !plate.is_positive() {
             continue;
         }
+        let inside = plate.shrink(FOCUS_RING_GAP + FOCUS_RING_WIDTH);
+        let node = if inside.is_positive() { inside } else { plate };
         let id = Id::unique(("item", item.id));
-        let response = ui.interact(plate, id, Sense::FOCUSABLE);
+        let response = ui.interact(node, id, Sense::FOCUSABLE);
         let name = item_name(item, &lane.name, rate, tempo);
         response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, &name));
         let selected = view.selection.contains(item.id);
         ui.ctx()
             .accesskit_node_builder(id, |node| node.set_selected(selected));
-        if response.gained_focus() {
-            view.selection.pick(item.id, false);
-        }
         if !response.has_focus() {
             continue;
         }
         let arrows_stay = EventFilter {
             horizontal_arrows: true,
+            vertical_arrows: true,
             ..EventFilter::default()
         };
         ui.memory_mut(|memory| memory.set_focus_lock_filter(id, arrows_stay));
         let step = grid_step(scene.timeline, rate, tempo);
-        let (left, right) = ui.input(|input| {
-            (
-                input.key_pressed(Key::ArrowLeft),
-                input.key_pressed(Key::ArrowRight),
-            )
-        });
-        if left || right {
-            let delta = if left { -step } else { step };
-            nudge = nudge_command(items, &view.selection, delta);
+        for (key, modifiers) in pressed(ui) {
+            match key {
+                Key::Enter => view.selection.pick(item.id, modifiers.command),
+                Key::ArrowLeft => command = nudge_command(items, &view.selection, -step),
+                Key::ArrowRight => command = nudge_command(items, &view.selection, step),
+                Key::ArrowUp if modifiers.alt => {
+                    command = track_step_command(items, &view.selection, &track_ids, -1);
+                }
+                Key::ArrowDown if modifiers.alt => {
+                    command = track_step_command(items, &view.selection, &track_ids, 1);
+                }
+                _ => {}
+            }
         }
     }
-    nudge
+    command
+}
+
+/// This frame's key presses with the modifiers each was pressed with.
+fn pressed(ui: &Ui) -> Vec<(Key, Modifiers)> {
+    ui.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => Some((*key, *modifiers)),
+                _ => None,
+            })
+            .collect()
+    })
 }
 
 /// A click on an Item selects it (Ctrl: in or out), on the empty lane clears the selection (Ctrl: keeps it); both select the lane's Track. A drag from an Item moves the selected Items, sent as `item_move` on release; a drag from the empty lane draws a selection box (Ctrl: adds to the selection).

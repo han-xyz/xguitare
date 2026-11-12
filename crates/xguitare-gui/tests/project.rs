@@ -1203,8 +1203,25 @@ fn item_keys_split_delete_undo_redo_and_nudge() {
         Some(Command::ItemDelete(vec![1, 3]))
     );
     assert_eq!(key(KeyEvent::Delete, &[]), None);
-    assert_eq!(key(KeyEvent::CtrlZ, &[]), Some(Command::ProjectUndo));
-    assert_eq!(key(KeyEvent::CtrlShiftZ, &[]), Some(Command::ProjectRedo));
+    assert_eq!(
+        key(KeyEvent::AltDown, &[3]),
+        Some(Command::ItemMove {
+            ids: vec![3],
+            delta: 0,
+            track: Some(1)
+        })
+    );
+    assert_eq!(key(KeyEvent::AltUp, &[3]), None, "no Track above Guitar");
+    assert_eq!(key(KeyEvent::AltDown, &[1, 3]), None, "no Track below Bass");
+    assert_eq!(
+        key(KeyEvent::AltUp, &[1]),
+        Some(Command::ItemMove {
+            ids: vec![1],
+            delta: 0,
+            track: Some(0)
+        })
+    );
+    assert_eq!(key(KeyEvent::AltDown, &[]), None);
     let nudge = |delta| {
         Some(Command::ItemMove {
             ids: vec![3],
@@ -1234,9 +1251,25 @@ fn item_keys_split_delete_undo_redo_and_nudge() {
     let mut closed = project_status("stopped");
     closed["project"] = json!(null);
     assert_eq!(
-        item_key_to_command(KeyEvent::CtrlZ, &closed, &items, &selection(&[]), None),
+        item_key_to_command(KeyEvent::S, &closed, &items, &selection(&[]), None),
         None
     );
+}
+
+#[test]
+fn undo_and_redo_keys_are_project_keys() {
+    let stopped = project_status("stopped");
+    assert_eq!(
+        project_key_to_command(KeyEvent::CtrlZ, &stopped, &[]),
+        Some(Command::ProjectUndo)
+    );
+    assert_eq!(
+        project_key_to_command(KeyEvent::CtrlShiftZ, &stopped, &[]),
+        Some(Command::ProjectRedo)
+    );
+    let mut closed = stopped;
+    closed["project"] = json!(null);
+    assert_eq!(project_key_to_command(KeyEvent::CtrlZ, &closed, &[]), None);
 }
 
 #[test]
@@ -1250,7 +1283,12 @@ fn item_keys_wait_only_for_a_text_field_and_arrows_for_no_focus() {
         assert!(key_active(key, false, true), "{key:?}");
         assert!(!key_active(key, true, true), "{key:?}");
     }
-    for key in [KeyEvent::Left, KeyEvent::Right] {
+    for key in [
+        KeyEvent::Left,
+        KeyEvent::Right,
+        KeyEvent::AltUp,
+        KeyEvent::AltDown,
+    ] {
         assert!(key_active(key, false, false), "{key:?}");
         assert!(!key_active(key, false, true), "{key:?}");
     }

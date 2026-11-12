@@ -584,7 +584,9 @@ pub fn key_active(key: KeyEvent, text_edit_focused: bool, widget_focused: bool) 
         | KeyEvent::Home
         | KeyEvent::End
         | KeyEvent::Left
-        | KeyEvent::Right => !widget_focused,
+        | KeyEvent::Right
+        | KeyEvent::AltUp
+        | KeyEvent::AltDown => !widget_focused,
         KeyEvent::Digit(..)
         | KeyEvent::M
         | KeyEvent::T
@@ -616,6 +618,8 @@ pub fn project_key_to_command(
         KeyEvent::CtrlS => Some(Command::ProjectSave),
         KeyEvent::CtrlM => Some(Command::ToggleMixer),
         KeyEvent::CtrlAltR => Some(Command::OpenRenderDialog),
+        KeyEvent::CtrlZ => Some(Command::ProjectUndo),
+        KeyEvent::CtrlShiftZ => Some(Command::ProjectRedo),
         KeyEvent::Digit(
             digit,
             KeyModifiers {
@@ -628,14 +632,14 @@ pub fn project_key_to_command(
         | KeyEvent::T
         | KeyEvent::S
         | KeyEvent::Delete
-        | KeyEvent::CtrlZ
-        | KeyEvent::CtrlShiftZ
         | KeyEvent::Left
-        | KeyEvent::Right => None,
+        | KeyEvent::Right
+        | KeyEvent::AltUp
+        | KeyEvent::AltDown => None,
     }
 }
 
-/// The Arrange view's Item keys: S splits at the playhead the selected Items (none: the selected Track's), Delete deletes the selected Items, Ctrl+Z and Ctrl+Shift+Z undo and redo, ← and → move the selected Items by one step of the grid drawn for `timeline` (a beat without one).
+/// The Arrange view's Item keys: S splits at the playhead the selected Items (none: the selected Track's), Delete deletes the selected Items, ← and → move the selected Items by one step of the grid drawn for `timeline` (a beat without one), Alt+↑ and Alt+↓ to the Track above or below.
 pub fn item_key_to_command(
     key: KeyEvent,
     status: &Value,
@@ -650,8 +654,11 @@ pub fn item_key_to_command(
             at: transport.frames,
         }),
         KeyEvent::Delete if !selection.is_empty() => Some(Command::ItemDelete(selection.ids())),
-        KeyEvent::CtrlZ => Some(Command::ProjectUndo),
-        KeyEvent::CtrlShiftZ => Some(Command::ProjectRedo),
+        KeyEvent::AltUp | KeyEvent::AltDown => {
+            let track_ids: Vec<u64> = track_rows(status).iter().map(|row| row.id).collect();
+            let step = if key == KeyEvent::AltUp { -1 } else { 1 };
+            track_step_command(items, selection, &track_ids, step)
+        }
         KeyEvent::Left | KeyEvent::Right => {
             let rate = sample_rate(status);
             let tempo = project_tempo(status)?;
@@ -686,6 +693,39 @@ pub fn nudge_command(
         ids: selection.ids(),
         delta,
         track: None,
+    })
+}
+
+/// The selected Items moved `step` Tracks down (negative: up) among the Tracks `track_ids`, in row order; `None` when one of them would leave the Tracks.
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "row indices far below isize::MAX"
+)]
+pub fn track_step_command(
+    items: &[ItemBlock],
+    selection: &ItemSelection,
+    track_ids: &[u64],
+    step: isize,
+) -> Option<Command> {
+    let row_of = |id: u64| {
+        let item = items.iter().find(|item| item.id == id)?;
+        let row = track_ids.iter().position(|track| *track == item.track_id)?;
+        Some(row as isize)
+    };
+    let ids: Vec<u64> = selection
+        .ids()
+        .into_iter()
+        .filter(|id| row_of(*id).is_some())
+        .collect();
+    let rows: Vec<isize> = ids.iter().filter_map(|id| row_of(*id)).collect();
+    let last = track_ids.len() as isize - 1;
+    let fits = rows.iter().all(|row| (0..=last).contains(&(row + step)));
+    let first = *rows.first()?;
+    fits.then(|| Command::ItemMove {
+        ids,
+        delta: 0,
+        track: Some((first + step) as usize),
     })
 }
 

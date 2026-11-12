@@ -1693,14 +1693,119 @@ fn item_editing_snapshots() {
         );
         write_png(&mut moving, &format!("project-move-ghost-{suffix}"));
     }
+
+    let (mut both, _, _dir) = harness_with(DEFAULT_WINDOW, project_snapshot("stopped"));
+    let (from, to) = box_over_both_items(&both);
+    drag_and_release(&mut both, from, to);
+    let from = item_rect(&both, GUITAR_ITEM).center();
+    let row = both.get_by_label("Track Bass").rect().height();
+    press_and_drag(&mut both, from, from + Vec2::new(2.0 * BEAT_PX + 3.0, row));
+    write_png(&mut both, "project-move-ghosts-1280x800");
+
+    let (mut focused, _, _dir) = harness_with(DEFAULT_WINDOW, project_snapshot("stopped"));
+    let at = item_rect(&focused, GUITAR_ITEM).center();
+    click_at(&mut focused, at);
+    focused.get_by_label(BASS_ITEM).focus();
+    focused.run_steps(2);
+    assert!(item_selected(&focused, GUITAR_ITEM) && !item_selected(&focused, BASS_ITEM));
+    write_png(&mut focused, "project-item-focus-1280x800");
 }
 
 #[test]
-fn items_are_focusable_after_the_track_headers() {
-    let (mut harness, _sent, _dir) = project_harness("stopped");
+fn track_rows_do_not_overlap() {
+    let (harness, _sent, _dir) = project_harness("stopped");
+    let rows =
+        ["Track Guitar", "Track Bass", "Track Keys"].map(|row| harness.get_by_label(row).rect());
+    for pair in rows.windows(2) {
+        assert!(pair[1].top() >= pair[0].bottom(), "{pair:?}");
+    }
+}
+
+#[test]
+fn a_focused_item_is_selected_by_enter_and_moved_by_alt_arrows() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
     harness.get_by_label(BASS_ITEM).focus();
     harness.run_steps(2);
-    assert!(item_selected(&harness, BASS_ITEM), "focus selects the Item");
+    assert!(
+        !item_selected(&harness, BASS_ITEM),
+        "focus leaves the selection alone"
+    );
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert!(item_selected(&harness, BASS_ITEM));
+    harness.get_by_label(GUITAR_ITEM).focus();
+    harness.run_steps(2);
+    assert!(item_selected(&harness, BASS_ITEM) && !item_selected(&harness, GUITAR_ITEM));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run_steps(2);
+    assert!(item_selected(&harness, BASS_ITEM) && item_selected(&harness, GUITAR_ITEM));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run_steps(2);
+    assert!(!item_selected(&harness, GUITAR_ITEM), "Ctrl+Enter toggles");
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert!(
+        !item_selected(&harness, BASS_ITEM),
+        "Enter selects only this"
+    );
+    sent_now(&sent);
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+    harness.run_steps(2);
+    harness.key_press(Key::ArrowRight);
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [
+            Command::ItemMove {
+                ids: vec![1],
+                delta: 0,
+                track: Some(1),
+            },
+            Command::ItemMove {
+                ids: vec![1],
+                delta: 24_000,
+                track: None,
+            },
+        ]
+    );
+}
+
+#[test]
+fn undo_keys_work_in_every_project_view() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    for view in [Key::Num1, Key::Num2, Key::Num3] {
+        harness.key_press_modifiers(Modifiers::COMMAND, view);
+        harness.run_steps(2);
+        sent_now(&sent);
+        harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        harness.run_steps(1);
+        harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+        harness.run_steps(1);
+        assert_eq!(
+            sent_now(&sent),
+            [Command::ProjectUndo, Command::ProjectRedo],
+            "{view:?}"
+        );
+    }
+}
+
+#[test]
+fn ctrl_z_in_a_text_field_undoes_the_typing_not_the_project() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    harness
+        .get_by_role_and_label(Role::TextInput, "Track 1")
+        .focus();
+    harness.run_steps(2);
+    harness
+        .get_by_role_and_label(Role::TextInput, "Track 1")
+        .type_text("X");
+    harness.run_steps(2);
+    sent_now(&sent);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
+    let field = harness.get_by_role_and_label(Role::TextInput, "Track 1");
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("Guitar"));
 }
 
 #[test]
