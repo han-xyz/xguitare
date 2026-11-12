@@ -72,7 +72,8 @@ pub fn visuals() -> Visuals {
     visuals.extreme_bg_color = colour(colours.well);
     visuals.faint_bg_color = colour(colours.panel);
     visuals.override_text_color = Some(colour(colours.text));
-    visuals.selection.bg_fill = colour(colours.arc_track);
+    visuals.selection.bg_fill = colour(colours.hover);
+    visuals.selection.stroke = Stroke::new(1.0, colour(colours.text));
     let widgets = &mut visuals.widgets;
     widgets.noninteractive.bg_fill = colour(colours.panel);
     widgets.noninteractive.bg_stroke.color = colour(colours.hover);
@@ -82,7 +83,7 @@ pub fn visuals() -> Visuals {
         &mut widgets.hovered,
         &mut widgets.active,
     ] {
-        state.bg_stroke.color = colour(colours.boundary);
+        state.bg_stroke = Stroke::new(1.0, colour(colours.boundary));
         state.fg_stroke.color = colour(colours.text);
     }
     for state in [
@@ -98,8 +99,8 @@ pub fn visuals() -> Visuals {
     widgets.inactive.weak_bg_fill = colour(colours.panel_open);
     widgets.hovered.bg_fill = colour(colours.hover);
     widgets.hovered.weak_bg_fill = colour(colours.hover);
-    widgets.active.bg_fill = colour(colours.arc_track);
-    widgets.active.weak_bg_fill = colour(colours.arc_track);
+    widgets.active.bg_fill = colour(colours.hover);
+    widgets.active.weak_bg_fill = colour(colours.hover);
     visuals
 }
 
@@ -119,10 +120,10 @@ pub fn outlined_button(text: &str) -> Button<'static> {
 
 /// Outlined in the clip red, for an action that removes something.
 pub fn warning_button(text: &str) -> Button<'static> {
-    let red = colour(palette().danger);
-    Button::new(RichText::new(text).color(red))
+    let colours = palette();
+    Button::new(RichText::new(text).color(colour(colours.danger_text)))
         .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(1.0, red))
+        .stroke(Stroke::new(1.0, colour(colours.danger)))
 }
 
 /// A Bank row: the program number in a muted column, then the name; the active row has an amber left border on a lighter fill. `enabled` false greys the row and takes no click.

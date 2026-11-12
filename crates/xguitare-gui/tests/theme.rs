@@ -304,8 +304,60 @@ fn colour_literal(line: &str) -> bool {
         NAMED.contains(&ident.as_str())
     });
     let hex = line.match_indices('#').any(|(at, _)| {
-        let digits = &line[at + 1..];
-        digits.len() >= 6 && digits[..6].chars().all(|c| c.is_ascii_hexdigit())
+        let digits: Vec<char> = line[at + 1..].chars().take(6).collect();
+        digits.len() == 6 && digits.iter().all(char::is_ascii_hexdigit)
     }) || line.contains("(0x");
-    constructor || named || hex
+    constructor || named || hex || decimal_triple(line)
+}
+
+fn decimal_triple(line: &str) -> bool {
+    line.split('(').skip(1).any(|rest| {
+        let Some((inner, _)) = rest.split_once(')') else {
+            return false;
+        };
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        parts.len() == 3 && parts.iter().all(|part| part.parse::<u8>().is_ok())
+    })
+}
+
+#[test]
+fn colour_literal_catches_every_colour_form() {
+    for line in [
+        "const TRACK: Rgb = (60, 120, 220);",
+        "colour((235, 130, 40))",
+        "Color32::from_rgb(1, 2, 3)",
+        "let red = (0xf0, 0x64, 0x5a);",
+        "// #3c78dc",
+        "Color32::WHITE",
+    ] {
+        assert!(colour_literal(line), "{line}");
+    }
+    for line in [
+        "let size = vec2(4.0, 8.0);",
+        "let pair = (1, 2);",
+        "let wide = (300, 2, 3);",
+        "format!(\"#{index}\")",
+        "// #ab— not hex",
+    ] {
+        assert!(!colour_literal(line), "{line}");
+    }
+}
+
+fn rgb_of(colour: Color32) -> Rgb {
+    (colour.r(), colour.g(), colour.b())
+}
+
+#[test]
+fn every_control_state_draws_its_boundary() {
+    let visuals = xguitare_gui::widgets::visuals();
+    let states = [
+        ("inactive", visuals.widgets.inactive),
+        ("hovered", visuals.widgets.hovered),
+        ("active", visuals.widgets.active),
+    ];
+    for (name, state) in states {
+        assert!(state.bg_stroke.width >= 1.0, "{name} stroke width");
+        let ratio = contrast(rgb_of(state.bg_stroke.color), rgb_of(state.bg_fill));
+        assert!(ratio >= BOUNDARY_FLOOR, "{name} stroke on fill {ratio:.2}");
+    }
 }

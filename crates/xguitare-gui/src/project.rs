@@ -108,7 +108,7 @@ pub fn transport_bar(
         if let Some(count_in) = transport.count_in_text() {
             ui.label(
                 RichText::new(count_in)
-                    .color(colour(colours.danger))
+                    .color(colour(colours.danger_text))
                     .strong(),
             );
         }
@@ -148,7 +148,7 @@ pub fn transport_bar(
         if let Some(warning) = transport.disk_warning() {
             ui.label(
                 RichText::new(warning)
-                    .color(colour(colours.danger))
+                    .color(colour(colours.danger_text))
                     .strong(),
             );
         }

@@ -26,6 +26,7 @@ const COLUMN_GAP: f32 = 4.0;
 /// A column's outer width: its content, inner margin and stroke.
 const MASTER_WIDTH: f32 = COLUMN_WIDTH + 10.0;
 const NAME_HEIGHT: f32 = 24.0;
+const TRACK_TAB_HEIGHT: f32 = 3.0;
 const SEND_ROW_HEIGHT: f32 = 36.0;
 /// The Send rows a column shows before they scroll.
 const SEND_ROWS_SHOWN: usize = 2;
@@ -224,12 +225,9 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
     } else {
         colours.text
     };
-    let mut text = RichText::new(&column.name)
+    let text = RichText::new(&column.name)
         .strong()
         .color(colour(text_colour));
-    if let MixerTarget::Track(index) = column.target {
-        text = text.color(colour(track_colour(index)));
-    }
     let button = egui::Button::new(text)
         .selected(shape.open)
         .min_size(vec2(COLUMN_WIDTH, NAME_HEIGHT))
@@ -238,6 +236,14 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
     response.widget_info(|| {
         WidgetInfo::labeled(Role::Button, true, format!("Rack of {}", column.name))
     });
+    if let MixerTarget::Track(index) = column.target {
+        let tab = Rect::from_min_size(
+            response.rect.min,
+            vec2(response.rect.width(), TRACK_TAB_HEIGHT),
+        );
+        ui.painter()
+            .rect_filled(tab, 0, colour(track_colour(index)));
+    }
     if response.clicked() {
         if let MixerTarget::Track(index) = column.target
             && shape.selected != Some(index)
@@ -723,7 +729,11 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
             None
         }
         RenderView::Failed(error) => {
-            ui.label(RichText::new(error).color(colour(colours.danger)).strong());
+            ui.label(
+                RichText::new(error)
+                    .color(colour(colours.danger_text))
+                    .strong(),
+            );
             None
         }
         RenderView::Cancelled => {
