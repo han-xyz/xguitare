@@ -213,6 +213,24 @@ fn track_colours_mark_the_strip_tab_on_every_surface_it_meets() {
             );
         }
     }
+    let edges = [
+        ("Bus", theme::bus_colour()),
+        ("Master", theme::master_colour()),
+    ];
+    for (index, track) in TRACK_COLOURS.iter().enumerate() {
+        let others = TRACK_COLOURS[index + 1..]
+            .iter()
+            .map(|other| ("a later Track", *other))
+            .chain(edges);
+        for (name, other) in others {
+            let distance = delta_e00(*track, other);
+            assert!(
+                distance >= ACCENT_DELTA_E_FLOOR,
+                "Track {} {track:?} vs {name} {other:?}: ΔE00 {distance:.2}",
+                index + 1
+            );
+        }
+    }
 }
 
 fn sample_size(definitions: FontDefinitions, font: &FontId) -> Vec2 {

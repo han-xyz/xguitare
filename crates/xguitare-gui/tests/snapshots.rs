@@ -231,9 +231,15 @@ fn project_snapshot(transport: &str) -> Snapshot {
     snapshot
 }
 
-/// The Project with two Buses: Guitar clipped and sending pre-fader to Verb, Bass muted and sending to Delay, Keys not to Master and sending to Verb, Verb soloed.
+/// The Project with the brief's mixer content and two Buses: Bass DI clipped and sending pre-fader to Room, Bass Amp muted and sending to Delay, Click not to Master and sending to Room, Room soloed.
+const MIXER_TRACKS: [&str; 3] = ["Bass DI", "Bass Amp", "Click"];
+
 fn mixer_snapshot() -> Snapshot {
     let mut snapshot = project_snapshot("playing");
+    for (track, name) in MIXER_TRACKS.into_iter().enumerate() {
+        snapshot.status.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
+        snapshot.items.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
+    }
     let status = snapshot.status.as_mut().unwrap();
     let mixer = [
         (
@@ -263,7 +269,7 @@ fn mixer_snapshot() -> Snapshot {
         entry["to_master"] = json!(to_master);
     }
     status["buses"] = json!([
-        {"id": 0, "name": "Verb", "volume_db": -4.0, "pan": 0.0, "mute": false, "solo": true,
+        {"id": 0, "name": "Room", "volume_db": -4.0, "pan": 0.0, "mute": false, "solo": true,
          "peak_db": [-14.5, -15.2], "clip": false},
         {"id": 1, "name": "Delay", "volume_db": 0.0, "pan": 0.3, "mute": false, "solo": false,
          "peak_db": [-120.0, -120.0], "clip": false},
@@ -278,12 +284,12 @@ fn mixer_snapshot() -> Snapshot {
     snapshot
 }
 
-/// [`mixer_snapshot`] with eight Buses, Guitar sending to each.
+/// [`mixer_snapshot`] with eight Buses, Bass DI sending to each.
 fn eight_buses_snapshot() -> Snapshot {
     let mut snapshot = mixer_snapshot();
     let status = snapshot.status.as_mut().unwrap();
     let names = [
-        "Verb", "Delay", "Room", "Plate", "Echo", "Chorus", "Crush", "Sub",
+        "Room", "Delay", "Hall", "Plate", "Echo", "Chorus", "Crush", "Sub",
     ];
     status["buses"] = names
         .iter()
@@ -1915,19 +1921,39 @@ fn typed_tempo_is_sent_on_enter_only() {
 
 #[test]
 fn mixer_snapshots() {
-    let (mut mixer, _, _dir) = harness_with(WINDOW, mixer_snapshot());
-    click_button(&mut mixer, "Mixer");
-    write_png(&mut mixer, "mixer");
+    for (size, name) in [
+        (WINDOW, "mixer"),
+        (DEFAULT_WINDOW, "mixer-1280x800"),
+        (MIN_WINDOW, "mixer-1024x640"),
+    ] {
+        let (mut mixer, _, _dir) = harness_with(size, mixer_snapshot());
+        click_button(&mut mixer, "Mixer");
+        write_png(&mut mixer, name);
+    }
+    for (label, name) in [
+        ("Volume Bass Amp", "mixer-fader-focused"),
+        ("Mute Bass Amp", "mixer-mute-focused"),
+        ("Send Bass DI to Room", "mixer-send-focused"),
+    ] {
+        let (mut focused, _, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
+        click_button(&mut focused, "Mixer");
+        let in_mixer = focused
+            .get_all_by_label(label)
+            .max_by(|one, two| one.rect().top().total_cmp(&two.rect().top()))
+            .unwrap();
+        in_mixer.focus();
+        write_png(&mut focused, name);
+    }
 
     let (mut bus_rack, _, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
     click_button(&mut bus_rack, "Mixer");
-    click_button(&mut bus_rack, "Rack of Verb");
+    click_button(&mut bus_rack, "Rack of Room");
     write_png(&mut bus_rack, "mixer-bus-rack");
 
     let (mut eight_buses, _, _dir) = harness_with(DEFAULT_WINDOW, eight_buses_snapshot());
     click_button(&mut eight_buses, "Mixer");
     write_png(&mut eight_buses, "mixer-eight-buses");
-    let sends = eight_buses.get_by_label("Send Guitar to Verb").rect();
+    let sends = eight_buses.get_by_label("Send Bass DI to Room").rect();
     eight_buses.event(Event::PointerMoved(sends.center()));
     eight_buses.event(Event::MouseWheel {
         unit: MouseWheelUnit::Point,
@@ -1975,8 +2001,8 @@ fn mixer_faders_and_switches_show_whole_above_the_rack() {
     ] {
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
-        let rack_top = harness.get_by_label("Guitar — Rack").rect().top();
-        for name in ["Verb", "Guitar", "Bass", "Keys", "Master"] {
+        let rack_top = harness.get_by_label("Bass DI — Rack").rect().top();
+        for name in ["Room", "Bass DI", "Bass Amp", "Click", "Master"] {
             let mut labels = vec![format!("Volume {name}"), format!("Volume {name} value")];
             if name != "Master" {
                 labels.push(format!("Solo {name}"));
@@ -1998,10 +2024,10 @@ fn mixer_faders_and_switches_show_whole_above_the_rack() {
 fn dragging_the_mixer_split_resizes_the_rack() {
     let (mut harness, _, _dir) = harness_with(WINDOW, mixer_snapshot());
     click_button(&mut harness, "Mixer");
-    let heading = harness.get_by_label("Guitar — Rack").rect().top();
+    let heading = harness.get_by_label("Bass DI — Rack").rect().top();
     let edge = pos2(700.0, heading - 4.0);
     drag_and_release(&mut harness, edge, edge - Vec2::new(0.0, 100.0));
-    let moved = harness.get_by_label("Guitar — Rack").rect().top();
+    let moved = harness.get_by_label("Bass DI — Rack").rect().top();
     assert!(
         (heading - 100.0 - moved).abs() < 8.0,
         "the Rack heading moved from {heading} to {moved}"
@@ -2014,12 +2040,12 @@ fn mixer_columns_send_their_commands() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
     for label in [
-        "Clip Guitar",
-        "pre Guitar Verb",
-        "to Master Keys",
-        "Solo Verb",
+        "Clip Bass DI",
+        "pre Bass DI Room",
+        "to Master Click",
+        "Solo Room",
         "+ Add Bus",
-        "Rack of Verb",
+        "Rack of Room",
     ] {
         click_button(&mut harness, label);
     }
@@ -2051,14 +2077,14 @@ fn mixer_columns_send_their_commands() {
             Command::ShowRack(ShownRack::Bus(0)),
         ]
     );
-    assert!(harness.query_by_label("Verb — Rack").is_some());
+    assert!(harness.query_by_label("Room — Rack").is_some());
     click_button(&mut harness, "cabinet (mono)");
     assert_eq!(sent_now(&sent), []);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
     harness.run_steps(2);
     assert_eq!(sent_now(&sent), [Command::ShowRack(ShownRack::Track)]);
     assert!(harness.query_by_label("Rack of Master").is_none());
-    assert!(harness.query_by_label("Guitar — Rack").is_some());
+    assert!(harness.query_by_label("Bass DI — Rack").is_some());
 }
 
 #[test]

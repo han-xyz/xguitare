@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use egui::style::ScrollStyle;
 use egui::{
     Align, Align2, CornerRadius, DragValue, Frame, Id, Layout, Margin, Mesh, Modal, ProgressBar,
     Rect, RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind, TextEdit, Ui,
@@ -27,12 +28,12 @@ use crate::widgets::{
 };
 
 /// A strip's content width; its outer width adds [`STRIP_MARGIN`] and the edge at each side.
-const STRIP_WIDTH: f32 = 124.0;
+const STRIP_WIDTH: f32 = 130.0;
 const STRIP_MARGIN: Margin = Margin {
     left: 6,
     right: 6,
-    top: 5,
-    bottom: 3,
+    top: 4,
+    bottom: 2,
 };
 const STRIP_OUTER_WIDTH: f32 =
     STRIP_WIDTH + STRIP_MARGIN.left as f32 + STRIP_MARGIN.right as f32 + 2.0;
@@ -44,17 +45,17 @@ const SELECTED_EDGE_WIDTH: f32 = 2.0;
 const FACE_MARGIN: Margin = Margin {
     left: EAR_WIDTH as i8 + 8,
     right: EAR_WIDTH as i8 + 8,
-    top: 4,
-    bottom: 4,
+    top: 2,
+    bottom: 2,
 };
-const KIND_HEIGHT: f32 = 12.0;
+const KIND_HEIGHT: f32 = 14.0;
 const NAME_HEIGHT: f32 = CONTROL_HEIGHT;
 const ROUTING_HEIGHT: f32 = CONTROL_HEIGHT;
 const SEND_ROW_HEIGHT: f32 = 34.0;
 /// The Send rows a column shows before they scroll.
 const SEND_ROWS_SHOWN: usize = 2;
-const PAN_HEIGHT: f32 = 56.0;
-const FADER_HEIGHT: f32 = 88.0;
+const PAN_HEIGHT: f32 = 57.0;
+const FADER_HEIGHT: f32 = 80.0;
 const FADER_CAP: egui::Vec2 = egui::Vec2::new(34.0, 14.0);
 const FADER_SLOT_WIDTH: f32 = 8.0;
 const FADER_CAP_LINE: f32 = 2.0;
@@ -71,6 +72,9 @@ const VALUE_FIELD_HEIGHT: f32 = 20.0;
 const SWITCH_SIZE: egui::Vec2 = egui::Vec2::new(40.0, CONTROL_HEIGHT);
 const PRE_SIZE: egui::Vec2 = egui::Vec2::new(28.0, CONTROL_HEIGHT);
 const ROW_GAP: f32 = 1.0;
+/// The mixer's scroll bars stay drawn while their content overflows, beside it rather than over it, so that hidden Sends and strips show.
+const SCROLL_BAR_WIDTH: f32 = 4.0;
+const SCROLL_BAR_MARGIN: f32 = 2.0;
 const ADD_BUS_DASH: f32 = 5.0;
 const ADD_BUS_GAP: f32 = 4.0;
 /// A strip's height: its edge, margins and rows, so that every strip and the Add Bus slot line up.
@@ -87,7 +91,11 @@ const STRIP_HEIGHT: f32 = 2.0
     + SWITCH_SIZE.y
     + 7.0 * ROW_GAP;
 /// The mixer panel's height with each strip whole: the faceplate's margins around one strip.
-pub const MIXER_HEIGHT: f32 = FACE_MARGIN.top as f32 + FACE_MARGIN.bottom as f32 + STRIP_HEIGHT;
+pub const MIXER_HEIGHT: f32 = FACE_MARGIN.top as f32
+    + FACE_MARGIN.bottom as f32
+    + STRIP_HEIGHT
+    + SCROLL_BAR_WIDTH
+    + SCROLL_BAR_MARGIN;
 const DIALOG_WIDTH: f32 = 420.0;
 const BITS: [(RenderBits, &str); 3] = [
     (RenderBits::Pcm24, "24"),
@@ -187,6 +195,8 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
         .fill(colour(colours.panel))
         .inner_margin(FACE_MARGIN)
         .show(ui, |ui| {
+            ui.spacing_mut().scroll = scroll_style();
+            ui.set_min_height(STRIP_HEIGHT + SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = STRIP_GAP;
                 let scrolled_width = ui.available_width() - STRIP_OUTER_WIDTH - 2.0 * STRIP_GAP;
@@ -219,6 +229,16 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
     );
     widgets::rack_ears(painter, rect, None);
     commands
+}
+
+/// Solid bars, the handle in the text colour on a well track: the mixer's scroll areas and the one around the panel.
+pub fn scroll_style() -> ScrollStyle {
+    ScrollStyle {
+        bar_width: SCROLL_BAR_WIDTH,
+        bar_inner_margin: SCROLL_BAR_MARGIN,
+        foreground_color: true,
+        ..ScrollStyle::solid()
+    }
 }
 
 struct Shape<'a> {
@@ -388,6 +408,7 @@ fn sends(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec<Command
         .id_salt(("sends", track))
         .max_height(SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32)
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             for send in &column.sends {
                 let bus = bus_names.get(send.bus).map_or("", String::as_str);
                 commands.extend(send_row(ui, track, (&column.name, bus), send));
@@ -399,7 +420,8 @@ fn sends(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec<Command
 fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendView) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
-    ui.allocate_ui(vec2(STRIP_WIDTH, SEND_ROW_HEIGHT), |ui| {
+    let row_width = ui.available_width();
+    ui.allocate_ui(vec2(row_width, SEND_ROW_HEIGHT), |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
             let accent = if send.level_db.is_some() {
@@ -430,7 +452,7 @@ fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendVie
                     SendLevel::Off => None,
                 });
             let readout_width =
-                STRIP_WIDTH - KnobSize::Strip.diameter() - PRE_SIZE.x - 2.0 * theme::SPACE_XS;
+                row_width - KnobSize::Strip.diameter() - PRE_SIZE.x - 2.0 * theme::SPACE_XS;
             ui.allocate_ui(vec2(readout_width, SEND_ROW_HEIGHT), |ui| {
                 ui.set_width(readout_width);
                 ui.vertical(|ui| {

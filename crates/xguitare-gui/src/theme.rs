@@ -112,7 +112,7 @@ pub const TRACK_COLOURS: [Rgb; 6] = [
     (70, 135, 230),
     (235, 130, 40),
     (70, 180, 80),
-    (165, 105, 230),
+    (230, 90, 170),
     (40, 170, 160),
     (232, 72, 64),
 ];
@@ -147,7 +147,7 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("text on panel", c.text, c.panel),
         pair("text on panel open", c.text, c.panel_open),
         pair(
-            "text on well; also the pressed edge and the cents centre mark",
+            "text on well; also the pressed edge, the cents centre mark and the mixer scroll bar handle",
             c.text,
             c.well,
         ),
@@ -276,7 +276,11 @@ pub fn decorative_pairs() -> Vec<ContrastPair> {
         pair("faceplate edge on panel", c.hover, c.panel),
         pair("faceplate edge on panel open", c.hover, c.panel_open),
         pair("rack frame on case", c.hover, c.case),
-        pair("unit bottom edge on panel", c.well, c.panel),
+        pair(
+            "unit bottom edge and mixer scroll bar track on panel",
+            c.well,
+            c.panel,
+        ),
         pair("eq grid on well", c.hover, c.well),
         pair(
             "knob highlight on knob shadow",

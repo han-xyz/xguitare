@@ -16,7 +16,7 @@ use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
-use crate::mixer::{MIXER_HEIGHT, MixerView, RenderDraft, mixer_panel, render_dialog};
+use crate::mixer::{self, MIXER_HEIGHT, MixerView, RenderDraft, mixer_panel, render_dialog};
 use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands};
 use crate::model::{
     BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
@@ -46,6 +46,8 @@ const SIDEBAR_MARGIN: Margin = Margin {
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const MIXER_MARGIN: Margin = Margin::same(8);
 const MIXER_GAP: i8 = 4;
+/// The resize line along the mixer split's lower edge, which the split's size includes.
+const SPLIT_LINE_WIDTH: f32 = 1.0;
 const MIXER_MIN_HEIGHT: f32 = 60.0;
 /// The least the split under the mixer panel leaves the Rack, which scrolls inside it.
 const RACK_MIN_HEIGHT: f32 = 120.0;
@@ -613,13 +615,14 @@ fn central_view(
         let max_height = (ui.available_height() - RACK_MIN_HEIGHT).max(MIXER_MIN_HEIGHT);
         Panel::top("mixer_split")
             .resizable(true)
-            .default_size(MIXER_HEIGHT + f32::from(MIXER_GAP))
+            .default_size(MIXER_HEIGHT + f32::from(MIXER_GAP) + SPLIT_LINE_WIDTH)
             .size_range(MIXER_MIN_HEIGHT..=max_height)
             .frame(Frame::new().inner_margin(Margin {
                 bottom: MIXER_GAP,
                 ..Margin::ZERO
             }))
             .show(ui, |ui| {
+                ui.spacing_mut().scroll = mixer::scroll_style();
                 ScrollArea::vertical()
                     .id_salt("mixer_columns")
                     .show(ui, |ui| commands.extend(mixer_panel(ui, snapshot, mixer)));
