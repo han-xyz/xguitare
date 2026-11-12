@@ -5,7 +5,6 @@ use xguitare_core::control::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
 use crate::model::{Band, Command, LADDER_RED_DB, LADDER_YELLOW_DB, Segment, acts_on_rack};
 use crate::project_model::{project_name, track_rows};
-use crate::theme::SPACE_S;
 
 /// The fader position of 0 dB; the top is +6 dB.
 pub const FADER_UNITY: f32 = 0.75;
@@ -520,13 +519,4 @@ pub fn default_render_name(projects: Option<&Value>, status: &Value) -> Option<S
         .find(|project| project["name"].as_str() == Some(name))
         .and_then(|project| project["folder"].as_str())
         .map(str::to_string)
-}
-
-/// Where the Render progress percentage, `text_width` wide, starts from the bar's left, and whether it sits on the lit part (`lit_width` wide) or on the well after it: never across the lit edge.
-pub fn progress_text_place(lit_width: f32, text_width: f32) -> (f32, bool) {
-    if lit_width >= text_width + 2.0 * SPACE_S {
-        (SPACE_S, true)
-    } else {
-        (lit_width + SPACE_S, false)
-    }
 }

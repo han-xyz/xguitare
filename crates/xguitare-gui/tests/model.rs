@@ -305,11 +305,146 @@ fn an_error_stays_until_dismissed_or_replaced_and_a_notice_expires() {
 }
 
 #[test]
-fn esc_dismisses_the_toast_unless_a_dialog_or_text_field_takes_it() {
-    assert!(esc_dismisses_toast(false, false));
-    assert!(!esc_dismisses_toast(true, false));
-    assert!(!esc_dismisses_toast(false, true));
+fn esc_dismisses_the_toast_unless_a_focused_widget_a_popup_or_a_dialog_takes_it() {
+    assert!(esc_dismisses_toast(false, false, false));
+    assert!(!esc_dismisses_toast(true, false, false));
+    assert!(!esc_dismisses_toast(false, true, false));
+    assert!(!esc_dismisses_toast(false, false, true));
 }
+
+/// A request of each kind the Control API takes, as JSON, and the toast's title when it fails.
+const FAILURE_TITLES: [(&str, &str); 46] = [
+    (r#"{"cmd": "status"}"#, "Could not read the status"),
+    (r#"{"cmd": "list"}"#, "Could not list the Bank"),
+    (r#"{"cmd": "load", "preset": "1"}"#, "Could not load Preset"),
+    (
+        r#"{"cmd": "set", "param": "gain.gain", "value": 1.0}"#,
+        "Could not set the Parameter",
+    ),
+    (
+        r#"{"cmd": "get", "param": null}"#,
+        "Could not read the Parameters",
+    ),
+    (r#"{"cmd": "save", "as": null}"#, "Could not save Preset"),
+    (r#"{"cmd": "modules"}"#, "Could not list the Modules"),
+    (
+        r#"{"cmd": "rack_add", "type": "gain", "after": null, "at": null}"#,
+        "Could not add the Module",
+    ),
+    (
+        r#"{"cmd": "rack_remove", "id": "gain"}"#,
+        "Could not remove the Module",
+    ),
+    (
+        r#"{"cmd": "rack_move", "id": "gain", "to": 0}"#,
+        "Could not move the Module",
+    ),
+    (r#"{"cmd": "tuner"}"#, "Could not read the Tuner"),
+    (r#"{"cmd": "mute", "on": true}"#, "Could not switch Mute"),
+    (
+        r#"{"cmd": "bypass", "id": "gain", "on": true}"#,
+        "Could not switch the bypass",
+    ),
+    (r#"{"cmd": "ir_list"}"#, "Could not list the Cabinet IRs"),
+    (
+        r#"{"cmd": "rack_ir", "ir": "a.wav", "id": null}"#,
+        "Could not load the Cabinet IR",
+    ),
+    (r#"{"cmd": "ports"}"#, "Could not list the ports"),
+    (
+        r#"{"cmd": "set_ports", "input": "a", "output_left": "b", "output_right": "c"}"#,
+        "Could not connect the ports",
+    ),
+    (r#"{"cmd": "settings"}"#, "Could not read the settings"),
+    (
+        r#"{"cmd": "set_settings", "bank_kind": null, "ir_dir": null}"#,
+        "Could not apply the settings",
+    ),
+    (
+        r#"{"cmd": "project_new", "name": "x"}"#,
+        "Could not create the Project",
+    ),
+    (
+        r#"{"cmd": "project_open", "name": "x"}"#,
+        "Could not open the Project",
+    ),
+    (r#"{"cmd": "project_save"}"#, "Could not save the Project"),
+    (r#"{"cmd": "project_close"}"#, "Could not close the Project"),
+    (r#"{"cmd": "project_list"}"#, "Could not list the Projects"),
+    (r#"{"cmd": "items"}"#, "Could not read the Items"),
+    (
+        r#"{"cmd": "track_add", "name": null}"#,
+        "Could not add the Track",
+    ),
+    (
+        r#"{"cmd": "track_remove", "track": 1}"#,
+        "Could not remove the Track",
+    ),
+    (
+        r#"{"cmd": "track_set", "track": 1}"#,
+        "Could not change the Track",
+    ),
+    (
+        r#"{"cmd": "track_select", "track": 1}"#,
+        "Could not select the Track",
+    ),
+    (
+        r#"{"cmd": "transport", "action": "play"}"#,
+        "Could not start playback",
+    ),
+    (
+        r#"{"cmd": "transport", "action": "stop"}"#,
+        "Could not stop",
+    ),
+    (
+        r#"{"cmd": "transport", "action": "record"}"#,
+        "Could not start recording",
+    ),
+    (
+        r#"{"cmd": "transport", "action": "locate", "position": 0}"#,
+        "Could not move the playhead",
+    ),
+    (
+        r#"{"cmd": "loop", "start": 0, "end": 1, "on": true}"#,
+        "Could not change the loop",
+    ),
+    (
+        r#"{"cmd": "tempo", "bpm": 120.0}"#,
+        "Could not set the tempo",
+    ),
+    (
+        r#"{"cmd": "click", "on": true}"#,
+        "Could not switch the click",
+    ),
+    (
+        r#"{"cmd": "metronome", "on": true}"#,
+        "Could not change the Metronome",
+    ),
+    (r#"{"cmd": "metronome_tap"}"#, "Could not tap the tempo"),
+    (
+        r#"{"cmd": "bus_add", "name": null}"#,
+        "Could not add the Bus",
+    ),
+    (
+        r#"{"cmd": "bus_remove", "bus": 1}"#,
+        "Could not remove the Bus",
+    ),
+    (
+        r#"{"cmd": "bus_set", "bus": 1}"#,
+        "Could not change the Bus",
+    ),
+    (
+        r#"{"cmd": "send_set", "track": 1, "bus": 1}"#,
+        "Could not set the Send",
+    ),
+    (
+        r#"{"cmd": "master_set", "volume": "off"}"#,
+        "Could not set the Master volume",
+    ),
+    (r#"{"cmd": "render"}"#, "Could not start the Render"),
+    (r#"{"cmd": "render_cancel"}"#, "Could not cancel the Render"),
+    (r#"{"cmd": "clip_reset"}"#, "Could not reset the clip"),
+];
 
 #[test]
 fn a_failed_command_names_its_action() {
@@ -318,19 +453,9 @@ fn a_failed_command_names_its_action() {
             error: "refused".to_string(),
         })
     };
-    let at = |preset: &str| Request::Load {
-        preset: preset.to_string(),
-        track: None,
-        bus: None,
-        master: false,
-    };
-    for (request, title) in [
-        (Request::Save { name: None }, "Could not save Preset"),
-        (at("1"), "Could not load Preset"),
-        (Request::ProjectSave, "Could not save the Project"),
-        (Request::IrList, "Could not list the Cabinet IRs"),
-        (Request::Modules, "Command failed"),
-    ] {
+    for (request, title) in FAILURE_TITLES {
+        let request: Request =
+            serde_json::from_str(request).unwrap_or_else(|err| panic!("{request}: {err}"));
         assert_eq!(
             response_message(&request, refused()),
             Some(Message::Error {

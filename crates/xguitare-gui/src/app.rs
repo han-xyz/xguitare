@@ -399,7 +399,7 @@ impl eframe::App for App {
             .as_ref()
             .filter(|status| project_name(Some(status)).is_some())
             .map(|_| self.views.shown);
-        let text_edit_focused = ui.ctx().text_edit_focused();
+        let esc_taken = esc_taken(ui.ctx());
         let mut commands: Vec<Command> = pressed_keys(ui)
             .into_iter()
             .filter_map(|key| key_command(key, snapshot, &rows))
@@ -446,7 +446,7 @@ impl eframe::App for App {
             self.mixer = MixerView::default();
         }
         let dialog_open = self.mixer.render.is_some() || self.autosave_prompt.is_some();
-        show_error_toast(ui, &mut self.feedback, text_edit_focused, dialog_open);
+        show_error_toast(ui, &mut self.feedback, esc_taken, dialog_open);
         commands.extend(open_render_dialog(ui.ctx(), snapshot, &mut self.mixer));
         if let Some(offer) = self.autosave_prompt.clone()
             && let Some(restore) = autosave_prompt(ui.ctx(), &offer.name)
@@ -693,11 +693,24 @@ fn revision(snapshot: &Snapshot) -> u64 {
 }
 
 /// The error toast, closed first by Esc when [`esc_dismisses_toast`] lets it.
-fn show_error_toast(ui: &Ui, feedback: &mut Feedback, text_edit_focused: bool, dialog_open: bool) {
+fn show_error_toast(
+    ui: &Ui,
+    feedback: &mut Feedback,
+    (widget_focused, popup_open): (bool, bool),
+    dialog_open: bool,
+) {
     if ui.input(|input| input.key_pressed(Key::Escape))
-        && esc_dismisses_toast(text_edit_focused, dialog_open)
+        && esc_dismisses_toast(widget_focused, popup_open, dialog_open)
     {
         feedback.dismiss();
     }
     error_toast(ui.ctx(), feedback);
+}
+
+/// Whether a focused widget or an open menu takes this frame's Esc, read before the frame's widgets act on it.
+fn esc_taken(ctx: &egui::Context) -> (bool, bool) {
+    (
+        ctx.memory(|memory| memory.focused().is_some()),
+        egui::Popup::is_any_open(ctx),
+    )
 }

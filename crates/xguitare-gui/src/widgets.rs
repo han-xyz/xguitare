@@ -4,11 +4,10 @@ use egui::{
     Widget, WidgetInfo, pos2, vec2,
 };
 
-use crate::mixer_model::progress_text_place;
 use crate::model::{
     Band, EAR_HOLE_RADIUS, EAR_WIDTH, FOOTSWITCH_WIDTH, KNOB_ARC_SWEEP_DEG, LADDER_SEGMENTS,
     ScreenRect, ear_holes, focus_ring_rects, knob_arcs, knob_points, knob_value_from_drag,
-    ladder_segments,
+    ladder_segments, progress_text_place,
 };
 use crate::theme::{
     self, CARET_WIDTH, CONTROL_HEIGHT, DIALOG_MARGIN, EDIT_BORDER_WIDTH, FOCUS_RING_GAP,

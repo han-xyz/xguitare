@@ -2016,9 +2016,18 @@ impl Feedback {
     }
 }
 
-/// Esc closes the error toast unless a dialog closes with it or a text field puts its value back with it.
-pub fn esc_dismisses_toast(text_edit_focused: bool, dialog_open: bool) -> bool {
-    !text_edit_focused && !dialog_open
+/// Esc closes the error toast unless it first releases a focused widget, closes an open menu or closes a dialog.
+pub fn esc_dismisses_toast(widget_focused: bool, popup_open: bool, dialog_open: bool) -> bool {
+    !widget_focused && !popup_open && !dialog_open
+}
+
+/// Where the Render progress percentage, `text_width` wide, starts from the bar's left, and whether it sits on the lit part (`lit_width` wide) or on the well after it: never across the lit edge.
+pub fn progress_text_place(lit_width: f32, text_width: f32) -> (f32, bool) {
+    if lit_width >= text_width + 2.0 * theme::SPACE_S {
+        (theme::SPACE_S, true)
+    } else {
+        (lit_width + theme::SPACE_S, false)
+    }
 }
 
 /// The id of a `rack remove` that the Daemon refused or that never reached it.
@@ -2061,29 +2070,54 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
 /// The error toast's title for a failed `req`: the action that failed.
 pub fn failure_title(req: &Request) -> &'static str {
     match req {
+        Request::Status => "Could not read the status",
+        Request::List => "Could not list the Bank",
         Request::Load { .. } => "Could not load Preset",
-        Request::Save { .. } => "Could not save Preset",
         Request::Set { .. } => SET_FAILED,
-        Request::Bypass { .. } => "Could not switch the bypass",
+        Request::Get { .. } => "Could not read the Parameters",
+        Request::Save { .. } => "Could not save Preset",
+        Request::Modules => "Could not list the Modules",
         Request::RackAdd { .. } => "Could not add the Module",
         Request::RackRemove { .. } => "Could not remove the Module",
         Request::RackMove { .. } => "Could not move the Module",
-        Request::RackIr { .. } => "Could not load the Cabinet IR",
-        Request::IrList => "Could not list the Cabinet IRs",
+        Request::Tuner => "Could not read the Tuner",
         Request::Mute { .. } => "Could not switch Mute",
+        Request::Bypass { .. } => "Could not switch the bypass",
+        Request::IrList => "Could not list the Cabinet IRs",
+        Request::RackIr { .. } => "Could not load the Cabinet IR",
+        Request::Ports => "Could not list the ports",
         Request::SetPorts { .. } => "Could not connect the ports",
+        Request::Settings => "Could not read the settings",
         Request::SetSettings { .. } => "Could not apply the settings",
         Request::ProjectNew { .. } => "Could not create the Project",
         Request::ProjectOpen { .. } => "Could not open the Project",
         Request::ProjectSave => "Could not save the Project",
         Request::ProjectClose => "Could not close the Project",
+        Request::ProjectList => "Could not list the Projects",
+        Request::Items => "Could not read the Items",
         Request::TrackAdd { .. } => "Could not add the Track",
         Request::TrackRemove { .. } => "Could not remove the Track",
         Request::TrackSet { .. } => "Could not change the Track",
+        Request::TrackSelect { .. } => "Could not select the Track",
+        Request::Transport { action, .. } => match action {
+            TransportAction::Play => "Could not start playback",
+            TransportAction::Stop => "Could not stop",
+            TransportAction::Record => "Could not start recording",
+            TransportAction::Locate => "Could not move the playhead",
+        },
+        Request::Loop { .. } => "Could not change the loop",
+        Request::Tempo { .. } => "Could not set the tempo",
+        Request::Click { .. } => "Could not switch the click",
+        Request::Metronome { .. } => "Could not change the Metronome",
+        Request::MetronomeTap => "Could not tap the tempo",
         Request::BusAdd { .. } => "Could not add the Bus",
         Request::BusRemove { .. } => "Could not remove the Bus",
+        Request::BusSet { .. } => "Could not change the Bus",
+        Request::SendSet { .. } => "Could not set the Send",
+        Request::MasterSet { .. } => "Could not set the Master volume",
         Request::Render { .. } => "Could not start the Render",
-        _ => "Command failed",
+        Request::RenderCancel => "Could not cancel the Render",
+        Request::ClipReset { .. } => "Could not reset the clip",
     }
 }
 
