@@ -7,6 +7,7 @@ pub mod control;
 pub mod engine;
 pub mod firstrun;
 pub mod flatten;
+mod history;
 mod ir;
 mod irdir;
 mod item_control;

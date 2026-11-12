@@ -15,6 +15,7 @@ use crate::control::{
 };
 use crate::engine::{Command, MeterPoint, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
+use crate::history::{Change, Entry, History, TrackItems};
 use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
@@ -44,6 +45,10 @@ const MASTER_NAME: &str = "Master";
 const NOTHING_MOVED: (usize, usize) = (MAX_TRACKS, MAX_BUSES);
 const ONE_TARGET: &str = "give track, bus or master, not more than one";
 const EDITING_WHILE_RECORDING: &str = "cannot edit items while recording";
+const UNDO_WHILE_RECORDING: &str = "cannot undo while recording";
+const REDO_WHILE_RECORDING: &str = "cannot redo while recording";
+const NOTHING_TO_UNDO: &str = "nothing to undo";
+const NOTHING_TO_REDO: &str = "nothing to redo";
 const SECONDS_SUFFIX: char = 's';
 
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
@@ -78,6 +83,7 @@ struct OpenProject {
     last_autosave: Instant,
     /// Finished Takes not yet in `project` because the Engine was busy; [`add_finished_takes`] retries them.
     unplaced: Vec<FinishedTake>,
+    history: History,
 }
 
 /// The open Project's Take audio, keyed by Take file.
@@ -918,6 +924,110 @@ pub(crate) fn apply_items(state: &mut EngineState, project: Project) -> Result<(
     Ok(())
 }
 
+/// [`apply_items`], recorded in the history as one entry named `label` when any Track's Items changed.
+pub(crate) fn edit_items(
+    state: &mut EngineState,
+    project: Project,
+    label: String,
+) -> Result<(), String> {
+    let open = open_project(state);
+    let tracks: Vec<TrackItems> = open
+        .project
+        .tracks
+        .iter()
+        .zip(&project.tracks)
+        .zip(&open.track_ids)
+        .filter(|((old, new), _)| old.items != new.items)
+        .map(|((old, new), &track_id)| TrackItems {
+            track_id,
+            before: old.items.clone(),
+            after: new.items.clone(),
+        })
+        .collect();
+    apply_items(state, project)?;
+    if !tracks.is_empty() {
+        open_project_mut(state).history.push(Entry {
+            label,
+            change: Change::Items(tracks),
+        });
+    }
+    Ok(())
+}
+
+/// Undoes the newest entry of the open Project's history through the path its edit took.
+pub(crate) fn project_undo(state: &mut EngineState) -> Result<Value, String> {
+    let entry = history_entry(
+        state,
+        UNDO_WHILE_RECORDING,
+        History::next_undo,
+        NOTHING_TO_UNDO,
+    )?;
+    let done = apply_change(state, entry.change.inverse())?;
+    let label = entry.label;
+    open_project_mut(state).history.undone(Entry {
+        label: label.clone(),
+        change: done.inverse(),
+    });
+    Ok(json!({ "label": label }))
+}
+
+/// Does again the newest undone entry of the open Project's history.
+pub(crate) fn project_redo(state: &mut EngineState) -> Result<Value, String> {
+    let entry = history_entry(
+        state,
+        REDO_WHILE_RECORDING,
+        History::next_redo,
+        NOTHING_TO_REDO,
+    )?;
+    let done = apply_change(state, entry.change)?;
+    let label = entry.label;
+    open_project_mut(state).history.redone(Entry {
+        label: label.clone(),
+        change: done,
+    });
+    Ok(json!({ "label": label }))
+}
+
+/// The entry `next` picks from the open Project's history; refused while recording.
+fn history_entry(
+    state: &EngineState,
+    while_recording: &str,
+    next: impl Fn(&History) -> Option<&Entry>,
+    nothing: &str,
+) -> Result<Entry, String> {
+    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+    if open.recording {
+        return Err(while_recording.to_string());
+    }
+    next(&open.history)
+        .cloned()
+        .ok_or_else(|| nothing.to_string())
+}
+
+/// Does `change` to the open Project and returns it as done.
+fn apply_change(state: &mut EngineState, change: Change) -> Result<Change, String> {
+    match change {
+        Change::Items(tracks) => {
+            let open = open_project(state);
+            let mut project = open.project.clone();
+            for items in &tracks {
+                let index = track_index(open, items.track_id)?;
+                project.tracks[index].items.clone_from(&items.after);
+            }
+            apply_items(state, project)?;
+            Ok(Change::Items(tracks))
+        }
+    }
+}
+
+/// The index of the Track with the id `track_id`.
+fn track_index(open: &OpenProject, track_id: u64) -> Result<usize, String> {
+    open.track_ids
+        .iter()
+        .position(|&id| id == track_id)
+        .ok_or_else(|| format!("the track of this edit is gone (id {track_id})"))
+}
+
 /// The Project fields of `status`, with `track_peaks` the input peaks of each Track and `mix` the post-fader peaks since this connection's last `status`.
 pub(crate) fn status_fields(
     state: &EngineState,
@@ -955,6 +1065,8 @@ pub(crate) fn status_fields(
             "loop",
             "click",
             "selected",
+            "undo",
+            "redo",
         ] {
             fields.insert(key.to_string(), Value::Null);
         }
@@ -1011,6 +1123,8 @@ pub(crate) fn status_fields(
             json!({"on": project.click, "count_in": project.count_in}),
         ),
         ("selected", json!(open.selected)),
+        ("undo", json!(open.history.undo_label())),
+        ("redo", json!(open.history.redo_label())),
         ("tracks", json!(tracks)),
         ("buses", buses_status(project, mix, meters)),
         ("master", master_status(project, mix, meters)),
@@ -1069,6 +1183,7 @@ fn open(
         changed: false,
         last_autosave: Instant::now(),
         unplaced: Vec::new(),
+        history: History::default(),
     });
     state.revision += 1;
     Ok(())

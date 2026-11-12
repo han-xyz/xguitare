@@ -170,6 +170,8 @@ fn status_reports_fields() {
             "loop": null,
             "click": null,
             "selected": null,
+            "undo": null,
+            "redo": null,
             "tracks": [],
             "buses": [],
             "master": null,

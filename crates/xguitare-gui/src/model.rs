@@ -2401,6 +2401,8 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::ProjectSave => "Could not save the Project",
         Request::ProjectClose => "Could not close the Project",
         Request::ProjectList => "Could not list the Projects",
+        Request::ProjectUndo => "Could not undo",
+        Request::ProjectRedo => "Could not redo",
         Request::Items => "Could not read the Items",
         Request::TrackAdd { .. } => "Could not add the Track",
         Request::TrackRemove { .. } => "Could not remove the Track",

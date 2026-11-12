@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::control::{EngineState, TrackRef};
 use crate::project::Project;
-use crate::project_control::{apply_items, editable_project, item_json, resolve_track};
+use crate::project_control::{edit_items, editable_project, item_json, resolve_track};
 
 const NO_ITEMS: &str = "give at least one item";
 
@@ -60,7 +60,7 @@ pub(crate) fn item_move(
             .push(item);
     }
     let reply = changed(&project, &order);
-    apply_items(state, project)?;
+    edit_items(state, project, count_label("move", order.len()))?;
     Ok(reply)
 }
 
@@ -91,7 +91,7 @@ pub(crate) fn item_trim(
         item.length = Some((new_end - new_start) as u64);
     }
     let reply = changed(&project, &[id]);
-    apply_items(state, project)?;
+    edit_items(state, project, "trim".to_string())?;
     Ok(reply)
 }
 
@@ -144,7 +144,7 @@ pub(crate) fn item_split(
         halves.extend([id, right_id]);
     }
     let reply = changed(&project, &halves);
-    apply_items(state, project)?;
+    edit_items(state, project, "split".to_string())?;
     Ok(reply)
 }
 
@@ -160,7 +160,7 @@ pub(crate) fn item_delete(state: &mut EngineState, ids: &[u64]) -> Result<Value,
     for &(track, index) in places.iter().rev() {
         project.tracks[track].items.remove(index);
     }
-    apply_items(state, project)?;
+    edit_items(state, project, count_label("delete", ids.len()))?;
     Ok(json!({ "deleted": ids }))
 }
 
@@ -180,8 +180,17 @@ pub(crate) fn item_take(state: &mut EngineState, id: u64, take: usize) -> Result
     item.take = take;
     item.length = item.length.map(|length| length.min(frames - item.offset));
     let reply = changed(&project, &[id]);
-    apply_items(state, project)?;
+    edit_items(state, project, format!("take {}", take + 1))?;
     Ok(reply)
+}
+
+/// `verb Item` for one Item, `verb <n> Items` for more.
+fn count_label(verb: &str, items: usize) -> String {
+    if items == 1 {
+        format!("{verb} Item")
+    } else {
+        format!("{verb} {items} Items")
+    }
 }
 
 /// `ids` with repeats left out; at least one.

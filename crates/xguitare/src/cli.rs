@@ -604,6 +604,8 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ProjectOpen { .. } => render_open(payload),
         Request::ProjectClose => format!("closed {}\n", text(&payload["name"])),
         Request::ProjectList => render_projects(payload),
+        Request::ProjectUndo => format!("undid {}\n", text(&payload["label"])),
+        Request::ProjectRedo => format!("redid {}\n", text(&payload["label"])),
         Request::Items => render_items(payload)?,
         Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
         Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),

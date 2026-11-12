@@ -32,9 +32,9 @@ use crate::project::{LoopRegion, MAX_BUSES, MAX_TRACKS, ProjectError};
 use crate::project_control::{
     ProjectRack, Projects, TrackChange, bypass_command, change_rack_module, click,
     create_projects_dir, items, param_command, project_close, project_list, project_new,
-    project_open, project_save, rack_preset, rebuild_arrangement, rebuild_arrangement_slots,
-    set_loop, set_rack_modules, status_fields, target_rack, tempo, track_add, track_remove,
-    track_select, track_set, transport,
+    project_open, project_redo, project_save, project_undo, rack_preset, rebuild_arrangement,
+    rebuild_arrangement_slots, set_loop, set_rack_modules, status_fields, target_rack, tempo,
+    track_add, track_remove, track_select, track_set, transport,
 };
 use crate::render::{RenderBits, RenderRange};
 use crate::render_control::{render, render_cancel};
@@ -184,6 +184,8 @@ pub enum Request {
     ProjectSave,
     ProjectClose,
     ProjectList,
+    ProjectUndo,
+    ProjectRedo,
     Items,
     TrackAdd {
         name: Option<String>,
@@ -621,6 +623,8 @@ fn handle_from(
         Request::ProjectSave => project_save(state),
         Request::ProjectClose => project_close(state),
         Request::ProjectList => project_list(state),
+        Request::ProjectUndo => project_undo(state),
+        Request::ProjectRedo => project_redo(state),
         Request::Items => items(state),
         Request::TrackAdd { name } => track_add(state, name.as_deref()),
         Request::TrackRemove { track } => track_remove(state, &track),
