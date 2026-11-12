@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::project::Item;
+use crate::project::{Item, Track};
 
 /// How many entries undo keeps; a new one past it drops the oldest.
 pub(crate) const HISTORY_DEPTH: usize = 200;
@@ -22,6 +22,8 @@ pub(crate) struct Entry {
 #[derive(Clone)]
 pub(crate) enum Change {
     Items(Vec<TrackItems>),
+    TrackAdded(PlacedTrack),
+    TrackRemoved(PlacedTrack),
 }
 
 /// One Track's Items before and after an edit, the Track named by its id.
@@ -30,6 +32,14 @@ pub(crate) struct TrackItems {
     pub track_id: u64,
     pub before: Vec<Item>,
     pub after: Vec<Item>,
+}
+
+/// A whole Track with its id and its index in the Project.
+#[derive(Clone)]
+pub(crate) struct PlacedTrack {
+    pub index: usize,
+    pub id: u64,
+    pub track: Track,
 }
 
 impl Change {
@@ -45,6 +55,8 @@ impl Change {
                     })
                     .collect(),
             ),
+            Change::TrackAdded(placed) => Change::TrackRemoved(placed),
+            Change::TrackRemoved(placed) => Change::TrackAdded(placed),
         }
     }
 }

@@ -6,11 +6,12 @@ use std::sync::atomic::Ordering;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
+use xguitare_core::arrangement::ArrangementCommand;
 use xguitare_core::control::{
     EngineState, PeakMeters, Request, Response, SendLevel, TrackRef, TransportAction, handle,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
-use xguitare_core::metronome::Metronome;
+use xguitare_core::metronome::{Metronome, MetronomeSettings};
 use xguitare_core::project::{Item, Project, Take};
 use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
@@ -204,6 +205,33 @@ fn trim(id: u64, start: u64) -> Request {
         id,
         start: Some(start),
         end: None,
+    }
+}
+
+fn rack(state: &mut EngineState, track: usize) -> Value {
+    ok(handle(
+        state,
+        Request::Get {
+            param: None,
+            track: Some(TrackRef::Index(track)),
+            bus: None,
+            master: false,
+        },
+    ))
+}
+
+fn fill_commands_to(state: &mut EngineState, free: usize) {
+    let filler = || {
+        Command::Metronome(MetronomeSettings {
+            on: false,
+            bpm: 120.0,
+            meter: (4, 4),
+            volume_db: -12.0,
+            sample_rate: 48_000.0,
+        })
+    };
+    while state.queues.commands.slots() > free {
+        assert!(state.queues.commands.push(filler()).is_ok());
     }
 }
 
@@ -412,4 +440,93 @@ fn item_ids_are_never_reused_after_undo_and_redo() {
     redo(&mut state);
     assert_eq!(items(&mut state)["tracks"][0]["items"][2]["id"], 5);
     assert_eq!(split(&mut state, 3500), 6);
+}
+
+#[test]
+fn a_removed_track_undone_comes_back_with_its_rack_mixer_and_items_in_its_place() {
+    let (mut state, mut audio, _dir) = state("remove");
+    open_song(&mut state);
+    ok(handle(&mut state, rack_add(1)));
+    ok(handle(&mut state, track_set(1, Some(-6.0), None)));
+    let before = (items(&mut state), status(&mut state)["tracks"].clone());
+    let bass_rack = rack(&mut state, 1);
+    drain(&mut audio);
+    ok(handle(
+        &mut state,
+        Request::TrackRemove {
+            track: TrackRef::Name("Bass".to_string()),
+        },
+    ));
+    let after = items(&mut state);
+    assert_eq!(labels(&mut state).0, json!("remove Track Bass"));
+    assert_eq!(undo(&mut state), json!({"label": "remove Track Bass"}));
+    assert_eq!(
+        (items(&mut state), status(&mut state)["tracks"].clone()),
+        before
+    );
+    assert_eq!(rack(&mut state, 1), bass_rack);
+    assert_eq!(redo(&mut state), json!({"label": "remove Track Bass"}));
+    assert_eq!(items(&mut state), after);
+    undo(&mut state);
+    assert_eq!(items(&mut state), before.0);
+}
+
+#[test]
+fn an_added_track_undone_goes_and_redone_comes_back_as_it_was() {
+    let (mut state, _audio, _dir) = state("add");
+    open_song(&mut state);
+    let before = items(&mut state);
+    ok(handle(
+        &mut state,
+        Request::TrackAdd {
+            name: Some("Drums".to_string()),
+        },
+    ));
+    ok(handle(&mut state, rack_add(3)));
+    let after = (items(&mut state), rack(&mut state, 3));
+    assert_eq!(undo(&mut state), json!({"label": "add Track Drums"}));
+    assert_eq!(items(&mut state), before);
+    assert_eq!(redo(&mut state), json!({"label": "add Track Drums"}));
+    assert_eq!(
+        (items(&mut state), rack(&mut state, 3)),
+        after,
+        "the Track comes back with the Rack it had when it was undone"
+    );
+}
+
+#[test]
+fn a_busy_engine_leaves_the_history_and_the_project_unchanged() {
+    let (mut state, mut audio, _dir) = state("busy");
+    open_song(&mut state);
+    ok(handle(&mut state, Request::ItemDelete { ids: vec![1, 3] }));
+    ok(handle(
+        &mut state,
+        Request::TrackRemove {
+            track: TrackRef::Index(2),
+        },
+    ));
+    undo(&mut state);
+    drain(&mut audio);
+    let before = (items(&mut state), labels(&mut state));
+    fill_commands_to(&mut state, 0);
+    let revision = state.revision;
+    for request in [Request::ProjectUndo, Request::ProjectRedo] {
+        assert_eq!(error(handle(&mut state, request)), "engine busy");
+    }
+    fill_commands_to(&mut state, 1);
+    assert_eq!(
+        error(handle(&mut state, Request::ProjectUndo)),
+        "engine busy",
+        "the delete changed two Tracks and one slot is free"
+    );
+    assert_eq!(state.revision, revision);
+    assert_eq!((items(&mut state), labels(&mut state)), before);
+    assert!(
+        !drain(&mut audio).iter().any(|command| matches!(
+            command,
+            Command::Arrangement(ArrangementCommand::SetTrackItems { .. })
+                | Command::SwapArrangement(_)
+        )),
+        "nothing reached the Engine"
+    );
 }

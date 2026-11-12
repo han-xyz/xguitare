@@ -15,7 +15,7 @@ use crate::control::{
 };
 use crate::engine::{Command, MeterPoint, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
-use crate::history::{Change, Entry, History, TrackItems};
+use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
 use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
@@ -519,7 +519,7 @@ pub(crate) fn project_open(
     if let Some(mismatch) = rate_mismatch(project.sample_rate, state.sample_rate) {
         return Err(mismatch);
     }
-    let takes = load_takes(&dir, &project)?;
+    let takes = missing_takes(&dir, &LoadedTakes::new(), &project)?;
     let payload = json!({
         "name": project.name,
         "path": dir.display().to_string(),
@@ -616,10 +616,16 @@ pub(crate) fn track_add(state: &mut EngineState, name: Option<&str>) -> Result<V
     let index = project.tracks.len() - 1;
     let mut track_ids = open.track_ids.clone();
     track_ids.push(open.next_track_id);
+    let id = open.next_track_id;
+    let track = project.tracks[index].clone();
     swap_project_with_ids(state, project, track_ids, NOTHING_MOVED, &mut Vec::new())?;
     let open = open_project_mut(state);
     open.next_track_id += 1;
     open.selected = index;
+    open.history.push(Entry {
+        label: format!("add Track {name}"),
+        change: Change::TrackAdded(PlacedTrack { index, id, track }),
+    });
     Ok(json!({"index": index, "name": name}))
 }
 
@@ -629,10 +635,22 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     if open.recording {
         return Err("cannot remove a track while recording".to_string());
     }
+    let removed = remove_track_at(state, index)?;
+    let name = removed.track.name.clone();
+    open_project_mut(state).history.push(Entry {
+        label: format!("remove Track {name}"),
+        change: Change::TrackRemoved(removed),
+    });
+    Ok(json!({"index": index, "name": name}))
+}
+
+/// Removes the Track at `index` and rebuilds the Arrangement; returns it as it was.
+fn remove_track_at(state: &mut EngineState, index: usize) -> Result<PlacedTrack, String> {
+    let open = open_project(state);
     let mut project = open.project.clone();
-    let removed = project.tracks.remove(index);
+    let track = project.tracks.remove(index);
     let mut track_ids = open.track_ids.clone();
-    track_ids.remove(index);
+    let id = track_ids.remove(index);
     let moved_from = (index, MAX_BUSES);
     swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())?;
     let open = open_project_mut(state);
@@ -644,7 +662,29 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
         .min(open.project.tracks.len().saturating_sub(1));
     let inputs = track_inputs(&open.project);
     state.projects.events.push(ProjectEvent::Inputs(inputs));
-    Ok(json!({"index": index, "name": removed.name}))
+    Ok(PlacedTrack { index, id, track })
+}
+
+/// Puts a Track back at its index with its id, loading its Takes not in memory, and rebuilds the Arrangement.
+fn restore_track(state: &mut EngineState, placed: &PlacedTrack) -> Result<(), String> {
+    let open = open_project(state);
+    let mut project = open.project.clone();
+    project.tracks.insert(placed.index, placed.track.clone());
+    check_project(&project).map_err(|err| err.to_string())?;
+    let mut track_ids = open.track_ids.clone();
+    track_ids.insert(placed.index, placed.id);
+    let had_tracks = !open.project.tracks.is_empty();
+    let missing = missing_takes(&open.dir, &open.takes, &project)?;
+    open_project_mut(state).takes.extend(missing);
+    let moved_from = (placed.index, MAX_BUSES);
+    swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())?;
+    let open = open_project_mut(state);
+    if had_tracks && placed.index <= open.selected {
+        open.selected += 1;
+    }
+    let inputs = track_inputs(&open.project);
+    state.projects.events.push(ProjectEvent::Inputs(inputs));
+    Ok(())
 }
 
 /// The values of a `track_set` request; `None` leaves that value as it is.
@@ -887,14 +927,7 @@ pub(crate) fn apply_items(state: &mut EngineState, project: Project) -> Result<(
     check_project(&project).map_err(|err| err.to_string())?;
     let open = open_project(state);
     let mut takes = open.takes.clone();
-    for item in project.tracks.iter().flat_map(|track| &track.items) {
-        let file = &item.takes[item.take].file;
-        if !takes.contains_key(file) {
-            let samples = load_take(&open.dir, file)
-                .map_err(|err| format!("cannot load take {file}: {err}"))?;
-            takes.insert(file.clone(), samples);
-        }
-    }
+    takes.extend(missing_takes(&open.dir, &open.takes, &project)?);
     let mut commands = Vec::new();
     if rate_mismatch(open.project.sample_rate, state.sample_rate).is_none() {
         let fade = item_fade_frames(state.sample_rate);
@@ -1017,6 +1050,14 @@ fn apply_change(state: &mut EngineState, change: Change) -> Result<Change, Strin
             apply_items(state, project)?;
             Ok(Change::Items(tracks))
         }
+        Change::TrackAdded(placed) => {
+            restore_track(state, &placed)?;
+            Ok(Change::TrackAdded(placed))
+        }
+        Change::TrackRemoved(placed) => {
+            let index = track_index(open_project(state), placed.id)?;
+            remove_track_at(state, index).map(Change::TrackRemoved)
+        }
     }
 }
 
@@ -1026,6 +1067,24 @@ fn track_index(open: &OpenProject, track_id: u64) -> Result<usize, String> {
         .iter()
         .position(|&id| id == track_id)
         .ok_or_else(|| format!("the track of this edit is gone (id {track_id})"))
+}
+
+/// The audio of each active Take of `project` not in `loaded`.
+fn missing_takes(
+    dir: &Path,
+    loaded: &LoadedTakes,
+    project: &Project,
+) -> Result<LoadedTakes, String> {
+    let mut missing = LoadedTakes::new();
+    for item in project.tracks.iter().flat_map(|track| &track.items) {
+        let file = &item.takes[item.take].file;
+        if !loaded.contains_key(file) && !missing.contains_key(file) {
+            let samples =
+                load_take(dir, file).map_err(|err| format!("cannot load take {file}: {err}"))?;
+            missing.insert(file.clone(), samples);
+        }
+    }
+    Ok(missing)
 }
 
 /// The Project fields of `status`, with `track_peaks` the input peaks of each Track and `mix` the post-fader peaks since this connection's last `status`.
@@ -1367,20 +1426,6 @@ pub(crate) fn send(state: &mut EngineState, commands: &[ArrangementCommand]) -> 
             .map_err(|_| ENGINE_BUSY.to_string())?;
     }
     Ok(())
-}
-
-fn load_takes(dir: &Path, project: &Project) -> Result<HashMap<String, Arc<[f32]>>, String> {
-    let mut takes = HashMap::new();
-    for item in project.tracks.iter().flat_map(|track| &track.items) {
-        let file = &item.takes[item.take].file;
-        if takes.contains_key(file) {
-            continue;
-        }
-        let samples =
-            load_take(dir, file).map_err(|err| format!("cannot load take {file}: {err}"))?;
-        takes.insert(file.clone(), samples);
-    }
-    Ok(takes)
 }
 
 pub(crate) fn resolve_track(project: &Project, track: &TrackRef) -> Result<usize, String> {
