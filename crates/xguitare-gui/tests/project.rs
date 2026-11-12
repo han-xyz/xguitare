@@ -10,18 +10,18 @@ use xguitare_gui::model::{
     Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
     requests_until_quit, response_message, restore,
 };
-use xguitare_gui::project_model::covered_stretches;
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
     ItemSelection, KeyFocus, LoopEdge, MainView, MoveDrag, MovePointer, ProjectRow, Tempo,
-    TimelineView, TrackRow, TransportState, TransportView, ViewSwitch, VisibleTake, autosave_offer,
-    bars_beats_text, dragged_loop, esc_clears_selection, grid_lines, hit_test, item_blocks,
-    item_key_to_command, item_name, item_node_action, items_in_box, key_active, move_preview,
-    parse_meter, project_end, project_key_to_command, project_name, project_rows, project_tempo,
-    recording_from, recording_span, restored_view, snap_to_beat, still_closing, time_text,
-    track_rows, transport_view, undo_text, waveform_columns,
+    TimelineView, TrackRow, TransportState, TransportView, TrimDrag, ViewSwitch, VisibleTake,
+    autosave_offer, bars_beats_text, copied_text, covered_stretches, dragged_loop,
+    esc_clears_selection, grid_lines, hit_test, item_blocks, item_key_to_command, item_name,
+    item_node_action, items_in_box, key_active, move_preview, parse_meter, project_end,
+    project_key_to_command, project_name, project_rows, project_tempo, recording_from,
+    recording_span, restored_view, snap_to_beat, still_closing, take_names, time_text, track_rows,
+    transport_view, trim_preview, trim_step_command, undo_text, visible_stretches,
+    waveform_columns,
 };
-use xguitare_gui::project_model::{TrimDrag, take_names, trim_preview, trim_step_command};
 
 const RATE: f64 = 48_000.0;
 const FOUR_FOUR: Tempo = Tempo {
@@ -1327,13 +1327,118 @@ fn the_undo_label_comes_from_status() {
 fn an_item_is_named_by_take_track_and_bar() {
     let item = block(9, BASS, 200_000, 48_000);
     assert_eq!(
-        item_name(&item, "Bass DI", RATE, FOUR_FOUR),
+        item_name(
+            &item,
+            std::slice::from_ref(&item),
+            "Bass DI",
+            RATE,
+            FOUR_FOUR
+        ),
         "Item t9, Bass DI, bar 3"
     );
+    let first = block(2, BASS, 0, 1);
     assert_eq!(
-        item_name(&block(2, BASS, 0, 1), "Bass DI", RATE, FOUR_FOUR),
+        item_name(
+            &first,
+            std::slice::from_ref(&first),
+            "Bass DI",
+            RATE,
+            FOUR_FOUR
+        ),
         "Item t2, Bass DI, bar 1"
     );
+}
+
+#[test]
+fn an_item_name_tells_its_take_count_and_what_covers_it() {
+    let lower = ItemBlock {
+        take: 1,
+        takes: 3,
+        ..block(1, GUITAR, 0, 400_000)
+    };
+    let items = vec![
+        lower.clone(),
+        block(2, GUITAR, 100_000, 50_000),
+        block(3, BASS, 0, 400_000),
+        block(4, GUITAR, 300_000, 200_000),
+    ];
+    assert_eq!(
+        item_name(&lower, &items, "Guitar", RATE, FOUR_FOUR),
+        "Item t1, Take 2 of 3, Guitar, bar 1, partly covered by t2 and t4"
+    );
+    assert_eq!(
+        item_name(&items[3], &items, "Guitar", RATE, FOUR_FOUR),
+        "Item t4, Guitar, bar 4"
+    );
+    let buried = vec![
+        block(5, GUITAR, 96_000, 48_000),
+        block(6, GUITAR, 0, 400_000),
+    ];
+    assert_eq!(
+        item_name(&buried[0], &buried, "Guitar", RATE, FOUR_FOUR),
+        "Item t5, Guitar, bar 2, covered by t6"
+    );
+}
+
+#[test]
+fn visible_stretches_are_what_the_items_above_leave_uncovered() {
+    let items = vec![
+        block(1, GUITAR, 0, 1000),
+        block(2, BASS, 100, 100),
+        block(3, GUITAR, 200, 200),
+        block(4, GUITAR, 900, 300),
+        block(5, GUITAR, 0, 50),
+    ];
+    assert_eq!(
+        visible_stretches(&items, 1),
+        [
+            Range {
+                start: 50,
+                end: 200
+            },
+            Range {
+                start: 400,
+                end: 900
+            }
+        ]
+    );
+    assert_eq!(
+        visible_stretches(&items, 4),
+        [Range {
+            start: 900,
+            end: 1200
+        }]
+    );
+    let buried = vec![block(6, GUITAR, 100, 100), block(7, GUITAR, 0, 400)];
+    assert_eq!(visible_stretches(&buried, 6), Vec::<Range<u64>>::new());
+}
+
+#[test]
+fn a_covered_item_answers_only_on_its_visible_stretches() {
+    let items = vec![
+        block(1, GUITAR, 0, 96_000),
+        block(2, GUITAR, 48_000, 96_000),
+    ];
+    let hit = |x| hit_test(&items, GUITAR, EDIT_VIEW, x);
+    assert_eq!(hit(50.0), ItemHit::Body(1));
+    assert_eq!(
+        hit(150.0),
+        ItemHit::Body(2),
+        "where the lower Item is covered"
+    );
+    assert_eq!(
+        hit(198.0),
+        ItemHit::Body(2),
+        "the lower Item's hidden end is not grabbed"
+    );
+    assert_eq!(hit(102.0), ItemHit::StartEdge(2));
+}
+
+#[test]
+fn copied_items_are_named_on_the_system_clipboard() {
+    let items = edit_items();
+    assert_eq!(copied_text(&items, &[3, 5]), "xguitare Items: t3, t5");
+    assert_eq!(copied_text(&items, &[1]), "xguitare Items: t1");
 }
 
 #[test]

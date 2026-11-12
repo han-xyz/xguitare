@@ -858,16 +858,55 @@ pub fn undo_text(status: &Value) -> Option<String> {
         .map(|label| format!("Undo: {label}"))
 }
 
-/// An Item's accessible name: `Item <take name>, <Track>, bar <n>`.
+/// An Item's accessible name: `Item <take name>, <Track>, bar <n>`, with `Take <n> of <count>` after the name when it has several Takes, and `partly covered by` or `covered by` the Take names of the Items above it on its Track at the end.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     reason = "a non-negative bar count far below u64::MAX"
 )]
-pub fn item_name(item: &ItemBlock, track: &str, sample_rate: f64, tempo: Tempo) -> String {
+pub fn item_name(
+    item: &ItemBlock,
+    items: &[ItemBlock],
+    track: &str,
+    sample_rate: f64,
+    tempo: Tempo,
+) -> String {
     let bar = (item.position as f64 / tempo.frames_per_bar(sample_rate)).floor() as u64 + 1;
-    format!("Item {}, {track}, bar {bar}", item.take_name)
+    let take = if item.takes > 1 {
+        format!(", Take {} of {}", item.take + 1, item.takes)
+    } else {
+        String::new()
+    };
+    let name = format!("Item {}{take}, {track}, bar {bar}", item.take_name);
+    let above: Vec<&str> = items
+        .iter()
+        .skip_while(|other| other.id != item.id)
+        .skip(1)
+        .filter(|top| {
+            top.track_id == item.track_id && top.position < item.end() && item.position < top.end()
+        })
+        .map(|top| top.take_name.as_str())
+        .collect();
+    if above.is_empty() {
+        return name;
+    }
+    let cover = if visible_stretches(items, item.id).is_empty() {
+        "covered"
+    } else {
+        "partly covered"
+    };
+    format!("{name}, {cover} by {}", above.join(" and "))
+}
+
+/// The text an `item_copy` from the GUI puts on the system clipboard, so that the next Ctrl+V always reaches the window as a paste: the copied Items' Take names.
+pub fn copied_text(items: &[ItemBlock], ids: &[u64]) -> String {
+    let names: Vec<&str> = items
+        .iter()
+        .filter(|item| ids.contains(&item.id))
+        .map(|item| item.take_name.as_str())
+        .collect();
+    format!("xguitare Items: {}", names.join(", "))
 }
 
 /// Pixels inside an Item's start and end that grab the edge rather than the body; at most a third of the Item each.
@@ -940,6 +979,25 @@ pub fn covered_stretches(items: &[ItemBlock], id: u64) -> Vec<Range<u64>> {
         }
     }
     merged
+}
+
+/// The timeline frames of the Item `id` that no Item after it in `items` on its Track covers, where it is heard and drawn; in order.
+pub fn visible_stretches(items: &[ItemBlock], id: u64) -> Vec<Range<u64>> {
+    let Some(item) = items.iter().find(|item| item.id == id) else {
+        return Vec::new();
+    };
+    let mut visible = Vec::new();
+    let mut from = item.position;
+    for covered in covered_stretches(items, id) {
+        if covered.start > from {
+            visible.push(from..covered.start);
+        }
+        from = covered.end;
+    }
+    if from < item.end() {
+        visible.push(from..item.end());
+    }
+    visible
 }
 
 /// The ids of the Items on the Tracks `track_ids` that overlap the timeline `frames`, in `items` order.

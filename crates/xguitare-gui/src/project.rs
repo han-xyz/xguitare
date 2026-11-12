@@ -1,3 +1,4 @@
+use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
     Align2, Button, Color32, ComboBox, CursorIcon, DragValue, EventFilter, Frame, Id, Key, Margin,
     Modifiers, Painter, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, SetOpenCommand,
@@ -19,11 +20,11 @@ use crate::model::{
 use crate::project_model::{
     EDGE_GRAB_PX, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
     ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView,
-    TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, covered_stretches,
-    dragged_loop, grid_lines, grid_step, hit_test, item_blocks, item_name, item_node_action,
-    items_in_box, move_preview, nearest_line, nudge_command, parse_meter, project_key_to_command,
-    project_tempo, recording_span, sample_rate, snap_to_beat, take_names, time_text, track_colour,
-    track_rows, track_step_command, transport_view, trim_preview, trim_step_command,
+    TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, dragged_loop, grid_lines,
+    grid_step, hit_test, item_blocks, item_name, item_node_action, items_in_box, move_preview,
+    nearest_line, nudge_command, parse_meter, project_key_to_command, project_tempo,
+    recording_span, sample_rate, snap_to_beat, take_names, time_text, track_colour, track_rows,
+    track_step_command, transport_view, trim_preview, trim_step_command, visible_stretches,
     waveform_columns,
 };
 use crate::rack::muted_text;
@@ -70,8 +71,12 @@ const SWITCH_GAP: f32 = 3.0;
 const KNOB_COLUMN_WIDTH: f32 = 64.0;
 const SWATCH_WIDTH: f32 = 5.0;
 const ITEM_INSET: f32 = 6.0;
-/// How much lower an Item's plate starts where it covers another, showing the covered stretch above it.
-const COVER_INSET: f32 = theme::SPACE_S;
+/// The `well` gap around an Item that lies over another, so that its edge reads against the plate pieces beside it.
+const COVER_GAP: f32 = 1.0;
+/// The fewest characters of an Item's name worth showing on a plate piece; a narrower piece shows no name.
+const MIN_NAME_CHARS: usize = 4;
+/// The mark after the active Take in an Item's menu.
+const TAKE_MARK: &str = "✔";
 /// Where a Take's waveform starts below its plate's top: under the top edge and the Take's name.
 const WAVE_TOP: f32 = UNIT_EDGE_WIDTH + theme::SPACE_XS + theme::SPACE_L;
 /// The loop region's lit tint over the lanes (project mockup: loop overlay, 13 %).
@@ -632,24 +637,6 @@ impl Scene {
         .intersect(lane)
     }
 
-    /// An Item's plate on `lane`: an Item that lies over part of one before it in `items` starts [`COVER_INSET`] lower, so that the dimmed stretch it covers shows above it.
-    fn item_plate(&self, lane: Rect, items: &[ItemBlock], item: &ItemBlock) -> Rect {
-        let plate = self.plate(lane, item.position, item.length);
-        let covers = items
-            .iter()
-            .take_while(|lower| lower.id != item.id)
-            .any(|lower| {
-                lower.track_id == item.track_id
-                    && lower.position < item.end()
-                    && item.position < lower.end()
-            });
-        if covers {
-            Rect::from_min_max(pos2(plate.left(), plate.top() + COVER_INSET), plate.max)
-        } else {
-            plate
-        }
-    }
-
     fn paint_grid(&self, painter: &Painter, rect: Rect) {
         let colours = palette();
         for line in &self.grid {
@@ -930,36 +917,7 @@ fn paint_lane(
     let rows = lane.top() + ITEM_INSET..=lane.bottom() - ITEM_INSET;
     let track = track_colour(row.index);
     for item in items.iter().filter(|item| item.track_id == row.id) {
-        let span = scene.item_plate(lane, items, item);
-        paint_take(painter, span, item, track);
-        let inner = span.shrink(TAKE_EDGE_WIDTH);
-        paint_item_waveform(
-            &painter.with_clip_rect(inner),
-            (lane, inner),
-            item,
-            peaks,
-            scene,
-            track,
-        );
-        for stretch in covered_stretches(items, item.id) {
-            let covered = ItemBlock {
-                position: stretch.start,
-                offset: item.offset + (stretch.start - item.position),
-                length: stretch.end - stretch.start,
-                ..item.clone()
-            };
-            let body = scene
-                .plate(lane, covered.position, covered.length)
-                .x_range();
-            let body = Rect::from_x_y_ranges(body, inner.y_range()).intersect(inner);
-            paint_covered(
-                &painter.with_clip_rect(body),
-                (lane, body),
-                &covered,
-                peaks,
-                scene,
-            );
-        }
+        paint_item(painter, lane, (items, item), peaks, scene, track);
     }
     if row.armed
         && let Some((from, to)) = scene.recording
@@ -974,7 +932,7 @@ fn paint_lane(
         .iter()
         .filter(|item| item.track_id == row.id && scene.selected.contains(item.id))
     {
-        paint_selection(painter, scene.item_plate(lane, items, item));
+        paint_selection(painter, scene.plate(lane, item.position, item.length));
     }
 }
 
@@ -995,26 +953,66 @@ fn paint_item_waveform(
     }
 }
 
-/// A stretch of an Item that an Item above covers, so that it is not heard: dimmed to the `panel` body with a `boundary` top edge and waveform and no name, over `body`.
-fn paint_covered(
+/// An Item as heard: one plate piece per stretch no later Item covers, each with its Track-colour top edge and its part of the waveform, and the Take's name once, in the first piece wide enough for [`MIN_NAME_CHARS`] of it, cut short with an ellipsis. An Item over another has a [`COVER_GAP`] `well` gap around its plate.
+fn paint_item(
     painter: &Painter,
-    (lane, body): (Rect, Rect),
-    covered: &ItemBlock,
+    lane: Rect,
+    (items, item): (&[ItemBlock], &ItemBlock),
     peaks: &HashMap<String, Arc<[i8]>>,
     scene: &Scene,
+    track: Rgb,
 ) {
-    let colours = palette();
-    painter.rect_filled(body, 0, colour(colours.panel));
-    let edge = Rect::from_min_size(body.min, vec2(body.width(), UNIT_EDGE_WIDTH));
-    painter.rect_filled(edge, 0, colour(colours.boundary));
-    paint_item_waveform(
-        painter,
-        (lane, body),
-        covered,
-        peaks,
-        scene,
-        colours.boundary,
-    );
+    let covers = items
+        .iter()
+        .take_while(|lower| lower.id != item.id)
+        .any(|lower| {
+            lower.track_id == item.track_id
+                && lower.position < item.end()
+                && item.position < lower.end()
+        });
+    if covers {
+        let plate = scene.plate(lane, item.position, item.length);
+        painter.rect_stroke(
+            plate,
+            RADIUS_CONTROL,
+            Stroke::new(COVER_GAP, colour(palette().well)),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let mut name = Some(item.label());
+    for stretch in visible_stretches(items, item.id) {
+        let piece = ItemBlock {
+            position: stretch.start,
+            offset: item.offset + (stretch.start - item.position),
+            length: stretch.end - stretch.start,
+            ..item.clone()
+        };
+        let span = scene.plate(lane, piece.position, piece.length);
+        if !span.is_positive() {
+            continue;
+        }
+        let shown = name.take_if(|name| fits_name(painter, span, name));
+        paint_take(painter, span, shown.as_deref(), track);
+        let inner = span.shrink(TAKE_EDGE_WIDTH);
+        paint_item_waveform(
+            &painter.with_clip_rect(inner),
+            (lane, inner),
+            &piece,
+            peaks,
+            scene,
+            track,
+        );
+    }
+}
+
+/// Whether a plate piece `span` holds [`MIN_NAME_CHARS`] of `name` beside its inset.
+fn fits_name(painter: &Painter, span: Rect, name: &str) -> bool {
+    let start: String = name.chars().take(MIN_NAME_CHARS).collect();
+    let width = painter
+        .layout_no_wrap(start, theme::legend(), Color32::PLACEHOLDER)
+        .size()
+        .x;
+    span.width() >= width + 2.0 * theme::SPACE_XS
 }
 
 /// A selected Item's mark around its plate, over the loop edges and the playhead so that it stays one closed shape: a [`SELECTED_OUTLINE`] `lit` ring a [`HALO_WIDTH`] `well` gap outside the plate with thicker corners, all on a `well` halo, so that it holds against the lane and any plate next to it and reads by its shape as well as its colour.
@@ -1091,7 +1089,7 @@ fn item_nodes(
     let track_ids: Vec<u64> = lanes.iter().map(|lane| lane.track_id).collect();
     let mut command = None;
     for (item, lane) in placed {
-        let plate = scene.item_plate(lane.rect, items, item);
+        let plate = scene.plate(lane.rect, item.position, item.length);
         if !plate.is_positive() {
             continue;
         }
@@ -1099,7 +1097,7 @@ fn item_nodes(
         let node = if inside.is_positive() { inside } else { plate };
         let id = item_node_id(item.id);
         let response = ui.interact(node, id, Sense::FOCUSABLE);
-        let name = item_name(item, &lane.name, rate, tempo);
+        let name = item_name(item, items, &lane.name, rate, tempo);
         response.widget_info(|| WidgetInfo::labeled(Role::ListItem, true, &name));
         let selected = view.selection.contains(item.id);
         ui.ctx()
@@ -1144,6 +1142,15 @@ fn item_nodes(
     command
 }
 
+/// A Take in an Item's menu; the active one in `lit` with a `lit` check mark after it, so that it is not told by a fill alone.
+fn take_entry(name: &str, active: bool) -> Button<'static> {
+    if !active {
+        return Button::new(name.to_owned());
+    }
+    let lit = colour(palette().lit);
+    Button::new(RichText::new(name).color(lit)).shortcut_text(RichText::new(TAKE_MARK).color(lit))
+}
+
 /// What the Item and lane menus need besides the Items: the `items` payload for the Take names, and whether the clipboard holds anything.
 struct MenuContext<'a> {
     payload: Option<&'a Value>,
@@ -1164,7 +1171,9 @@ fn item_menu(
         .unwrap_or_default();
     let mut command = None;
     for (take, name) in names.iter().enumerate() {
-        let entry = ui.selectable_label(take == item.take, name);
+        let active = take == item.take;
+        let entry = ui.add(take_entry(name, active));
+        entry.widget_info(|| WidgetInfo::selected(Role::Button, true, active, name));
         if take == 0 && focus_first {
             entry.request_focus();
         }
@@ -1574,7 +1583,7 @@ fn paint_haloed_line(painter: &Painter, x: f32, lane: Rect, width: f32, ink: Rgb
 }
 
 /// A plate on the lane: the Take body with a top edge in the Track colour and the Take's name on the body.
-fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
+fn paint_take(painter: &Painter, span: Rect, name: Option<&str>, track: Rgb) {
     let colours = palette();
     painter.rect(
         span,
@@ -1583,7 +1592,7 @@ fn paint_take(painter: &Painter, span: Rect, item: &ItemBlock, track: Rgb) {
         Stroke::new(TAKE_EDGE_WIDTH, colour(colours.take_edge)),
         egui::StrokeKind::Inside,
     );
-    paint_plate_top(painter, span, track, &item.label());
+    paint_plate_top(painter, span, track, name);
 }
 
 /// A zero line and min/max columns in `ink` from `left`, one per pixel, over the plate body below the Take's name, so silence reads as a flat line.
@@ -1610,14 +1619,20 @@ fn paint_waveform(painter: &Painter, span: Rect, left: f32, columns: &[(i8, i8)]
 }
 
 /// A Take plate's top edge in `edge` and `name` on the body below it.
-fn paint_plate_top(painter: &Painter, span: Rect, edge: Rgb, name: &str) {
+fn paint_plate_top(painter: &Painter, span: Rect, edge: Rgb, name: Option<&str>) {
     let top = Rect::from_min_size(span.min, vec2(span.width(), UNIT_EDGE_WIDTH));
     painter.rect_filled(top, 0, colour(edge));
-    painter.with_clip_rect(span).text(
+    let Some(name) = name else {
+        return;
+    };
+    let mut job = LayoutJob::single_section(
+        name.to_owned(),
+        TextFormat::simple(theme::legend(), colour(palette().text)),
+    );
+    job.wrap = TextWrapping::truncate_at_width(span.width() - 2.0 * theme::SPACE_XS);
+    painter.with_clip_rect(span).galley(
         span.left_top() + vec2(theme::SPACE_XS, UNIT_EDGE_WIDTH + theme::SPACE_XS),
-        Align2::LEFT_TOP,
-        name,
-        theme::legend(),
+        painter.layout_job(job),
         colour(palette().text),
     );
 }
@@ -1626,7 +1641,7 @@ fn paint_plate_top(painter: &Painter, span: Rect, edge: Rgb, name: &str) {
 fn paint_recording_take(painter: &Painter, span: Rect, name: &str) {
     let colours = palette();
     painter.rect_filled(span, RADIUS_CONTROL, colour(colours.recording_take));
-    paint_plate_top(painter, span, colours.danger, name);
+    paint_plate_top(painter, span, colours.danger, Some(name));
     let corners = [
         span.left_top(),
         span.right_top(),

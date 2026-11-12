@@ -1499,7 +1499,7 @@ fn clicking_a_track_row_selects_it() {
     assert_eq!(sent_now(&sent), [Command::TrackSelect(2)]);
 }
 
-const GUITAR_ITEM: &str = "Item guitar-2, Guitar, bar 2";
+const GUITAR_ITEM: &str = "Item guitar-2, Take 2 of 2, Guitar, bar 2";
 const BASS_ITEM: &str = "Item bass-1, Bass, bar 1";
 /// Pixels per beat at the default zoom: 24 000 frames at 480 frames per pixel.
 const BEAT_PX: f32 = 50.0;
@@ -1669,7 +1669,10 @@ fn both_halves_of_a_split_stay_selected_and_the_footer_shows_the_undo_label() {
     updates.send(split).unwrap();
     harness.run_steps(2);
     assert!(item_selected(&harness, GUITAR_ITEM));
-    assert!(item_selected(&harness, "Item guitar-2, Guitar, bar 3"));
+    assert!(item_selected(
+        &harness,
+        "Item guitar-2, Take 2 of 2, Guitar, bar 3"
+    ));
     harness.get_by_label("Undo: split Item");
 }
 
@@ -1890,6 +1893,10 @@ fn the_item_menu_chooses_a_take_and_edits_the_item() {
         Some(egui::accesskit::Toggled::True),
         "the active Take is marked"
     );
+    assert_eq!(
+        harness.get_by_label("guitar-1").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::False)
+    );
     sent_now(&sent);
     harness.get_by_label("guitar-1").click();
     harness.run_steps(2);
@@ -1987,6 +1994,9 @@ fn t_and_ctrl_keys_take_duplicate_copy_and_paste() {
     assert!(!item_selected(&harness, GUITAR_ITEM));
 }
 
+const EDITING_GUITAR_ITEM: &str =
+    "Item guitar-2, Take 2 of 3, Guitar, bar 2, partly covered by punch-1";
+
 /// The zoom of the 1024x640 editing snapshots, so that the punch-in, the trimmed edge and the pasted Item fit the narrow lanes.
 const EDITING_ZOOM_1024: f32 = 0.25;
 
@@ -2026,13 +2036,13 @@ fn trim_menu_overlap_and_paste_snapshots() {
         write_png(&mut overlap, &format!("item-overlap-{suffix}"));
 
         let (mut trim, _, _dir) = editing(editing_snapshot());
-        let plate = item_rect(&trim, GUITAR_ITEM);
+        let plate = item_rect(&trim, EDITING_GUITAR_ITEM);
         let edge = pos2(plate.left() - 1.0, plate.center().y);
         press_and_drag(&mut trim, edge, edge + Vec2::new(2.0 * beat + 3.0, 0.0));
         write_png(&mut trim, &format!("item-trim-{suffix}"));
 
         let (mut menu, _, _dir) = editing(editing_snapshot());
-        let plate = item_rect(&menu, GUITAR_ITEM);
+        let plate = item_rect(&menu, EDITING_GUITAR_ITEM);
         right_click_at(&mut menu, pos2(plate.left() + beat / 2.0, plate.center().y));
         write_png(&mut menu, &format!("item-menu-{suffix}"));
 
@@ -2056,7 +2066,67 @@ fn trim_menu_overlap_and_paste_snapshots() {
         updates.send(pasted).unwrap();
         paste.run_steps(2);
         write_png(&mut paste, &format!("item-paste-{suffix}"));
+
+        for (clipboard, state) in [(1, "enabled"), (0, "greyed")] {
+            let mut snapshot = editing_snapshot();
+            snapshot.status.as_mut().unwrap()["clipboard"] = json!(clipboard);
+            let (mut menu, _, _dir) = editing(snapshot);
+            let at = keys_lane_point(&menu, 2.0 * beat);
+            right_click_at(&mut menu, at);
+            write_png(&mut menu, &format!("lane-paste-{state}-{suffix}"));
+        }
     }
+}
+
+fn copied_text_sent(harness: &Harness<App>) -> Vec<String> {
+    harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn copying_items_names_them_on_the_system_clipboard() {
+    let (mut harness, sent, _dir) = project_harness("stopped");
+    let at = item_rect(&harness, GUITAR_ITEM).center();
+    click_at(&mut harness, at);
+    sent_now(&sent);
+    harness.event(Event::Copy);
+    harness.step();
+    assert_eq!(copied_text_sent(&harness), ["xguitare Items: guitar-2"]);
+    assert_eq!(sent_now(&sent), [Command::ItemCopy(vec![1])]);
+}
+
+#[test]
+fn a_paste_into_a_text_field_types_and_pastes_no_items() {
+    let (mut harness, sent, _dir) =
+        harness_with(WINDOW, with_clipboard(project_snapshot("stopped"), 1));
+    harness
+        .get_by_role_and_label(Role::TextInput, "Track 1")
+        .focus();
+    harness.run_steps(2);
+    sent_now(&sent);
+    harness.event(Event::Paste("X".to_string()));
+    harness.run_steps(2);
+    assert!(
+        !sent_now(&sent)
+            .iter()
+            .any(|command| matches!(command, Command::ItemPaste { .. }))
+    );
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::TextInput, "Track 1")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("GuitarX")
+    );
 }
 
 #[test]

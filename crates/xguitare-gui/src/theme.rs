@@ -243,7 +243,7 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
     let mut pairs = vec![
         pair("boundary on case", c.boundary, c.case),
         pair(
-            "boundary on panel; also a Metronome beat's ring, a drag ghost's edge on its body, and a covered stretch's top edge and waveform",
+            "boundary on panel; also a Metronome beat's ring and a drag ghost's edge on its body",
             c.boundary,
             c.panel,
         ),
@@ -311,11 +311,10 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("clip LED lit on clip off", c.danger, c.clip_off),
         pair("fader cap on panel", c.ear_edge, c.panel),
         pair("fader cap on well", c.ear_edge, c.well),
-        pair("Take edge on the lane", c.take_edge, c.well),
         pair(
-            "Take edge on the covered stretch below it",
+            "Take edge on the lane; also on the well gap between an Item and one it lies over",
             c.take_edge,
-            c.panel,
+            c.well,
         ),
         pair("recording Take edge", c.danger, c.recording_take),
         pair("loop edges on the recording Take", c.lit, c.recording_take),
@@ -378,7 +377,6 @@ pub fn decorative_pairs() -> Vec<ContrastPair> {
         pair("timeline beat line on the lane", c.grid_beat, c.well),
         pair("ruler bar line on the ruler", c.grid_bar, c.ruler),
         pair("transport LCD well on panel", c.well, c.panel),
-        pair("covered stretch on its Take", c.panel, c.panel_open),
     ];
     pairs.extend(MODULE_ACCENTS.iter().map(|(_, accent)| {
         pair(

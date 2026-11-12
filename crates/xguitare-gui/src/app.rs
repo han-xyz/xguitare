@@ -27,7 +27,7 @@ use crate::project::{
     ProjectView, TIMELINE_HEIGHT, autosave_prompt, item_node_id, tracks_view, transport_bar,
 };
 use crate::project_model::{
-    AutosaveOffer, KeyFocus, MainView, ViewSwitch, esc_clears_selection, item_blocks,
+    AutosaveOffer, KeyFocus, MainView, ViewSwitch, copied_text, esc_clears_selection, item_blocks,
     item_key_to_command, key_active, project_key_to_command, project_name, recording_from,
     restored_view, transport_view,
 };
@@ -552,6 +552,18 @@ impl eframe::App for App {
             )
         }) {
             self.project_view.select_new = true;
+        }
+        if let Some(Command::ItemCopy(ids)) = commands
+            .iter()
+            .rfind(|command| matches!(command, Command::ItemCopy(_)))
+        {
+            let items = self
+                .snapshot
+                .items
+                .as_ref()
+                .map(item_blocks)
+                .unwrap_or_default();
+            ui.ctx().copy_text(copied_text(&items, ids));
         }
         remember_removes(&mut self.removing, &commands);
         self.remember_undo(&commands, now);
