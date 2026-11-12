@@ -129,8 +129,12 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("text on case", c.text, c.case),
         pair("text on panel", c.text, c.panel),
         pair("text on panel open", c.text, c.panel_open),
-        pair("text on well", c.text, c.well),
-        pair("text on hover", c.text, c.hover),
+        pair(
+            "text on well; also the pressed edge and the cents centre mark",
+            c.text,
+            c.well,
+        ),
+        pair("text on hover; also the selection stroke", c.text, c.hover),
         pair("text on beat light", c.text, c.arc_track),
         pair("muted on case", c.muted, c.case),
         pair("muted on panel", c.muted, c.panel),
@@ -150,9 +154,17 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("go on case", c.go, c.case),
         pair("go on panel", c.go, c.panel),
         pair("lit on panel", c.lit, c.panel),
-        pair("lit on panel open", c.lit, c.panel_open),
+        pair(
+            "lit on panel open; also the lit lamp ring",
+            c.lit,
+            c.panel_open,
+        ),
         pair("lit on beat light", c.lit, c.arc_track),
-        pair("go on panel open", c.go, c.panel_open),
+        pair(
+            "go on panel open; also the Tuner lamp ring",
+            c.go,
+            c.panel_open,
+        ),
         pair("bypass text on well", c.bypass_text, c.well),
         pair("bypass text on hover", c.bypass_text, c.hover),
         pair("danger text on well", c.danger_text, c.well),
@@ -161,10 +173,11 @@ pub fn text_pairs() -> Vec<ContrastPair> {
         pair("on accent on bypass arc", c.on_accent, c.bypass_arc),
         pair("rack position on ear edge", c.on_accent, c.ear_edge),
         pair("rack position on ear centre", c.on_accent, c.ear_centre),
-        pair("lit on well", c.lit, c.well),
-        pair("chevron on panel", c.hover_boundary, c.panel),
-        pair("chevron on panel open", c.hover_boundary, c.panel_open),
-        pair("chevron on bypass panel", c.hover_boundary, c.bypass_panel),
+        pair(
+            "lit on well; also the edit border and the cents needle",
+            c.lit,
+            c.well,
+        ),
     ]
 }
 
@@ -178,7 +191,6 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("boundary on well", c.boundary, c.well),
         pair("boundary on bypass panel", c.boundary, c.bypass_panel),
         pair("boundary on hover", c.boundary, c.hover),
-        pair("selection stroke on selection", c.text, c.hover),
         pair("danger on case", c.danger, c.case),
         pair("danger on panel", c.danger, c.panel),
         pair("focus ring on case", c.focus_ring, c.case),
@@ -186,12 +198,9 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("focus ring on panel open", c.focus_ring, c.panel_open),
         pair("focus ring on bypass panel", c.focus_ring, c.bypass_panel),
         pair("bypass arc on bypass panel", c.bypass_arc, c.bypass_panel),
-        pair("lit on panel open", c.lit, c.panel_open),
-        pair("go on panel open", c.go, c.panel_open),
         pair("danger on panel open", c.danger, c.panel_open),
         pair("hover boundary on hover", c.hover_boundary, c.hover),
         pair("hover boundary on well", c.hover_boundary, c.well),
-        pair("pressed edge on well", c.text, c.well),
         pair(
             "bypassed pointer on knob highlight",
             c.bypass_text,
@@ -199,18 +208,56 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         ),
         pair("danger on hover", c.danger, c.hover),
         pair("danger on well", c.danger, c.well),
-        pair("tick on panel", c.hover_boundary, c.panel),
-        pair("tick on panel open", c.hover_boundary, c.panel_open),
-        pair("tick on bypass panel", c.hover_boundary, c.bypass_panel),
+        pair("tick and chevron on panel", c.hover_boundary, c.panel),
+        pair(
+            "tick and chevron on panel open",
+            c.hover_boundary,
+            c.panel_open,
+        ),
+        pair(
+            "tick and chevron on bypass panel",
+            c.hover_boundary,
+            c.bypass_panel,
+        ),
         pair("pointer on knob highlight", c.text, c.knob_highlight),
         pair("pointer on knob shadow", c.text, c.knob_shadow),
         pair("knob rim on knob shadow", c.boundary, c.knob_shadow),
-        pair("edit border on well", c.lit, c.well),
         pair("focus ring on focus gap", c.focus_ring, c.on_accent),
         pair("focus ring on hover", c.focus_ring, c.hover),
         pair("focus ring on well", c.focus_ring, c.well),
-        pair("cents needle on well", c.lit, c.well),
-        pair("centre mark on well", c.text, c.well),
+    ]
+}
+
+/// Pure decoration: divider rules, band-title underlines, screw rings, the faceplate edge of the meter bridge and the Tuner, the knob body's gradient, the unlit LED and arc track. These mark no control and no state, so WCAG 1.4.11 sets them no floor; anything that outlines or identifies a control belongs in [`boundary_pairs`].
+pub fn decorative_pairs() -> Vec<ContrastPair> {
+    let c = palette();
+    vec![
+        pair("header rule on panel", c.knob_highlight, c.panel),
+        pair(
+            "header and band title rule on panel open",
+            c.knob_highlight,
+            c.panel_open,
+        ),
+        pair(
+            "header rule on bypass panel",
+            c.knob_highlight,
+            c.bypass_panel,
+        ),
+        pair("screw ring on ear edge", c.knob_highlight, c.ear_edge),
+        pair("screw hole on ear edge", c.well, c.ear_edge),
+        pair("engraving highlight on ear edge", c.ear_centre, c.ear_edge),
+        pair("faceplate edge on panel", c.hover, c.panel),
+        pair("faceplate edge on panel open", c.hover, c.panel_open),
+        pair("rack frame on case", c.hover, c.case),
+        pair("unit bottom edge on panel", c.well, c.panel),
+        pair("eq grid on well", c.hover, c.well),
+        pair(
+            "knob highlight on knob shadow",
+            c.knob_highlight,
+            c.knob_shadow,
+        ),
+        pair("arc track on panel", c.arc_track, c.panel),
+        pair("arc track on panel open", c.arc_track, c.panel_open),
     ]
 }
 
@@ -225,6 +272,9 @@ pub const SPACE_S: f32 = 8.0;
 pub const SPACE_M: f32 = 12.0;
 pub const SPACE_L: f32 = 16.0;
 pub const SPACE_XL: f32 = 24.0;
+
+/// The Module-coloured edge along a Rack unit's top.
+pub const UNIT_EDGE_WIDTH: f32 = 2.0;
 
 pub const RADIUS_LED: u8 = 1;
 pub const RADIUS_CONTROL: u8 = 3;
@@ -336,6 +386,11 @@ pub fn ear_number() -> FontId {
 /// An eq band column's title.
 pub fn band_title() -> FontId {
     FontId::new(TEXT_BODY, family_semibold())
+}
+
+/// The note in the open Tuner view.
+pub fn tuner_note() -> FontId {
+    FontId::monospace(TEXT_DISPLAY)
 }
 
 /// The cents beside the Tuner note.

@@ -314,14 +314,18 @@ fn project_harness(transport: &str) -> (Harness<'static, App>, Receiver<Command>
     harness_with(WINDOW, project_snapshot(transport))
 }
 
-fn click_unit_switch(harness: &mut Harness<App>, unit: &str, label: &str) {
-    let unit_rect = harness.get_by_label(&format!("{unit} unit")).rect();
-    harness
-        .get_all_by_role_and_label(Role::Button, label)
-        .find(|switch| unit_rect.contains_rect(switch.rect()))
-        .unwrap_or_else(|| panic!("no {label} switch in the {unit} unit"))
-        .click();
+/// Clicks the On/Off switch named `name`: the Module's name, or `Tuner`.
+fn click_unit_switch(harness: &mut Harness<App>, name: &str) {
+    harness.get_by_role_and_label(Role::Switch, name).click();
     harness.run_steps(2);
+}
+
+fn switch_is_on(harness: &Harness<App>, name: &str) -> bool {
+    harness
+        .get_by_role_and_label(Role::Switch, name)
+        .accesskit_node()
+        .toggled()
+        == Some(egui::accesskit::Toggled::True)
 }
 
 fn snapshot_dir() -> PathBuf {
@@ -465,7 +469,7 @@ fn gui_snapshots() {
     write_png(&mut two_open, "two-units-open");
 
     let (mut tuner, _, _dir) = harness();
-    click_unit_switch(&mut tuner, "Tuner", "Off");
+    click_unit_switch(&mut tuner, "Tuner");
     write_png(&mut tuner, "tuner-open");
 
     let (mut save_as, _, _dir) = harness();
@@ -494,11 +498,8 @@ fn gui_snapshots() {
     write_png(&mut harness_with(WINDOW, muted_snapshot()).0, "mute-banner");
 
     let (mut switch_focus, _, _dir) = harness();
-    let unit_rect = switch_focus.get_by_label("compressor unit").rect();
     switch_focus
-        .get_all_by_role_and_label(Role::Button, "On")
-        .find(|switch| unit_rect.contains_rect(switch.rect()))
-        .unwrap()
+        .get_by_role_and_label(Role::Switch, "Compressor")
         .focus();
     write_png(&mut switch_focus, "switch-focused");
 
@@ -1029,6 +1030,19 @@ fn eq_snapshots() {
     write_png(&mut defaults, "eq-defaults");
     let (mut closed, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&EQ_EXAMPLE));
     write_png(&mut closed, "eq-closed");
+    let (mut flat, _, _dir) = harness_with(DEFAULT_WINDOW, eq_snapshot(&[]));
+    flat.get_by_label("flat");
+    write_png(&mut flat, "eq-closed-flat");
+    let mut bypassed = eq_snapshot(&EQ_EXAMPLE);
+    for param in bypassed.params.as_mut().unwrap()["params"]
+        .as_array_mut()
+        .unwrap()
+    {
+        param["bypass"] = json!(param["module"] == "eq");
+    }
+    let (mut bypassed, _, _dir) = harness_with(DEFAULT_WINDOW, bypassed);
+    assert!(!switch_is_on(&bypassed, "EQ"));
+    write_png(&mut bypassed, "eq-closed-bypassed");
 }
 
 #[test]
@@ -1057,7 +1071,7 @@ fn open_eq_holds_its_curve_and_band_knobs() {
         harness.get_by_role_and_label(Role::Slider, "Mid 1 Freq");
         harness.get_by_role_and_label(Role::Slider, "Mid 2 Q");
         harness.get_by_role_and_label(Role::Slider, "Threshold");
-        harness.get_by_label("EQ");
+        harness.get_by_role_and_label(Role::Label, "EQ");
     }
 }
 
@@ -1550,8 +1564,10 @@ fn tile_dropped_outside_the_rack_adds_nothing() {
 #[test]
 fn unit_switch_sends_bypass() {
     let (mut harness, sent, _dir) = harness_with(WINDOW, bypassed_snapshot(&["chorus"]));
-    click_unit_switch(&mut harness, "compressor", "On");
-    click_unit_switch(&mut harness, "chorus", "Off");
+    assert!(switch_is_on(&harness, "Compressor"));
+    assert!(!switch_is_on(&harness, "Chorus"));
+    click_unit_switch(&mut harness, "Compressor");
+    click_unit_switch(&mut harness, "Chorus");
     assert_eq!(harness.query_all_by_label("▼").count(), 0);
     assert_eq!(
         sent_now(&sent),
@@ -1593,13 +1609,17 @@ fn units_have_fixed_heights() {
 }
 
 #[test]
-fn tuner_unit_switch_opens_and_closes_the_tuner_view() {
-    let (mut harness, _, _dir) = harness();
+fn tuner_unit_switch_opens_and_closes_the_tuner_view_and_its_mute() {
+    let (mut harness, sent, _dir) = harness();
     assert_eq!(unit_height(&harness, "Tuner unit"), 64.0);
-    click_unit_switch(&mut harness, "Tuner", "Off");
+    assert!(!switch_is_on(&harness, "Tuner"));
+    click_unit_switch(&mut harness, "Tuner");
     assert_eq!(unit_height(&harness, "Tuner unit"), 168.0);
-    click_unit_switch(&mut harness, "Tuner", "On");
+    assert!(switch_is_on(&harness, "Tuner"));
+    assert_eq!(sent_now(&sent), [Command::Mute(true)]);
+    click_unit_switch(&mut harness, "Tuner");
     assert_eq!(unit_height(&harness, "Tuner unit"), 64.0);
+    assert_eq!(sent_now(&sent), [Command::Mute(false)]);
 }
 
 #[test]
@@ -1611,8 +1631,8 @@ fn five_knobs_fit_one_row_in_the_default_window() {
 #[test]
 fn closed_units_wrap_their_knobs_in_the_minimum_window() {
     let (harness, _, _dir) = harness_sized(MIN_WINDOW);
-    assert_eq!(unit_height(&harness, "compressor unit"), 192.0);
-    assert_eq!(unit_height(&harness, "tonestack unit"), 128.0);
+    assert_eq!(unit_height(&harness, "compressor unit"), 128.0);
+    assert_eq!(unit_height(&harness, "tonestack unit"), 64.0);
     for param in ["Threshold", "Ratio", "Attack", "Release", "Makeup"] {
         let field = harness.get_by_role_and_label(Role::TextInput, param).rect();
         let unit = harness.get_by_label("compressor unit").rect();

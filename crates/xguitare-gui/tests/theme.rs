@@ -3,7 +3,8 @@ use std::path::Path;
 
 use egui::{Color32, Context, FontDefinitions, FontId, RawInput, Vec2};
 use xguitare_gui::theme::{
-    self, ContrastPair, NEUTRAL_ACCENT, Rgb, accent_for, boundary_pairs, palette, text_pairs,
+    self, ContrastPair, NEUTRAL_ACCENT, Rgb, accent_for, boundary_pairs, decorative_pairs, palette,
+    text_pairs,
 };
 
 const TEXT_FLOOR: f64 = 4.5;
@@ -365,5 +366,90 @@ fn every_control_state_draws_its_boundary() {
         assert!(state.bg_stroke.width >= 1.0, "{name} stroke width");
         let ratio = contrast(rgb_of(state.bg_stroke.color), rgb_of(state.bg_fill));
         assert!(ratio >= BOUNDARY_FLOOR, "{name} stroke on fill {ratio:.2}");
+    }
+}
+
+fn all_declared_pairs() -> Vec<(&'static str, ContrastPair)> {
+    let lists = [
+        ("text", text_pairs()),
+        ("boundary", boundary_pairs()),
+        ("decorative", decorative_pairs()),
+    ];
+    lists
+        .into_iter()
+        .flat_map(|(list, pairs)| pairs.into_iter().map(move |pair| (list, pair)))
+        .collect()
+}
+
+#[test]
+fn every_colour_pair_is_declared_in_exactly_one_list() {
+    let pairs = all_declared_pairs();
+    for (index, (list, pair)) in pairs.iter().enumerate() {
+        for (other_list, other) in &pairs[index + 1..] {
+            if list == other_list {
+                continue;
+            }
+            assert!(
+                (pair.fore, pair.back) != (other.fore, other.back),
+                "{} ({list}) and {} ({other_list}) are the same pair",
+                pair.name,
+                other.name
+            );
+        }
+    }
+}
+
+#[test]
+fn decorative_pairs_list_the_faint_lines_that_mark_no_control() {
+    let pairs = decorative_pairs();
+    for name in [
+        "header rule on panel",
+        "header and band title rule on panel open",
+        "screw ring on ear edge",
+        "faceplate edge on panel",
+    ] {
+        assert!(
+            pairs.iter().any(|pair| pair.name == name),
+            "{name} is not declared decorative"
+        );
+    }
+}
+
+#[test]
+fn every_palette_token_is_in_a_declared_pair() {
+    let c = palette();
+    let tokens = [
+        ("case", c.case),
+        ("panel", c.panel),
+        ("panel_open", c.panel_open),
+        ("well", c.well),
+        ("ear_edge", c.ear_edge),
+        ("ear_centre", c.ear_centre),
+        ("text", c.text),
+        ("muted", c.muted),
+        ("boundary", c.boundary),
+        ("lit", c.lit),
+        ("bypass_panel", c.bypass_panel),
+        ("bypass_text", c.bypass_text),
+        ("arc_track", c.arc_track),
+        ("bypass_arc", c.bypass_arc),
+        ("danger", c.danger),
+        ("danger_text", c.danger_text),
+        ("go", c.go),
+        ("focus_ring", c.focus_ring),
+        ("hover_boundary", c.hover_boundary),
+        ("knob_highlight", c.knob_highlight),
+        ("knob_shadow", c.knob_shadow),
+        ("hover", c.hover),
+        ("on_accent", c.on_accent),
+    ];
+    let pairs = all_declared_pairs();
+    for (name, token) in tokens {
+        assert!(
+            pairs
+                .iter()
+                .any(|(_, pair)| pair.fore == token || pair.back == token),
+            "{name} is drawn in no declared pair"
+        );
     }
 }

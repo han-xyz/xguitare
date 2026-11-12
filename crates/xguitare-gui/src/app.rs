@@ -356,10 +356,6 @@ impl eframe::App for App {
         }
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one frame of the window, panel by panel, sharing the Tuner handle"
-    )]
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let snapshot = &self.snapshot;
         let now = Instant::now();
@@ -435,25 +431,16 @@ impl eframe::App for App {
         };
         let mut view = RackView {
             knobs: &mut knobs,
-            tuner_open: *tuner.open,
-            muted_by_tuner: *tuner.open && *tuner.muted_by_us,
+            tuner: &mut tuner,
             clips: &mut self.clips,
             holds: &self.holds,
             open_units: &mut self.open_units,
-            tuner_switched: false,
         };
         CentralPanel::default()
             .frame(Frame::central_panel(ui.style()).inner_margin(central_margin(&self.mixer)))
             .show(ui, |ui| {
                 commands.extend(central_view(ui, snapshot, &mut self.mixer, &mut view));
             });
-        if view.tuner_switched {
-            let muted = snapshot
-                .status
-                .as_ref()
-                .map(|status| status["muted"] == true);
-            commands.extend(tuner.toggle(muted.unwrap_or_default()));
-        }
         widgets::paint_focus_ring(ui.ctx());
         let commands = self.keep_window_commands(commands);
         remember_removes(&mut self.removing, &commands);

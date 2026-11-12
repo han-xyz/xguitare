@@ -766,12 +766,9 @@ pub enum Direction {
     Down,
 }
 
-/// Each Module id with the Rack position its ears show: 1-based in Rack order, as `rack move` counts.
-pub fn rack_position_labels(ids: &[String]) -> Vec<(String, String)> {
-    ids.iter()
-        .enumerate()
-        .map(|(index, id)| (id.clone(), (index + 1).to_string()))
-        .collect()
+/// The Rack position each of `count` units' ears show, in Rack order: 1-based, as `rack move` counts.
+pub fn rack_position_labels(count: usize) -> Vec<String> {
+    (1..=count).map(|position| position.to_string()).collect()
 }
 
 /// The Rack position a Module at `index` moves to; `None` when it is already at that end.
@@ -1460,6 +1457,47 @@ pub fn unit_suffix(unit: &str) -> &'static str {
 /// The width one small knob takes in a closed unit, with its label, its value field and the gap after it.
 pub const CLOSED_KNOB_WIDTH: f32 = 114.0;
 
+/// The gap between a unit's header items, and between its ears and its content.
+pub const HEADER_GAP: f32 = 10.0;
+pub const UNIT_NAME_WIDTH: f32 = 90.0;
+pub const FOOTSWITCH_WIDTH: f32 = 42.0;
+pub const CHEVRON_WIDTH: f32 = 20.0;
+pub const RULE_WIDTH: f32 = 1.0;
+pub const MOVE_BUTTON_SIDE: f32 = 30.0;
+pub const MOVE_BUTTON_GAP: f32 = 8.0;
+pub const MOVE_BUTTONS_WIDTH: f32 = 2.0 * MOVE_BUTTON_SIDE + MOVE_BUTTON_GAP;
+/// The `Bypassed` tag's place after the chevron, kept whatever the tag's text measures.
+pub const TAG_SLOT_WIDTH: f32 = 72.0;
+/// The widths of a closed unit's header items other than its knobs and the `Bypassed` tag, left to right: On/Off switch with its lamp, name, chevron, rule, ↑/↓.
+const HEADER_FIXED_ITEMS: [f32; 5] = [
+    FOOTSWITCH_WIDTH,
+    UNIT_NAME_WIDTH,
+    CHEVRON_WIDTH,
+    RULE_WIDTH,
+    MOVE_BUTTONS_WIDTH,
+];
+
+/// What a closed unit `unit_width` wide leaves its knobs: less its ears and margins, the fixed header items, the `Bypassed` tag when `bypassed`, and one header gap per item.
+pub fn closed_knobs_width(unit_width: f32, bypassed: bool) -> f32 {
+    let tag = bypassed.then_some(TAG_SLOT_WIDTH);
+    let fixed: f32 = HEADER_FIXED_ITEMS
+        .iter()
+        .chain(&tag)
+        .map(|width| width + HEADER_GAP)
+        .sum();
+    (unit_width - 2.0 * (EAR_WIDTH + HEADER_GAP) - fixed).max(0.0)
+}
+
+/// What an open unit `unit_width` wide leaves its knob rows: less its ears and margins, and less the Cabinet IR column at its right when `has_ir`.
+pub fn open_knobs_width(unit_width: f32, has_ir: bool) -> f32 {
+    let side_column = if has_ir {
+        MOVE_BUTTONS_WIDTH + HEADER_GAP
+    } else {
+        0.0
+    };
+    (unit_width - 2.0 * (EAR_WIDTH + HEADER_GAP) - side_column).max(0.0)
+}
+
 /// Rows of small knobs a closed unit of `knob_count` Parameters needs in `width`: as many per row as fit, at least one per row and one row.
 pub fn closed_unit_rows(knob_count: usize, width: f32) -> usize {
     let per_row = ((width / CLOSED_KNOB_WIDTH).floor() as usize).max(1);
@@ -1469,7 +1507,7 @@ pub fn closed_unit_rows(knob_count: usize, width: f32) -> usize {
 /// The height of an open unit with one row of large knobs, and the least any open unit has.
 pub const OPEN_UNIT_HEIGHT: f32 = 168.0;
 /// One large knob column with its label and value field, and the gap after it.
-pub const OPEN_KNOB_PITCH: f32 = 92.0;
+pub const OPEN_KNOB_PITCH: f32 = 80.0;
 const OPEN_ROW_HEIGHT: f32 = 104.0;
 const OPEN_ROW_GAP: f32 = 8.0;
 const CHOICE_HEIGHT: f32 = 32.0;

@@ -37,7 +37,8 @@ use xguitare_gui::model::{
 };
 use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
-    choice_buttons, choice_step, open_knob_rows, open_unit_height,
+    choice_buttons, choice_step, closed_knobs_width, open_knob_rows, open_knobs_width,
+    open_unit_height,
 };
 use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for, palette};
 
@@ -2366,40 +2367,35 @@ fn open_unit_grows_by_a_row_per_extra_row() {
 }
 
 #[test]
-fn ear_numbers_follow_rack_order_through_a_move_an_add_and_a_remove() {
-    let labels = |ids: &[&str]| {
-        let ids: Vec<String> = ids.iter().map(|id| (*id).to_string()).collect();
-        rack_position_labels(&ids)
-    };
-    let expected = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
-        pairs
-            .iter()
-            .map(|(id, label)| ((*id).to_string(), (*label).to_string()))
-            .collect()
-    };
+fn ear_numbers_count_the_rack_from_one_after_a_move_an_add_and_a_remove() {
+    assert_eq!(rack_position_labels(3), ["1", "2", "3"]);
     assert_eq!(
-        labels(&["gate", "drive", "delay"]),
-        expected(&[("gate", "1"), ("drive", "2"), ("delay", "3")])
+        rack_position_labels(4),
+        ["1", "2", "3", "4"],
+        "after an add"
     );
+    assert_eq!(rack_position_labels(2), ["1", "2"], "after a remove");
+    assert_eq!(rack_position_labels(0), Vec::<String>::new());
+}
+
+/// A unit's width in the 1280x800 and 1024x640 windows.
+const DEFAULT_WINDOW_UNIT_WIDTH: f32 = 974.0;
+const MIN_WINDOW_UNIT_WIDTH: f32 = 718.0;
+
+#[test]
+fn open_blend_fits_one_row_at_1280_and_wraps_by_group_at_1024() {
+    let rows = |unit_width| open_knob_rows("blend", 10, open_knobs_width(unit_width, false));
+    assert_eq!(rows(DEFAULT_WINDOW_UNIT_WIDTH), [10]);
+    assert_eq!(rows(MIN_WINDOW_UNIT_WIDTH), [7, 3]);
+}
+
+#[test]
+fn closed_units_fit_three_small_knobs_a_row_at_1024() {
+    let width = closed_knobs_width(MIN_WINDOW_UNIT_WIDTH, false);
+    assert_eq!(closed_unit_rows(5, width), 2, "compressor");
+    assert_eq!(closed_unit_rows(3, width), 1, "tonestack");
     assert_eq!(
-        labels(&["delay", "gate", "drive"]),
-        expected(&[("delay", "1"), ("gate", "2"), ("drive", "3")]),
-        "after delay moves to the top"
+        closed_unit_rows(5, closed_knobs_width(DEFAULT_WINDOW_UNIT_WIDTH, false)),
+        1
     );
-    assert_eq!(
-        labels(&["delay", "gate", "drive", "reverb"]),
-        expected(&[
-            ("delay", "1"),
-            ("gate", "2"),
-            ("drive", "3"),
-            ("reverb", "4")
-        ]),
-        "after reverb is added"
-    );
-    assert_eq!(
-        labels(&["delay", "drive", "reverb"]),
-        expected(&[("delay", "1"), ("drive", "2"), ("reverb", "3")]),
-        "after gate is removed"
-    );
-    assert_eq!(labels(&[]), expected(&[]));
 }

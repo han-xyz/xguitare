@@ -481,12 +481,17 @@ fn paint_tile(painter: &Painter, rect: Rect, type_name: &str, hovered: bool) {
     );
 }
 
-/// Turning Mute off by hand means closing the Tuner view leaves it off.
-fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Command> {
-    let muted = snapshot
+/// Whether the Daemon reports Mute on; `None` while no status arrives.
+pub fn muted_now(snapshot: &Snapshot) -> Option<bool> {
+    snapshot
         .status
         .as_ref()
-        .and_then(|status| status["muted"].as_bool());
+        .and_then(|status| status["muted"].as_bool())
+}
+
+/// Turning Mute off by hand means closing the Tuner view leaves it off.
+fn tuner_and_mute(ui: &mut Ui, snapshot: &Snapshot, tuner: &mut Tuner) -> Vec<Command> {
+    let muted = muted_now(snapshot);
     let button_size = vec2(
         (ui.available_width() - ui.spacing().item_spacing.x) / 2.0,
         SIDEBAR_BUTTON_HEIGHT,

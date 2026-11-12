@@ -5,8 +5,9 @@ use egui::{
 };
 
 use crate::model::{
-    Band, EAR_HOLE_RADIUS, EAR_WIDTH, KNOB_ARC_SWEEP_DEG, LADDER_SEGMENTS, ScreenRect, ear_holes,
-    focus_ring_rects, knob_arcs, knob_points, knob_value_from_drag, ladder_segments,
+    Band, EAR_HOLE_RADIUS, EAR_WIDTH, FOOTSWITCH_WIDTH, KNOB_ARC_SWEEP_DEG, LADDER_SEGMENTS,
+    ScreenRect, ear_holes, focus_ring_rects, knob_arcs, knob_points, knob_value_from_drag,
+    ladder_segments,
 };
 use crate::theme::{
     self, CARET_WIDTH, EDIT_BORDER_WIDTH, FOCUS_RING_GAP, FOCUS_RING_WIDTH, RADIUS_CONTROL,
@@ -42,7 +43,7 @@ const LAMP_RADIUS: f32 = 6.0;
 const LAMP_GAP: f32 = 2.0;
 const LAMP_RING_WIDTH: f32 = 1.0;
 const LAMP_OFF_RING_WIDTH: f32 = 1.5;
-const TAG_PADDING: Vec2 = Vec2::new(SPACE_S, 1.0);
+const TAG_PADDING: Vec2 = Vec2::new(SPACE_S, 0.0);
 const LADDER_SEGMENT_HEIGHT: f32 = 11.0;
 const LADDER_SEGMENT_WIDTHS: (f32, f32) = (8.0, 20.0);
 const LADDER_GAP: f32 = 3.0;
@@ -57,7 +58,7 @@ const BANK_ROW_HEIGHT: f32 = 40.0;
 const BANK_ROW_BORDER: f32 = 3.0;
 const BANK_ROW_PADDING: f32 = 10.0;
 const BANK_NUMBER_WIDTH: f32 = 18.0;
-pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(42.0, 38.0);
+pub const FOOTSWITCH_SIZE: Vec2 = Vec2::new(FOOTSWITCH_WIDTH, 38.0);
 const FOOTSWITCH_LED_TOP: f32 = 13.0;
 const FOOTSWITCH_TEXT_BOTTOM: f32 = 4.0;
 /// Where the focus pass reads a widget's own corner radius, for a widget that is not a rounded rectangle.
@@ -367,12 +368,12 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
     response
 }
 
-/// A Module's On/Off switch with the unit's lamp on its face: lit in `accent` and reading `On` while the Module runs, unlit and reading `Off` while it is bypassed.
-pub fn footswitch(ui: &mut Ui, on: bool, accent: Color32) -> Response {
+/// A unit's On/Off switch with the unit's lamp on its face: lit in `accent` and reading `On` while on, unlit and reading `Off` while off. Assistive technology reads it as a switch named `name` with its on/off state.
+pub fn footswitch(ui: &mut Ui, name: &str, on: bool, accent: Color32) -> Response {
     let colours = palette();
     let (rect, response) = ui.allocate_exact_size(FOOTSWITCH_SIZE, Sense::click());
     let text = if on { "On" } else { "Off" };
-    response.widget_info(|| WidgetInfo::selected(Role::Button, true, on, text));
+    response.widget_info(|| WidgetInfo::selected(Role::Switch, true, on, name));
     focus_corner(ui, response.id, f32::from(RADIUS_PANEL));
     let (_, edge) = control_state(&response);
     let painter = ui.painter();
