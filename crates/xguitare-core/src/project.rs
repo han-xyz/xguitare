@@ -765,7 +765,7 @@ fn is_zero(frames: &u64) -> bool {
 }
 
 /// Whether `file` is `takes/<name>.wav`: one file directly in the Project's `takes/` folder.
-fn is_take_file(file: &str) -> bool {
+pub(crate) fn is_take_file(file: &str) -> bool {
     file.strip_prefix(TAKES_DIR)
         .and_then(|rest| rest.strip_prefix('/'))
         .and_then(|name| name.strip_suffix(TAKE_EXTENSION))

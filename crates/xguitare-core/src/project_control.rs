@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, PoisonError};
 use std::time::Instant;
 
 use serde_json::{Map, Value, json};
@@ -26,7 +26,9 @@ use crate::project::{
 };
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
-use crate::take_capture::{FinishedTake, Latency, TrackReader, add_finished_take, load_take};
+use crate::take_capture::{
+    FinishedTake, Latency, TrackReader, WritingTakes, add_finished_take, load_take,
+};
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Config, Preset, PresetModule};
 
@@ -89,6 +91,7 @@ struct OpenProject {
     unplaced: Vec<FinishedTake>,
     history: History,
     clipboard: Vec<CopiedItem>,
+    writing: WritingTakes,
 }
 
 /// The open Project's Take audio, keyed by Take file.
@@ -103,8 +106,12 @@ pub type TrackReaders = Vec<TrackReader>;
     reason = "a few events per Control API request; boxing the closed Project saves nothing that matters"
 )]
 pub enum ProjectEvent {
-    /// Start a disk thread writing Takes under `dir` at `sample_rate`.
-    Opened { dir: PathBuf, sample_rate: u32 },
+    /// Start a disk thread writing Takes under `dir` at `sample_rate` that keeps `writing` current.
+    Opened {
+        dir: PathBuf,
+        sample_rate: u32,
+        writing: WritingTakes,
+    },
     /// Queue these Take readers on the disk thread.
     Readers(TrackReaders),
     /// Connect Track n's input port to `inputs[n]`, disconnecting the rest.
@@ -151,6 +158,11 @@ pub fn add_finished_takes(
     let Some(open) = state.projects.open.as_mut() else {
         return Vec::new();
     };
+    let mut writing = open.writing.lock().unwrap_or_else(PoisonError::into_inner);
+    for take in finished {
+        writing.remove(&take.file);
+    }
+    drop(writing);
     let mut takes = std::mem::take(&mut open.unplaced);
     takes.extend_from_slice(finished);
     if takes.is_empty() {
@@ -1074,6 +1086,30 @@ pub(crate) fn fill_clipboard(state: &mut EngineState, items: Vec<CopiedItem>) {
     open_project_mut(state).clipboard = items;
 }
 
+/// The open Project's folder and the Take files it keeps: those its Items, active or not, and its clipboard name, finished Takes not yet placed and those the disk thread is writing.
+pub(crate) fn kept_takes(state: &EngineState) -> Result<(&Path, HashSet<String>), String> {
+    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+    let items = open
+        .project
+        .tracks
+        .iter()
+        .flat_map(|track| &track.items)
+        .chain(open.clipboard.iter().map(|copied| &copied.item));
+    let mut kept: HashSet<String> = items
+        .flat_map(|item| &item.takes)
+        .map(|take| take.file.clone())
+        .chain(open.unplaced.iter().map(|take| take.file.clone()))
+        .collect();
+    kept.extend(
+        open.writing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .cloned(),
+    );
+    Ok((&open.dir, kept))
+}
+
 /// The first Take file of `items`, active or not, that is no longer in the open Project's folder.
 pub(crate) fn gone_take_file<'a>(
     state: &EngineState,
@@ -1336,10 +1372,12 @@ fn open(
     // The swap is queued, so the commands after it reach the new Arrangement; a full queue leaves the click off and at the default volume until the next `click`.
     let _ = send(state, &click_commands(state, &project));
     state.metronome.on = false;
+    let writing = WritingTakes::default();
     let events = &mut state.projects.events;
     events.push(ProjectEvent::Opened {
         dir: dir.clone(),
         sample_rate: project.sample_rate,
+        writing: Arc::clone(&writing),
     });
     events.push(ProjectEvent::Readers(readers));
     events.push(ProjectEvent::Inputs(track_inputs(&project)));
@@ -1366,6 +1404,7 @@ fn open(
         unplaced: Vec::new(),
         history: History::default(),
         clipboard: Vec::new(),
+        writing,
     };
     sync_peaks(&mut open);
     state.projects.open = Some(open);

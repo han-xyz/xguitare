@@ -24,6 +24,7 @@ pub mod render_control;
 mod state;
 pub mod take_capture;
 pub mod take_peaks;
+mod takes_control;
 pub mod tuner;
 pub mod watch;
 

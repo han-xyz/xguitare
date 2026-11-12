@@ -191,9 +191,13 @@ impl ProjectDisk {
 
     fn apply(&mut self, state: &mut EngineState, event: ProjectEvent, session: &Session) {
         match event {
-            ProjectEvent::Opened { dir, sample_rate } => {
+            ProjectEvent::Opened {
+                dir,
+                sample_rate,
+                writing,
+            } => {
                 info!("opened project {}", dir.display());
-                match DiskThread::spawn(TakeWriter::new(dir, sample_rate)) {
+                match DiskThread::spawn(TakeWriter::new(dir, sample_rate, writing)) {
                     Ok(thread) => self.open = Some(thread),
                     Err(err) => error!("cannot start the disk thread: {err}; recording is off"),
                 }

@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use hound::WavReader;
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -66,6 +66,9 @@ pub struct TrackReader {
     pub name: String,
     pub reader: TakeReader,
 }
+
+/// The Take files the disk thread has created and not yet handed over (relative to the Project folder): it adds a file when it creates it and removes one it gives up on; a finished Take leaves when the open Project receives it.
+pub type WritingTakes = Arc<Mutex<HashSet<String>>>;
 
 /// A Take the disk thread wrote to `file` (relative to the Project folder).
 #[derive(Debug, Clone, PartialEq, Eq)]

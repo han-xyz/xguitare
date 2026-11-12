@@ -42,6 +42,7 @@ use crate::render::{RenderBits, RenderRange};
 use crate::render_control::{render, render_cancel};
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
 use crate::take_peaks::peak_page;
+use crate::takes_control::takes_unused;
 use crate::tuner::Tuner;
 use crate::{
     Bank, BankEntry, BankKind, BuildWarning, Config, ModuleRegistry, ParamAddress, Ports, Preset,
@@ -323,6 +324,8 @@ pub enum Request {
         first: Option<usize>,
         count: Option<usize>,
     },
+    /// The open Project's Take files that nothing uses.
+    TakesUnused,
 }
 
 /// A Track or Bus by its zero-based index (a JSON number) or its name (a JSON string).
@@ -728,6 +731,7 @@ fn handle_from(
         Request::ItemCopy { ids } => item_copy(state, &ids),
         Request::ItemPaste { track, at } => item_paste(state, &track, at),
         Request::TakePeaks { file, first, count } => peak_page(state, &file, first, count),
+        Request::TakesUnused => takes_unused(state),
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),

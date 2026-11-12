@@ -2513,6 +2513,7 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::ItemCopy { .. } => "Could not copy the Items",
         Request::ItemPaste { .. } => "Could not paste the Items",
         Request::TakePeaks { .. } => "Could not read the waveform",
+        Request::TakesUnused => "Could not list the unused Takes",
     }
 }
 

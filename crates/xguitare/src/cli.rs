@@ -615,6 +615,7 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ProjectUndo => format!("undid {}\n", text(&payload["label"])),
         Request::ProjectRedo => format!("redid {}\n", text(&payload["label"])),
         Request::Items => render_items(payload)?,
+        Request::TakesUnused => render_takes_unused(payload),
         Request::TrackAdd { .. } => format!("added track {}\n", track_label(payload)),
         Request::TrackRemove { .. } => format!("removed track {}\n", track_label(payload)),
         Request::TrackSet { .. } => render_track(payload),
@@ -722,6 +723,41 @@ fn render_items(payload: &Value) -> Result<String, String> {
         }
     }
     Ok(lines)
+}
+
+/// One line per unused Take file with its size, then the total.
+fn render_takes_unused(payload: &Value) -> String {
+    let mut lines = String::new();
+    let files = items(&payload["files"]);
+    let mut count = 0;
+    for file in files {
+        count += 1;
+        let _ = writeln!(
+            lines,
+            "{} {}",
+            text(&file["file"]),
+            size_text(file["bytes"].as_u64().unwrap_or(0))
+        );
+    }
+    let total = size_text(payload["bytes"].as_u64().unwrap_or(0));
+    let _ = writeln!(lines, "{count} unused takes, {total}");
+    lines
+}
+
+/// `bytes` in B, KB, MB or GB (powers of 1000), one decimal past B.
+fn size_text(bytes: u64) -> String {
+    const UNITS: [&str; 3] = ["KB", "MB", "GB"];
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    #[allow(clippy::cast_precision_loss, reason = "a size shown to one decimal")]
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 /// One line per Item an edit changed: `<id> track <index> at <bar.beat> (frame <position>), <length> frames, take <n>/<takes>`.

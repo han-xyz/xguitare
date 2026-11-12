@@ -2,24 +2,27 @@ use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use tracing::warn;
-use xguitare_core::take_capture::{FinishedTake, ReadStop, TrackReader, next_take_file};
+use xguitare_core::take_capture::{
+    FinishedTake, ReadStop, TrackReader, WritingTakes, next_take_file,
+};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-/// Writes each Track's Takes as mono f32 WAV files under `<project>/takes/`.
+/// Writes each Track's Takes as mono f32 WAV files under `<project>/takes/`, keeping `writing` current.
 pub struct TakeWriter {
     project_dir: PathBuf,
     spec: WavSpec,
     tracks: Vec<TrackWriter>,
     buffer: Vec<f32>,
+    writing: WritingTakes,
 }
 
 struct TrackWriter {
@@ -39,7 +42,7 @@ enum Output {
 }
 
 impl TakeWriter {
-    pub fn new(project_dir: PathBuf, sample_rate: u32) -> TakeWriter {
+    pub fn new(project_dir: PathBuf, sample_rate: u32, writing: WritingTakes) -> TakeWriter {
         TakeWriter {
             project_dir,
             spec: WavSpec {
@@ -50,6 +53,7 @@ impl TakeWriter {
             },
             tracks: Vec::new(),
             buffer: Vec::new(),
+            writing,
         }
     }
 
@@ -75,7 +79,13 @@ impl TakeWriter {
             while let Some(front) = track.readers.front_mut() {
                 let stop = front.reader.read(track.written, &mut self.buffer);
                 let (track_id, name) = (front.track_id, front.name.clone());
-                track.write(&self.buffer, &self.project_dir, &name, self.spec);
+                track.write(
+                    &self.buffer,
+                    &self.project_dir,
+                    &name,
+                    self.spec,
+                    &self.writing,
+                );
                 match stop {
                     ReadStop::Empty => break,
                     ReadStop::HandedOver => {
@@ -83,12 +93,13 @@ impl TakeWriter {
                     }
                     ReadStop::Abandoned => {
                         track.readers.pop_front();
-                        if let Some(file) = track.close() {
+                        if let Some(file) = track.close(&self.writing) {
                             warn!("take {file} lost its end mark; its file is kept but not placed");
+                            unmark_writing(&self.writing, &file);
                         }
                     }
                     ReadStop::TakeEnd(span) => {
-                        if let Some(file) = track.close() {
+                        if let Some(file) = track.close(&self.writing) {
                             finished.push(FinishedTake {
                                 track_id,
                                 file,
@@ -104,13 +115,24 @@ impl TakeWriter {
 }
 
 impl TrackWriter {
-    fn write(&mut self, samples: &[f32], project_dir: &Path, name: &str, spec: WavSpec) {
+    fn write(
+        &mut self,
+        samples: &[f32],
+        project_dir: &Path,
+        name: &str,
+        spec: WavSpec,
+        writing: &WritingTakes,
+    ) {
         if samples.is_empty() {
             return;
         }
         self.written += samples.len() as u64;
         if matches!(self.output, Output::Closed) {
             let file = next_take_file(project_dir, name);
+            writing
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(file.clone());
             let created = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -121,6 +143,7 @@ impl TrackWriter {
                 Ok(wav) => Output::Writing { file, wav },
                 Err(err) => {
                     warn!("cannot create take {file}: {err}; dropping this take");
+                    unmark_writing(writing, &file);
                     Output::Failed
                 }
             };
@@ -133,24 +156,33 @@ impl TrackWriter {
             .try_for_each(|&sample| wav.write_sample(sample))
         {
             warn!("cannot write take {file}: {err}; dropping this take");
+            unmark_writing(writing, file);
             self.output = Output::Failed;
         }
     }
 
     /// Ends the Take: finalizes its file and returns its name, or `None` when it had no frames or failed.
-    fn close(&mut self) -> Option<String> {
+    fn close(&mut self, writing: &WritingTakes) -> Option<String> {
         self.written = 0;
         match std::mem::replace(&mut self.output, Output::Closed) {
             Output::Writing { file, wav } => match wav.finalize() {
                 Ok(()) => Some(file),
                 Err(err) => {
                     warn!("cannot finish take {file}: {err}; dropping this take");
+                    unmark_writing(writing, &file);
                     None
                 }
             },
             Output::Closed | Output::Failed => None,
         }
     }
+}
+
+fn unmark_writing(writing: &WritingTakes, file: &str) {
+    writing
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(file);
 }
 
 /// The disk thread: runs a [`TakeWriter`] every few milliseconds and hands back the Takes it finished.

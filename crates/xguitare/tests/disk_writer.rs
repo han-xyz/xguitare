@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,7 +10,7 @@ use xguitare::disk_writer::{DiskThread, TakeWriter};
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
 use xguitare_core::engine::{Command, FadeLengths, RackSwitcher, engine_queues};
 use xguitare_core::project::{LoopRegion, Master, Project, Track};
-use xguitare_core::take_capture::{FinishedTake, TakeSpan, TrackReader, take_ring};
+use xguitare_core::take_capture::{FinishedTake, TakeSpan, TrackReader, WritingTakes, take_ring};
 use xguitare_dsp::{Rack, StereoRack};
 
 struct TempDir(PathBuf);
@@ -46,7 +46,7 @@ fn wav_samples(dir: &Path, file: &str) -> Vec<f32> {
 fn writes_exactly_the_pushed_frames_into_a_wav() {
     let dir = temp_dir("exact");
     let (mut recorder, reader) = take_ring(1000);
-    let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, WritingTakes::default());
     writer.add_readers(vec![TrackReader {
         track_id: 0,
         name: "Lead Gtr".to_string(),
@@ -78,7 +78,7 @@ fn a_handed_over_ring_continues_its_take_in_the_next_reader() {
     let dir = temp_dir("closed");
     let (mut old, old_reader) = take_ring(1000);
     let (mut new, new_reader) = take_ring(1000);
-    let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, WritingTakes::default());
     writer.add_readers(vec![TrackReader {
         track_id: 0,
         name: "t".to_string(),
@@ -105,7 +105,7 @@ fn a_handed_over_ring_continues_its_take_in_the_next_reader() {
 #[test]
 fn a_ring_dropped_mid_take_finishes_that_take_and_the_next_take_gets_its_own_file() {
     let dir = temp_dir("dropped");
-    let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, WritingTakes::default());
     let (mut dropped, reader) = take_ring(1000);
     writer.add_readers(vec![TrackReader {
         track_id: 0,
@@ -148,7 +148,12 @@ fn a_ring_dropped_mid_take_finishes_that_take_and_the_next_take_gets_its_own_fil
 #[test]
 fn disk_thread_reports_each_finished_take() {
     let dir = temp_dir("thread");
-    let disk = DiskThread::spawn(TakeWriter::new(dir.0.clone(), 48_000)).unwrap();
+    let disk = DiskThread::spawn(TakeWriter::new(
+        dir.0.clone(),
+        48_000,
+        WritingTakes::default(),
+    ))
+    .unwrap();
     let (mut first, first_reader) = take_ring(1000);
     let (mut second, second_reader) = take_ring(1000);
     disk.add_readers(vec![
@@ -242,7 +247,7 @@ fn armed_arrangement() -> Box<Arrangement> {
 #[test]
 fn a_take_recorded_while_a_pending_arrangement_is_replaced_stays_one_file() {
     let dir = temp_dir("replaced");
-    let mut writer = TakeWriter::new(dir.0.clone(), 48_000);
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, WritingTakes::default());
     let (mut control, audio, _tap) = engine_queues(16);
     let fades = FadeLengths::at(48_000.0, 20.0);
     let mut switcher =
@@ -308,4 +313,52 @@ fn empty_master() -> StereoRack {
     let mut master = StereoRack::new(Vec::new()).expect("no Modules");
     master.prepare(48_000.0, BLOCK);
     master
+}
+
+fn writing_files(writing: &WritingTakes) -> Vec<String> {
+    let mut files: Vec<String> = writing
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .cloned()
+        .collect();
+    files.sort();
+    files
+}
+
+#[test]
+fn a_take_file_is_marked_writing_from_its_creation_until_the_project_receives_it() {
+    let dir = temp_dir("writing");
+    let writing = WritingTakes::default();
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, Arc::clone(&writing));
+    let (mut recorder, reader) = take_ring(1000);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
+    recorder.push(0, &[0.5; 100]);
+    assert_eq!(writer.drain(), []);
+    assert_eq!(writing_files(&writing), ["takes/t-1.wav"]);
+    recorder.end_take(false);
+    assert_eq!(writer.drain().len(), 1);
+    assert_eq!(writing_files(&writing), ["takes/t-1.wav"]);
+}
+
+#[test]
+fn a_take_file_that_cannot_be_created_is_not_marked_writing() {
+    let dir = temp_dir("writing-failed");
+    fs::remove_dir(dir.0.join("takes")).unwrap();
+    let writing = WritingTakes::default();
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, Arc::clone(&writing));
+    let (mut recorder, reader) = take_ring(1000);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
+    recorder.push(0, &[0.5; 100]);
+    recorder.end_take(false);
+    assert_eq!(writer.drain(), []);
+    assert_eq!(writing_files(&writing), Vec::<String>::new());
 }

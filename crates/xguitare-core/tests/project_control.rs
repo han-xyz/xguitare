@@ -990,7 +990,7 @@ fn finished_takes_become_items_and_close_hands_the_project_over() {
     let events = take_project_events(&mut state);
     assert!(matches!(
         events.first(),
-        Some(ProjectEvent::Opened { dir, sample_rate: 48_000 }) if *dir == folder
+        Some(ProjectEvent::Opened { dir, sample_rate: 48_000, .. }) if *dir == folder
     ));
     assert!(
         events
