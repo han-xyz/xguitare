@@ -285,6 +285,11 @@ pub const SPACE_M: f32 = 12.0;
 pub const SPACE_L: f32 = 16.0;
 pub const SPACE_XL: f32 = 24.0;
 
+/// A button, an Add Module chip or a Bank row: the smallest pointer target.
+pub const CONTROL_HEIGHT: f32 = 24.0;
+/// A left-panel section's header, which reaches the 24 px target through the panel padding above it.
+pub const SECTION_HEADER_HEIGHT: f32 = 20.0;
+
 /// The Module-coloured edge along a Rack unit's top.
 pub const UNIT_EDGE_WIDTH: f32 = 2.0;
 
@@ -395,9 +400,9 @@ pub fn ear_number() -> FontId {
     FontId::monospace(TEXT_UNIT)
 }
 
-/// A left-panel section's title.
-pub fn section_title() -> FontId {
-    FontId::new(TEXT_BODY, family_semibold())
+/// A left-panel section's title and an Add Module chip's type.
+pub fn caption() -> FontId {
+    FontId::new(TEXT_BODY, family_condensed())
 }
 
 /// An eq band column's title.

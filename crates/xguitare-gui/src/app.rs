@@ -38,10 +38,10 @@ use crate::widgets;
 
 const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_MARGIN: Margin = Margin {
-    left: 12,
-    right: 4,
-    top: 12,
-    bottom: 12,
+    left: theme::SPACE_M as i8,
+    right: theme::SPACE_XS as i8,
+    top: theme::SPACE_M as i8,
+    bottom: theme::SPACE_M as i8,
 };
 const RACK_MARGIN: Margin = Margin::symmetric(8, 24);
 const MIXER_MARGIN: Margin = Margin::same(8);

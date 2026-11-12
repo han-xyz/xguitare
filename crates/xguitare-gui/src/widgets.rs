@@ -10,8 +10,8 @@ use crate::model::{
     ladder_segments,
 };
 use crate::theme::{
-    self, CARET_WIDTH, EDIT_BORDER_WIDTH, FOCUS_RING_GAP, FOCUS_RING_WIDTH, RADIUS_CONTROL,
-    RADIUS_LED, RADIUS_PANEL, RADIUS_PILL, SPACE_S, accent_for, colour, palette,
+    self, CARET_WIDTH, CONTROL_HEIGHT, EDIT_BORDER_WIDTH, FOCUS_RING_GAP, FOCUS_RING_WIDTH,
+    RADIUS_CONTROL, RADIUS_LED, RADIUS_PANEL, RADIUS_PILL, SPACE_S, accent_for, colour, palette,
 };
 
 const ARC_SEGMENTS: usize = 48;
@@ -54,11 +54,9 @@ const CENTS_TICKS: usize = 21;
 const CENTS_TICK_HEIGHT: f32 = 8.0;
 const CENTS_CENTRE_TICK_HEIGHT: f32 = 20.0;
 const CENTS_STRIP_INSET: f32 = 2.0;
-const BANK_ROW_HEIGHT: f32 = 28.0;
 const BANK_ROW_BORDER: f32 = 3.0;
-const BANK_ROW_PADDING: f32 = 8.0;
 const SWITCH_SIZE: Vec2 = Vec2::new(32.0, 18.0);
-const SWITCH_TARGET: Vec2 = Vec2::new(32.0, 24.0);
+const SWITCH_TARGET: Vec2 = Vec2::new(SWITCH_SIZE.x, CONTROL_HEIGHT);
 const SWITCH_THUMB_RADIUS: f32 = 6.0;
 const SWITCH_THUMB_INSET: f32 = 3.0;
 const BANK_NUMBER_WIDTH: f32 = 18.0;
@@ -402,7 +400,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
     } else {
         Sense::hover()
     };
-    let size = vec2(ui.available_width(), BANK_ROW_HEIGHT);
+    let size = vec2(ui.available_width(), CONTROL_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, sense);
     let label = format!("{number} {name}");
     response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, active, &label));
@@ -414,7 +412,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
     } else if enabled && response.hovered() {
         painter.rect_filled(rect, 0, colour(colours.hover));
     }
-    let number_left = rect.left() + BANK_ROW_BORDER + BANK_ROW_PADDING;
+    let number_left = rect.left() + BANK_ROW_BORDER + SPACE_S;
     let number_colour = if active { colours.text } else { colours.muted };
     painter.text(
         pos2(number_left, rect.center().y),
@@ -430,10 +428,7 @@ pub fn bank_row(ui: &mut Ui, number: &str, name: &str, active: bool, enabled: bo
         theme::list_item()
     };
     painter.text(
-        pos2(
-            number_left + BANK_NUMBER_WIDTH + BANK_ROW_PADDING,
-            rect.center().y,
-        ),
+        pos2(number_left + BANK_NUMBER_WIDTH + SPACE_S, rect.center().y),
         Align2::LEFT_CENTER,
         name,
         name_font,

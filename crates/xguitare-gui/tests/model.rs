@@ -2038,7 +2038,7 @@ fn sections_in_panel_order() {
             "Project",
             "Preset",
             "Bass Bank",
-            "Rack",
+            "Add Module",
             "Tuner and Mute",
             "Metronome",
             "Audio",
@@ -2402,8 +2402,8 @@ fn closed_units_fit_three_small_knobs_a_row_at_1024() {
 
 #[test]
 fn add_module_chips_take_three_columns_while_each_stays_wide_enough() {
-    assert_eq!(chip_columns(208.0), 3);
-    assert_eq!(chip_columns(188.0), 3);
-    assert_eq!(chip_columns(187.0), 2);
+    assert_eq!(chip_columns(220.0), 3);
+    assert_eq!(chip_columns(212.0), 3);
+    assert_eq!(chip_columns(211.0), 2);
     assert_eq!(chip_columns(120.0), 2);
 }

@@ -1071,7 +1071,7 @@ fn keys_moved(value: f64, shown: f64) -> bool {
     (value - shown).abs() > f64::EPSILON
 }
 
-fn choice_keys(ui: &mut Ui) -> Vec<ChoiceKey> {
+pub(crate) fn choice_keys(ui: &mut Ui) -> Vec<ChoiceKey> {
     ui.input_mut(|input| {
         CHOICE_KEYS
             .iter()

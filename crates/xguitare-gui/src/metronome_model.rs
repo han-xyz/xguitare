@@ -69,6 +69,49 @@ pub fn beat_light(previous: Option<&Value>, current: Option<&Value>) -> BeatLigh
     }
 }
 
+/// One beat's dot in the Metronome section; `accent` is beat 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeatDot {
+    Ring {
+        accent: bool,
+    },
+    /// The beat playing, or beat 1 while no beat plays; `flash` while the beat is new.
+    Filled {
+        accent: bool,
+        flash: bool,
+    },
+}
+
+/// A dot per beat in a bar of `beats`: the playing beat filled, beat 1 filled while none plays, the others ringed.
+pub fn beat_dots(beats: u32, light: BeatLight) -> Vec<BeatDot> {
+    let (playing, accent, flash) = match light {
+        BeatLight::Dark => (1, true, false),
+        BeatLight::Beat {
+            beat,
+            accent,
+            flash,
+        } => (beat, accent, flash),
+    };
+    (1..=beats)
+        .map(|beat| {
+            if beat == playing {
+                BeatDot::Filled { accent, flash }
+            } else {
+                BeatDot::Ring { accent: beat == 1 }
+            }
+        })
+        .collect()
+}
+
+/// The tempo with one decimal only when it has one: `120`, `97.5`.
+pub fn bpm_text(bpm: f64) -> String {
+    if bpm.fract() == 0.0 {
+        format!("{bpm:.0}")
+    } else {
+        format!("{bpm:.1}")
+    }
+}
+
 /// M toggles the Metronome and T taps, with no Project open only: in a Project the transport's Click is the toggle.
 pub fn metronome_key_to_command(key: KeyEvent, status: &Value) -> Option<Command> {
     if project_name(Some(status)).is_some() {

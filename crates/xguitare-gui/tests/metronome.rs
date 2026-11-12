@@ -11,7 +11,8 @@ use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::metronome_model::{
-    BeatLight, MetronomeView, beat_light, metronome_key_to_command, metronome_view,
+    BeatDot, BeatLight, MetronomeView, beat_dots, beat_light, bpm_text, metronome_key_to_command,
+    metronome_view,
 };
 use xguitare_gui::model::{Command, KeyEvent, Outgoing, requests_until_quit};
 use xguitare_gui::project_model::{key_active, project_key_to_command};
@@ -279,4 +280,67 @@ fn the_daemon_status_gives_the_metronome_view() {
             beats_played: 0,
         })
     );
+}
+
+#[test]
+fn an_idle_metronome_lights_beat_one_and_rings_the_rest() {
+    assert_eq!(
+        beat_dots(4, BeatLight::Dark),
+        [
+            BeatDot::Filled {
+                accent: true,
+                flash: false
+            },
+            BeatDot::Ring { accent: false },
+            BeatDot::Ring { accent: false },
+            BeatDot::Ring { accent: false },
+        ]
+    );
+}
+
+#[test]
+fn the_playing_beat_stays_filled_after_its_flash() {
+    let playing = |flash| BeatLight::Beat {
+        beat: 3,
+        accent: false,
+        flash,
+    };
+    for flash in [true, false] {
+        assert_eq!(
+            beat_dots(3, playing(flash)),
+            [
+                BeatDot::Ring { accent: true },
+                BeatDot::Ring { accent: false },
+                BeatDot::Filled {
+                    accent: false,
+                    flash
+                },
+            ]
+        );
+    }
+}
+
+#[test]
+fn beat_one_playing_is_the_accented_dot() {
+    let light = BeatLight::Beat {
+        beat: 1,
+        accent: true,
+        flash: true,
+    };
+    assert_eq!(
+        beat_dots(2, light),
+        [
+            BeatDot::Filled {
+                accent: true,
+                flash: true
+            },
+            BeatDot::Ring { accent: false },
+        ]
+    );
+}
+
+#[test]
+fn a_whole_tempo_shows_no_decimal() {
+    assert_eq!(bpm_text(120.0), "120");
+    assert_eq!(bpm_text(97.5), "97.5");
 }

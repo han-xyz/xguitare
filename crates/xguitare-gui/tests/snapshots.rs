@@ -1098,7 +1098,7 @@ fn metronome_snapshot() -> Snapshot {
 #[test]
 fn metronome_section_snapshot() {
     let (mut harness, _, _dir) = harness_with(WINDOW, metronome_snapshot());
-    for title in ["Bass Bank", "Rack"] {
+    for title in ["Bass Bank", "Add Module"] {
         harness.get_by_label(title).click();
         harness.run_steps(2);
     }
@@ -1109,7 +1109,7 @@ fn metronome_section_snapshot() {
 #[test]
 fn double_click_on_the_metronome_volume_knob_resets_it_to_its_default() {
     let (mut harness, sent, _dir) = harness_with(WINDOW, metronome_snapshot());
-    for title in ["Bass Bank", "Rack"] {
+    for title in ["Bass Bank", "Add Module"] {
         harness.get_by_label(title).click();
         harness.run_steps(2);
     }
@@ -1480,6 +1480,77 @@ fn loading_a_preset_drops_the_undo() {
 }
 
 #[test]
+fn bank_kind_is_one_choice_group_moved_by_arrows() {
+    let (mut harness, sent, _dir) = harness();
+    for title in [
+        "Preset",
+        "Bass Bank",
+        "Tuner and Mute",
+        "Metronome",
+        "Settings",
+    ] {
+        harness.get_by_label(title).click();
+        harness.run_steps(2);
+    }
+    harness
+        .get_by_role_and_label(Role::RadioButton, "Bass")
+        .focus();
+    harness.run_steps(2);
+    harness.key_press(Key::ArrowLeft);
+    harness.run_steps(2);
+    assert!(
+        harness
+            .get_by_role_and_label(Role::RadioButton, "Guitar")
+            .is_focused()
+    );
+    harness.get_by_label("Apply").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::SetSettings {
+            bank_kind: Some(BankKind::Guitar),
+            ir_dir: None,
+            projects_dir: None,
+        }]
+    );
+}
+
+#[test]
+fn the_metronome_switch_turns_it_off() {
+    let (mut harness, sent, _dir) = harness_with(WINDOW, metronome_snapshot());
+    harness
+        .get_by_role_and_label(Role::Switch, "Metronome")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Metronome {
+            on: Some(false),
+            bpm: None,
+            meter: None,
+            volume: None,
+        }]
+    );
+}
+
+#[test]
+fn the_metronome_and_tuner_buttons_show_at_1280x800() {
+    let (mut harness, _, _dir) = harness_with(DEFAULT_WINDOW, metronome_snapshot());
+    harness.run_steps(2);
+    let bottom = DEFAULT_WINDOW.y;
+    for (role, label) in [
+        (Role::Button, "Tuner"),
+        (Role::Button, "Mute"),
+        (Role::Switch, "Metronome"),
+    ] {
+        let rect = harness.get_by_role_and_label(role, label).rect();
+        assert!(rect.bottom() <= bottom, "{label} ends at {}", rect.bottom());
+    }
+    harness.get_by_label("Beat 1");
+    write_png(&mut harness, "left-panel-1280x800");
+}
+
+#[test]
 fn only_a_bank_kind_change_in_settings_drops_the_undo() {
     let (mut harness, sent, _dir) = harness();
     let from = unit_header_point(&harness, "chorus");
@@ -1769,7 +1840,7 @@ fn audio_and_settings_apply() {
         "Project",
         "Preset",
         "Bass Bank",
-        "Rack",
+        "Add Module",
         "Audio",
         "Settings",
     ] {

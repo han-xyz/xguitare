@@ -13,7 +13,7 @@ use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::project_model::AutosaveOffer;
-use crate::theme::{FOCUS_RING_GAP, FOCUS_RING_WIDTH, Rgb, palette};
+use crate::theme::{self, FOCUS_RING_GAP, FOCUS_RING_WIDTH, Rgb, palette};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
@@ -1719,9 +1719,9 @@ fn number_text(value: f64) -> String {
 }
 
 /// The gap between Add Module chips, across and down.
-pub const CHIP_GAP: f32 = 4.0;
+pub const CHIP_GAP: f32 = theme::SPACE_XS;
 /// The narrowest chip that still shows `compressor`, the longest Module type, beside its accent tab.
-const MIN_CHIP_WIDTH: f32 = 60.0;
+const MIN_CHIP_WIDTH: f32 = 68.0;
 
 /// Three columns of Add Module chips when three fit `width`, else two.
 pub fn chip_columns(width: f32) -> usize {
@@ -1762,7 +1762,7 @@ impl Section {
             (Section::Preset, _) => "Preset",
             (Section::Bank, BankKind::Guitar) => "Guitar Bank",
             (Section::Bank, BankKind::Bass) => "Bass Bank",
-            (Section::Rack, _) => "Rack",
+            (Section::Rack, _) => "Add Module",
             (Section::Tuner, _) => "Tuner and Mute",
             (Section::Metronome, _) => "Metronome",
             (Section::Audio, _) => "Audio",
