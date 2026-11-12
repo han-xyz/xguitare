@@ -451,11 +451,13 @@ pub fn palette_place(slot: usize, ids: &[String]) -> AddPlace {
         .map_or(AddPlace::Front, |id| AddPlace::After(id.clone()))
 }
 
-/// What is being dragged: the unit at a Rack position, or a Module tile of the left panel by its type.
+/// What is being dragged: the Module unit at a Rack position, a Module tile of the left panel by its type, a fixed unit in the Rack, or a fixed unit's chip of the left panel.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dragged {
     Unit(usize),
     Tile(String),
+    Fixed(FixedUnit),
+    FixedChip(FixedUnit),
 }
 
 /// A rectangle in screen pixels: the window, or the part of it where a released unit stays in the Rack.
@@ -480,12 +482,19 @@ pub fn drag_outcome(
     window: &ScreenRect,
     area: &ScreenRect,
     unit_edges: &[f32],
-    ids: &[String],
+    order: &[RackItem],
 ) -> Option<Command> {
     let pointer = pointer.filter(|pointer| window.contains(*pointer))?;
+    let ids: Vec<String> = order.iter().filter_map(RackItem::module_id).collect();
+    let modules_above = |slot: usize| {
+        order[..slot.min(order.len())]
+            .iter()
+            .filter(|item| item.module_id().is_some())
+            .count()
+    };
     let slot = area
         .contains(pointer)
-        .then(|| drop_slot(pointer.1, unit_edges));
+        .then(|| modules_above(drop_slot(pointer.1, unit_edges)));
     match (dragged, slot) {
         (Dragged::Unit(from), None) => Some(Command::RackRemove {
             id: ids[*from].clone(),
@@ -497,10 +506,299 @@ pub fn drag_outcome(
                 to,
             })
         }
-        (Dragged::Tile(_), None) => None,
         (Dragged::Tile(type_name), Some(slot)) => {
-            Some(add_command(type_name, &palette_place(slot, ids)))
+            Some(add_command(type_name, &palette_place(slot, &ids)))
         }
+        (Dragged::Tile(_), None) | (Dragged::Fixed(_) | Dragged::FixedChip(_), _) => None,
+    }
+}
+
+/// A Rack unit that is not a Module: its place is window layout only, in no Preset and not in the Control API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixedUnit {
+    Meters,
+    Tuner,
+}
+
+impl FixedUnit {
+    /// In the order of their chips in the left panel.
+    pub const ALL: [FixedUnit; 2] = [FixedUnit::Tuner, FixedUnit::Meters];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FixedUnit::Meters => "Meters",
+            FixedUnit::Tuner => "Tuner",
+        }
+    }
+
+    /// As the footer's sentence names it.
+    pub fn in_prose(self) -> &'static str {
+        match self {
+            FixedUnit::Meters => "meters",
+            FixedUnit::Tuner => "Tuner",
+        }
+    }
+
+    fn stored(self) -> &'static str {
+        match self {
+            FixedUnit::Meters => "meters",
+            FixedUnit::Tuner => "tuner",
+        }
+    }
+}
+
+/// Where a shown fixed unit sits: at the front, just before a Module id, or at the end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Anchor {
+    Front,
+    Before(String),
+    End,
+}
+
+/// One unit of the Rack as drawn, top to bottom.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RackItem {
+    Fixed(FixedUnit),
+    Module(String),
+}
+
+impl RackItem {
+    pub fn module_id(&self) -> Option<String> {
+        match self {
+            RackItem::Fixed(_) => None,
+            RackItem::Module(id) => Some(id.clone()),
+        }
+    }
+}
+
+/// Where the fixed units sit among the Modules of every Rack the window shows; a hidden fixed unit is absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RackLayout {
+    /// In drawn order, which also orders fixed units sharing an anchor.
+    shown: Vec<(FixedUnit, Anchor)>,
+}
+
+impl Default for RackLayout {
+    fn default() -> RackLayout {
+        RackLayout {
+            shown: vec![
+                (FixedUnit::Meters, Anchor::Front),
+                (FixedUnit::Tuner, Anchor::Front),
+            ],
+        }
+    }
+}
+
+impl RackLayout {
+    /// The units drawn for the Module `ids`; a fixed unit before an id not among them is drawn at the end.
+    pub fn order(&self, ids: &[String]) -> Vec<RackItem> {
+        let fixed_where = |sits: &dyn Fn(&Anchor) -> bool| {
+            self.shown
+                .iter()
+                .filter(|(_, anchor)| sits(anchor))
+                .map(|(unit, _)| RackItem::Fixed(*unit))
+                .collect::<Vec<_>>()
+        };
+        let mut order = fixed_where(&|anchor| *anchor == Anchor::Front);
+        for id in ids {
+            order.extend(fixed_where(
+                &|anchor| matches!(anchor, Anchor::Before(before) if before == id),
+            ));
+            order.push(RackItem::Module(id.clone()));
+        }
+        order.extend(fixed_where(&|anchor| match anchor {
+            Anchor::Front => false,
+            Anchor::Before(before) => !ids.contains(before),
+            Anchor::End => true,
+        }));
+        order
+    }
+
+    pub fn is_shown(&self, unit: FixedUnit) -> bool {
+        self.shown.iter().any(|(shown, _)| *shown == unit)
+    }
+
+    /// Moves `unit`, or shows it when hidden, into gap `slot` of the units drawn for `ids`: 0 the front, the unit count the end.
+    pub fn place(&mut self, unit: FixedUnit, slot: usize, ids: &[String]) {
+        let mut order = self.order(ids);
+        let item = RackItem::Fixed(unit);
+        let slot = match order.iter().position(|drawn| *drawn == item) {
+            Some(from) => {
+                order.remove(from);
+                if slot > from { slot - 1 } else { slot }
+            }
+            None => slot,
+        };
+        order.insert(slot.min(order.len()), item);
+        *self = RackLayout::from_order(&order);
+    }
+
+    /// Moves a shown `unit` one unit up or down past whatever is drawn next to it.
+    pub fn step(&mut self, unit: FixedUnit, direction: Direction, ids: &[String]) {
+        let order = self.order(ids);
+        let Some(index) = order
+            .iter()
+            .position(|drawn| *drawn == RackItem::Fixed(unit))
+        else {
+            return;
+        };
+        let Some(to) = move_target(index, direction, order.len()) else {
+            return;
+        };
+        let slot = match direction {
+            Direction::Up => to,
+            Direction::Down => to + 1,
+        };
+        self.place(unit, slot, ids);
+    }
+
+    /// `None` when `unit` is already hidden.
+    pub fn hide(&mut self, unit: FixedUnit, now: Instant) -> Option<HiddenFixed> {
+        let index = self.shown.iter().position(|(shown, _)| *shown == unit)?;
+        let (_, anchor) = self.shown.remove(index);
+        Some(HiddenFixed {
+            unit,
+            anchor,
+            index,
+            since: now,
+        })
+    }
+
+    pub fn undo_hide(&mut self, hidden: &HiddenFixed) {
+        if self.is_shown(hidden.unit) {
+            return;
+        }
+        let index = hidden.index.min(self.shown.len());
+        self.shown
+            .insert(index, (hidden.unit, hidden.anchor.clone()));
+    }
+
+    /// After the Rack's Module ids change from `previous` to `ids`: a fixed unit before an id that is gone moves before the next later Module of `previous` still there, else to the end.
+    pub fn follow(&mut self, previous: &[String], ids: &[String]) {
+        for (_, anchor) in &mut self.shown {
+            let Anchor::Before(before) = anchor else {
+                continue;
+            };
+            if ids.contains(before) {
+                continue;
+            }
+            *anchor = previous
+                .iter()
+                .skip_while(|id| *id != before)
+                .skip(1)
+                .find(|id| ids.contains(id))
+                .map_or(Anchor::End, |id| Anchor::Before(id.clone()));
+        }
+    }
+
+    /// The layout as kept in eframe storage.
+    pub fn to_stored(&self) -> String {
+        let entries: Vec<Value> = self
+            .shown
+            .iter()
+            .map(|(unit, anchor)| match anchor {
+                Anchor::Front => serde_json::json!({"unit": unit.stored(), "at": "front"}),
+                Anchor::End => serde_json::json!({"unit": unit.stored(), "at": "end"}),
+                Anchor::Before(id) => serde_json::json!({"unit": unit.stored(), "before": id}),
+            })
+            .collect();
+        Value::Array(entries).to_string()
+    }
+
+    /// A stored string that does not parse, from an older or edited file, reads as the default layout.
+    pub fn from_stored(stored: &str) -> RackLayout {
+        RackLayout::parse_stored(stored).unwrap_or_default()
+    }
+
+    fn parse_stored(stored: &str) -> Option<RackLayout> {
+        let entries: Vec<Value> = serde_json::from_str(stored).ok()?;
+        let mut layout = RackLayout { shown: Vec::new() };
+        for entry in &entries {
+            let unit = FixedUnit::ALL
+                .into_iter()
+                .find(|unit| entry["unit"] == unit.stored())?;
+            if layout.is_shown(unit) {
+                return None;
+            }
+            let anchor = match (entry["at"].as_str(), entry["before"].as_str()) {
+                (Some("front"), None) => Anchor::Front,
+                (Some("end"), None) => Anchor::End,
+                (None, Some(id)) => Anchor::Before(id.to_string()),
+                _ => return None,
+            };
+            layout.shown.push((unit, anchor));
+        }
+        Some(layout)
+    }
+
+    /// Each fixed unit's anchor read off its place in `order`: the front when no Module is above it, else before the next Module, else the end.
+    fn from_order(order: &[RackItem]) -> RackLayout {
+        let shown = order
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let RackItem::Fixed(unit) = item else {
+                    return None;
+                };
+                let anchor = if order[..index]
+                    .iter()
+                    .all(|above| above.module_id().is_none())
+                {
+                    Anchor::Front
+                } else {
+                    order[index + 1..]
+                        .iter()
+                        .find_map(RackItem::module_id)
+                        .map_or(Anchor::End, Anchor::Before)
+                };
+                Some((*unit, anchor))
+            })
+            .collect();
+        RackLayout { shown }
+    }
+}
+
+/// A fixed unit the GUI hid, offered for [`UNDO_FOR`] to go back where it was.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HiddenFixed {
+    pub unit: FixedUnit,
+    anchor: Anchor,
+    index: usize,
+    since: Instant,
+}
+
+impl HiddenFixed {
+    pub fn is_shown(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.since) < UNDO_FOR
+    }
+}
+
+/// What a fixed unit's drag does to the [`RackLayout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutDrop {
+    /// Into a gap of the units drawn, as [`RackLayout::place`] takes it.
+    Place(FixedUnit, usize),
+    Hide(FixedUnit),
+}
+
+/// A fixed unit or its chip released inside the Rack `area` goes to the [`drop_slot`]; a fixed unit released elsewhere in the `window` hides. A Module unit or tile, a chip outside the Rack, and a release outside the window do nothing here.
+pub fn layout_drop(
+    dragged: &Dragged,
+    pointer: Option<(f32, f32)>,
+    window: &ScreenRect,
+    area: &ScreenRect,
+    unit_edges: &[f32],
+) -> Option<LayoutDrop> {
+    let pointer = pointer.filter(|pointer| window.contains(*pointer))?;
+    let slot = area
+        .contains(pointer)
+        .then(|| drop_slot(pointer.1, unit_edges));
+    match (dragged, slot) {
+        (Dragged::Fixed(unit) | Dragged::FixedChip(unit), Some(slot)) => {
+            Some(LayoutDrop::Place(*unit, slot))
+        }
+        (Dragged::Fixed(unit), None) => Some(LayoutDrop::Hide(*unit)),
+        _ => None,
     }
 }
 
@@ -768,9 +1066,18 @@ pub enum Direction {
     Down,
 }
 
-/// The Rack position each of `count` units' ears show, in Rack order: 1-based, as `rack move` counts.
-pub fn rack_position_labels(count: usize) -> Vec<String> {
-    (1..=count).map(|position| position.to_string()).collect()
+/// The Rack position each unit of `order` shows on its ears: Modules count 1-based, as `rack move` counts; a fixed unit shows none.
+pub fn rack_ear_labels(order: &[RackItem]) -> Vec<Option<String>> {
+    let mut position = 0;
+    order
+        .iter()
+        .map(|item| {
+            item.module_id().map(|_| {
+                position += 1;
+                position.to_string()
+            })
+        })
+        .collect()
 }
 
 /// The Rack position a Module at `index` moves to; `None` when it is already at that end.

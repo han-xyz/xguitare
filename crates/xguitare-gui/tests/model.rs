@@ -31,10 +31,9 @@ use xguitare_gui::model::{
     typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RemovedUnit, Restore, ScreenRect, UnitStyle,
-    bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects, knob_arcs, knob_origin,
-    module_title, mute_banner, palette_place, paused, rack_position_labels, restore, shown_undo,
-    unit_style,
+    CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RackItem, RemovedUnit, Restore, ScreenRect,
+    UnitStyle, bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects, knob_arcs,
+    knob_origin, module_title, mute_banner, palette_place, paused, restore, shown_undo, unit_style,
 };
 use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
@@ -1431,6 +1430,10 @@ fn rack_ids() -> Vec<String> {
         .to_vec()
 }
 
+fn rack_order() -> Vec<RackItem> {
+    rack_ids().into_iter().map(RackItem::Module).collect()
+}
+
 const WINDOW: ScreenRect = ScreenRect {
     left: 0.0,
     top: 0.0,
@@ -1488,7 +1491,7 @@ fn unit_dropped_on_another_slot_moves_there() {
             &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
-            &rack_ids(),
+            &rack_order(),
         )
     };
     assert_eq!(
@@ -1523,7 +1526,7 @@ fn unit_dropped_beside_itself_stays() {
             &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
-            &rack_ids(),
+            &rack_order(),
         );
         assert_eq!(outcome, None);
     }
@@ -1539,7 +1542,7 @@ fn unit_dropped_outside_the_rack_is_removed() {
                 &WINDOW,
                 &RACK_AREA,
                 &UNIT_EDGES,
-                &rack_ids(),
+                &rack_order(),
             ),
             Some(Command::RackRemove {
                 id: "cabinet".to_string(),
@@ -1558,7 +1561,7 @@ fn drag_released_outside_the_window_is_cancelled() {
                 &WINDOW,
                 &RACK_AREA,
                 &UNIT_EDGES,
-                &rack_ids()
+                &rack_order()
             ),
             None
         );
@@ -1575,7 +1578,7 @@ fn drag_released_at_a_point_outside_the_window_is_cancelled() {
                 &WINDOW,
                 &RACK_AREA,
                 &UNIT_EDGES,
-                &rack_ids(),
+                &rack_order(),
             ),
             None
         );
@@ -1592,7 +1595,7 @@ fn tile_dropped_in_the_rack_adds_at_the_slot() {
             &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
-            &rack_ids()
+            &rack_order()
         ),
         Some(add_command("gate", &AddPlace::Front))
     );
@@ -1603,7 +1606,7 @@ fn tile_dropped_in_the_rack_adds_at_the_slot() {
             &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
-            &rack_ids()
+            &rack_order()
         ),
         Some(Command::RackAdd {
             type_name: "gate".to_string(),
@@ -1623,7 +1626,7 @@ fn tile_dropped_outside_the_rack_adds_nothing() {
             &WINDOW,
             &RACK_AREA,
             &UNIT_EDGES,
-            &rack_ids()
+            &rack_order()
         ),
         None
     );
@@ -2607,18 +2610,6 @@ fn open_unit_grows_by_a_row_per_extra_row() {
     let one_more = open_unit_height(2) - OPEN_UNIT_HEIGHT;
     assert!(one_more > 100.0, "{one_more}");
     assert_eq!(open_unit_height(3) - open_unit_height(2), one_more);
-}
-
-#[test]
-fn ear_numbers_count_the_rack_from_one_after_a_move_an_add_and_a_remove() {
-    assert_eq!(rack_position_labels(3), ["1", "2", "3"]);
-    assert_eq!(
-        rack_position_labels(4),
-        ["1", "2", "3", "4"],
-        "after an add"
-    );
-    assert_eq!(rack_position_labels(2), ["1", "2"], "after a remove");
-    assert_eq!(rack_position_labels(0), Vec::<String>::new());
 }
 
 /// A unit's width in the 1280x800 and 1024x640 windows.

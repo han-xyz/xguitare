@@ -19,13 +19,13 @@ use crate::model::{
     CHEVRON_WIDTH, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged,
     EAR_WIDTH, Feedback, HEADER_GAP, KnobKey, Link, METER_FLOOR_DB, MOVE_BUTTON_GAP,
     MOVE_BUTTON_SIDE, Message, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
-    RULE_WIDTH, SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading,
+    RULE_WIDTH, RackItem, SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading,
     UNIT_NAME_WIDTH, autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text,
     chip_click, choice_buttons, choice_step, choice_text, closed_knobs_width, closed_unit_rows,
     drag_outcome, drop_slot, format_value, in_tune, key_step, knob_fraction, knob_origin,
     knob_param_value, link_banner, module_title, move_target, mute_banner, open_knob_rows,
     open_knobs_width, open_unit_height, param_label, param_rows, paused, peak_db, peak_text,
-    rack_position_labels, tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
+    rack_ear_labels, tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
@@ -530,7 +530,11 @@ fn module_units(
 ) -> (Vec<Command>, Vec<(Rect, Response)>) {
     let mut commands = Vec::new();
     let mut placed = Vec::with_capacity(modules.len());
-    let positions = rack_position_labels(modules.len());
+    let order: Vec<RackItem> = modules
+        .iter()
+        .map(|(id, _)| RackItem::Module(id.clone()))
+        .collect();
+    let positions: Vec<String> = rack_ear_labels(&order).into_iter().flatten().collect();
     for (index, ((module, rows), position)) in modules.iter().zip(&positions).enumerate() {
         let is_cabinet = rows.first().is_some_and(|row| row.module_type == CABINET);
         let unit = ModuleUnit {
@@ -587,6 +591,7 @@ fn drag_and_drop(
             type_name.as_str(),
             ui.input(|input| input.pointer.any_released()),
         ),
+        Dragged::Fixed(_) | Dragged::FixedChip(_) => return None,
     };
     let edges: Vec<f32> = placed
         .iter()
@@ -610,14 +615,17 @@ fn drag_and_drop(
     if !released {
         return None;
     }
-    let ids: Vec<String> = modules.iter().map(|(id, _)| id.clone()).collect();
+    let order: Vec<RackItem> = modules
+        .iter()
+        .map(|(id, _)| RackItem::Module(id.clone()))
+        .collect();
     drag_outcome(
         &dragged,
         pointer.map(|pos| (pos.x, pos.y)),
         &screen_rect(ui.ctx().content_rect()),
         &screen_rect(area),
         &edges,
-        &ids,
+        &order,
     )
 }
 
