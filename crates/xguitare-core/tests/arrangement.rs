@@ -205,7 +205,7 @@ fn item_plays_at_its_position_and_stops_at_its_end() {
             assert!(close(sample, 0.0), "frame {frame}: {sample}");
         }
     }
-    assert!(close(left[125], 1.0), "{}", left[125]);
+    assert!(close(left[125], 0.98), "{}", left[125]);
     assert_eq!(arrangement.playhead(), BLOCK as u64);
 }
 
@@ -228,19 +228,81 @@ fn played(items: Vec<(Item, f32)>, frames: usize) -> Vec<f32> {
 
 #[test]
 fn an_item_edge_ramps_from_silence_over_5_ms() {
-    let left = played(vec![(item(0, "", 4800), 1.0)], 4800);
-    assert!(close(left[0], 0.0), "{}", left[0]);
+    let left = played(vec![(item(0, "", 4800), 1.0)], 4801);
+    let step = 1.0 / FADE_FRAMES as f32;
+    assert!(close(left[0], step / 2.0), "{}", left[0]);
     assert!(
-        close(left[FADE_FRAMES / 2], 0.5),
+        close(left[FADE_FRAMES / 2], 0.5 + step / 2.0),
         "{}",
         left[FADE_FRAMES / 2]
     );
     assert!(close(left[FADE_FRAMES], 1.0), "{}", left[FADE_FRAMES]);
-    assert!(
-        close(left[4799], 1.0 / FADE_FRAMES as f32),
-        "{}",
-        left[4799]
-    );
+    assert!(close(left[4799], step / 2.0), "{}", left[4799]);
+    assert_eq!(left[4800], 0.0);
+}
+
+#[test]
+fn a_sliver_ramps_up_and_down_over_half_its_length_each() {
+    let cases: [(u64, &[f32]); 4] = [
+        (1, &[0.5]),
+        (2, &[0.5, 0.5]),
+        (3, &[0.25, 0.75, 0.25]),
+        (9, &[0.1, 0.3, 0.5, 0.7, 0.9, 0.7, 0.5, 0.3, 0.1]),
+    ];
+    for (frames, gains) in cases {
+        let left = played(vec![(item(10, "", frames), 1.0)], 30);
+        let sliver = &left[10..10 + gains.len()];
+        for (frame, (&sample, &gain)) in sliver.iter().zip(gains).enumerate() {
+            assert!(
+                close(sample, gain),
+                "{frames} frames, frame {frame}: {sample}"
+            );
+        }
+        assert!(
+            left[..10]
+                .iter()
+                .chain(&left[10 + gains.len()..])
+                .all(|&s| s == 0.0)
+        );
+    }
+}
+
+#[test]
+fn a_split_item_plays_exactly_as_before() {
+    let take: Vec<f32> = (0..4800).map(|n| ((n % 97) as f32 / 97.0) - 0.5).collect();
+    let render = |items: Vec<Item>| {
+        let mut t = track("t");
+        t.items = items;
+        let takes = HashMap::from([("takes/t-1.wav".to_string(), Arc::from(take.clone()))]);
+        let mut arrangement = arrangement(&project(vec![t]), &takes);
+        arrangement.apply(ArrangementCommand::Play);
+        run(&mut arrangement, &[&[0.0; BLOCK]], 5000).0
+    };
+    let whole = render(vec![item(0, "takes/t-1.wav", 4800)]);
+    for at in [1, 7, 239, 240, 241, 2400, 4790, 4799] {
+        let mut first = item(0, "takes/t-1.wav", 4800);
+        first.length = Some(at);
+        let mut second = item(at, "takes/t-1.wav", 4800);
+        second.offset = at;
+        let split = render(vec![first, second]);
+        for (frame, (a, b)) in whole.iter().zip(&split).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "split at {at}, frame {frame}: {a} vs {b}"
+            );
+        }
+    }
+}
+
+#[test]
+fn abutting_items_of_two_takes_cross_with_no_dip() {
+    let mut first = item(0, "", 4800);
+    first.length = Some(2000);
+    let left = played(vec![(first, 0.5), (item(2000, "", 2000), 0.5)], 4000);
+    let inside = FADE_FRAMES..4000 - FADE_FRAMES;
+    for (&sample, frame) in left[inside.clone()].iter().zip(inside) {
+        assert!(close(sample, 0.5), "frame {frame}: {sample}");
+    }
 }
 
 #[test]

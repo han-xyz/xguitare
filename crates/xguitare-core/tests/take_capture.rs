@@ -238,6 +238,9 @@ fn first_take_makes_an_item_and_loop_takes_stack_on_it() {
     assert_eq!((t.items[3].position, t.items[3].offset), (500, 10));
     let ids: Vec<u64> = t.items.iter().map(|item| item.id).collect();
     assert_eq!((ids, next), (vec![1, 2, 3, 4], 5));
+    let mut last = u64::MAX;
+    add_take(&mut t, at(9000), take("takes/t-7.wav"), false, &mut last);
+    assert_eq!((t.items[4].id, last), (u64::MAX, u64::MAX));
 }
 
 #[test]

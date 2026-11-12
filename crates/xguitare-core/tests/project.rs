@@ -978,6 +978,11 @@ fn item_length_and_ids_are_checked() {
     project.next_item_id = 5;
     project.tracks[0].items[0].length = Some(1000);
     project.save(&folder).unwrap();
+    project.next_item_id = 1 << 63;
+    assert_eq!(
+        project.save(&folder).unwrap_err().to_string(),
+        "next_item_id must be at most 9223372036854775807"
+    );
 }
 
 #[test]

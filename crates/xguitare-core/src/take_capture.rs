@@ -239,7 +239,7 @@ pub fn add_take(
         take: 0,
         takes: vec![take],
     });
-    *next_item_id += 1;
+    *next_item_id = next_item_id.saturating_add(1);
 }
 
 /// The first free `takes/<track slug>-<n>.wav` under `project_dir`, counting from 1.

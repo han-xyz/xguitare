@@ -21,15 +21,20 @@ pub struct PlacedTake {
 }
 
 impl PlacedTake {
-    /// The linear fade gain at `frame` of the `len` it plays: rising from 0 over `fade_in`, falling to `1 / fade_out` over `fade_out`.
+    /// The linear fade gain at `frame` of the `len` it plays, the lower of the fade-in and fade-out ramps; each ramp moves half a step at the span's edge, so even a one-frame span is attenuated.
     pub(crate) fn gain(&self, frame: usize) -> f32 {
-        if frame < self.fade_in {
-            frame as f32 / self.fade_in as f32
-        } else if frame + self.fade_out >= self.len {
-            (self.len - frame) as f32 / self.fade_out as f32
+        let rising = if frame < self.fade_in {
+            (frame as f32 + 0.5) / self.fade_in as f32
         } else {
             1.0
-        }
+        };
+        let left = self.len - frame;
+        let falling = if left <= self.fade_out {
+            (left as f32 - 0.5) / self.fade_out as f32
+        } else {
+            1.0
+        };
+        rising.min(falling)
     }
 }
 
@@ -38,7 +43,9 @@ pub fn item_fade_frames(sample_rate: f32) -> u64 {
     (ITEM_FADE.as_secs_f64() * f64::from(sample_rate)).round() as u64
 }
 
-/// The stretches of one Track's `items` that are heard: an Item later in `items` is on top and hides what it covers of those before it. Each stretch fades in and out over `fade` frames, or half its length when shorter; where a top Item cuts into a lower one, the lower stretch goes on under the top one's ramp (as far as the lower Item reaches), so the two cross.
+/// The stretches of one Track's `items` that are heard, in timeline order: an Item later in `items` is on top and hides what it covers of those before it; neighbouring stretches that continue one Take frame for frame play as one.
+///
+/// Each stretch's own edges fade over `fade` frames, or over half its uncovered length (rounded up) when that is shorter. Where a top Item cuts into a lower one, the lower stretch goes on under the top one's ramp, as far as the lower Item reaches. Where a stretch ends at an Item's end and the next one starts at its Item's start, the first goes on into its Take under the next one's fade-in, as far as its Take reaches, and the next fades in over just that.
 ///
 /// # Errors
 ///
@@ -48,28 +55,44 @@ pub fn flatten<S: BuildHasher>(
     takes: &HashMap<String, Arc<[f32]>, S>,
     fade: u64,
 ) -> Result<Vec<PlacedTake>, TakeNotLoaded> {
-    let heard = heard_stretches(items);
+    let heard = joined(items, heard_stretches(items));
     heard
         .iter()
         .map(|stretch| {
-            let item = &items[stretch.item];
+            let item = &items[stretch.first];
             let file = &item.takes[item.take].file;
             let samples = takes.get(file).ok_or_else(|| TakeNotLoaded(file.clone()))?;
-            Ok(place(item, stretch, &heard, fade, samples))
+            Ok(place(items, stretch, &heard, fade, samples))
         })
         .collect()
 }
 
-/// Timeline frames `start..end` of the Item at index `item` that nothing above covers.
+/// Timeline frames `start..end` that nothing above covers, of the Item at index `first`, continued to `end` by the Item at index `last` when the two play one Take on.
 struct Stretch {
-    item: usize,
+    first: usize,
+    last: usize,
     start: u64,
     end: u64,
 }
 
 impl Stretch {
     fn own_fade(&self, fade: u64) -> u64 {
-        fade.min((self.end - self.start) / 2)
+        fade.min((self.end - self.start).div_ceil(2))
+    }
+
+    fn cut_at_start(&self, items: &[Item]) -> bool {
+        self.start > items[self.first].position
+    }
+
+    fn cut_at_end(&self, items: &[Item]) -> bool {
+        self.end < items[self.last].end()
+    }
+
+    /// Frames of the last Item's Take after this stretch's end.
+    fn take_after_end(&self, items: &[Item]) -> u64 {
+        let item = &items[self.last];
+        let played_to = item.offset.saturating_add(self.end - item.position);
+        item.takes[item.take].frames.saturating_sub(played_to)
     }
 }
 
@@ -88,12 +111,37 @@ fn heard_stretches(items: &[Item]) -> Vec<Stretch> {
                 .collect();
         }
         stretches.extend(parts.into_iter().map(|(start, end)| Stretch {
-            item: index,
+            first: index,
+            last: index,
             start,
             end,
         }));
     }
+    stretches.sort_by_key(|stretch| stretch.start);
     stretches
+}
+
+/// `stretches` in order, each run that plays one Take on without a skip merged into one.
+fn joined(items: &[Item], stretches: Vec<Stretch>) -> Vec<Stretch> {
+    let mut joined: Vec<Stretch> = Vec::with_capacity(stretches.len());
+    for stretch in stretches {
+        match joined.last_mut() {
+            Some(before) if continues(items, before, &stretch) => {
+                before.end = stretch.end;
+                before.last = stretch.last;
+            }
+            _ => joined.push(stretch),
+        }
+    }
+    joined
+}
+
+fn continues(items: &[Item], before: &Stretch, after: &Stretch) -> bool {
+    let (from, to) = (&items[before.last], &items[after.first]);
+    before.end == after.start
+        && from.takes[from.take].file == to.takes[to.take].file
+        && from.offset.saturating_add(before.end - from.position)
+            == to.offset.saturating_add(after.start - to.position)
 }
 
 /// What is left of `start..end` outside `cover`: none, one or two non-empty ranges.
@@ -108,39 +156,61 @@ fn uncovered((start, end): (u64, u64), cover: (u64, u64)) -> Vec<(u64, u64)> {
         .collect()
 }
 
+/// Frames the stretch before `after` plays on past its end under `after`'s fade-in: none unless it ends at its Item's end and `after` starts at its Item's start.
+fn join_overlap(items: &[Item], before: &Stretch, after: &Stretch, fade: u64) -> u64 {
+    if before.cut_at_end(items) || after.cut_at_start(items) {
+        return 0;
+    }
+    after.own_fade(fade).min(before.take_after_end(items))
+}
+
 fn place(
-    item: &Item,
+    items: &[Item],
     stretch: &Stretch,
     heard: &[Stretch],
     fade: u64,
     samples: &Arc<[f32]>,
 ) -> PlacedTake {
-    let crossing = |neighbour: Option<&Stretch>| neighbour.map_or(0, |other| other.own_fade(fade));
-    let (extend_in, fade_in) = if stretch.start > item.position {
-        let ramp = crossing(heard.iter().find(|other| other.end == stretch.start))
-            .min(stretch.start - item.position);
+    let before = heard.iter().find(|other| other.end == stretch.start);
+    let after = heard.iter().find(|other| other.start == stretch.end);
+    let (first, last) = (&items[stretch.first], &items[stretch.last]);
+    let (extend_in, fade_in) = if stretch.cut_at_start(items) {
+        let ramp = before
+            .map_or(0, |top| top.own_fade(fade))
+            .min(stretch.start - first.position);
         (ramp, ramp)
     } else {
-        (0, stretch.own_fade(fade))
+        let joined = before.map_or(0, |before| join_overlap(items, before, stretch, fade));
+        (
+            0,
+            if joined > 0 {
+                joined
+            } else {
+                stretch.own_fade(fade)
+            },
+        )
     };
-    let (extend_out, fade_out) = if stretch.end < item.end() {
-        let ramp = crossing(heard.iter().find(|other| other.start == stretch.end))
-            .min(item.end() - stretch.end);
+    let (extend_out, fade_out) = if stretch.cut_at_end(items) {
+        let ramp = after
+            .map_or(0, |top| top.own_fade(fade))
+            .min(last.end() - stretch.end);
         (ramp, ramp)
     } else {
-        (0, stretch.own_fade(fade))
+        match after.map_or(0, |after| join_overlap(items, stretch, after, fade)) {
+            0 => (0, stretch.own_fade(fade)),
+            joined => (joined, joined),
+        }
     };
     let position = stretch.start - extend_in;
     let offset =
-        clamp_frames(item.offset.saturating_add(position - item.position)).min(samples.len());
+        clamp_frames(first.offset.saturating_add(position - first.position)).min(samples.len());
     let len = clamp_frames(stretch.end + extend_out - position).min(samples.len() - offset);
-    let fade_in = clamp_frames(fade_in).min(len);
     PlacedTake {
         position,
         offset,
         len,
-        fade_in,
-        fade_out: clamp_frames(fade_out).min(len - fade_in),
+        fade_in: clamp_frames(fade_in).min(len),
+        fade_out: clamp_frames(fade_out).min(len),
         samples: Arc::clone(samples),
     }
 }

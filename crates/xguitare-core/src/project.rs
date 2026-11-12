@@ -31,7 +31,7 @@ const LATENCY_OFFSET_MS: RangeInclusive<f64> = -1000.0..=1000.0;
 pub(crate) const COUNT_IN_BARS: RangeInclusive<u32> = 0..=2;
 const VOLUME_DB: RangeInclusive<f32> = -60.0..=6.0;
 const PAN: RangeInclusive<f32> = -1.0..=1.0;
-/// The largest frame a TOML integer holds, so every saved frame loads again.
+/// The largest frame or Item id a TOML integer holds, so every saved one loads again.
 const LAST_FRAME: u64 = i64::MAX as u64;
 const TAKE_EXTENSION: &str = ".wav";
 
@@ -211,6 +211,7 @@ pub enum ProjectError {
     },
     DuplicateItemId(u64),
     NextItemId,
+    NextItemIdPastLast,
     EmptyName,
     Exists(String),
     /// A Track name that `track_add` would refuse, with its message.
@@ -631,6 +632,9 @@ pub(crate) fn check_project(project: &Project) -> Result<(), ProjectError> {
 }
 
 fn check_item_ids(project: &Project) -> Result<(), ProjectError> {
+    if project.next_item_id > LAST_FRAME {
+        return Err(ProjectError::NextItemIdPastLast);
+    }
     let mut ids = HashSet::new();
     for item in project.tracks.iter().flat_map(|track| &track.items) {
         if !ids.insert(item.id) {
@@ -980,6 +984,9 @@ impl fmt::Display for ProjectError {
             }
             ProjectError::DuplicateItemId(id) => write!(f, "two items have id {id}"),
             ProjectError::NextItemId => f.write_str("next_item_id must be above every item id"),
+            ProjectError::NextItemIdPastLast => {
+                write!(f, "next_item_id must be at most {LAST_FRAME}")
+            }
             ProjectError::EmptyName => f.write_str("project name must not be empty"),
             ProjectError::Exists(name) => write!(f, "a project named '{name}' already exists"),
             ProjectError::TrackName(error) | ProjectError::BusName(error) => f.write_str(error),

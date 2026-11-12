@@ -399,7 +399,7 @@ closed Live
 
 Each Track records the dry input; its Rack is applied on playback, so its sound can still change after recording. A recording becomes a Take on a new Item; with the loop on, each pass after a wrap becomes another Take of the same Item, the newest one playing.
 
-Where Items overlap on a Track only the one on top, the newest, is heard; the Items under it are silent where it covers them. Every Item fades in and out over 5 ms, and where one Item cuts into another the two cross over those 5 ms, so edges do not click.
+Where Items overlap on a Track only the one on top, the newest, is heard; the Items under it are silent where it covers them. Every Item fades in and out over 5 ms (an Item shorter than 10 ms over half its length), and where one Item cuts into another the two cross over those 5 ms, so edges do not click. Where one Item ends exactly where the next begins, the first plays on into its Take under the next one's fade-in, so a split Item sounds as before; when its Take ends right there, both fade and the level dips for those 5 ms.
 
 ### Mixer
 
