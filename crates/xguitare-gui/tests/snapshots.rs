@@ -2045,14 +2045,14 @@ fn typed_tempo_is_sent_on_enter_only() {
 
 #[test]
 fn mixer_snapshots() {
-    for (size, name) in [
-        (WINDOW, "mixer"),
-        (DEFAULT_WINDOW, "mixer-1280x800"),
-        (MIN_WINDOW, "mixer-1024x640"),
+    for (size, suffix) in [
+        (MIN_WINDOW, "1024x640"),
+        (DEFAULT_WINDOW, "1280x800"),
+        (FULL_HD_WINDOW, "1920x1080"),
     ] {
         let (mut mixer, _, _dir) = harness_with(size, mixer_snapshot());
         click_button(&mut mixer, "Mixer");
-        write_png(&mut mixer, name);
+        write_png(&mut mixer, &format!("view-mixer-{suffix}"));
     }
     for (label, name) in [
         ("Volume Bass Amp", "mixer-fader-focused"),
@@ -2078,6 +2078,8 @@ fn mixer_snapshots() {
     let (mut eight_buses, _, _dir) = harness_with(DEFAULT_WINDOW, eight_buses_snapshot());
     click_button(&mut eight_buses, "Mixer");
     write_png(&mut eight_buses, "mixer-eight-buses");
+    let (mut eight_buses, _, _dir) = harness_with(MIN_WINDOW, eight_buses_snapshot());
+    click_button(&mut eight_buses, "Mixer");
     let sends = eight_buses.get_by_label("Send Bass DI to Room").rect();
     eight_buses.event(Event::PointerMoved(sends.center()));
     eight_buses.event(Event::MouseWheel {
@@ -2118,15 +2120,20 @@ fn transport_bar_fits_one_row_at_1280() {
     }
 }
 
+/// The footer with nothing to report: the mixer's strips take the height down to it.
+const EMPTY_FOOTER_HEIGHT: f32 = 20.0;
+
 #[test]
 fn mixer_faders_and_switches_show_whole_in_the_mixer_view() {
     for (size, snapshot) in [
+        (MIN_WINDOW, mixer_snapshot()),
         (WINDOW, mixer_snapshot()),
+        (FULL_HD_WINDOW, mixer_snapshot()),
         (DEFAULT_WINDOW, eight_buses_snapshot()),
     ] {
         let (mut harness, _, _dir) = harness_with(size, snapshot);
         click_button(&mut harness, "Mixer");
-        let footer_top = size.y - FOOTER_ALLOWANCE;
+        let footer_top = size.y - EMPTY_FOOTER_HEIGHT;
         for name in ["Room", "Bass DI", "Bass Amp", "Click", "Master"] {
             let mut labels = vec![format!("Volume {name}"), format!("Volume {name} value")];
             if name != "Master" {
@@ -2214,6 +2221,25 @@ fn mixer_columns_send_their_commands() {
     assert_eq!(sent_now(&sent), []);
     assert!(harness.query_by_label("Rack of Master").is_none());
     assert!(harness.query_by_label("Room — Rack").is_some());
+}
+
+#[test]
+fn enter_on_a_strip_name_shows_its_rack_view_and_a_click_stays_in_the_mixer() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, mixer_snapshot());
+    let mixer = |harness: &Harness<App>| harness.query_by_label("Rack of Master").is_some();
+    click_button(&mut harness, "Mixer");
+    click_button(&mut harness, "Rack of Master");
+    assert!(mixer(&harness));
+    harness.get_by_label("Rack of Room").focus();
+    harness.run_steps(1);
+    harness.key_press(Key::Enter);
+    harness.run_steps(2);
+    assert!(!mixer(&harness));
+    assert!(harness.query_by_label("Room — Rack").is_some());
+    assert!(sent_now(&sent).ends_with(&[Command::ShowRack(ShownRack::Bus(0))]));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::M);
+    harness.run_steps(2);
+    assert!(mixer(&harness));
 }
 
 #[test]

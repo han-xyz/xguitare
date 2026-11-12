@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use egui::style::ScrollStyle;
 use egui::{
-    Align, Align2, CornerRadius, DragValue, Frame, Id, Layout, Margin, Mesh, Modal, ProgressBar,
-    Rect, RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind, TextEdit, Ui,
-    WidgetInfo, pos2, vec2,
+    Align, Align2, CornerRadius, DragValue, Frame, Id, Key, Layout, Margin, Mesh, Modal,
+    ProgressBar, Rect, RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind,
+    TextEdit, Ui, WidgetInfo, pos2, vec2,
 };
 use serde_json::Value;
 use xguitare_core::control::SendLevel;
@@ -13,13 +13,13 @@ use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
-    SendView, ShownRack, StereoPeakHold, default_render_name, fader_db, fader_position,
-    mixer_columns, render_view, send_fraction, send_level, send_text, shown_rack_column,
-    strip_ladder,
+    SEND_ROW_HEIGHT, SendView, ShownRack, StereoPeakHold, StripFit, default_render_name, fader_db,
+    fader_position, mixer_columns, render_view, send_fraction, send_level, send_text,
+    shown_rack_column, strip_fit, strip_ladder,
 };
 use crate::model::{Band, Command, EAR_WIDTH, Snapshot, TrackEdit};
 use crate::project::{PAN, knob_with_reset, released_value};
-use crate::project_model::{track_colour, transport_view};
+use crate::project_model::{MainView, track_colour, transport_view};
 use crate::rack::muted_text;
 use crate::theme::{
     self, CONTROL_HEIGHT, RADIUS_PANEL, SPACE_S, bus_colour, colour, master_colour, palette,
@@ -52,11 +52,7 @@ const FACE_MARGIN: Margin = Margin {
 const KIND_HEIGHT: f32 = 14.0;
 const NAME_HEIGHT: f32 = CONTROL_HEIGHT;
 const ROUTING_HEIGHT: f32 = CONTROL_HEIGHT;
-const SEND_ROW_HEIGHT: f32 = 34.0;
-/// The Send rows a column shows before they scroll.
-const SEND_ROWS_SHOWN: usize = 2;
 const PAN_HEIGHT: f32 = 57.0;
-const FADER_HEIGHT: f32 = 80.0;
 const FADER_CAP: egui::Vec2 = egui::Vec2::new(34.0, 14.0);
 const FADER_SLOT_WIDTH: f32 = 8.0;
 const FADER_CAP_LINE: f32 = 2.0;
@@ -78,16 +74,13 @@ const SCROLL_BAR_WIDTH: f32 = 4.0;
 const SCROLL_BAR_MARGIN: f32 = 2.0;
 const ADD_BUS_DASH: f32 = 5.0;
 const ADD_BUS_GAP: f32 = 4.0;
-/// A strip's height: its edge, margins and rows, so that every strip and the Add Bus slot line up.
-const STRIP_HEIGHT: f32 = 2.0
-    + STRIP_MARGIN.top as f32
-    + STRIP_MARGIN.bottom as f32
-    + KIND_HEIGHT
+/// A strip's edge and margins.
+const STRIP_FRAME_HEIGHT: f32 = 2.0 + STRIP_MARGIN.top as f32 + STRIP_MARGIN.bottom as f32;
+/// The rows of a strip other than its Sends and fader.
+const FIXED_ROWS_HEIGHT: f32 = KIND_HEIGHT
     + NAME_HEIGHT
     + ROUTING_HEIGHT
-    + SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32
     + PAN_HEIGHT
-    + FADER_HEIGHT
     + VALUE_FIELD_HEIGHT
     + SWITCH_SIZE.y
     + 7.0 * ROW_GAP;
@@ -146,7 +139,7 @@ impl RenderDraft {
     }
 }
 
-/// A faceplate between two rack ears: one strip per Track, then per Bus with the Add Bus slot after the last, scrolled sideways when they do not fit, and Master pinned at the right edge.
+/// A faceplate between two rack ears: one strip per Track, then per Bus with the Add Bus slot after the last, scrolled sideways when they do not fit, and Master pinned at the right edge; the strips take the height ([`strip_fit`]) and scroll up and down in a window too short for them.
 pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Vec<Command> {
     let mut commands = Vec::new();
     let Some(status) = snapshot.status.as_ref() else {
@@ -165,11 +158,19 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
         .as_u64()
         .and_then(|index| usize::try_from(index).ok());
     let open = shown_rack_column(view.rack, status);
+    let strips_height = ui.available_height()
+        - FACE_MARGIN.sum().y
+        - SCROLL_BAR_WIDTH
+        - SCROLL_BAR_MARGIN
+        - STRIP_FRAME_HEIGHT
+        - FIXED_ROWS_HEIGHT;
+    let fit = strip_fit(strips_height, bus_names.len());
+    let height = strip_height(fit);
     let show_column = |ui: &mut Ui, column: &MixerColumn| {
         let hold = view.holds.get(&column.target).copied().unwrap_or_default();
         let shape = Shape {
             bus_names: &bus_names,
-            send_rows: bus_names.len(),
+            fit,
             selected,
             open: open == Some(column.target),
             rack: ShownRack::of(status, column.target),
@@ -177,36 +178,43 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
         mixer_column(ui, column, hold, &shape)
     };
     let colours = palette();
-    let face = Frame::new()
-        .fill(colour(colours.panel))
-        .inner_margin(FACE_MARGIN)
+    ui.spacing_mut().scroll = scroll_style();
+    let face = ScrollArea::vertical()
+        .id_salt("mixer_columns")
         .show(ui, |ui| {
-            ui.spacing_mut().scroll = scroll_style();
-            ui.set_min_height(STRIP_HEIGHT + SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = STRIP_GAP;
-                let scrolled_width = ui.available_width() - STRIP_OUTER_WIDTH - 2.0 * STRIP_GAP;
-                ScrollArea::horizontal()
-                    .id_salt("mixer")
-                    .max_width(scrolled_width)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        ui.horizontal_top(|ui| {
-                            for column in strips {
-                                commands.extend(show_column(ui, column));
-                            }
-                            if add_bus_slot(ui) {
-                                commands.push(Command::BusAdd);
-                            }
-                        });
+            Frame::new()
+                .fill(colour(colours.panel))
+                .inner_margin(FACE_MARGIN)
+                .show(ui, |ui| {
+                    ui.set_min_height(height + SCROLL_BAR_WIDTH + SCROLL_BAR_MARGIN);
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = STRIP_GAP;
+                        let scrolled_width =
+                            ui.available_width() - STRIP_OUTER_WIDTH - 2.0 * STRIP_GAP;
+                        ScrollArea::horizontal()
+                            .id_salt("mixer")
+                            .max_width(scrolled_width)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.horizontal_top(|ui| {
+                                    for column in strips {
+                                        commands.extend(show_column(ui, column));
+                                    }
+                                    if add_bus_slot(ui, height) {
+                                        commands.push(Command::BusAdd);
+                                    }
+                                });
+                            });
+                        let (rule, _) = ui.allocate_exact_size(vec2(1.0, height), Sense::hover());
+                        ui.painter()
+                            .rect_filled(rule, 0, colour(colours.knob_highlight));
+                        commands.extend(show_column(ui, master));
                     });
-                let (rule, _) = ui.allocate_exact_size(vec2(1.0, STRIP_HEIGHT), Sense::hover());
-                ui.painter()
-                    .rect_filled(rule, 0, colour(colours.knob_highlight));
-                commands.extend(show_column(ui, master));
-            });
+                })
+                .response
+                .rect
         });
-    let rect = face.response.rect;
+    let rect = face.inner;
     let painter = ui.painter();
     painter.hline(
         rect.x_range(),
@@ -218,7 +226,7 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
 }
 
 /// Solid bars, the handle in the text colour on a well track: the mixer's scroll areas and the one around the panel.
-pub fn scroll_style() -> ScrollStyle {
+fn scroll_style() -> ScrollStyle {
     ScrollStyle {
         bar_width: SCROLL_BAR_WIDTH,
         bar_inner_margin: SCROLL_BAR_MARGIN,
@@ -227,9 +235,17 @@ pub fn scroll_style() -> ScrollStyle {
     }
 }
 
+/// A strip's height for `fit`, so that every strip and the Add Bus slot line up.
+fn strip_height(fit: StripFit) -> f32 {
+    STRIP_FRAME_HEIGHT
+        + FIXED_ROWS_HEIGHT
+        + SEND_ROW_HEIGHT * fit.send_rows as f32
+        + fit.fader_height
+}
+
 struct Shape<'a> {
     bus_names: &'a [String],
-    send_rows: usize,
+    fit: StripFit,
     selected: Option<usize>,
     open: bool,
     rack: Option<ShownRack>,
@@ -269,7 +285,7 @@ fn mixer_column(
         .inner_margin(STRIP_MARGIN)
         .show(ui, |ui| {
             ui.set_width(STRIP_WIDTH);
-            ui.set_min_height(STRIP_HEIGHT - 2.0 - STRIP_MARGIN.sum().y);
+            ui.set_min_height(strip_height(shape.fit) - STRIP_FRAME_HEIGHT);
             ui.spacing_mut().item_spacing.y = ROW_GAP;
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 kind_label(ui, column.target);
@@ -278,16 +294,16 @@ fn mixer_column(
                     ui.set_min_height(ROUTING_HEIGHT);
                     commands.extend(routing(ui, column));
                 });
-                let sends_height = SEND_ROW_HEIGHT * shape.send_rows.min(SEND_ROWS_SHOWN) as f32;
+                let sends_height = SEND_ROW_HEIGHT * shape.fit.send_rows as f32;
                 ui.allocate_ui(vec2(STRIP_WIDTH, sends_height), |ui| {
                     ui.set_min_height(sends_height);
-                    commands.extend(sends(ui, column, shape.bus_names));
+                    commands.extend(sends(ui, column, shape.bus_names, sends_height));
                 });
                 ui.allocate_ui(vec2(STRIP_WIDTH, PAN_HEIGHT), |ui| {
                     ui.set_min_height(PAN_HEIGHT);
                     commands.extend(pan_knob(ui, column));
                 });
-                commands.extend(fader_and_meter(ui, column, hold));
+                commands.extend(fader_and_meter(ui, column, hold, shape.fit.fader_height));
                 commands.extend(volume_field(ui, column));
                 commands.extend(mute_and_solo(ui, column));
             });
@@ -321,7 +337,7 @@ fn kind_label(ui: &mut Ui, target: MixerTarget) {
     });
 }
 
-/// Opens the column's Rack below the panel; a Bus's name also has `Remove` in its context menu.
+/// Makes the column's Rack the shown Rack, and Enter on it also shows the Rack view; a Bus's name also has `Remove` in its context menu.
 fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
@@ -348,6 +364,9 @@ fn name_button(ui: &mut Ui, column: &MixerColumn, shape: &Shape) -> Vec<Command>
             commands.push(Command::TrackSelect(index));
         }
         commands.extend(shape.rack.map(Command::ShowRack));
+        if response.has_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
+            commands.push(Command::ShowView(MainView::Rack));
+        }
     }
     if let MixerTarget::Bus(index) = column.target {
         response.context_menu(|ui| {
@@ -384,29 +403,34 @@ fn routing(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
     })
 }
 
-/// One Send knob with a `pre` switch per Bus, in their own scroll past two rows; nothing for a Bus or Master.
-fn sends(ui: &mut Ui, column: &MixerColumn, bus_names: &[String]) -> Vec<Command> {
+/// One Send knob with a `pre` switch per Bus, in their own scroll past `height`; nothing for a Bus or Master.
+fn sends(ui: &mut Ui, column: &MixerColumn, bus_names: &[String], height: f32) -> Vec<Command> {
     let mut commands = Vec::new();
     let MixerTarget::Track(track) = column.target else {
         return commands;
     };
     ScrollArea::vertical()
         .id_salt(("sends", track))
-        .max_height(SEND_ROW_HEIGHT * SEND_ROWS_SHOWN as f32)
+        .max_height(height)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            let row_width = ui.available_width();
             for send in &column.sends {
                 let bus = bus_names.get(send.bus).map_or("", String::as_str);
-                commands.extend(send_row(ui, track, (&column.name, bus), send));
+                commands.extend(send_row(ui, (track, row_width), (&column.name, bus), send));
             }
         });
     commands
 }
 
-fn send_row(ui: &mut Ui, track: usize, (name, bus): (&str, &str), send: &SendView) -> Vec<Command> {
+fn send_row(
+    ui: &mut Ui,
+    (track, row_width): (usize, f32),
+    (name, bus): (&str, &str),
+    send: &SendView,
+) -> Vec<Command> {
     let mut commands = Vec::new();
     let colours = palette();
-    let row_width = ui.available_width();
     ui.allocate_ui(vec2(row_width, SEND_ROW_HEIGHT), |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
@@ -534,16 +558,21 @@ fn volume_command(column: &MixerColumn, db: f64) -> Command {
 }
 
 /// The printed dB scale, the fader (drag it; sent on release, a double-click for 0 dB), and the twin LED ladders with their peak hold under the latching clip LED (click to reset), all on the fader's travel.
-fn fader_and_meter(ui: &mut Ui, column: &MixerColumn, hold: StereoPeakHold) -> Vec<Command> {
+fn fader_and_meter(
+    ui: &mut Ui,
+    column: &MixerColumn,
+    hold: StereoPeakHold,
+    height: f32,
+) -> Vec<Command> {
     let mut commands = Vec::new();
     let meter_width = 2.0 * LADDER_WIDTH + LADDER_GAP;
     let zone_width = SCALE_WIDTH + FADER_CAP.x + meter_width + 2.0 * theme::SPACE_XS;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
         ui.add_space((STRIP_WIDTH - zone_width) / 2.0 - theme::SPACE_XS);
-        fader_scale(ui);
-        commands.extend(fader(ui, column));
-        commands.extend(stereo_meter(ui, column, hold, meter_width));
+        fader_scale(ui, height);
+        commands.extend(fader(ui, column, height));
+        commands.extend(stereo_meter(ui, column, hold, vec2(meter_width, height)));
     });
     commands
 }
@@ -554,8 +583,8 @@ fn travel_y(rect: Rect, position: f32) -> f32 {
     rect.top() + FADER_CAP.y / 2.0 + travel * (1.0 - position)
 }
 
-fn fader_scale(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(SCALE_WIDTH, FADER_HEIGHT), Sense::hover());
+fn fader_scale(ui: &mut Ui, height: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(SCALE_WIDTH, height), Sense::hover());
     let painter = ui.painter();
     for db in FADER_SCALE_DB {
         let text = if db > 0.0 {
@@ -573,9 +602,9 @@ fn fader_scale(ui: &mut Ui) {
     }
 }
 
-fn fader(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
+fn fader(ui: &mut Ui, column: &MixerColumn, height: f32) -> Option<Command> {
     let (rect, response) =
-        ui.allocate_exact_size(vec2(FADER_CAP.x, FADER_HEIGHT), Sense::click_and_drag());
+        ui.allocate_exact_size(vec2(FADER_CAP.x, height), Sense::click_and_drag());
     response
         .widget_info(|| WidgetInfo::labeled(Role::Slider, true, format!("Volume {}", column.name)));
     let id = response.id.with("position");
@@ -655,9 +684,10 @@ fn stereo_meter(
     ui: &mut Ui,
     column: &MixerColumn,
     hold: StereoPeakHold,
-    width: f32,
+    size: egui::Vec2,
 ) -> Option<Command> {
-    let (rect, response) = ui.allocate_exact_size(vec2(width, FADER_HEIGHT), Sense::hover());
+    let width = size.x;
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
     let [left, right] = column.peak_db;
     response.widget_info(|| {
         WidgetInfo::labeled(
@@ -744,9 +774,8 @@ fn volume_field(ui: &mut Ui, column: &MixerColumn) -> Option<Command> {
 }
 
 /// The Add Bus slot: a dashed outline as tall as a strip, its name at the top.
-fn add_bus_slot(ui: &mut Ui) -> bool {
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(STRIP_OUTER_WIDTH, STRIP_HEIGHT), Sense::click());
+fn add_bus_slot(ui: &mut Ui, height: f32) -> bool {
+    let (rect, response) = ui.allocate_exact_size(vec2(STRIP_OUTER_WIDTH, height), Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, true, "+ Add Bus"));
     let colours = palette();
     let hovered = response.hovered() || response.is_pointer_button_down_on();

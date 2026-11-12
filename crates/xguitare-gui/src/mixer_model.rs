@@ -252,6 +252,39 @@ pub fn send_text(level_db: Option<f64>) -> String {
     level_db.map_or_else(|| "off".to_string(), |db| format!("{db:.1} dB"))
 }
 
+/// A strip's fader height at the least and at the most.
+pub const FADER_MIN_HEIGHT: f32 = 134.0;
+pub const FADER_MAX_HEIGHT: f32 = 320.0;
+pub const SEND_ROW_HEIGHT: f32 = 34.0;
+/// The Send rows a strip shows however short the mixer is; past them the Sends scroll inside the strip.
+pub const SEND_ROWS_MIN: usize = 2;
+
+/// A strip's fader height and the Send rows it shows before they scroll.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StripFit {
+    pub fader_height: f32,
+    pub send_rows: usize,
+}
+
+/// How a strip spends `height`, what its fixed rows leave: the fader [`FADER_MIN_HEIGHT`] and up to [`SEND_ROWS_MIN`] Send rows first, then a Send row per Bus, then the fader the rest up to [`FADER_MAX_HEIGHT`]. Below that minimum the strip keeps it, and the mixer scrolls.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a whole count of rows, floored at 0, fits a usize"
+)]
+pub fn strip_fit(height: f32, buses: usize) -> StripFit {
+    let rows_room = ((height - FADER_MIN_HEIGHT) / SEND_ROW_HEIGHT)
+        .floor()
+        .max(0.0) as usize;
+    let send_rows = rows_room.max(SEND_ROWS_MIN).min(buses);
+    let fader_height =
+        (height - send_rows as f32 * SEND_ROW_HEIGHT).clamp(FADER_MIN_HEIGHT, FADER_MAX_HEIGHT);
+    StripFit {
+        fader_height,
+        send_rows,
+    }
+}
+
 /// The selectors of a Rack request for the Rack of `rack`; none for the Daemon's own choice (the selected Track, or the one Rack with no Project open).
 pub fn rack_selectors(rack: Option<MixerTarget>) -> (Option<TrackRef>, Option<BusRef>, bool) {
     match rack {

@@ -4,9 +4,9 @@ use serde_json::{Value, json};
 use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
     Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, SendView, ShownRack,
-    StereoPeakHold, aim_rack_commands, default_render_name, fader_db, fader_position,
+    StereoPeakHold, StripFit, aim_rack_commands, default_render_name, fader_db, fader_position,
     mixer_columns, rack_selectors, render_view, send_fraction, send_level, send_text,
-    shown_rack_column, strip_ladder,
+    shown_rack_column, strip_fit, strip_ladder,
 };
 use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command};
 use xguitare_gui::project_model::{MainView, project_key_to_command};
@@ -511,4 +511,23 @@ fn a_refused_render_shows_its_error_in_place_of_the_last_render() {
         render_view(&status, None, Some(&sent)),
         RenderView::Running(0.1)
     );
+}
+
+fn fit(fader_height: f32, send_rows: usize) -> StripFit {
+    StripFit {
+        fader_height,
+        send_rows,
+    }
+}
+
+#[test]
+fn strip_height_goes_to_the_fader_minimum_then_send_rows_then_the_fader() {
+    assert_eq!(strip_fit(100.0, 2), fit(134.0, 2));
+    assert_eq!(strip_fit(134.0 + 68.0, 8), fit(134.0, 2));
+    assert_eq!(strip_fit(134.0 + 68.0 + 33.0, 8), fit(167.0, 2));
+    assert_eq!(strip_fit(134.0 + 102.0, 8), fit(134.0, 3));
+    assert_eq!(strip_fit(134.0 + 272.0 + 50.0, 8), fit(184.0, 8));
+    assert_eq!(strip_fit(900.0, 8), fit(320.0, 8));
+    assert_eq!(strip_fit(400.0, 1), fit(320.0, 1));
+    assert_eq!(strip_fit(200.0, 0), fit(200.0, 0));
 }

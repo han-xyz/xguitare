@@ -6,9 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use egui::{
-    CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, ScrollArea, Theme, Ui,
-};
+use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_core::control::{BusRef, TrackRef};
@@ -16,7 +14,7 @@ use xguitare_core::{BankKind, Config};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
-use crate::mixer::{self, MixerView, RenderDraft, mixer_panel, render_dialog};
+use crate::mixer::{MixerView, RenderDraft, mixer_panel, render_dialog};
 use crate::mixer_model::{MASTER, MixerTarget, RackFocus, aim_rack_commands, shown_rack_column};
 use crate::model::{
     BankRow, ClipLatch, Command, Feedback, KeyEvent, KeyModifiers, Link, PeakHold, PortSelection,
@@ -647,11 +645,7 @@ fn central_view(
         return rack_view(ui, snapshot, view);
     };
     if main_view == MainView::Mixer {
-        ui.spacing_mut().scroll = mixer::scroll_style();
-        return ScrollArea::vertical()
-            .id_salt("mixer_columns")
-            .show(ui, |ui| mixer_panel(ui, snapshot, mixer))
-            .inner;
+        return mixer_panel(ui, snapshot, mixer);
     }
     let Some(target) = shown_rack_column(mixer.rack, status) else {
         return Vec::new();

@@ -270,6 +270,12 @@ pub fn boundary_pairs() -> Vec<ContrastPair> {
         pair("fader cap on well", c.ear_edge, c.well),
         pair("Take edge on the lane", c.take_edge, c.well),
         pair("recording Take edge", c.danger, c.recording_take),
+        pair("loop edges on the recording Take", c.lit, c.recording_take),
+        pair(
+            "loop edges, loop off, on the recording Take",
+            c.boundary,
+            c.recording_take,
+        ),
         pair("playhead on the ruler", c.danger, c.ruler),
         pair("loop edges on the ruler", c.lit, c.ruler),
         pair("Track level bar on its well", c.go, c.well),
