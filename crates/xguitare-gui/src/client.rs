@@ -304,8 +304,7 @@ impl Client {
         };
         let present: Vec<String> = rack
             .as_ref()
-            .map(param_rows)
-            .unwrap_or_default()
+            .map_or_default(param_rows)
             .into_iter()
             .map(|(id, _)| id)
             .collect();
@@ -575,12 +574,7 @@ impl Client {
 
     /// Fetches the peak table of each active Take of the Items not cached for its frames; a Take the Daemon refused, or whose reply names other frames, is not asked for again until its frames change, and one whose pages do not all arrive is asked for again at the next refresh.
     fn fetch_peaks(&mut self) {
-        let items = self
-            .snapshot
-            .items
-            .as_ref()
-            .map(item_blocks)
-            .unwrap_or_default();
+        let items = self.snapshot.items.as_ref().map_or_default(item_blocks);
         for item in items {
             let wanted = (item.file, item.take_frames);
             if self.peak_frames.get(&wanted.0) == Some(&wanted.1)

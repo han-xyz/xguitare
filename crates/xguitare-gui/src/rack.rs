@@ -124,7 +124,7 @@ enum FixedAction {
 
 pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<Command> {
     let mut commands = Vec::new();
-    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
+    let modules = snapshot.params.as_ref().map_or_default(param_rows);
     let ids: Vec<String> = modules.iter().map(|(id, _)| id.clone()).collect();
     let order = view.layout.order(&ids);
     let muted_by_tuner = *view.tuner.open && *view.tuner.muted_by_us;
@@ -1380,8 +1380,7 @@ fn choice_chip(
     let text = shown
         .labels
         .get(lit)
-        .map(|label| choice_text(label))
-        .unwrap_or_default();
+        .map_or_default(|label| choice_text(label));
     let name = format!("{}, {text}, selected", param_label(&row.param));
     let group = Layout::top_down(Align::Min);
     let clicked = ui

@@ -746,11 +746,11 @@ fn stereo_meter(
         StrokeKind::Inside,
     );
     let travel = Rect::from_x_y_ranges(rect.x_range(), travel_y(rect, 1.0)..=travel_y(rect, 0.0));
-    for side in 0..2 {
+    for (side, &peak_db) in column.peak_db.iter().enumerate() {
         let ladder_left = rect.left() + side as f32 * (LADDER_WIDTH + LADDER_GAP);
         let ladder =
             Rect::from_x_y_ranges(ladder_left..=ladder_left + LADDER_WIDTH, travel.y_range());
-        paint_ladder(painter, ladder, column.peak_db[side]);
+        paint_ladder(painter, ladder, peak_db);
         let held_db = hold.held_db()[side];
         if held_db > FADER_FLOOR_DB {
             let hold_y = travel_y(rect, fader_position(held_db));

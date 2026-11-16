@@ -270,7 +270,7 @@ impl ProjectDisk {
         let Some(open) = open else {
             return;
         };
-        let finished = self.open.map(DiskThread::stop).unwrap_or_default();
+        let finished = self.open.map_or_default(DiskThread::stop);
         log_last_takes(&finish_stopped(open, &finished, latency));
     }
 }

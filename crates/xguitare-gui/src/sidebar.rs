@@ -273,11 +273,7 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
         commands.push(Command::ProjectNew(new_name.trim().to_string()));
         new_name.clear();
     }
-    let rows = snapshot
-        .projects
-        .as_ref()
-        .map(project_rows)
-        .unwrap_or_default();
+    let rows = snapshot.projects.as_ref().map_or_default(project_rows);
     let combo = ComboBox::from_id_salt("open_project")
         .width(ui.available_width())
         .selected_text(OPEN_PROJECT)
@@ -458,7 +454,7 @@ fn add_module(
     add: &mut AddDraft,
     stereo_rack: bool,
 ) -> Option<Command> {
-    let modules = snapshot.params.as_ref().map(param_rows).unwrap_or_default();
+    let modules = snapshot.params.as_ref().map_or_default(param_rows);
     let rack = rack_channels(&modules, &snapshot.module_types);
     let width = ui.available_width();
     let columns = chip_columns(width);
@@ -596,8 +592,7 @@ fn fixed_chips(ui: &mut Ui, snapshot: &Snapshot, layout: &mut RackLayout) {
         let ids: Vec<String> = snapshot
             .params
             .as_ref()
-            .map(param_rows)
-            .unwrap_or_default()
+            .map_or_default(param_rows)
             .into_iter()
             .map(|(id, _)| id)
             .collect();

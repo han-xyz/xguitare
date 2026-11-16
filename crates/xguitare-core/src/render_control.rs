@@ -134,8 +134,7 @@ fn checked_render_name(name: &str) -> Result<&str, String> {
 
 fn folder_name(dir: &Path) -> String {
     dir.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_default(|name| name.to_string_lossy().into_owned())
 }
 
 /// `<dir>/renders`, created when missing; a symlink or anything but a directory there is refused.

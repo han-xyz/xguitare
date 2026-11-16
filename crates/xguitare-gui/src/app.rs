@@ -169,8 +169,7 @@ impl App {
         let open_units = cc
             .storage
             .and_then(|storage| storage.get_string(OPEN_UNITS_KEY))
-            .map(|stored| open_units_from_string(&stored))
-            .unwrap_or_default();
+            .map_or_default(|stored| open_units_from_string(&stored));
         let stored_view = cc.storage.and_then(|storage| storage.get_string(VIEW_KEY));
         let snap = cc
             .storage
@@ -179,8 +178,7 @@ impl App {
         let rack_layout = cc
             .storage
             .and_then(|storage| storage.get_string(RACK_LAYOUT_KEY))
-            .map(|stored| RackLayout::from_stored(&stored))
-            .unwrap_or_default();
+            .map_or_default(|stored| RackLayout::from_stored(&stored));
         cc.egui_ctx.set_theme(Theme::Dark);
         cc.egui_ctx.set_fonts(theme::fonts());
         cc.egui_ctx
@@ -257,8 +255,7 @@ impl App {
         let present: HashSet<String> = snapshot
             .params
             .as_ref()
-            .map(param_rows)
-            .unwrap_or_default()
+            .map_or_default(param_rows)
             .into_iter()
             .flat_map(|(_, rows)| rows.into_iter().map(|row| row.address))
             .collect();
@@ -443,11 +440,9 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let snapshot = &self.snapshot;
         let now = Instant::now();
-        let rows = snapshot
-            .bank
-            .as_ref()
-            .map(|list| bank_rows_for_rack(bank_rows(list).0, self.mixer.shows_stereo_rack()))
-            .unwrap_or_default();
+        let rows = snapshot.bank.as_ref().map_or_default(|list| {
+            bank_rows_for_rack(bank_rows(list).0, self.mixer.shows_stereo_rack())
+        });
         let main_view = snapshot
             .status
             .as_ref()
@@ -458,8 +453,7 @@ impl eframe::App for App {
         let item_ids: Vec<u64> = snapshot
             .items
             .as_ref()
-            .map(item_blocks)
-            .unwrap_or_default()
+            .map_or_default(item_blocks)
             .iter()
             .map(|item| item.id)
             .collect();
@@ -585,12 +579,7 @@ impl eframe::App for App {
             .iter()
             .rfind(|command| matches!(command, Command::ItemCopy(_)))
         {
-            let items = self
-                .snapshot
-                .items
-                .as_ref()
-                .map(item_blocks)
-                .unwrap_or_default();
+            let items = self.snapshot.items.as_ref().map_or_default(item_blocks);
             ui.ctx().copy_text(copied_text(&items, ids));
         }
         remember_removes(&mut self.removing, &commands);
@@ -644,7 +633,7 @@ fn key_command(
     if project_name(Some(status)).is_none() {
         return key_to_command(key, rows);
     }
-    let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
+    let items = snapshot.items.as_ref().map_or_default(item_blocks);
     if let Some(view) = arrange
         && let Some(command) =
             item_key_to_command(key, status, &items, &view.selection, view.timeline)
