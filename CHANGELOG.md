@@ -22,6 +22,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - `octave` Module, a tracking octaver for single notes with no added delay: `oct1` one octave down, `oct2` two octaves down and `up` one octave up beside `dry`, `tone` on the two sub voices, `range` bass|guitar.
 - Metal starter Presets in both starter Banks: Thrash, Djent, Doom, Buzzsaw and Stoner (programs 8 to 12); an existing Bank is not touched, copy the files from `crates/xguitare-core/bank/` or `bank-bass/` to add them.
 - Bass starter Presets Envelope Funk (compressor, `autowah`, `eq`, cabinet) and Modern Grind (`eq`, `blend`, `limiter`, cabinet); an existing bass Bank is not touched.
+- Starter Presets Sub Octave (`octave` with only the octave below) and Distortion (`drive` into a clean `preamp`) in the guitar Bank, Synth Sub (`octave` under the bass) and Distortion (`blend`) in the bass Bank, programs 13 and 14, matched in loudness like the others; an existing Bank is not touched, copy the files from `crates/xguitare-core/bank/` or `bank-bass/` to add them.
 - GUI: the `eq` unit (`EQ`) shows its response curve, a small one when closed and, when open, a plot with a dot per band over four band columns of knobs.
 - GUI: a choice Parameter is a row of buttons in an open unit and a chip with the current choice in a closed one (a click on a two-way chip switches it); an open unit grows to hold its knobs, which wrap to another row between groups of Parameters.
 - Choice Parameters: the Control API `modules` and `get` entries carry `labels` (`["lp","bp","hp"]`; `[]` for a plain number) and `xguitare modules` prints them, `mode (lp|bp|hp)`. Presets and `set` keep the number.
@@ -43,6 +44,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 ### Changed
 
 - Starter Presets: the cabinet `level` of all 26 starter Presets is retuned so that on a plucked test signal at −18 dB RMS none has a true peak above −1 dBTP and the Presets of a Bank play at one BS.1770 loudness (−13 LUFS guitar, −14 LUFS bass; bass Primus Flange and Envelope Funk sit lower, at the ceiling); an existing Bank is not touched, copy the files from `crates/xguitare-core/bank/` or `bank-bass/` to take the new levels.
+- Starter Presets: guitar Stoner has an `octave` adding the octave below before its `drive`, bass Stoner one adding the octave up before its `blend`; bass Stoner's cabinet `level` is −18.0 dB (was −17.9).
 - GUI: the meter bridge and the Tuner unit can be dragged to any gap of the Rack, moved with their `↑` `↓`, or hidden with `Hide` or by dragging them out (the footer offers Undo); the `Tuner` and `Meters` chips under `Add Module` show them again. Their places are kept across restarts and shared by every Rack the window shows.
 - GUI: the left panel's `Metronome` section now sits above `Add Module`, so it is in view at 1280×800.
 - GUI: new "Faceplate" look, part 1: one theme for every colour and text size, the IBM Plex fonts bundled in the binary, and a new set of eighteen Module colours, each distinct from the others and readable with dark text on it.
