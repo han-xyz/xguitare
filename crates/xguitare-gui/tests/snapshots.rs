@@ -3293,12 +3293,13 @@ fn rack_layout_snapshots() {
     }
 }
 
-/// A Project window with the Clean up Takes dialog opened, before and after the Daemon answers `takes_unused` with `reply`.
+/// A Project window of `size` with the Clean up Takes dialog opened, before and after the Daemon answers `takes_unused` with `reply`.
 fn clean_takes_harness(
+    size: Vec2,
     reply: Result<Value, String>,
 ) -> (Harness<'static, App>, Receiver<Command>, TempDir) {
     let (mut harness, updates, sent, dir) =
-        streamed_harness_sending(DEFAULT_WINDOW, project_snapshot("stopped"));
+        streamed_harness_sending(size, project_snapshot("stopped"));
     harness.run_steps(2);
     click_button(&mut harness, "Clean up Takes…");
     harness.run_steps(2);
@@ -3320,45 +3321,52 @@ fn close_dialog(harness: &mut Harness<App>, label: &str) {
     harness.run_steps(2);
 }
 
+/// A Take file name of 60 characters, the longest the dialog's snapshots list.
+const LONG_TAKE_NAME: &str = "living-room-session-with-the-new-amp-and-old-strings-107.wav";
+
 #[test]
 fn clean_up_takes_dialog_lists_the_unused_takes_and_deletes_them() {
-    let unused = json!({"files": [
-        {"file": "takes/guitar-3.wav", "bytes": 23_040_044},
-        {"file": "takes/guitar-4.wav", "bytes": 4_608_044},
-        {"file": "takes/bass-2.wav", "bytes": 800},
-    ], "bytes": 27_648_888});
-    let (mut harness, sent, _dir) = clean_takes_harness(Ok(unused));
-    for text in [
-        "guitar-3.wav",
-        "23.0 MB",
-        "bass-2.wav",
-        "800 B",
-        "3 files, 27.6 MB",
-        "Deleting saves the Project and clears Undo.",
-    ] {
-        harness.get_by_label(text);
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let unused = json!({"files": [
+            {"file": "takes/guitar-3.wav", "bytes": 23_040_044},
+            {"file": format!("takes/{LONG_TAKE_NAME}"), "bytes": 4_608_044},
+            {"file": "takes/bass-2.wav", "bytes": 800},
+        ], "bytes": 27_648_888});
+        let (mut harness, sent, _dir) = clean_takes_harness(size, Ok(unused));
+        for text in [
+            "guitar-3.wav",
+            "23.0 MB",
+            LONG_TAKE_NAME,
+            "4.6 MB",
+            "bass-2.wav",
+            "800 B",
+            "3 files, 27.6 MB",
+            "Deleting saves the Project and clears Undo.",
+        ] {
+            harness.get_by_label(text);
+        }
+        write_png(&mut harness, &format!("clean-takes-{suffix}"));
+        click_button(&mut harness, "Delete 3 files");
+        assert_eq!(
+            sent_now(&sent),
+            [Command::CleanTakes(vec![
+                "takes/guitar-3.wav".to_string(),
+                format!("takes/{LONG_TAKE_NAME}"),
+                "takes/bass-2.wav".to_string(),
+            ])]
+        );
+        assert!(
+            harness
+                .query_by_role_and_label(Role::Button, "Delete 3 files")
+                .is_none()
+        );
     }
-    write_png(&mut harness, "clean-takes-1280x800");
-    click_button(&mut harness, "Delete 3 files");
-    assert_eq!(
-        sent_now(&sent),
-        [Command::CleanTakes(vec![
-            "takes/guitar-3.wav".to_string(),
-            "takes/guitar-4.wav".to_string(),
-            "takes/bass-2.wav".to_string(),
-        ])]
-    );
-    assert!(
-        harness
-            .query_by_role_and_label(Role::Button, "Delete 3 files")
-            .is_none()
-    );
 }
 
 #[test]
 fn clean_up_takes_dialog_reads_the_takes_again_when_reopened() {
     let unused = json!({"files": [{"file": "takes/bass-2.wav", "bytes": 800}], "bytes": 800});
-    let (mut harness, sent, _dir) = clean_takes_harness(Ok(unused));
+    let (mut harness, sent, _dir) = clean_takes_harness(DEFAULT_WINDOW, Ok(unused));
     harness.get_by_label("bass-2.wav");
     close_dialog(&mut harness, "Cancel");
     click_button(&mut harness, "Clean up Takes…");
@@ -3370,20 +3378,26 @@ fn clean_up_takes_dialog_reads_the_takes_again_when_reopened() {
 
 #[test]
 fn clean_up_takes_dialog_says_when_nothing_is_unused() {
-    let (mut harness, sent, _dir) = clean_takes_harness(Ok(json!({"files": [], "bytes": 0})));
-    harness.get_by_label("No unused Takes.");
-    write_png(&mut harness, "clean-takes-empty-1280x800");
-    close_dialog(&mut harness, "Close");
-    assert_eq!(sent_now(&sent), []);
-    assert!(harness.query_by_label("No unused Takes.").is_none());
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let (mut harness, sent, _dir) =
+            clean_takes_harness(size, Ok(json!({"files": [], "bytes": 0})));
+        harness.get_by_label("No unused Takes.");
+        write_png(&mut harness, &format!("clean-takes-empty-{suffix}"));
+        close_dialog(&mut harness, "Close");
+        assert_eq!(sent_now(&sent), []);
+        assert!(harness.query_by_label("No unused Takes.").is_none());
+    }
 }
 
 #[test]
 fn clean_up_takes_dialog_shows_why_the_takes_could_not_be_read() {
-    let (mut harness, _sent, _dir) =
-        clean_takes_harness(Err("takes is not a directory".to_string()));
-    harness.get_by_label("takes is not a directory");
-    write_png(&mut harness, "clean-takes-failed-1280x800");
-    close_dialog(&mut harness, "Close");
-    assert!(harness.query_by_label("takes is not a directory").is_none());
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let (mut harness, _sent, _dir) =
+            clean_takes_harness(size, Err("takes is not a directory".to_string()));
+        harness.get_by_label("Could not read the Project's takes folder:");
+        harness.get_by_label("takes is not a directory");
+        write_png(&mut harness, &format!("clean-takes-failed-{suffix}"));
+        close_dialog(&mut harness, "Close");
+        assert!(harness.query_by_label("takes is not a directory").is_none());
+    }
 }

@@ -46,6 +46,7 @@ const SECTION_PADDING: Margin = Margin::same(SPACE_S as i8);
 const ARROW_SIZE: f32 = 8.0;
 const UNSAVED: &str = "unsaved changes";
 const SAVE_AS_LABEL: &str = "Save as new";
+const TAKES_UNREADABLE: &str = "Could not read the Project's takes folder:";
 const SAVE_AS_HINT: &str = "New Preset name";
 const SEARCH_HINT: &str = "Search by name or number";
 const CHOOSE: &str = "choose";
@@ -327,7 +328,7 @@ pub fn clean_takes_dialog(
                 return;
             }
             CleanTakesView::Failed(error) => {
-                open = note_with_close(ui, error);
+                open = error_with_close(ui, error);
                 return;
             }
         };
@@ -375,6 +376,30 @@ pub fn clean_takes_dialog(
 /// The Clean up Takes dialog's `text` and `Close`; `false` once `Close` is clicked.
 fn note_with_close(ui: &mut Ui, text: &str) -> bool {
     ui.label(text);
+    ui.add_space(SPACE_S);
+    !ui.add(outlined_button("Close")).clicked()
+}
+
+/// Why the Takes could not be listed, after a lead sentence, with the error toast's danger dot and detail style; `false` once `Close` is clicked.
+fn error_with_close(ui: &mut Ui, error: &str) -> bool {
+    ui.horizontal_top(|ui| {
+        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&theme::body()));
+        let (dot, _) =
+            ui.allocate_exact_size(vec2(2.0 * TOAST_DOT_RADIUS, line_height), Sense::hover());
+        ui.painter()
+            .circle_filled(dot.center(), TOAST_DOT_RADIUS, colour(palette().danger));
+        ui.vertical(|ui| {
+            ui.label(TAKES_UNREADABLE);
+            ui.add(
+                egui::Label::new(
+                    RichText::new(error)
+                        .font(theme::value())
+                        .color(colour(palette().muted)),
+                )
+                .wrap(),
+            );
+        });
+    });
     ui.add_space(SPACE_S);
     !ui.add(outlined_button("Close")).clicked()
 }
