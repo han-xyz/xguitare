@@ -61,6 +61,8 @@ const NO_PROJECTS: &str = "no Projects yet";
 const CLEAN_UP_TAKES: &str = "Clean up Takes\u{2026}";
 const CLEAN_TAKES_WARNING: &str = "Deleting saves the Project and clears Undo.";
 const CLEAN_TAKES_WIDTH: f32 = 360.0;
+/// Room for the widest size, `999.9 MB`, right-aligned beside each Take name.
+const CLEAN_TAKES_SIZE_WIDTH: f32 = 64.0;
 /// The list scrolls past this height.
 const CLEAN_TAKES_LIST_HEIGHT: f32 = 240.0;
 const NO_METRONOME: &str = "no Metronome from the Daemon";
@@ -335,18 +337,19 @@ pub fn clean_takes_dialog(
         ScrollArea::vertical()
             .max_height(CLEAN_TAKES_LIST_HEIGHT)
             .show(ui, |ui| {
-                Grid::new("unused_takes")
-                    .num_columns(2)
-                    .spacing(vec2(SPACE_M, SPACE_XS))
-                    .show(ui, |ui| {
-                        for (name, size) in &unused.rows {
-                            ui.label(name);
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(muted_text(size));
-                            });
-                            ui.end_row();
-                        }
+                ui.spacing_mut().item_spacing.y = SPACE_XS;
+                for (name, size) in &unused.rows {
+                    ui.horizontal(|ui| {
+                        let name_width = ui.available_width() - CLEAN_TAKES_SIZE_WIDTH - SPACE_M;
+                        ui.allocate_ui(vec2(name_width, ui.spacing().interact_size.y), |ui| {
+                            ui.set_width(name_width);
+                            ui.add(egui::Label::new(name.as_str()).truncate());
+                        });
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(muted_text(size));
+                        });
                     });
+                }
             });
         ui.add_space(SPACE_XS);
         let count = unused.files.len();

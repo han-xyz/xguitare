@@ -3327,37 +3327,49 @@ const LONG_TAKE_NAME: &str = "living-room-session-with-the-new-amp-and-old-strin
 #[test]
 fn clean_up_takes_dialog_lists_the_unused_takes_and_deletes_them() {
     for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let longest = format!("{}take.wav", "overdub-".repeat(24));
         let unused = json!({"files": [
             {"file": "takes/guitar-3.wav", "bytes": 23_040_044},
             {"file": format!("takes/{LONG_TAKE_NAME}"), "bytes": 4_608_044},
             {"file": "takes/bass-2.wav", "bytes": 800},
-        ], "bytes": 27_648_888});
+            {"file": format!("takes/{longest}"), "bytes": 2_000},
+        ], "bytes": 27_650_888});
         let (mut harness, sent, _dir) = clean_takes_harness(size, Ok(unused));
         for text in [
             "guitar-3.wav",
-            "23.0 MB",
             LONG_TAKE_NAME,
-            "4.6 MB",
             "bass-2.wav",
-            "800 B",
-            "3 files, 27.6 MB",
+            &longest,
+            "4 files, 27.7 MB",
             "Deleting saves the Project and clears Undo.",
         ] {
             harness.get_by_label(text);
         }
+        let first_name = harness.get_by_label("guitar-3.wav").rect();
+        let sizes =
+            ["23.0 MB", "4.6 MB", "800 B", "2.0 KB"].map(|size| harness.get_by_label(size).rect());
+        for size in &sizes[1..] {
+            assert!((size.right() - sizes[0].right()).abs() < 0.5, "{sizes:?}");
+        }
+        assert!(
+            sizes[0].right() - first_name.left() <= 360.0,
+            "the list stays inside the dialog's width: {first_name:?} {sizes:?}"
+        );
+        assert!(harness.get_by_label(&longest).rect().right() < sizes[3].left());
         write_png(&mut harness, &format!("clean-takes-{suffix}"));
-        click_button(&mut harness, "Delete 3 files");
+        click_button(&mut harness, "Delete 4 files");
         assert_eq!(
             sent_now(&sent),
             [Command::CleanTakes(vec![
                 "takes/guitar-3.wav".to_string(),
                 format!("takes/{LONG_TAKE_NAME}"),
                 "takes/bass-2.wav".to_string(),
+                format!("takes/{longest}"),
             ])]
         );
         assert!(
             harness
-                .query_by_role_and_label(Role::Button, "Delete 3 files")
+                .query_by_role_and_label(Role::Button, "Delete 4 files")
                 .is_none()
         );
     }
