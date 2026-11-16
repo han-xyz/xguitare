@@ -4,7 +4,7 @@ use xguitare_dsp::midi::program_change;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{
     Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Limiter,
-    Module, Preamp, Rack, Reverb, Shaper, StereoRack, StereoSlot, Tonestack,
+    Module, Octave, Preamp, Rack, Reverb, Shaper, StereoRack, StereoSlot, Tonestack,
 };
 
 #[cfg(debug_assertions)]
@@ -74,6 +74,21 @@ fn shaper_does_not_allocate() {
     assert_rack_does_not_allocate(
         Box::new(Shaper::new()),
         &[(0, 12.0), (1, -12.0), (2, 6.0), (3, 50.0)],
+    );
+}
+
+#[test]
+fn octave_does_not_allocate() {
+    assert_rack_does_not_allocate(
+        Box::new(Octave::new()),
+        &[
+            (0, 50.0),
+            (1, 100.0),
+            (2, 80.0),
+            (3, 60.0),
+            (4, 1200.0),
+            (5, 1.0),
+        ],
     );
 }
 

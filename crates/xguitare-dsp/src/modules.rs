@@ -11,6 +11,7 @@ pub mod fuzz;
 pub mod gain;
 pub mod gate;
 pub mod limiter;
+pub mod octave;
 pub mod preamp;
 pub mod reverb;
 pub mod shaper;

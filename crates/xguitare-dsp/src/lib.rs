@@ -24,6 +24,7 @@ pub use modules::fuzz::Fuzz;
 pub use modules::gain::Gain;
 pub use modules::gate::Gate;
 pub use modules::limiter::Limiter;
+pub use modules::octave::Octave;
 pub use modules::preamp::Preamp;
 pub use modules::reverb::Reverb;
 pub use modules::shaper::Shaper;
