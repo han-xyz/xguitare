@@ -39,7 +39,7 @@ type = "cabinet"
 ir = "default-cab.wav"
 
 [module.params]
-level = 8.2
+level = 6.1
 
 [[module]]
 type = "delay"

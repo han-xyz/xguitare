@@ -28,7 +28,7 @@ type = "cabinet"
 ir = "default-cab.wav"
 
 [module.params]
-level = 12.0
+level = 16.6
 
 [[module]]
 type = "chorus"

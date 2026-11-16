@@ -37,4 +37,4 @@ type = "cabinet"
 ir = "default-cab.wav"
 
 [module.params]
-level = 4.6
+level = 3.2

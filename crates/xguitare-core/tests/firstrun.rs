@@ -365,65 +365,55 @@ fn output_level(preset: &xguitare_core::Preset, dir: &std::path::Path, input: &[
     }
 }
 
-const METAL_PRESETS: [&str; 5] = ["Thrash", "Djent", "Doom", "Buzzsaw", "Stoner"];
+const CAP_GUITAR_DB: f32 = -13.0;
+const CAP_BASS_DB: f32 = -13.0;
+const PEAK_CEILING_DB: f32 = -1.0;
 
-fn levels(kind: BankKind, names: &[&str], notes_hz: &[f32]) -> Vec<Level> {
-    let temp = temp_dir(&format!("loudness-{}", names[0]));
+fn bank_levels(kind: BankKind, notes_hz: &[f32]) -> Vec<(String, Level)> {
+    let temp = temp_dir(&format!("loudness-{kind:?}"));
     let dir = temp.0.join("bank");
     ensure_bank(&dir, kind, 48_000).unwrap();
-    let bank = Bank::load_dir(&dir).unwrap();
     let input = plucked(notes_hz, 48_000.0, 4.0, -18.0);
-    names
+    Bank::load_dir(&dir)
+        .unwrap()
+        .entries
         .iter()
-        .map(|name| {
-            let preset = bank
-                .entries
-                .iter()
-                .find_map(|entry| match entry {
-                    BankEntry::Valid { preset, .. } if preset.name == *name => Some(preset),
-                    _ => None,
-                })
-                .unwrap();
-            output_level(preset, &dir, &input)
+        .map(|entry| {
+            let BankEntry::Valid { preset, .. } = entry else {
+                panic!("invalid starter preset: {entry:?}");
+            };
+            (preset.name.clone(), output_level(preset, &dir, &input))
         })
         .collect()
 }
 
-fn assert_within_2_db(name: &str, level: &Level, reference: &str, reference_level: &Level) {
-    assert!(
-        (level.rms_db - reference_level.rms_db).abs() <= 2.0,
-        "{name}: {:.1} dB, {reference} {:.1} dB",
-        level.rms_db,
-        reference_level.rms_db
-    );
+fn assert_headroom_at_one_loudness(kind: BankKind, notes_hz: &[f32], cap_db: f32) {
+    let levels = bank_levels(kind, notes_hz);
+    assert_eq!(levels.len(), 13);
+    let failures: Vec<String> = levels
+        .iter()
+        .filter_map(|(name, level)| {
+            let peak_db = 20.0 * level.peak.log10();
+            let rms_db = level.rms_db;
+            let clips = peak_db > PEAK_CEILING_DB;
+            let too_loud = rms_db > cap_db + 0.05;
+            let too_quiet = peak_db < PEAK_CEILING_DB - 0.2 && rms_db < cap_db - 0.2;
+            (clips || too_loud || too_quiet).then(|| {
+                format!("{name}: peak {peak_db:.2} dBFS, RMS {rms_db:.2} dB, cap {cap_db} dB")
+            })
+        })
+        .collect();
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
 #[test]
-fn new_bass_presets_play_as_loud_as_funk() {
-    let names = ["Funk", "Envelope Funk", "Modern Grind"]
-        .into_iter()
-        .chain(METAL_PRESETS)
-        .collect::<Vec<_>>();
-    let levels = levels(BankKind::Bass, &names, &BASS_NOTES_HZ);
-    for (name, level) in names.iter().zip(&levels).skip(1) {
-        assert_within_2_db(name, level, "Funk", &levels[0]);
-    }
-    for (name, level) in names.iter().zip(&levels).skip(3) {
-        assert!(level.peak < 1.0, "{name}: peak {:.3}", level.peak);
-    }
+fn guitar_presets_leave_headroom_at_one_loudness() {
+    assert_headroom_at_one_loudness(BankKind::Guitar, &GUITAR_NOTES_HZ, CAP_GUITAR_DB);
 }
 
 #[test]
-fn metal_guitar_presets_play_as_loud_as_high_gain() {
-    let names = ["High Gain"]
-        .into_iter()
-        .chain(METAL_PRESETS)
-        .collect::<Vec<_>>();
-    let levels = levels(BankKind::Guitar, &names, &GUITAR_NOTES_HZ);
-    for (name, level) in names.iter().zip(&levels).skip(1) {
-        assert_within_2_db(name, level, "High Gain", &levels[0]);
-        assert!(level.peak < 1.0, "{name}: peak {:.3}", level.peak);
-    }
+fn bass_presets_leave_headroom_at_one_loudness() {
+    assert_headroom_at_one_loudness(BankKind::Bass, &BASS_NOTES_HZ, CAP_BASS_DB);
 }
 
 #[test]
