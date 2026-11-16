@@ -41,7 +41,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Changed
 
-- Starter Presets: the cabinet `level` of all 26 starter Presets is lowered or raised so that none peaks above −1 dBFS on a plucked test signal at −18 dB RMS and the dense Presets of a Bank play at one loudness (−13 dB RMS); an existing Bank is not touched, copy the files from `crates/xguitare-core/bank/` or `bank-bass/` to take the new levels.
+- Starter Presets: the cabinet `level` of all 26 starter Presets is retuned so that on a plucked test signal at −18 dB RMS none has a true peak above −1 dBTP and the Presets of a Bank play at one BS.1770 loudness (−13 LUFS guitar, −14 LUFS bass; bass Primus Flange and Envelope Funk sit lower, at the ceiling); an existing Bank is not touched, copy the files from `crates/xguitare-core/bank/` or `bank-bass/` to take the new levels.
 
 - GUI: the meter bridge and the Tuner unit can be dragged to any gap of the Rack, moved with their `↑` `↓`, or hidden with `Hide` or by dragging them out (the footer offers Undo); the `Tuner` and `Meters` chips under `Add Module` show them again. Their places are kept across restarts and shared by every Rack the window shows.
 - GUI: the left panel's `Metronome` section now sits above `Add Module`, so it is in view at 1280×800.
