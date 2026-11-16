@@ -209,6 +209,10 @@ pub enum ProjectError {
         track: String,
         item: usize,
     },
+    OffsetPastTake {
+        track: String,
+        item: usize,
+    },
     DuplicateItemId(u64),
     NextItemId,
     NextItemIdPastLast,
@@ -388,7 +392,7 @@ impl Project {
     ///
     /// # Errors
     ///
-    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, an Item's active Take that does not exist, more than [`MAX_BUSES`] Buses, two Buses with one id or one name, a Bus's volume or pan out of the Track range, a Master volume other than `-inf` or −60..=6 dB, a cabinet on a Bus or Master, or a Send to an unknown Bus, a second Send to one Bus, or a Send level other than `-inf` or −60..=6 dB.
+    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, an Item's active Take that does not exist or holds no frames after the Item's `offset`, more than [`MAX_BUSES`] Buses, two Buses with one id or one name, a Bus's volume or pan out of the Track range, a Master volume other than `-inf` or −60..=6 dB, a cabinet on a Bus or Master, or a Send to an unknown Bus, a second Send to one Bus, or a Send level other than `-inf` or −60..=6 dB.
     pub fn load(dir: &Path) -> Result<Project, ProjectError> {
         read(&dir.join(PROJECT_FILE))
     }
@@ -731,6 +735,12 @@ pub(crate) fn check_track(track: &Track) -> Result<(), ProjectError> {
                 item: index,
             });
         }
+        if item.offset >= item.takes[item.take].frames {
+            return Err(ProjectError::OffsetPastTake {
+                track: track.name.clone(),
+                item: index,
+            });
+        }
         if item.length == Some(0) {
             return Err(ProjectError::ZeroLength {
                 track: track.name.clone(),
@@ -998,6 +1008,12 @@ impl fmt::Display for ProjectError {
                 write!(
                     f,
                     "track '{track}' item {item} plays past the end of its take"
+                )
+            }
+            ProjectError::OffsetPastTake { track, item } => {
+                write!(
+                    f,
+                    "track '{track}' item {item} starts past the end of its take"
                 )
             }
             ProjectError::DuplicateItemId(id) => write!(f, "two items have id {id}"),

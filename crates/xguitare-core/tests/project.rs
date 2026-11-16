@@ -929,6 +929,28 @@ fn item_ids_and_length_round_trip() {
 }
 
 #[test]
+fn an_item_starting_at_or_past_the_end_of_its_take_does_not_load() {
+    let dir = temp_dir("offset-past-take");
+    let (folder, project) = project_with_items(&dir.0, vec![item(1, 999, None, 1000)]);
+    project.save(&folder).unwrap();
+    let file = folder.join(PROJECT_FILE);
+    for offset in ["1000", "10000"] {
+        let text = fs::read_to_string(&file).unwrap();
+        fs::write(
+            &file,
+            text.replace("offset = 999", &format!("offset = {offset}")),
+        )
+        .unwrap();
+        assert_eq!(
+            Project::load(&folder).unwrap_err().to_string(),
+            "track 'Gtr' item 0 starts past the end of its take",
+            "offset {offset}"
+        );
+        fs::write(&file, text).unwrap();
+    }
+}
+
+#[test]
 fn a_file_without_item_ids_gets_them_in_file_order() {
     let dir = temp_dir("old-ids");
     let bass_items = "arm = false\n\n[[tracks.items]]\nposition = 0\ntake = 0\n\n[[tracks.items.takes]]\nfile = \"takes/bass-1.wav\"\nframes = 10\n\n[[tracks.items]]\nposition = 20\ntake = 0\n\n[[tracks.items.takes]]\nfile = \"takes/bass-2.wav\"\nframes = 10\n";

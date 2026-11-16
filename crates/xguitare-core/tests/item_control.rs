@@ -430,6 +430,16 @@ fn item_trim_moves_the_edges_within_the_take() {
 }
 
 #[test]
+fn item_trim_clamps_an_item_on_the_last_frame_of_its_take() {
+    let (mut state, _audio, _dir) = state("trim-last-frame");
+    let mut last = item(1, 10_000, "takes/a.wav", 4800);
+    last.offset = 4799;
+    open_with(&mut state, vec![("Guitar", vec![last])], &TAKES);
+    ok(handle(&mut state, item_trim(1, Some(0), Some(90_000))));
+    assert_eq!(layout(&mut state), [vec![[1, 5201, 0, 4800]]]);
+}
+
+#[test]
 fn item_split_cuts_inside_items_and_keeps_every_take_on_both_halves() {
     let (mut state, _audio, _dir) = state("split");
     let mut looped = item(1, 1000, "takes/a.wav", 4800);
