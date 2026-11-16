@@ -95,7 +95,7 @@ pub fn translucent((r, g, b): Rgb, alpha: u8) -> Color32 {
 
 pub const NEUTRAL_ACCENT: Rgb = (120, 120, 120);
 
-const MODULE_ACCENTS: [(&str, Rgb); 17] = [
+const MODULE_ACCENTS: [(&str, Rgb); 18] = [
     ("gain", (0xa9, 0xaf, 0xb9)),
     ("gate", (0x77, 0x7e, 0xad)),
     ("drive", (0xeb, 0x82, 0x28)),
@@ -113,6 +113,7 @@ const MODULE_ACCENTS: [(&str, Rgb); 17] = [
     ("blend", (0x6c, 0xf4, 0xc7)),
     ("limiter", (0x70, 0xb2, 0xf1)),
     ("shaper", (0xef, 0x8a, 0x78)),
+    ("octave", (0xf4, 0xac, 0xfe)),
 ];
 
 pub fn accent_for(type_name: &str) -> Rgb {

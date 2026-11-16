@@ -1094,6 +1094,42 @@ fn shaper_open_snapshot() {
     write_png(&mut open, "shaper-open");
 }
 
+/// The Funk Rack with an octave before the preamp, both octaves down and the octave up mixed in.
+fn octave_snapshot() -> Snapshot {
+    let octave = vec![
+        param("octave", "dry", 100.0, (0.0, 100.0, 100.0, "%", false)),
+        param("octave", "oct1", 70.0, (0.0, 100.0, 70.0, "%", false)),
+        param("octave", "oct2", 40.0, (0.0, 100.0, 0.0, "%", false)),
+        param("octave", "up", 20.0, (0.0, 100.0, 0.0, "%", false)),
+        param("octave", "tone", 500.0, (100.0, 2000.0, 500.0, "Hz", false)),
+        choice("octave", "range", 0.0, &["bass", "guitar"]),
+    ];
+    with_module(octave, "preamp")
+}
+
+const OCTAVE_CLOSED_INDEX: usize = 1;
+
+#[test]
+fn octave_open_shows_its_five_knobs_at_both_sizes() {
+    for (size, name) in [
+        (DEFAULT_WINDOW, "octave-open-1280x800"),
+        (MIN_WINDOW, "octave-open-1024x640"),
+    ] {
+        let (mut open, _, _dir) = harness_with(size, octave_snapshot());
+        open_unit(&mut open, OCTAVE_CLOSED_INDEX);
+        let unit = open.get_by_label("octave unit").rect();
+        let next_unit = unit_top(&open, "preamp");
+        let fields = open
+            .get_all_by_role(Role::TextInput)
+            .map(|field| field.rect())
+            .filter(|field| unit.x_range().contains(field.center().x))
+            .filter(|field| field.top() >= unit.top() && field.top() < next_unit)
+            .count();
+        assert_eq!(fields, 5, "at {size:?}");
+        write_png(&mut open, name);
+    }
+}
+
 const EQ_SPEC: [(&str, f64, f64, f64, &str); 13] = [
     ("low_cut", 10.0, 300.0, 10.0, "Hz"),
     ("low_freq", 20.0, 500.0, 100.0, "Hz"),
@@ -2467,7 +2503,7 @@ fn the_metronome_shows_whole_at_1280x800_above_add_module() {
             + harness
                 .query_all_by_label_contains("(mono_to_stereo)")
                 .count(),
-        17
+        18
     );
     let tap = harness.get_by_role_and_label(Role::Button, "Tap").rect();
     assert!(

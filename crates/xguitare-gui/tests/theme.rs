@@ -12,7 +12,7 @@ const BOUNDARY_FLOOR: f64 = 3.0;
 const ACCENT_DELTA_E_FLOOR: f64 = 15.0;
 const SAMPLE: &str = "Funk 120 dB";
 
-const ACCENTS: [(&str, Rgb); 17] = [
+const ACCENTS: [(&str, Rgb); 18] = [
     ("gain", (0xa9, 0xaf, 0xb9)),
     ("gate", (0x77, 0x7e, 0xad)),
     ("drive", (0xeb, 0x82, 0x28)),
@@ -30,6 +30,7 @@ const ACCENTS: [(&str, Rgb); 17] = [
     ("blend", (0x6c, 0xf4, 0xc7)),
     ("limiter", (0x70, 0xb2, 0xf1)),
     ("shaper", (0xef, 0x8a, 0x78)),
+    ("octave", (0xf4, 0xac, 0xfe)),
 ];
 
 fn linear(value: u8) -> f64 {
