@@ -444,6 +444,41 @@ fn the_crossfade_at_a_cut_keeps_an_equal_level() {
     }
 }
 
+const SHORT_TAKE_LEADS: [u64; 5] = [1, 3, 10, 239, 240];
+
+fn assert_unity(left: &[f32], frames: std::ops::Range<usize>, lead: u64) {
+    for frame in frames {
+        assert!(
+            (left[frame] - 1.0).abs() < 1e-4,
+            "lead {lead}, frame {frame}: {}",
+            left[frame]
+        );
+    }
+}
+
+#[test]
+fn a_lower_take_starting_just_before_a_top_end_crosses_to_unity() {
+    for lead in SHORT_TAKE_LEADS {
+        let mut lower = item(1000, "", 4000);
+        lower.length = Some(2000);
+        let mut top = item(500, "", 4000);
+        top.length = Some(500 + lead);
+        let left = played(vec![(lower, 1.0), (top, 1.0)], 4000);
+        assert_unity(&left, 500 + FADE_FRAMES..3000 - FADE_FRAMES, lead);
+    }
+}
+
+#[test]
+fn a_lower_take_ending_just_after_a_top_start_crosses_to_unity() {
+    for lead in SHORT_TAKE_LEADS {
+        let mut top = item(2000 - lead, "", 1000);
+        top.length = Some(500);
+        let left = played(vec![(item(1000, "", 1000), 1.0), (top, 1.0)], 3000);
+        let top_end = (2000 - lead) as usize + 500;
+        assert_unity(&left, 1000 + FADE_FRAMES..top_end - FADE_FRAMES, lead);
+    }
+}
+
 #[test]
 fn an_item_with_a_length_stops_at_its_end() {
     let mut short = item(0, "", 2000);

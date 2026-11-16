@@ -45,7 +45,7 @@ pub fn item_fade_frames(sample_rate: f32) -> u64 {
 
 /// The stretches of one Track's `items` that are heard, in timeline order: an Item later in `items` is on top and hides what it covers of those before it; neighbouring stretches that continue one Take frame for frame play as one.
 ///
-/// Each stretch's own edges fade over `fade` frames, or over half its uncovered length (rounded up) when that is shorter. Where a top Item cuts into a lower one, the lower stretch goes on under the top one's ramp, as far as the lower Item's Take reaches; under a top shorter than twice `fade` and odd in length, the two ramps meet on its middle frame, which sums above 1 by one ramp step. Where a stretch ends at an Item's end and the next one starts at its Item's start, the first goes on into its Take under the next one's fade-in, as far as its Take reaches, and the next fades in over just that.
+/// Each stretch's own edges fade over `fade` frames, or over half its uncovered length (rounded up) when that is shorter. Where a top Item cuts into a lower one, the lower stretch goes on under the top one's ramp, as far as the lower Item's Take reaches, and the top one's ramp there is cut to the same length; under a top shorter than twice `fade` and odd in length, the two ramps meet on its middle frame, which sums above 1 by one ramp step. Where a stretch ends at an Item's end and the next one starts at its Item's start, the first goes on into its Take under the next one's fade-in, as far as its Take reaches, and the next fades in over just that.
 ///
 /// # Errors
 ///
@@ -185,15 +185,17 @@ fn place(
             .min(stretch.take_before_start(items));
         (ramp, ramp)
     } else {
-        let joined = before.map_or(0, |before| join_overlap(items, before, stretch, fade));
-        (
-            0,
-            if joined > 0 {
-                joined
-            } else {
-                stretch.own_fade(fade)
+        let fade_in = match before {
+            Some(lower) if lower.cut_at_end(items) => {
+                stretch.own_fade(fade).min(lower.take_after_end(items))
+            }
+            Some(before) => match join_overlap(items, before, stretch, fade) {
+                0 => stretch.own_fade(fade),
+                joined => joined,
             },
-        )
+            None => stretch.own_fade(fade),
+        };
+        (0, fade_in)
     };
     let (extend_out, fade_out) = if stretch.cut_at_end(items) {
         let ramp = after
@@ -201,9 +203,16 @@ fn place(
             .min(stretch.take_after_end(items));
         (ramp, ramp)
     } else {
-        match after.map_or(0, |after| join_overlap(items, stretch, after, fade)) {
-            0 => (0, stretch.own_fade(fade)),
-            joined => (joined, joined),
+        match after {
+            Some(lower) if lower.cut_at_start(items) => (
+                0,
+                stretch.own_fade(fade).min(lower.take_before_start(items)),
+            ),
+            Some(after) => match join_overlap(items, stretch, after, fade) {
+                0 => (0, stretch.own_fade(fade)),
+                joined => (joined, joined),
+            },
+            None => (0, stretch.own_fade(fade)),
         }
     };
     let position = stretch.start - extend_in;

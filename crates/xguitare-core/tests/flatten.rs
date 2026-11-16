@@ -116,10 +116,10 @@ fn three_deep_each_crossfades_with_the_one_heard_next_to_it() {
 }
 
 #[test]
-fn the_extension_under_the_top_stays_inside_the_lower_item() {
+fn the_extension_under_the_top_stays_inside_the_lower_item_and_the_top_ramp_matches_it() {
     assert_eq!(
         spans(&[item(1, 95, 200), item(2, 0, 100)]),
-        [(0, 0, 100, 10, 10), (95, 0, 105, 5, 10)]
+        [(0, 0, 100, 10, 5), (95, 0, 105, 5, 10)]
     );
 }
 
