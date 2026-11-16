@@ -1130,6 +1130,20 @@ fn octave_open_shows_its_five_knobs_at_both_sizes() {
     }
 }
 
+#[test]
+fn octave_range_focused_snapshot() {
+    let (mut open, _, _dir) = harness_with(DEFAULT_WINDOW, octave_snapshot());
+    open_unit(&mut open, OCTAVE_CLOSED_INDEX);
+    open.get_by_role_and_label(Role::RadioButton, "Range, Bass")
+        .focus();
+    open.run_steps(2);
+    assert!(
+        open.get_by_role_and_label(Role::RadioButton, "Range, Bass")
+            .is_focused()
+    );
+    write_png(&mut open, "octave-range-focused");
+}
+
 const EQ_SPEC: [(&str, f64, f64, f64, &str); 13] = [
     ("low_cut", 10.0, 300.0, 10.0, "Hz"),
     ("low_freq", 20.0, 500.0, 100.0, "Hz"),
