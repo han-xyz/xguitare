@@ -1943,10 +1943,11 @@ fn takes_unused_escapes_hidden_characters_in_file_names() {
 /// The Daemon's request line limit, `MAX_LINE` in `socket_server.rs`.
 const MAX_LINE: usize = 64 * 1024;
 
-/// Lists `unused` Take files of 1000 bytes each and deletes them as the Daemon does, refusing a request line over [`MAX_LINE`], except the first file of each batch, which it reports in `failed`; the `takes_clean` numbered `fail_at` (from 1) is refused.
+/// Lists `unused` Take files of 1000 bytes each and deletes them as the Daemon does, refusing a request line over [`MAX_LINE`]; in the `takes_clean` batches numbered in `failing` (from 1) it reports the first file in `failed`, and the batch numbered `refuse_at` is refused.
 struct CleaningDaemon {
     unused: Vec<String>,
-    fail_at: Option<usize>,
+    failing: Vec<usize>,
+    refuse_at: Option<usize>,
     cleans: Vec<Vec<String>>,
 }
 
@@ -1970,8 +1971,15 @@ impl Transport for CleaningDaemon {
             }
             Request::TakesClean { files } => {
                 self.cleans.push(files.clone());
-                if self.fail_at == Some(self.cleans.len()) {
+                if self.refuse_at == Some(self.cleans.len()) {
                     return reply(r#"{"ok":false,"error":"cannot clean takes while recording"}"#);
+                }
+                if !self.failing.contains(&self.cleans.len()) {
+                    return reply(&format!(
+                        r#"{{"ok":true,"deleted":{},"bytes":{}}}"#,
+                        files.len(),
+                        files.len() * 1000
+                    ));
                 }
                 reply(&format!(
                     r#"{{"ok":true,"deleted":{},"bytes":{},"failed":[{{"file":"{}","error":"Permission denied (os error 13)"}}]}}"#,
@@ -1985,12 +1993,17 @@ impl Transport for CleaningDaemon {
     }
 }
 
-fn clean_unused(count: usize, fail_at: Option<usize>) -> (Outcome, Vec<Vec<String>>) {
+fn clean_unused(
+    count: usize,
+    failing: &[usize],
+    refuse_at: Option<usize>,
+) -> (Outcome, Vec<Vec<String>>) {
     let mut daemon = CleaningDaemon {
         unused: (0..count)
             .map(|n| format!("takes/guitar-{n}.wav"))
             .collect(),
-        fail_at,
+        failing: failing.to_vec(),
+        refuse_at,
         cleans: Vec::new(),
     };
     let argv = ["xguitare", "takes", "clean", "--yes"].map(String::from);
@@ -2006,25 +2019,33 @@ fn clean_unused(count: usize, fail_at: Option<usize>) -> (Outcome, Vec<Vec<Strin
 }
 
 #[test]
-fn takes_clean_yes_deletes_thousands_of_takes_in_batches() {
-    let (out, cleans) = clean_unused(5000, None);
+fn takes_clean_yes_deletes_thousands_of_takes_in_batches_and_sums_them() {
+    let (out, cleans) = clean_unused(5000, &[], None);
     assert_eq!(cleans.concat().len(), 5000);
-    let deleted = 5000 - cleans.len();
-    let undeleted: Vec<String> = cleans
-        .iter()
-        .map(|batch| {
-            format!(
-                "error: could not delete {}: Permission denied (os error 13)",
-                batch[0]
-            )
-        })
-        .collect();
     assert!(cleans.len() > 1, "one batch only");
     assert_eq!(
         (out.stdout, out.stderr, out.code),
         (
-            format!("deleted {deleted} takes, 5.0 MB freed\n"),
-            undeleted.join("\n") + "\n",
+            "deleted 5000 takes, 5.0 MB freed\n".to_string(),
+            String::new(),
+            0
+        )
+    );
+}
+
+#[test]
+fn takes_clean_yes_lists_the_files_of_every_batch_it_could_not_delete_and_exits_1() {
+    let (out, cleans) = clean_unused(5000, &[1, 3], None);
+    assert!(cleans.len() > 3, "too few batches");
+    assert_eq!(
+        (out.stdout, out.stderr, out.code),
+        (
+            "deleted 4998 takes, 5.0 MB freed\n".to_string(),
+            format!(
+                "error: could not delete {}: Permission denied (os error 13)\n\
+                 error: could not delete {}: Permission denied (os error 13)\n",
+                cleans[0][0], cleans[2][0]
+            ),
             1
         )
     );
@@ -2032,7 +2053,7 @@ fn takes_clean_yes_deletes_thousands_of_takes_in_batches() {
 
 #[test]
 fn takes_clean_yes_stopped_by_an_error_reports_what_went_before() {
-    let (out, cleans) = clean_unused(5000, Some(2));
+    let (out, cleans) = clean_unused(5000, &[1], Some(2));
     assert_eq!(cleans.len(), 2, "the run stops at the refused batch");
     let deleted = format!("deleted {} takes, ", cleans[0].len() - 1);
     assert!(out.stdout.starts_with(&deleted), "{}", out.stdout);

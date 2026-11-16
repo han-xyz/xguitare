@@ -601,19 +601,24 @@ fn a_clean_up_drops_every_cached_peak_table_and_reads_the_unused_takes() {
     handle.join().unwrap();
 }
 
-#[test]
-fn a_clean_up_of_thousands_of_takes_goes_in_batches_and_reports_the_total() {
+/// Sends a clean-up of 5000 Takes to a Daemon that reports the first file of the `takes_clean` batches numbered in `failing` (from 1) as not deleted; the message shown and the size of each batch sent.
+fn clean_thousands(test: &str, failing: &'static [usize]) -> (Message, Vec<usize>) {
     const MAX_LINE: usize = 64 * 1024;
-    let dir = temp_dir("clean-batches");
+    let dir = temp_dir(test);
     let config = config(&dir);
     let listener = UnixListener::bind(&config.socket).unwrap();
-    let received = serve_requests(listener, |request| {
+    let mut batch = 0;
+    let received = serve_requests(listener, move |request| {
         if request.to_string().len() > MAX_LINE {
             return json!({"ok": false, "error": "request too long"});
         }
         match request["cmd"].as_str().unwrap() {
             "takes_clean" => {
+                batch += 1;
                 let files = request["files"].as_array().unwrap();
+                if !failing.contains(&batch) {
+                    return json!({"ok": true, "deleted": files.len(), "bytes": files.len() * 1000});
+                }
                 let deleted = files.len() - 1;
                 let failed =
                     json!([{"file": files[0], "error": "Permission denied (os error 13)"}]);
@@ -641,17 +646,30 @@ fn a_clean_up_of_thousands_of_takes_goes_in_batches_and_reports_the_total() {
         .map(|request| request["files"].as_array().unwrap().len())
         .collect();
     assert_eq!(batches.iter().sum::<usize>(), 5000);
+    (message, batches)
+}
+
+#[test]
+fn a_clean_up_of_thousands_of_takes_goes_in_batches_and_notes_the_total() {
+    let (message, batches) = clean_thousands("clean-batches", &[]);
     assert!(batches.len() > 1, "one batch only");
-    let deleted = 5000 - batches.len();
+    assert_eq!(
+        message,
+        Message::Notice("Deleted 5000 Takes, 5.0 MB freed".to_string())
+    );
+}
+
+#[test]
+fn a_clean_up_in_batches_shows_an_error_with_the_files_of_every_batch_not_deleted() {
+    let (message, batches) = clean_thousands("clean-batches-failed", &[1, 3]);
+    assert!(batches.len() > 3, "too few batches");
     assert_eq!(
         message,
         Message::Error {
             title: "Could not clean up the Takes",
-            detail: format!(
-                "Deleted {deleted} Takes, 5.0 MB freed; could not delete takes/guitar-0.wav: \
-                 Permission denied (os error 13), and {} more",
-                batches.len() - 1
-            ),
+            detail: "Deleted 4998 Takes, 5.0 MB freed; could not delete takes/guitar-0.wav: \
+                     Permission denied (os error 13), and 1 more"
+                .to_string(),
         }
     );
 }
