@@ -152,7 +152,7 @@ The guitar starter Bank ends with five metal Presets (programs 8 to 12):
 - Buzzsaw: `drive` at full into an `eq` that lifts lows, mids and highs, then `preamp`, cabinet.
 - Stoner: a fuzz-into-amp sound in the manner of stoner rock: `drive` and `fuzz` into `preamp`, a mid-forward `tonestack`, cabinet, a short `delay` and `reverb`.
 
-A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy `09-thrash.toml` to `13-stoner.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) into your Bank directory; the hot reload picks them up.
+A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy the five files `09-thrash.toml`, `10-djent.toml`, `11-doom.toml`, `12-buzzsaw.toml` and `13-stoner.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) directory into your Bank directory, renumbering them if those numbers are taken; the Daemon watches the Bank directory and picks up the new files without a restart.
 
 ### Bass
 
