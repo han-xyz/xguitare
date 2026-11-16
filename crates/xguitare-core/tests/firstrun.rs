@@ -335,9 +335,9 @@ fn plucked(notes_hz: &[f32], sample_rate: f32, seconds: f32, rms_db: f32) -> Vec
 }
 
 const SAMPLE_RATE: f32 = 48_000.0;
+const BLOCK: usize = 128;
 
 fn render(preset: &xguitare_core::Preset, dir: &std::path::Path, input: &[f32]) -> [Vec<f32>; 2] {
-    const BLOCK: usize = 128;
     let (mut rack, _) = preset.build(SAMPLE_RATE, BLOCK, dir, dir, 100.0).unwrap();
     let mut output = [
         Vec::with_capacity(input.len()),
@@ -407,7 +407,6 @@ fn short_term_max_lufs(channels: &[&[f32]]) -> f32 {
 }
 
 fn true_peak_db(channels: &[&[f32]]) -> f32 {
-    const BLOCK: usize = 128;
     let mut peak = 0.0f32;
     for channel in channels {
         let mut oversampler = xguitare_dsp::oversample::Oversampler4x::new();
@@ -435,6 +434,13 @@ fn meter_reads_a_1_khz_sine_at_minus_26_lufs() {
     let tone = sine(1000.0, 10f32.powf(-23.0 / 20.0), 0.0);
     let loudness = short_term_max_lufs(&[&tone]);
     assert!((loudness + 26.0).abs() <= 0.1, "{loudness:.3} LUFS");
+}
+
+#[test]
+fn meter_sums_the_channels_power() {
+    let tone = sine(1000.0, 10f32.powf(-23.0 / 20.0), 0.0);
+    let loudness = short_term_max_lufs(&[&tone, &tone]);
+    assert!((loudness + 23.0).abs() <= 0.1, "{loudness:.3} LUFS");
 }
 
 #[test]
