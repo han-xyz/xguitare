@@ -159,7 +159,7 @@ The guitar starter Bank has five metal Presets (programs 8 to 12) and two more (
 
 A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy the files `09-thrash.toml`, `10-djent.toml`, `11-doom.toml`, `12-buzzsaw.toml`, `13-stoner.toml`, `14-sub-octave.toml` (bass `14-synth-sub.toml`) and `15-distortion.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) directory into your Bank directory, renumbering them if those numbers are taken; the Daemon watches the Bank directory and picks up the new files without a restart.
 
-The starter Presets of each Bank are matched in loudness by meter (ITU-R BS.1770 short-term loudness: −13 LUFS for guitar, −14 LUFS for bass) with 1 dB of true-peak headroom (−1 dBTP) on a test signal of plucked notes at −18 dB RMS; a few spiky Presets (guitar Sub Octave, bass Primus Flange, Envelope Funk and Synth Sub) sit lower so as not to pass that ceiling. A meter is a starting point and the last word is your ear, and hot playing or a hot input can still go above full scale: lower the cabinet `level` or the interface gain.
+The starter Presets of each Bank are matched in loudness by meter (ITU-R BS.1770 short-term loudness: −13 LUFS for guitar, −14 LUFS for bass) with 1 dB of true-peak headroom (−1 dBTP) on a test signal of plucked notes at −18 dB RMS; a few spiky Presets (bass Primus Flange, Envelope Funk and Synth Sub) sit lower so as not to pass that ceiling. A meter is a starting point and the last word is your ear, and hot playing or a hot input can still go above full scale: lower the cabinet `level` or the interface gain.
 
 ### Bass
 
