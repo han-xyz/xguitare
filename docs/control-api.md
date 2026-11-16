@@ -1152,7 +1152,7 @@ Runs the transport. `action` is one of:
 
 - `play`: plays from the playhead; armed Tracks keep monitoring.
 - `stop`: stops; the playhead stays where it is.
-- `record`: records every armed Track; from stopped, after `count_in` bars of click (see `click`). Each Take becomes an Item placed earlier by the input and output latency and the Project's `latency_offset_ms`.
+- `record`: records every armed Track; from stopped, after `count_in` bars of click (see `click`). Each Take becomes an Item placed earlier by the input and output latency and the Project's `latency_offset_ms`. A Take that holds no frames after the ones this skips (recorded from frame 0 and stopped within the latency) becomes no Item; its file is kept and listed by `takes_unused`.
 - `locate`: moves the playhead to `position`: a frame (JSON number), or text `<bar>.<beat>`, `<bar>` (beat 1), or `<seconds>s`, with bars and beats counted from 1 at the Project's tempo and meter. It may be at most one hour past the end of the Project's last Take or loop region.
 
 Request:

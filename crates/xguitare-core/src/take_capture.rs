@@ -277,7 +277,7 @@ pub fn load_take(project_dir: &Path, file: &str) -> Result<Arc<[f32]>, hound::Er
     Ok(samples.into())
 }
 
-/// Loads a finished Take into `takes` and adds it as a Take on Track `track` at its latency-compensated placement; `None` when that Track does not exist.
+/// Loads a finished Take into `takes` and adds it as a Take on Track `track` at its latency-compensated placement; `None`, with the Project and `takes` unchanged, when that Track does not exist or the Take holds no frames after the placement's `offset`.
 ///
 /// # Errors
 ///
@@ -306,6 +306,9 @@ pub fn add_finished_take<S: BuildHasher>(
         return Ok(None);
     };
     let samples = load_take(project_dir, &finished.file)?;
+    if samples.len() as u64 <= placement.offset {
+        return Ok(None);
+    }
     let take = Take {
         file: finished.file.clone(),
         frames: samples.len() as u64,

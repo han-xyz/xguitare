@@ -354,7 +354,8 @@ fn add_takes(
             continue;
         };
         match add_finished_take(project, dir, takes, track, take, latency(track)) {
-            Ok(_) => added.push(take.file.clone()),
+            Ok(Some(_)) => added.push(take.file.clone()),
+            Ok(None) => {}
             Err(err) => failures.push(format!("cannot load take {}: {err}", take.file)),
         }
     }

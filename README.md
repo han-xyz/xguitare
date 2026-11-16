@@ -504,7 +504,7 @@ rendered /home/you/Music/xguitare/live/renders/live-2.wav
 
 ### Latency compensation
 
-What you play reaches the Daemon late by the input's capture latency, and you play along to what you hear late by the output's playback latency. Each Take is placed earlier by both, as JACK reports them for the Track's input port and for the port `out_l` feeds, plus the Project's `latency_offset_ms` (−1000 to 1000, edited in `project.toml`) to correct what the drivers do not report. A Take recorded from frame 0 starts at frame 0 with its first frames skipped (the Item's `offset`).
+What you play reaches the Daemon late by the input's capture latency, and you play along to what you hear late by the output's playback latency. Each Take is placed earlier by both, as JACK reports them for the Track's input port and for the port `out_l` feeds, plus the Project's `latency_offset_ms` (−1000 to 1000, edited in `project.toml`) to correct what the drivers do not report. A Take recorded from frame 0 starts at frame 0 with its first frames skipped (the Item's `offset`). A Take no longer than the frames skipped becomes no Item; its file is kept, and `xguitare takes unused` lists it.
 
 ### Autosave
 

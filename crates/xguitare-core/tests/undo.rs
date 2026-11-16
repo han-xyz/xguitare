@@ -622,6 +622,60 @@ fn a_recorded_take_undone_keeps_its_file_and_redone_plays_again() {
     );
 }
 
+/// Capture and playback latency of 64 frames each: a Take recorded from frame 0 skips its first 128 frames.
+const LATENCY_128: Latency = Latency {
+    capture: 64,
+    playback: 64,
+};
+
+/// Adds a Take of `frames` recorded on Keys from frame 0 with [`LATENCY_128`]; the failures and the Take's file.
+fn record_keys_from_0(state: &mut EngineState, frames: usize) -> (Vec<String>, &'static str) {
+    let keys_id = items(state)["tracks"][2]["id"].as_u64().unwrap();
+    let file = "takes/keys-1.wav";
+    write_take(&folder(state).join(file), &vec![0.75; frames]);
+    let finished = FinishedTake {
+        track_id: keys_id,
+        file: file.to_string(),
+        span: TakeSpan {
+            start: 0,
+            frames: frames as u64,
+            loop_take: false,
+        },
+    };
+    (
+        add_finished_takes(state, &[finished], |_| LATENCY_128),
+        file,
+    )
+}
+
+#[test]
+fn a_take_no_longer_than_its_latency_compensation_is_kept_as_a_file_but_not_placed() {
+    let (mut state, _audio, _dir) = state("record-short");
+    open_song(&mut state);
+    let before = items(&mut state);
+    let (failures, file) = record_keys_from_0(&mut state, 128);
+    assert_eq!(failures, Vec::<String>::new());
+    assert_eq!(items(&mut state), before);
+    assert_eq!(labels(&mut state), (Value::Null, Value::Null));
+    ok(handle(&mut state, Request::ProjectSave));
+    let unused = ok(handle(&mut state, Request::TakesUnused));
+    assert_eq!(unused["files"][0]["file"], file);
+}
+
+#[test]
+fn a_take_one_frame_longer_than_its_latency_compensation_is_placed() {
+    let (mut state, _audio, _dir) = state("record-just-long-enough");
+    open_song(&mut state);
+    let (failures, file) = record_keys_from_0(&mut state, 129);
+    assert_eq!(failures, Vec::<String>::new());
+    let placed = &items(&mut state)["tracks"][2]["items"][0];
+    assert_eq!(
+        (&placed["takes"], &placed["offset"], &placed["length"]),
+        (&json!([file]), &json!(128), &json!(1))
+    );
+    ok(handle(&mut state, Request::ProjectSave));
+}
+
 #[test]
 fn an_undone_track_removal_drops_its_sends_to_a_bus_removed_since() {
     let (mut state, _audio, _dir) = state("send-gone");
