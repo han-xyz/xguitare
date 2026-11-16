@@ -1,0 +1,29 @@
+name = "Sub Octave"
+
+[[module]]
+type = "gate"
+
+[[module]]
+type = "octave"
+[module.params]
+range = 1
+dry = 0
+oct1 = 100
+tone = 400
+
+[[module]]
+type = "compressor"
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 25
+stages = 2
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 10.7
+high_cut = 4000

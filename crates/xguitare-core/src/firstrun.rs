@@ -28,6 +28,14 @@ const STARTER_PRESETS: &[(&str, &str)] = &[
     ("11-doom.toml", include_str!("../bank/11-doom.toml")),
     ("12-buzzsaw.toml", include_str!("../bank/12-buzzsaw.toml")),
     ("13-stoner.toml", include_str!("../bank/13-stoner.toml")),
+    (
+        "14-sub-octave.toml",
+        include_str!("../bank/14-sub-octave.toml"),
+    ),
+    (
+        "15-distortion.toml",
+        include_str!("../bank/15-distortion.toml"),
+    ),
 ];
 const BASS_PRESETS: &[(&str, &str)] = &[
     ("01-blues.toml", include_str!("../bank-bass/01-blues.toml")),
@@ -66,6 +74,14 @@ const BASS_PRESETS: &[(&str, &str)] = &[
     (
         "13-stoner.toml",
         include_str!("../bank-bass/13-stoner.toml"),
+    ),
+    (
+        "14-synth-sub.toml",
+        include_str!("../bank-bass/14-synth-sub.toml"),
+    ),
+    (
+        "15-distortion.toml",
+        include_str!("../bank-bass/15-distortion.toml"),
     ),
 ];
 

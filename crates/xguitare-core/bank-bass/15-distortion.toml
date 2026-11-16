@@ -1,0 +1,35 @@
+name = "Distortion"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -22
+ratio = 4
+attack = 8
+release = 100
+makeup = 3
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 70
+drive = 75
+bass = 2
+bass_freq = 1
+mid = 2
+mid_freq = 1
+treble = 2
+presence = 60
+crossover = 120
+
+[[module]]
+type = "limiter"
+[module.params]
+ceiling = -1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -17.9

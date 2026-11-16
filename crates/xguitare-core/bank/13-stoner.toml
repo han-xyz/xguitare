@@ -7,6 +7,14 @@ threshold = -55
 release = 150
 
 [[module]]
+type = "octave"
+[module.params]
+range = 1
+dry = 100
+oct1 = 55
+tone = 500
+
+[[module]]
 type = "drive"
 [module.params]
 drive = 15

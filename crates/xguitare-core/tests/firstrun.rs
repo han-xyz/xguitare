@@ -19,14 +19,14 @@ fn temp_dir(test: &str) -> TempDir {
 }
 
 #[test]
-fn guitar_bank_seeds_thirteen_presets_and_ir() {
+fn guitar_bank_seeds_fifteen_presets_and_ir() {
     let temp = temp_dir("missing");
     let dir = temp.0.join("bank");
     let created = ensure_bank(&dir, BankKind::Guitar, 48_000).unwrap();
     assert_eq!(
         created,
         Created {
-            presets: 13,
+            presets: 15,
             ir: true
         }
     );
@@ -51,6 +51,8 @@ fn guitar_bank_seeds_thirteen_presets_and_ir() {
             "11-doom.toml",
             "12-buzzsaw.toml",
             "13-stoner.toml",
+            "14-sub-octave.toml",
+            "15-distortion.toml",
             "default-cab.wav"
         ]
     );
@@ -71,7 +73,9 @@ fn guitar_bank_seeds_thirteen_presets_and_ir() {
             "Djent",
             "Doom",
             "Buzzsaw",
-            "Stoner"
+            "Stoner",
+            "Sub Octave",
+            "Distortion"
         ]
     );
     let types: Vec<&[&str]> = racks[8..]
@@ -87,6 +91,7 @@ fn guitar_bank_seeds_thirteen_presets_and_ir() {
             &["gate", "drive", "eq", "preamp", "cabinet"],
             &[
                 "gate",
+                "octave",
                 "drive",
                 "fuzz",
                 "preamp",
@@ -95,6 +100,8 @@ fn guitar_bank_seeds_thirteen_presets_and_ir() {
                 "delay",
                 "reverb"
             ],
+            &["gate", "octave", "compressor", "preamp", "cabinet"],
+            &["gate", "drive", "preamp", "tonestack", "cabinet", "reverb"],
         ]
     );
 }
@@ -121,14 +128,14 @@ fn built_racks(dir: &std::path::Path) -> Vec<(String, Vec<&'static str>)> {
 }
 
 #[test]
-fn bass_bank_seeds_thirteen_presets_and_ir() {
+fn bass_bank_seeds_fifteen_presets_and_ir() {
     let temp = temp_dir("bass");
     let dir = temp.0.join("bank-bass");
     let created = ensure_bank(&dir, BankKind::Bass, 48_000).unwrap();
     assert_eq!(
         created,
         Created {
-            presets: 13,
+            presets: 15,
             ir: true
         }
     );
@@ -153,6 +160,8 @@ fn bass_bank_seeds_thirteen_presets_and_ir() {
             "11-doom.toml",
             "12-buzzsaw.toml",
             "13-stoner.toml",
+            "14-synth-sub.toml",
+            "15-distortion.toml",
             "bass-cab.wav"
         ]
     );
@@ -173,7 +182,9 @@ fn bass_bank_seeds_thirteen_presets_and_ir() {
             "Djent",
             "Doom",
             "Buzzsaw",
-            "Stoner"
+            "Stoner",
+            "Synth Sub",
+            "Distortion"
         ]
     );
     let types: Vec<&[&str]> = racks[6..]
@@ -189,7 +200,9 @@ fn bass_bank_seeds_thirteen_presets_and_ir() {
             &["gate", "compressor", "eq", "blend", "limiter", "cabinet"],
             &["blend", "eq", "limiter", "cabinet"],
             &["gate", "blend", "eq", "limiter", "cabinet"],
-            &["compressor", "blend", "eq", "limiter", "cabinet"],
+            &["compressor", "octave", "blend", "eq", "limiter", "cabinet"],
+            &["compressor", "octave", "eq", "limiter", "cabinet"],
+            &["compressor", "blend", "limiter", "cabinet"],
         ]
     );
     let samples: Vec<f32> = hound::WavReader::open(dir.join("bass-cab.wav"))
@@ -235,7 +248,7 @@ fn interrupted_first_run_is_retried() {
     assert_eq!(
         created,
         Created {
-            presets: 13,
+            presets: 15,
             ir: true
         }
     );
@@ -260,6 +273,8 @@ fn interrupted_first_run_is_retried() {
             "11-doom.toml",
             "12-buzzsaw.toml",
             "13-stoner.toml",
+            "14-sub-octave.toml",
+            "15-distortion.toml",
             "default-cab.wav"
         ]
     );
@@ -276,8 +291,8 @@ fn trailing_slash_bank_dir_still_creates_bank() {
     let unrelated = temp.0.join("bank.tmp");
     fs::create_dir_all(&unrelated).unwrap();
     let created = ensure_bank(&with_slash, BankKind::Guitar, 48_000).unwrap();
-    assert_eq!(created.presets, 13);
-    assert_eq!(Bank::load_dir(&dir).unwrap().entries.len(), 13);
+    assert_eq!(created.presets, 15);
+    assert_eq!(Bank::load_dir(&dir).unwrap().entries.len(), 15);
     let mut siblings: Vec<String> = fs::read_dir(&temp.0)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -305,7 +320,7 @@ fn starter_banks_build_without_warnings() {
             built += 1;
         }
     }
-    assert_eq!(built, 26);
+    assert_eq!(built, 30);
 }
 
 const BASS_NOTES_HZ: [f32; 4] = [41.2, 55.0, 73.4, 98.0];
@@ -496,7 +511,7 @@ fn bank_levels(kind: BankKind, notes_hz: &[f32]) -> Vec<(String, Level)> {
 
 fn assert_matched_below_ceiling(kind: BankKind, notes_hz: &[f32], target_lufs: f32) {
     let levels = bank_levels(kind, notes_hz);
-    assert_eq!(levels.len(), 13);
+    assert_eq!(levels.len(), 15);
     let failures: Vec<String> = levels
         .iter()
         .filter_map(|(name, level)| {
@@ -544,7 +559,7 @@ fn starter_preset_values_lie_inside_param_specs() {
             .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
             .collect();
         files.sort();
-        assert_eq!(files.len(), 13);
+        assert_eq!(files.len(), 15);
         for file in files {
             let preset: toml::Table = fs::read_to_string(&file).unwrap().parse().unwrap();
             let file = file.file_name().unwrap().to_string_lossy();

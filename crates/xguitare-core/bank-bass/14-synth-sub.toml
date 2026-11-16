@@ -1,0 +1,28 @@
+name = "Synth Sub"
+
+[[module]]
+type = "compressor"
+
+[[module]]
+type = "octave"
+[module.params]
+range = 0
+dry = 50
+oct1 = 100
+tone = 300
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 30
+high_cut = 3000
+
+[[module]]
+type = "limiter"
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = 4.8

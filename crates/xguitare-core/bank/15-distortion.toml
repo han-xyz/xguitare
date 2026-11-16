@@ -1,0 +1,40 @@
+name = "Distortion"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -50
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 80
+tone = 55
+level = 0
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 30
+master = -14
+stages = 2
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 55
+middle = 50
+treble = 55
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 5.5
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 8

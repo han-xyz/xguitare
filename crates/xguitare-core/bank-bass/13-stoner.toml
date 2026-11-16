@@ -10,6 +10,14 @@ release = 100
 makeup = 3
 
 [[module]]
+type = "octave"
+[module.params]
+range = 0
+dry = 100
+oct1 = 0
+up = 35
+
+[[module]]
 type = "blend"
 [module.params]
 blend = 80
@@ -38,4 +46,4 @@ type = "cabinet"
 ir = "bass-cab.wav"
 
 [module.params]
-level = -17.9
+level = -18.0
