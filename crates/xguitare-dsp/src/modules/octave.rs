@@ -19,6 +19,10 @@ const UP_GAIN: f32 = FRAC_PI_2;
 const GATE_LEVEL: f32 = 3.162e-4;
 /// After an event, events sooner than this fraction of the last period are a harmonic's lobe, not the next cycle; under one half, so that one missed event (a doubled period) cannot lock the tracker onto every other cycle.
 const HOLD_OFF_FRACTION: f32 = 0.45;
+/// The −1 voice switches the note through a 4-pole low-pass at this multiple of the tracked note, so that a strong second harmonic does not land at 3f/2.
+const FOLLOW_RATIO: f32 = 1.3;
+/// How fast that low-pass's corner glides to a new tracked note.
+const FOLLOW_SECONDS: f32 = 0.01;
 
 /// The tracker's constants for one `range`.
 struct Tracking {
@@ -126,6 +130,9 @@ pub struct Octave {
     up_low_pass: Svf,
     oct1_tone: Svf,
     oct2_tone: Svf,
+    follow: [Svf; 2],
+    follow_hz: f32,
+    follow_coeff: f32,
     tracker: Tracker,
 }
 
@@ -163,6 +170,9 @@ impl Octave {
             up_low_pass: Svf::new(),
             oct1_tone: Svf::new(),
             oct2_tone: Svf::new(),
+            follow: [Svf::new(), Svf::new()],
+            follow_hz: 0.0,
+            follow_coeff: 0.0,
             tracker: Tracker::default(),
         };
         octave.update_tracking();
@@ -174,6 +184,21 @@ impl Octave {
         self.pre_filter_coefficients =
             SvfCoefficients::low_pass(tracking.pre_filter_hz, FRAC_1_SQRT_2, self.sample_rate);
         self.tracker.prepare(tracking, self.sample_rate);
+    }
+
+    fn follow_target_hz(&self) -> f32 {
+        FOLLOW_RATIO * self.sample_rate / self.tracker.period
+    }
+
+    /// The pre-filtered note through the low-pass that follows the tracked note.
+    fn followed(&mut self, pre_filtered: f32) -> f32 {
+        let target = self.follow_target_hz();
+        self.follow_hz = target + self.follow_coeff * (self.follow_hz - target);
+        let coefficients =
+            SvfCoefficients::low_pass(self.follow_hz, FRAC_1_SQRT_2, self.sample_rate);
+        self.follow.iter_mut().fold(pre_filtered, |signal, filter| {
+            filter.process(&coefficients, signal)
+        })
     }
 
     fn smoothers(&mut self) -> [&mut Smoother; 6] {
@@ -218,6 +243,7 @@ impl Module for Octave {
             SvfCoefficients::high_pass(INPUT_HIGH_PASS_HZ, FRAC_1_SQRT_2, sample_rate);
         self.up_low_pass_coefficients =
             SvfCoefficients::low_pass(UP_LOW_PASS_HZ, FRAC_1_SQRT_2, sample_rate);
+        self.follow_coeff = one_pole_coeff(FOLLOW_SECONDS, sample_rate);
         self.update_tracking();
         self.reset();
     }
@@ -237,7 +263,11 @@ impl Module for Octave {
         ] {
             filter.reset();
         }
+        for filter in &mut self.follow {
+            filter.reset();
+        }
         self.tracker.reset();
+        self.follow_hz = self.follow_target_hz();
     }
 
     fn set_param(&mut self, idx: usize, value: f32) {
@@ -268,7 +298,8 @@ impl Module for Octave {
             let pre_filtered = self
                 .pre_filter
                 .process(&self.pre_filter_coefficients, high_passed);
-            let (sub1, sub2) = self.tracker.process(pre_filtered);
+            let followed = self.followed(pre_filtered);
+            let (sub1, sub2) = self.tracker.process(pre_filtered, followed);
             self.gate
                 .set_target(if self.tracker.is_open() { 1.0 } else { 0.0 });
             let gate = self.gate.next_value();
@@ -335,8 +366,8 @@ impl Tracker {
         self.peak >= GATE_LEVEL
     }
 
-    /// The −1 voice (the input with A's polarity) and the −2 voice (B as a square at the input's envelope), before `tone`.
-    fn process(&mut self, input: f32) -> (f32, f32) {
+    /// The −1 voice (`followed` with A's polarity) and the −2 voice (B as a square at the input's envelope), before `tone`.
+    fn process(&mut self, input: f32, followed: f32) -> (f32, f32) {
         self.since_event += 1.0;
         if input > self.peak {
             if self.armed && self.since_event >= self.hold_off {
@@ -354,14 +385,14 @@ impl Tracker {
             self.forget_note();
         }
         // Flipping at a rising zero crossing keeps f/2 above 3f/2 when the note has a strong second harmonic; at a falling one it does not.
-        if self.previous < 0.0 && input >= 0.0 {
+        if self.previous < 0.0 && followed >= 0.0 {
             self.sub1_sign = if self.flip_a { -1.0 } else { 1.0 };
             self.sub2_sign = if self.flip_b { -1.0 } else { 1.0 };
         }
-        self.previous = input;
+        self.previous = followed;
         let level = input.abs();
         self.envelope = level + self.envelope_coeff * (self.envelope - level);
-        (self.sub1_sign * input, self.sub2_sign * self.envelope)
+        (self.sub1_sign * followed, self.sub2_sign * self.envelope)
     }
 
     fn fire(&mut self) {

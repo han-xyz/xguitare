@@ -64,7 +64,7 @@ fn voice_alone(voice: usize, settings: &[(usize, f32)]) -> Vec<(usize, f32)> {
 
 /// The R3 note: fundamental with 2f at 0.8 and 3f at 0.4, sine phase, first peak at −12 dBFS, decaying 20 dB per second.
 fn plucked(freq: f32, rate: f32) -> Vec<f32> {
-    shaped_note(freq, rate, FIRST_PEAK_DB, 0.8, 0.0)
+    shaped_note(freq, rate, FIRST_PEAK_DB, 0.8, 0.0, 0.0)
 }
 
 fn shaped_note(
@@ -73,12 +73,14 @@ fn shaped_note(
     first_peak_db: f64,
     second: f64,
     phase_shift: f64,
+    second_phase: f64,
 ) -> Vec<f32> {
     let (freq, rate) = (f64::from(freq), f64::from(rate));
     let shape = |n: usize| {
         let phase = TAU * freq * n as f64 / rate + phase_shift;
         let decay = 10.0_f64.powf(-(n as f64) / rate);
-        (phase.sin() + second * (2.0 * phase).sin() + 0.4 * (3.0 * phase).sin()) * decay
+        (phase.sin() + second * (2.0 * phase + second_phase).sin() + 0.4 * (3.0 * phase).sin())
+            * decay
     };
     let first_peak = (0..(rate / freq).ceil() as usize)
         .map(|n| shape(n).abs())
@@ -104,10 +106,11 @@ fn tracking_failures(
     ratio: f32,
     range: f32,
     notes: &[f32],
+    rates: &[f32],
     note: &dyn Fn(f32, f32) -> Vec<f32>,
 ) -> Vec<String> {
     let mut failures = Vec::new();
-    for rate in RATES {
+    for &rate in rates {
         for &freq in notes {
             let settings = voice_alone(voice, &[(TONE, 2000.0), (RANGE, range)]);
             let output = run(&mut octave_at(rate, &settings), &note(freq, rate));
@@ -150,7 +153,7 @@ fn assert_tracks_note(
     notes: &[f32],
     note: &dyn Fn(f32, f32) -> Vec<f32>,
 ) {
-    let failures = tracking_failures(voice, ratio, range, notes, note);
+    let failures = tracking_failures(voice, ratio, range, notes, &RATES, note);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -339,7 +342,7 @@ fn range_is_a_choice_of_bass_and_guitar() {
 }
 
 fn assert_tracks_variant(first_peak_db: f64, second: f64, phase_shift: f64) {
-    let note = move |f, r| shaped_note(f, r, first_peak_db, second, phase_shift);
+    let note = move |f, r| shaped_note(f, r, first_peak_db, second, phase_shift, 0.0);
     for (voice, ratio) in [(OCT1, 0.5), (OCT2, 0.25)] {
         assert_tracks_note(voice, ratio, BASS, &[41.0, 98.0], &note);
         assert_tracks_note(voice, ratio, GUITAR, &[110.0, 330.0], &note);
@@ -467,4 +470,115 @@ fn a_note_under_minus_70_dbfs_makes_no_sub() {
     };
     assert!(db(sub_peak(-60.0)) > -80.0, "a -60 dBFS note makes a sub");
     assert!(db(sub_peak(-75.0)) < -120.0, "{} dBFS", db(sub_peak(-75.0)));
+}
+
+#[test]
+fn oct1_holds_half_the_note_whatever_the_second_harmonic() {
+    let shapes = [
+        ("+0.8 sine", 0.8, 0.0),
+        ("-0.8 sine", -0.8, 0.0),
+        ("0.8 cosine", 0.8, std::f64::consts::FRAC_PI_2),
+    ];
+    let mut failures = Vec::new();
+    for (name, second, second_phase) in shapes {
+        let note = move |f, r| shaped_note(f, r, FIRST_PEAK_DB, second, 0.0, second_phase);
+        for (range, notes) in [(BASS, &BASS_NOTES[..]), (GUITAR, &GUITAR_NOTES[..])] {
+            for failure in tracking_failures(OCT1, 0.5, range, notes, &[SAMPLE_RATE], &note) {
+                failures.push(format!("2f {name}: {failure}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A plucked string: eight partials at 1/k^0.9 and k·f·√(1 + b·k²), each decaying (15 + 3k) dB per second, in phases from `seed`, first peak at −12 dBFS.
+fn inharmonic_note(freq: f32, rate: f32, b: f64, seed: u64) -> Vec<f32> {
+    let mut state = seed;
+    let mut next_phase = || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        TAU * (state >> 11) as f64 / (1_u64 << 53) as f64
+    };
+    let partials: Vec<(f64, f64, f64, f64)> = (1..=8)
+        .map(|k| {
+            let k = f64::from(k);
+            let freq = f64::from(freq) * k * (1.0 + b * k * k).sqrt();
+            (freq, k.powf(-0.9), 15.0 + 3.0 * k, next_phase())
+        })
+        .collect();
+    let rate = f64::from(rate);
+    let note: Vec<f64> = (0..(NOTE_SECONDS * rate) as usize)
+        .map(|n| {
+            let t = n as f64 / rate;
+            partials
+                .iter()
+                .map(|&(freq, amp, decay_db, phase)| {
+                    amp * 10.0_f64.powf(-decay_db * t / 20.0) * (TAU * freq * t + phase).sin()
+                })
+                .sum()
+        })
+        .collect();
+    let scale =
+        10.0_f64.powf(FIRST_PEAK_DB / 20.0) / note.iter().fold(0.0_f64, |m, s| m.max(s.abs()));
+    note.iter().map(|s| (scale * s) as f32).collect()
+}
+
+#[test]
+fn oct1_holds_half_the_note_on_inharmonic_strings() {
+    let mut failures = Vec::new();
+    for (b, seed) in [(4e-4, 1), (8e-4, 2), (4e-4, 3)] {
+        let note = move |f, r| inharmonic_note(f, r, b, seed);
+        for (range, notes) in [
+            (BASS, &[41.0, 55.0, 98.0][..]),
+            (GUITAR, &[82.0, 110.0][..]),
+        ] {
+            for failure in tracking_failures(OCT1, 0.5, range, notes, &[SAMPLE_RATE], &note) {
+                failures.push(format!("b {b} seed {seed}: {failure}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn tone_jump_is_smoothed() {
+    let input = sine(0.5, 110.0, SAMPLE_RATE, BLOCK * 300);
+    let mut module = prepared(Octave::new(), &voice_alone(OCT1, &[(TONE, 100.0)]));
+    let jump_at = BLOCK * 188;
+    let mut output = run(&mut module, &input[..jump_at]);
+    module.set_param(TONE, 2000.0);
+    output.extend(run(&mut module, &input[jump_at..]));
+    let largest_step = |part: &[f32]| {
+        part.windows(2)
+            .fold(0.0_f32, |m, pair| m.max((pair[1] - pair[0]).abs()))
+    };
+    let settled = largest_step(&output[output.len() - BLOCK * 40..]);
+    let jump = largest_step(&output[jump_at - 1..jump_at + BLOCK * 8]);
+    assert!(
+        jump <= 3.0 * settled,
+        "jump step {jump}, settled step {settled}"
+    );
+}
+
+#[test]
+fn oct1_level_follows_the_note_to_the_top_of_the_guitar_range() {
+    let half_note = |freq: f32| {
+        let input = sine(0.25, freq, SAMPLE_RATE, SAMPLE_RATE as usize);
+        let settings = voice_alone(OCT1, &[(TONE, 2000.0), (RANGE, GUITAR)]);
+        let output = run(&mut prepared(Octave::new(), &settings), &input);
+        bin_mag(
+            &hann(&output[SAMPLE_RATE as usize * 3 / 10..]),
+            0.5 * freq,
+            SAMPLE_RATE,
+        )
+    };
+    let pre_filter = SvfCoefficients::low_pass(400.0, std::f32::consts::FRAC_1_SQRT_2, SAMPLE_RATE);
+    let (low, high) = (659.0, 988.0);
+    let expected = pre_filter.gain_db(high, SAMPLE_RATE) - pre_filter.gain_db(low, SAMPLE_RATE);
+    let measured = db(half_note(high) / half_note(low));
+    assert!(
+        (measured - expected).abs() <= 2.0,
+        "{low} to {high} Hz: {measured} dB, the pre-filter alone {expected} dB"
+    );
 }
