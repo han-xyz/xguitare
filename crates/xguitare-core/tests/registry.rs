@@ -22,6 +22,7 @@ fn specs_equal_constructed_module_specs() {
             "gate",
             "compressor",
             "shaper",
+            "octave",
             "autowah",
             "drive",
             "fuzz",
