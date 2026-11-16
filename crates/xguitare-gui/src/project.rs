@@ -21,8 +21,8 @@ use crate::project_model::{
     EDGE_GRAB_PX, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
     ItemSelection, LoopEdge, MainView, MoveDrag, MovePointer, MovePreview, Tempo, TimelineView,
     TrackRow, TransportView, TrimDrag, TrimPreview, bars_beats_text, dragged_loop, grid_lines,
-    grid_step, hit_test, item_blocks, item_name, item_node_action, items_in_box, move_preview,
-    nearest_line, nudge_command, parse_meter, project_key_to_command, project_tempo,
+    grid_step, hit_test, item_blocks, item_menu_labels, item_name, item_node_action, items_in_box,
+    move_preview, nearest_line, nudge_command, parse_meter, project_key_to_command, project_tempo,
     recording_span, sample_rate, snap_to_beat, take_names, time_text, track_colour, track_rows,
     track_step_command, transport_view, trim_preview, trim_step_command, visible_stretches,
     waveform_columns,
@@ -1156,7 +1156,10 @@ struct MenuContext<'a> {
     clipboard: bool,
 }
 
-/// An Item's menu: its Takes with the active one marked (another one chosen is sent as `item_take`), then `Split at playhead`, `Duplicate`, `Copy` and `Delete` for the selected Items, or for this Item alone when it is not selected. With `focus_first` the first entry takes the keyboard focus.
+/// The keys of the Item menu's edits, in [`item_menu_labels`] order, shown beside them.
+const ITEM_EDIT_KEYS: [&str; 4] = ["S", "Ctrl+D", "Ctrl+C", "Delete"];
+
+/// An Item's menu: its Takes with the active one marked (another one chosen is sent as `item_take`), then `Split at playhead`, `Duplicate`, `Copy` and `Delete` with their keys for the selected Items, or for this Item alone when it is not selected. With `focus_first` the first entry takes the keyboard focus.
 fn item_menu(
     ui: &mut Ui,
     item: &ItemBlock,
@@ -1186,20 +1189,20 @@ fn item_menu(
     } else {
         vec![item.id]
     };
+    let labels = item_menu_labels(ids.len());
     let edits = [
-        (
-            "Split at playhead",
-            Command::ItemSplit {
-                ids: Some(ids.clone()),
-                at: scene.playhead,
-            },
-        ),
-        ("Duplicate", Command::ItemDuplicate(ids.clone())),
-        ("Copy", Command::ItemCopy(ids.clone())),
-        ("Delete", Command::ItemDelete(ids)),
+        Command::ItemSplit {
+            ids: Some(ids.clone()),
+            at: scene.playhead,
+        },
+        Command::ItemDuplicate(ids.clone()),
+        Command::ItemCopy(ids.clone()),
+        Command::ItemDelete(ids),
     ];
-    for (label, edit) in edits {
-        if ui.button(label).clicked() {
+    for ((label, keys), edit) in labels.into_iter().zip(ITEM_EDIT_KEYS).zip(edits) {
+        let entry = ui.add(Button::new(label.as_str()).shortcut_text(muted_text(keys)));
+        entry.widget_info(|| WidgetInfo::labeled(Role::Button, true, &label));
+        if entry.clicked() {
             command = Some(edit);
             ui.close();
         }

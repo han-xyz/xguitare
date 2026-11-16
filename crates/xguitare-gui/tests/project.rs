@@ -16,8 +16,8 @@ use xguitare_gui::project_model::{
     ItemSelection, KeyFocus, LoopEdge, MainView, MoveDrag, MovePointer, ProjectRow, Tempo,
     TimelineView, TrackRow, TransportState, TransportView, TrimDrag, ViewSwitch, VisibleTake,
     autosave_offer, bars_beats_text, copied_text, covered_stretches, dragged_loop,
-    esc_clears_selection, grid_lines, hit_test, item_blocks, item_key_to_command, item_name,
-    item_node_action, items_in_box, key_active, move_preview, parse_meter, project_end,
+    esc_clears_selection, grid_lines, hit_test, item_blocks, item_key_to_command, item_menu_labels,
+    item_name, item_node_action, items_in_box, key_active, move_preview, parse_meter, project_end,
     project_key_to_command, project_name, project_rows, project_tempo, recording_from,
     recording_span, restored_view, snap_to_beat, still_closing, take_names, time_text, track_rows,
     transport_view, trim_preview, trim_step_command, undo_text, visible_stretches,
@@ -1440,6 +1440,23 @@ fn copied_items_are_named_on_the_system_clipboard() {
     let items = edit_items();
     assert_eq!(copied_text(&items, &[3, 5]), "xguitare Items: t3, t5");
     assert_eq!(copied_text(&items, &[1]), "xguitare Items: t1");
+}
+
+#[test]
+fn item_menu_edits_name_the_count_of_more_than_one_item() {
+    assert_eq!(
+        item_menu_labels(1),
+        ["Split at playhead", "Duplicate", "Copy", "Delete"]
+    );
+    assert_eq!(
+        item_menu_labels(2),
+        [
+            "Split 2 Items at playhead",
+            "Duplicate 2 Items",
+            "Copy 2 Items",
+            "Delete 2 Items"
+        ]
+    );
 }
 
 #[test]

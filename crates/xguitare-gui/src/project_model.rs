@@ -909,6 +909,19 @@ pub fn copied_text(items: &[ItemBlock], ids: &[u64]) -> String {
     format!("xguitare Items: {}", names.join(", "))
 }
 
+/// The labels of an Item menu's `Split at playhead`, `Duplicate`, `Copy` and `Delete` for the `count` Items they act on, naming the count when it is more than one (`Delete 2 Items`).
+pub fn item_menu_labels(count: usize) -> [String; 4] {
+    if count <= 1 {
+        return ["Split at playhead", "Duplicate", "Copy", "Delete"].map(String::from);
+    }
+    [
+        format!("Split {count} Items at playhead"),
+        format!("Duplicate {count} Items"),
+        format!("Copy {count} Items"),
+        format!("Delete {count} Items"),
+    ]
+}
+
 /// Pixels inside an Item's start and end that grab the edge rather than the body; at most a third of the Item each.
 pub const EDGE_GRAB_PX: f32 = 6.0;
 
