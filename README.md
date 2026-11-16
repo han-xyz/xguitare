@@ -120,11 +120,14 @@ mix = 10
 
 Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks at 0 dB at its cutoff whatever `q`; lp and hp keep a resonant peak, up to about +22 dB at `q` 12, so lower `wet` or `q` when they get loud. A choice Parameter lists its choices instead of a range (`mode` lp|bp|hp): a Preset and `set` take the choice's number, counted from 0, so `mode = 1` is bp. `blend` runs its whole input, the clean part included, through 4x oversampling: it adds about 0.5 ms of delay (22.5 samples at 48 kHz), which is not reported as latency, and rolls off slightly above 15 kHz (−1.7 dB at 20 kHz). `limiter` delays the sound by `lookahead` ms so that it can lower the gain before a peak arrives; that delay is not counted in recording latency compensation. Its output never goes above `ceiling`. `shaper` raises or lowers the start of each note (`attack`) and what follows it (`sustain`) whatever the input level; at `attack` 0 and `sustain` 0 it leaves the sound unchanged.
 
+`octave` is a tracking octaver for single notes: it follows the played note with no added delay and mixes up to three voices with the `dry` signal. `oct1` is one octave down (the note with its polarity switched every other cycle) and `oct2` two octaves down (a square at a quarter of the note's frequency that follows the note's level), both through a low-pass at `tone`; `up` is one octave up, from rectifying the input. `range` bass is tuned for B0 to G4, guitar for E2 to B5. Chords and notes ringing into each other make the sub voices glitch, so put it before distortion. On a Bus or the Master it runs as two instances, one per side, which track on their own, so the two sides' subs may differ in polarity.
+
 | Module | Parameters |
 | --- | --- |
 | `gate` | `threshold` −90..0 −60 dB, `attack` 0.1..50 1 ms, `release` 5..1000 100 ms, `hysteresis` 0..20 6 dB |
 | `compressor` | `threshold` −60..0 −20 dB, `ratio` 1..20 4, `attack` 0.1..100 10 ms, `release` 10..1000 100 ms, `makeup` 0..24 0 dB |
 | `shaper` | `attack` −15..15 0 dB, `sustain` −24..24 0 dB, `output` −12..12 0 dB, `mix` 0..100 100 % |
+| `octave` | `dry` 0..100 100 %, `oct1` 0..100 70 %, `oct2` 0..100 0 %, `up` 0..100 0 %, `tone` 100..2000 500 Hz, `range` bass\|guitar 0 |
 | `autowah` | `mode` lp\|bp\|hp 0, `direction` up\|down 0, `sensitivity` −24..36 0 dB, `attack` 0.5..50 5 ms, `decay` 20..1000 150 ms, `freq_low` 80..800 200 Hz, `freq_high` 400..4000 2500 Hz, `q` 0.5..12 3, `dry` 0..100 50 %, `wet` 0..100 100 % |
 | `drive` | `drive` 0..100 50 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
