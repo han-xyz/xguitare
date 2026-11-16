@@ -52,7 +52,7 @@ The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first s
 2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
-- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with eight starter Presets (Clean, Crunch, Lead, High Gain, Bass, Rock, Blues, Funk) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
+- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with thirteen starter Presets (Clean, Crunch, Lead, High Gain, Bass, Rock, Blues, Funk, Thrash, Djent, Doom, Buzzsaw, Stoner) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
 - `loaded 0 Clean`: the Daemon starts on the Bank's first Preset (program 0).
 - `jack client active`: the sample rate and the buffer size the audio server actually granted.
 - `connected a -> b`: one line per port connection made from the `[ports]` config. Without a `[ports]` section and with more than one sound card, the Daemon connects nothing and warns with the candidate port names (`several capture devices; pick one in config ports.input: ...`).
@@ -144,6 +144,16 @@ Bank numbering: every `*.toml` file in the Bank directory, sorted by file name, 
 
 Hot reload: the Daemon watches the Bank directory. Saving the active Preset's file in an editor switches to the new version with a short crossfade; if the file no longer parses, the Daemon logs the error and keeps playing the old version. Adding, removing or renaming files renumbers the Bank.
 
+The guitar starter Bank ends with five metal Presets (programs 8 to 12):
+
+- Thrash: `gate`, `drive` into a four-stage `preamp`, an `eq` that scoops the mids at 750 Hz, cabinet.
+- Djent: a fast `gate`, a light `drive` into a four-stage `preamp`, an `eq` with a tight low cut and a push at 1400 Hz, `limiter`, cabinet.
+- Doom: `fuzz` into `preamp`, a bass-heavy `tonestack`, a dark cabinet (`high_cut` 5000 Hz) and a large `reverb`.
+- Buzzsaw: `drive` at full into an `eq` that lifts lows, mids and highs, then `preamp`, cabinet.
+- Stoner: a fuzz-into-amp sound in the manner of stoner rock: `drive` and `fuzz` into `preamp`, a mid-forward `tonestack`, cabinet, a short `delay` and `reverb`.
+
+A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy `09-thrash.toml` to `13-stoner.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) into your Bank directory; the hot reload picks them up.
+
 ### Bass
 
 Set `bank_kind = "bass"` in the config to seed the Bank directory (default `~/.config/xguitare/bank`) with bass Presets when it does not exist yet:
@@ -154,7 +164,15 @@ bank_kind = "bass"
 
 Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `<config dir>/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
 
-The first run creates eight Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock, Envelope Funk, Modern Grind) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module, Envelope Funk `autowah` and `eq`, Modern Grind `eq`, `blend` and `limiter`. In a Preset's Rack the `limiter` is a mono Module and sits before the cabinet, so the cabinet's `level` sets the final peak; a limiter that is truly the last Module belongs on a Bus or the Master, which are stereo.
+The first run creates thirteen Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock, Envelope Funk, Modern Grind, Thrash, Djent, Doom, Buzzsaw, Stoner) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module, Envelope Funk `autowah` and `eq`, Modern Grind `eq`, `blend` and `limiter`. In a Preset's Rack the `limiter` is a mono Module and sits before the cabinet, so the cabinet's `level` sets the final peak; a limiter that is truly the last Module belongs on a Bus or the Master, which are stereo.
+
+The five metal bass Presets each end in `limiter` and cabinet, and drive the bass through `blend`, whose `crossover` keeps the lows clean:
+
+- Thrash: `compressor`, `blend` with a 1000 Hz mid lift, an `eq` that cuts 500 Hz and lifts 2500 Hz.
+- Djent: `gate`, a hard `compressor`, `eq`, `blend` at a high `drive` with the clean part below 200 Hz, a `limiter` driven by 3 dB.
+- Doom: `blend` at full `drive` with the 40 Hz bass lifted and the treble lowered, an `eq` with a low shelf and a 4500 Hz `high_cut`.
+- Buzzsaw: `gate`, `blend` at a high `drive` and `presence` with the mids and treble lifted, an `eq` push at 900 Hz.
+- Stoner: a fuzz-into-amp sound in the manner of stoner rock: `compressor`, `blend` at a high `drive` with a 500 Hz mid lift, an `eq` that cuts below 35 Hz and above 6000 Hz.
 
 ## CLI
 
