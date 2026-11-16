@@ -1,0 +1,42 @@
+name = "Thrash"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -22
+ratio = 5
+attack = 8
+release = 80
+makeup = 3
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 55
+drive = 55
+mid = 2
+mid_freq = 1
+treble = 4
+presence = 70
+crossover = 120
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 40
+mid1_freq = 500
+mid1_gain = -3
+mid2_freq = 2500
+mid2_gain = 4
+
+[[module]]
+type = "limiter"
+[module.params]
+ceiling = -1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -9.1

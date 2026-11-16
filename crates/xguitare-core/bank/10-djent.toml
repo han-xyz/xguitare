@@ -1,0 +1,46 @@
+name = "Djent"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -42
+release = 30
+hysteresis = 4
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 10
+tone = 70
+level = 8
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 80
+master = -16
+stages = 4
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 110
+low_gain = -2
+mid1_freq = 1400
+mid1_gain = 2
+mid1_q = 1
+high_cut = 9000
+
+[[module]]
+type = "limiter"
+[module.params]
+ceiling = -1
+release = 60
+lookahead = 1
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 3.6

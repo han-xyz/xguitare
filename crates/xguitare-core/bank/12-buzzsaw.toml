@@ -1,0 +1,37 @@
+name = "Buzzsaw"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -45
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 100
+tone = 100
+level = 6
+
+[[module]]
+type = "eq"
+[module.params]
+low_freq = 100
+low_gain = 8
+mid1_freq = 1000
+mid1_gain = 8
+mid1_q = 0.7
+high_gain = 6
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 60
+master = -16
+stages = 3
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 0.0

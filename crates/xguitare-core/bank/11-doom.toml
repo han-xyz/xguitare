@@ -1,0 +1,43 @@
+name = "Doom"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -55
+release = 200
+
+[[module]]
+type = "fuzz"
+[module.params]
+sustain = 85
+tone = 30
+level = -2
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 55
+master = -14
+stages = 3
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 75
+middle = 55
+treble = 35
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 4.3
+high_cut = 5000
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 60
+damping = 70
+mix = 15

@@ -1,0 +1,31 @@
+name = "Doom"
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 75
+drive = 100
+bass = 4
+bass_freq = 0
+treble = -3
+presence = 30
+crossover = 110
+
+[[module]]
+type = "eq"
+[module.params]
+low_freq = 70
+low_gain = 3
+high_cut = 4500
+
+[[module]]
+type = "limiter"
+[module.params]
+ceiling = -1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -17.2

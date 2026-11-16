@@ -1,0 +1,39 @@
+name = "Buzzsaw"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -50
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 90
+drive = 95
+bass = 3
+bass_freq = 1
+mid = 6
+mid_freq = 1
+treble = 5
+presence = 85
+crossover = 150
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 40
+mid1_freq = 900
+mid1_gain = 5
+high_cut = 7000
+
+[[module]]
+type = "limiter"
+[module.params]
+ceiling = -1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -12.9

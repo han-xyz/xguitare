@@ -1,0 +1,40 @@
+name = "Thrash"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -48
+release = 50
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 20
+tone = 60
+level = 6
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 85
+master = -16
+stages = 4
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 80
+low_freq = 100
+low_gain = 2
+mid1_freq = 750
+mid1_gain = -6
+mid1_q = 1
+mid2_freq = 3000
+mid2_gain = 2
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 4.6

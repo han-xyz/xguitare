@@ -1,0 +1,41 @@
+name = "Stoner"
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -22
+ratio = 4
+attack = 10
+release = 100
+makeup = 3
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 80
+drive = 85
+bass = 3
+bass_freq = 1
+mid = 3
+mid_freq = 0
+treble = 0
+presence = 50
+crossover = 120
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 35
+high_cut = 6000
+
+[[module]]
+type = "limiter"
+[module.params]
+ceiling = -1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -14.8

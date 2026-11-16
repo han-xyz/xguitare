@@ -1,0 +1,46 @@
+name = "Djent"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -50
+
+[[module]]
+type = "compressor"
+[module.params]
+threshold = -25
+ratio = 8
+attack = 3
+release = 60
+makeup = 4
+
+[[module]]
+type = "eq"
+[module.params]
+low_cut = 40
+
+[[module]]
+type = "blend"
+[module.params]
+blend = 85
+drive = 80
+bass = 2
+bass_freq = 1
+mid = 4
+mid_freq = 1
+treble = 3
+presence = 70
+crossover = 200
+
+[[module]]
+type = "limiter"
+[module.params]
+input = 3
+ceiling = -1
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -14.2

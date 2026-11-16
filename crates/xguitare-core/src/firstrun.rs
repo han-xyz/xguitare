@@ -23,6 +23,11 @@ const STARTER_PRESETS: &[(&str, &str)] = &[
     ("06-rock.toml", include_str!("../bank/06-rock.toml")),
     ("07-blues.toml", include_str!("../bank/07-blues.toml")),
     ("08-funk.toml", include_str!("../bank/08-funk.toml")),
+    ("09-thrash.toml", include_str!("../bank/09-thrash.toml")),
+    ("10-djent.toml", include_str!("../bank/10-djent.toml")),
+    ("11-doom.toml", include_str!("../bank/11-doom.toml")),
+    ("12-buzzsaw.toml", include_str!("../bank/12-buzzsaw.toml")),
+    ("13-stoner.toml", include_str!("../bank/13-stoner.toml")),
 ];
 const BASS_PRESETS: &[(&str, &str)] = &[
     ("01-blues.toml", include_str!("../bank-bass/01-blues.toml")),
@@ -47,6 +52,20 @@ const BASS_PRESETS: &[(&str, &str)] = &[
     (
         "08-modern-grind.toml",
         include_str!("../bank-bass/08-modern-grind.toml"),
+    ),
+    (
+        "09-thrash.toml",
+        include_str!("../bank-bass/09-thrash.toml"),
+    ),
+    ("10-djent.toml", include_str!("../bank-bass/10-djent.toml")),
+    ("11-doom.toml", include_str!("../bank-bass/11-doom.toml")),
+    (
+        "12-buzzsaw.toml",
+        include_str!("../bank-bass/12-buzzsaw.toml"),
+    ),
+    (
+        "13-stoner.toml",
+        include_str!("../bank-bass/13-stoner.toml"),
     ),
 ];
 

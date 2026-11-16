@@ -1,0 +1,55 @@
+name = "Stoner"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -55
+release = 150
+
+[[module]]
+type = "drive"
+[module.params]
+drive = 15
+tone = 55
+level = 5
+
+[[module]]
+type = "fuzz"
+[module.params]
+sustain = 80
+tone = 50
+level = -2
+
+[[module]]
+type = "preamp"
+[module.params]
+gain = 50
+master = -14
+stages = 3
+
+[[module]]
+type = "tonestack"
+[module.params]
+bass = 60
+middle = 65
+treble = 50
+
+[[module]]
+type = "cabinet"
+ir = "default-cab.wav"
+
+[module.params]
+level = 8.2
+
+[[module]]
+type = "delay"
+[module.params]
+time = 380
+feedback = 25
+mix = 10
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 45
+mix = 10
