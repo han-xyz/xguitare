@@ -195,8 +195,12 @@ impl ProjectDisk {
                 dir,
                 sample_rate,
                 writing,
+                warnings,
             } => {
                 info!("opened project {}", dir.display());
+                for warning in warnings {
+                    warn!("{warning}");
+                }
                 match DiskThread::spawn(TakeWriter::new(dir, sample_rate, writing)) {
                     Ok(thread) => self.open = Some(thread),
                     Err(err) => error!("cannot start the disk thread: {err}; recording is off"),

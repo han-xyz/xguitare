@@ -97,7 +97,7 @@ fn set_mtime(path: &Path, time: SystemTime) {
 fn round_trip_keeps_tracks_items_takes_and_racks() {
     let dir = temp_dir("round-trip");
     fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
-    let project = Project::load(&dir.0).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
 
     assert_eq!(project.name, "Song");
     assert_eq!(project.sample_rate, 48_000);
@@ -149,14 +149,14 @@ fn round_trip_keeps_tracks_items_takes_and_racks() {
 
     let copy = temp_dir("round-trip-copy");
     project.save(&copy.0).unwrap();
-    assert_eq!(Project::load(&copy.0).unwrap(), project);
+    assert_eq!(Project::load(&copy.0).unwrap().0, project);
 }
 
 #[test]
 fn save_leaves_no_temp_file() {
     let dir = temp_dir("save-clean");
     fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
-    let project = Project::load(&dir.0).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
     project.save(&dir.0).unwrap();
     let names: Vec<_> = fs::read_dir(&dir.0)
         .unwrap()
@@ -173,7 +173,7 @@ fn new_creates_slugged_folder_with_takes() {
     assert_eq!(project.name, "My First Song!");
     assert_eq!(project.tracks, []);
     assert!(folder.join("takes").is_dir());
-    assert_eq!(Project::load(&folder).unwrap(), project);
+    assert_eq!(Project::load(&folder).unwrap().0, project);
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn track_names_follow_the_rules_of_track_add() {
         assert_eq!(load_error(&dir.0, &with_name(name)), error);
     }
     fs::write(dir.0.join(PROJECT_FILE), with_name(r" Ba\u001bss ")).unwrap();
-    assert_eq!(Project::load(&dir.0).unwrap().tracks[1].name, "Bass");
+    assert_eq!(Project::load(&dir.0).unwrap().0.tracks[1].name, "Bass");
 }
 
 #[test]
@@ -362,8 +362,8 @@ fn autosave_round_trips_beside_project_file() {
     project.tempo_bpm = 140.0;
     project.save_autosave(&folder).unwrap();
     assert!(folder.join(AUTOSAVE_FILE).is_file());
-    assert_eq!(Project::load_autosave(&folder).unwrap(), project);
-    assert_eq!(Project::load(&folder).unwrap().tempo_bpm, 120.0);
+    assert_eq!(Project::load_autosave(&folder).unwrap().0, project);
+    assert_eq!(Project::load(&folder).unwrap().0.tempo_bpm, 120.0);
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn loop_on_needs_start_before_end() {
         "start = 5\nend = 0\non = false",
     );
     fs::write(dir.0.join(PROJECT_FILE), off).unwrap();
-    assert!(!Project::load(&dir.0).unwrap().loop_region.on);
+    assert!(!Project::load(&dir.0).unwrap().0.loop_region.on);
 }
 
 #[test]
@@ -576,7 +576,7 @@ fn item_offset_round_trips_and_is_range_checked() {
             .unwrap()
             .contains("offset = 256")
     );
-    assert_eq!(Project::load(&folder).unwrap(), project);
+    assert_eq!(Project::load(&folder).unwrap().0, project);
     project.tracks[0].items[0].offset = u64::MAX;
     assert_eq!(
         project.save(&folder).unwrap_err().to_string(),
@@ -588,7 +588,7 @@ fn item_offset_round_trips_and_is_range_checked() {
 fn click_defaults_off_and_count_in_is_range_checked() {
     let dir = temp_dir("click");
     fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
-    let project = Project::load(&dir.0).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
     assert_eq!((project.click, project.count_in), (false, 0));
     assert_load_errors(
         "count-in",
@@ -671,7 +671,7 @@ pan = 0.0
 fn round_trip_keeps_buses_sends_and_master() {
     let dir = temp_dir("mixer-round-trip");
     fs::write(dir.0.join(PROJECT_FILE), MIXER).unwrap();
-    let project = Project::load(&dir.0).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
     assert_eq!(project.master.volume_db, -3.0);
     let master: Vec<&str> = project
         .master
@@ -711,14 +711,14 @@ fn round_trip_keeps_buses_sends_and_master() {
 
     let copy = temp_dir("mixer-round-trip-copy");
     project.save(&copy.0).unwrap();
-    assert_eq!(Project::load(&copy.0).unwrap(), project);
+    assert_eq!(Project::load(&copy.0).unwrap().0, project);
 }
 
 #[test]
 fn a_file_without_a_mixer_loads_with_no_buses_and_master_at_zero_db() {
     let dir = temp_dir("mixer-old-file");
     fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
-    let project = Project::load(&dir.0).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
     assert_eq!(project.buses, []);
     assert_eq!(project.master, Master::default());
     assert_eq!(project.master.volume_db, 0.0);
@@ -735,13 +735,13 @@ fn a_file_without_a_mixer_loads_with_no_buses_and_master_at_zero_db() {
 fn only_sends_that_are_not_off_are_saved() {
     let dir = temp_dir("mixer-off-sends");
     fs::write(dir.0.join(PROJECT_FILE), MIXER).unwrap();
-    let mut project = Project::load(&dir.0).unwrap();
+    let mut project = Project::load(&dir.0).unwrap().0;
     project.tracks[0].sends[1].level_db = f32::NEG_INFINITY;
     project.master.volume_db = f32::NEG_INFINITY;
     project.save(&dir.0).unwrap();
     let text = fs::read_to_string(dir.0.join(PROJECT_FILE)).unwrap();
     assert_eq!(text.matches("[[tracks.sends]]").count(), 1, "{text}");
-    let loaded = Project::load(&dir.0).unwrap();
+    let loaded = Project::load(&dir.0).unwrap().0;
     assert_eq!(loaded.tracks[0].sends, project.tracks[0].sends[..1]);
     assert_eq!(loaded.master.volume_db, f32::NEG_INFINITY);
 }
@@ -925,29 +925,58 @@ fn item_ids_and_length_round_trip() {
     assert!(text.contains("id = 7") && text.contains("id = 3"), "{text}");
     assert_eq!(text.matches("length = ").count(), 1, "{text}");
     assert!(text.contains("length = 500"), "{text}");
-    assert_eq!(Project::load(&folder).unwrap(), project);
+    assert_eq!(Project::load(&folder).unwrap().0, project);
+}
+
+fn item_ids(project: &Project) -> Vec<u64> {
+    project.tracks[0].items.iter().map(|item| item.id).collect()
 }
 
 #[test]
-fn an_item_starting_at_or_past_the_end_of_its_take_does_not_load() {
+fn an_item_starting_at_or_past_the_end_of_its_take_is_dropped_on_load_with_a_warning() {
     let dir = temp_dir("offset-past-take");
-    let (folder, project) = project_with_items(&dir.0, vec![item(1, 999, None, 1000)]);
+    let (folder, project) = project_with_items(
+        &dir.0,
+        vec![item(1, 0, None, 1000), item(7, 999, None, 1000)],
+    );
     project.save(&folder).unwrap();
-    let file = folder.join(PROJECT_FILE);
+    let text = fs::read_to_string(folder.join(PROJECT_FILE)).unwrap();
     for offset in ["1000", "10000"] {
-        let text = fs::read_to_string(&file).unwrap();
-        fs::write(
-            &file,
-            text.replace("offset = 999", &format!("offset = {offset}")),
-        )
-        .unwrap();
-        assert_eq!(
-            Project::load(&folder).unwrap_err().to_string(),
-            "track 'Gtr' item 0 starts past the end of its take",
-            "offset {offset}"
-        );
-        fs::write(&file, text).unwrap();
+        for file in [PROJECT_FILE, AUTOSAVE_FILE] {
+            let past = text.replace("offset = 999", &format!("offset = {offset}"));
+            fs::write(folder.join(file), past).unwrap();
+            let loaded = if file == AUTOSAVE_FILE {
+                Project::load_autosave(&folder)
+            } else {
+                Project::load(&folder)
+            };
+            let (loaded, warnings) = loaded.unwrap();
+            assert_eq!(item_ids(&loaded), [1], "{file}, offset {offset}");
+            let warnings: Vec<String> = warnings.iter().map(ToString::to_string).collect();
+            assert_eq!(
+                warnings,
+                ["track 'Gtr': dropped item 7 (takes/gtr-7.wav): starts past the end of its take"],
+                "{file}, offset {offset}"
+            );
+        }
     }
+    let (loaded, _) = Project::load(&folder).unwrap();
+    loaded.save(&folder).unwrap();
+    let (saved, warnings) = Project::load(&folder).unwrap();
+    assert_eq!((item_ids(&saved), warnings.len()), (vec![1], 0));
+}
+
+#[test]
+fn saving_an_item_starting_past_the_end_of_its_take_names_it_by_id() {
+    let dir = temp_dir("save-offset-past-take");
+    let (folder, project) = project_with_items(
+        &dir.0,
+        vec![item(1, 0, None, 1000), item(7, 1000, None, 1000)],
+    );
+    assert_eq!(
+        project.save(&folder).unwrap_err().to_string(),
+        "track 'Gtr' item 7 starts past the end of its take"
+    );
 }
 
 #[test]
@@ -959,7 +988,7 @@ fn a_file_without_item_ids_gets_them_in_file_order() {
         TWO_TRACKS.strip_suffix("arm = false\n").unwrap()
     );
     fs::write(dir.0.join(PROJECT_FILE), text).unwrap();
-    let project = Project::load(&dir.0).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
     let ids: Vec<Vec<u64>> = project
         .tracks
         .iter()

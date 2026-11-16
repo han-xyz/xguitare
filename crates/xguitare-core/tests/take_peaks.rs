@@ -106,7 +106,7 @@ fn open_with_takes(state: &mut EngineState, a: &[f32], b: &[f32]) {
     let folder = state.config.projects_dir.join("song");
     write_take(&folder.join("takes/a.wav"), a);
     write_take(&folder.join("takes/b.wav"), b);
-    let mut project = Project::load(&folder).unwrap();
+    let mut project = Project::load(&folder).unwrap().0;
     project.tracks[0].items = vec![Item {
         id: 1,
         position: 0,

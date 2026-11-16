@@ -304,7 +304,7 @@ fn a_full_take_peaks_reply_crosses_the_socket() {
     assert!(request(&stream, r#"{"cmd":"project_close"}"#).starts_with(r#"{"ok":true"#));
     let folder = dir.join("projects/song");
     write_full_scale_take(&folder.join("takes/a.wav"));
-    let mut project = Project::load(&folder).unwrap();
+    let mut project = Project::load(&folder).unwrap().0;
     project.tracks[0].items = vec![Item {
         id: 1,
         position: 0,

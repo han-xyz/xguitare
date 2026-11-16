@@ -22,8 +22,8 @@ use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
-    AUTOSAVE_FILE, Item, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track,
-    autosave_due, autosave_newer, check_project, check_track, checked_name,
+    AUTOSAVE_FILE, Item, LoadWarning, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project,
+    Track, autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
@@ -107,11 +107,12 @@ pub type TrackReaders = Vec<TrackReader>;
     reason = "a few events per Control API request; boxing the closed Project saves nothing that matters"
 )]
 pub enum ProjectEvent {
-    /// Start a disk thread writing Takes under `dir` at `sample_rate` that keeps `writing` current.
+    /// Start a disk thread writing Takes under `dir` at `sample_rate` that keeps `writing` current, and log what loading the Project changed.
     Opened {
         dir: PathBuf,
         sample_rate: u32,
         writing: WritingTakes,
+        warnings: Vec<LoadWarning>,
     },
     /// Queue these Take readers on the disk thread.
     Readers(TrackReaders),
@@ -530,7 +531,7 @@ pub(crate) fn project_new(state: &mut EngineState, name: &str) -> Result<Value, 
     project.sample_rate = state.sample_rate as u32;
     project.save(&dir).map_err(|err| err.to_string())?;
     let payload = json!({"name": project.name, "path": dir.display().to_string()});
-    open(state, dir, project, HashMap::new())
+    open(state, dir, project, HashMap::new(), Vec::new())
         .map_err(|err| format!("{err}; the project was created, open it with project_open"))?;
     Ok(payload)
 }
@@ -562,7 +563,7 @@ pub(crate) fn project_open(
     } else {
         Project::load(&dir)
     };
-    let project = loaded.map_err(|err| err.to_string())?;
+    let (project, warnings) = loaded.map_err(|err| err.to_string())?;
     if let Some(mismatch) = rate_mismatch(project.sample_rate, state.sample_rate) {
         return Err(mismatch);
     }
@@ -573,7 +574,7 @@ pub(crate) fn project_open(
         "autosave_newer": newer,
         "restored": restore,
     });
-    open(state, dir, project, takes)?;
+    open(state, dir, project, takes, warnings)?;
     if restore {
         open_project_mut(state).changed = true;
     }
@@ -634,7 +635,7 @@ pub(crate) fn project_list(state: &EngineState) -> Result<Value, String> {
                 .file_name()
                 .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
             match Project::load(dir) {
-                Ok(project) => json!({"name": project.name, "folder": folder, "valid": true}),
+                Ok((project, _)) => json!({"name": project.name, "folder": folder, "valid": true}),
                 Err(err) => json!({"name": folder, "folder": folder, "valid": false, "error": err.to_string()}),
             }
         })
@@ -1383,6 +1384,7 @@ fn open(
     dir: PathBuf,
     project: Project,
     takes: HashMap<String, Arc<[f32]>>,
+    warnings: Vec<LoadWarning>,
 ) -> Result<(), String> {
     let track_ids: Vec<u64> = (0..project.tracks.len() as u64).collect();
     let (readers, _) = start_arrangement(
@@ -1406,6 +1408,7 @@ fn open(
         dir: dir.clone(),
         sample_rate: project.sample_rate,
         writing: Arc::clone(&writing),
+        warnings,
     });
     events.push(ProjectEvent::Readers(readers));
     events.push(ProjectEvent::Inputs(track_inputs(&project)));

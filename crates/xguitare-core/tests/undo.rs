@@ -130,7 +130,7 @@ fn open_song(state: &mut EngineState) {
     let folder = folder(state);
     write_take(&folder.join("takes/a.wav"), &vec![0.25; 4800]);
     write_take(&folder.join("takes/b.wav"), &vec![0.5; 4800]);
-    let mut project = Project::load(&folder).unwrap();
+    let mut project = Project::load(&folder).unwrap().0;
     let mut looped = item(1, 1000, "takes/a.wav");
     looped.takes.push(take("takes/b.wav", 4800));
     project.tracks[0].items = vec![looped, item(2, 3000, "takes/b.wav")];

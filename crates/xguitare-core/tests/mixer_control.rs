@@ -149,7 +149,9 @@ fn revision(s: &EngineState) -> u64 {
 
 fn saved(s: &mut Session) -> Project {
     ok(s, r#"{"cmd":"project_save"}"#);
-    Project::load(&s.state.config.projects_dir.join("song")).unwrap()
+    Project::load(&s.state.config.projects_dir.join("song"))
+        .unwrap()
+        .0
 }
 
 #[test]

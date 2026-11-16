@@ -127,7 +127,7 @@ fn open_with(
     for &(file, level, frames) in takes {
         write_take(&folder.join(file), &vec![level; frames]);
     }
-    let mut project = Project::load(&folder).unwrap();
+    let mut project = Project::load(&folder).unwrap().0;
     for (track, (_, items)) in project.tracks.iter_mut().zip(tracks) {
         track.items = items;
     }

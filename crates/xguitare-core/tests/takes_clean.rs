@@ -125,7 +125,7 @@ fn open_song(state: &mut EngineState) -> (PathBuf, WritingTakes) {
     ] {
         write_take(&folder.join(format!("takes/{name}.wav")), frames);
     }
-    let mut project = Project::load(&folder).unwrap();
+    let mut project = Project::load(&folder).unwrap().0;
     project.tracks[0].items = vec![
         Item {
             id: 1,
@@ -520,7 +520,7 @@ fn the_project_is_saved_before_its_takes_go() {
     ok(clean(&mut state, &["takes/c.wav"]));
     assert!(!exists(&folder, "takes/c.wav"));
     assert!(!exists(&folder, AUTOSAVE_FILE));
-    let saved = Project::load(&folder).unwrap();
+    let saved = Project::load(&folder).unwrap().0;
     let files: Vec<&str> = saved.tracks[0]
         .items
         .iter()

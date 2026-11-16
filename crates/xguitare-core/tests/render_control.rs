@@ -118,7 +118,7 @@ fn song(test: &str, items: bool) -> Session {
     ok(&mut s, r#"{"cmd":"project_close"}"#);
     take_project_events(&mut s.state);
     let dir = song_dir(&s);
-    let mut project = Project::load(&dir).unwrap();
+    let mut project = Project::load(&dir).unwrap().0;
     let mut track = Track::from_preset(
         "Guitar",
         &xguitare_core::Preset {

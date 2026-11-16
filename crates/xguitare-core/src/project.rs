@@ -211,7 +211,7 @@ pub enum ProjectError {
     },
     OffsetPastTake {
         track: String,
-        item: usize,
+        id: u64,
     },
     DuplicateItemId(u64),
     NextItemId,
@@ -242,6 +242,17 @@ pub enum ProjectError {
         bus: u64,
     },
     SendLevel(String),
+}
+
+/// What [`Project::load`] changed to open a file that an earlier build wrote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadWarning {
+    /// An Item that played nothing, its active Take no longer than its `offset`, was left out; `file` is that Take's, which stays on disk.
+    DroppedItem {
+        track: String,
+        id: u64,
+        file: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -388,21 +399,21 @@ impl Project {
         Ok((dir, project))
     }
 
-    /// Reads `<dir>/project.toml`.
+    /// Reads `<dir>/project.toml`, leaving out each Item whose active Take holds no frames after its `offset`, with a [`LoadWarning`] for it; saving refuses such an Item.
     ///
     /// # Errors
     ///
-    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, an Item's active Take that does not exist or holds no frames after the Item's `offset`, more than [`MAX_BUSES`] Buses, two Buses with one id or one name, a Bus's volume or pan out of the Track range, a Master volume other than `-inf` or −60..=6 dB, a cabinet on a Bus or Master, or a Send to an unknown Bus, a second Send to one Bus, or a Send level other than `-inf` or −60..=6 dB.
-    pub fn load(dir: &Path) -> Result<Project, ProjectError> {
+    /// A [`ProjectError`] when the file cannot be read or parsed, a Track's Modules fail the checks a Preset's do, or a value is out of range: more than [`MAX_TRACKS`] Tracks, tempo outside 20..=300 bpm, a meter other than 1..=16 beats of a 2, 4, 8 or 16 note, a sample rate of 0, a latency offset outside ±1000 ms, a loop that is on with its start not before its end, a Track's volume outside −60..=6 dB or pan outside −1..=1, an Item or loop past the last frame, a Take file other than `takes/<name>.wav`, an Item's active Take that does not exist, more than [`MAX_BUSES`] Buses, two Buses with one id or one name, a Bus's volume or pan out of the Track range, a Master volume other than `-inf` or −60..=6 dB, a cabinet on a Bus or Master, or a Send to an unknown Bus, a second Send to one Bus, or a Send level other than `-inf` or −60..=6 dB.
+    pub fn load(dir: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
         read(&dir.join(PROJECT_FILE))
     }
 
-    /// Reads `<dir>/project.autosave.toml`.
+    /// Reads `<dir>/project.autosave.toml` as [`Project::load`] reads `project.toml`.
     ///
     /// # Errors
     ///
     /// As [`Project::load`].
-    pub fn load_autosave(dir: &Path) -> Result<Project, ProjectError> {
+    pub fn load_autosave(dir: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
         read(&dir.join(AUTOSAVE_FILE))
     }
 
@@ -538,7 +549,7 @@ fn checked_strip_name<'a>(
     Ok(name.to_string())
 }
 
-fn read(path: &Path) -> Result<Project, ProjectError> {
+fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
     let text = fs::read_to_string(path).map_err(io_error(path))?;
     let file: ProjectFile = toml::from_str(&text).map_err(|error| {
         let (line, col) = crate::toml_position(&text, &error);
@@ -568,6 +579,10 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         tracks[idx].name = checked_name(&tracks[..idx], &tracks[idx].name, None)
             .map_err(ProjectError::TrackName)?;
     }
+    let warnings = tracks
+        .iter_mut()
+        .flat_map(drop_items_past_their_take)
+        .collect();
     if file.buses.len() > MAX_BUSES {
         return Err(ProjectError::TooManyBuses);
     }
@@ -596,7 +611,29 @@ fn read(path: &Path) -> Result<Project, ProjectError> {
         master,
     };
     check_project(&project)?;
-    Ok(project)
+    Ok((project, warnings))
+}
+
+/// Leaves out the Track's Items that [`starts_past_its_take`], which an earlier build could record and save.
+fn drop_items_past_their_take(track: &mut Track) -> Vec<LoadWarning> {
+    let (dropped, kept) = track
+        .items
+        .drain(..)
+        .partition(|item| item.take < item.takes.len() && starts_past_its_take(item));
+    track.items = kept;
+    dropped
+        .into_iter()
+        .map(|item: Item| LoadWarning::DroppedItem {
+            track: track.name.clone(),
+            id: item.id,
+            file: item.takes[item.take].file.clone(),
+        })
+        .collect()
+}
+
+/// Whether the Item's active Take holds no frames after its `offset`; the active Take exists.
+fn starts_past_its_take(item: &Item) -> bool {
+    item.offset >= item.takes[item.take].frames
 }
 
 /// Whether `(beats, note)` is 1 to 16 beats of a 2, 4, 8 or 16 note.
@@ -735,10 +772,10 @@ pub(crate) fn check_track(track: &Track) -> Result<(), ProjectError> {
                 item: index,
             });
         }
-        if item.offset >= item.takes[item.take].frames {
+        if starts_past_its_take(item) {
             return Err(ProjectError::OffsetPastTake {
                 track: track.name.clone(),
-                item: index,
+                id: item.id,
             });
         }
         if item.length == Some(0) {
@@ -1010,10 +1047,10 @@ impl fmt::Display for ProjectError {
                     "track '{track}' item {item} plays past the end of its take"
                 )
             }
-            ProjectError::OffsetPastTake { track, item } => {
+            ProjectError::OffsetPastTake { track, id } => {
                 write!(
                     f,
-                    "track '{track}' item {item} starts past the end of its take"
+                    "track '{track}' item {id} starts past the end of its take"
                 )
             }
             ProjectError::DuplicateItemId(id) => write!(f, "two items have id {id}"),
@@ -1053,3 +1090,15 @@ impl fmt::Display for ProjectError {
 }
 
 impl std::error::Error for ProjectError {}
+
+impl fmt::Display for LoadWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoadWarning::DroppedItem { track, id, file } => write!(
+                f,
+                "track '{track}': dropped item {id} ({}): starts past the end of its take",
+                shown_file_name(file)
+            ),
+        }
+    }
+}

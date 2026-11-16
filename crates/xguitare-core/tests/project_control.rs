@@ -220,7 +220,9 @@ fn reader_ids(state: &mut EngineState) -> Vec<(String, u64)> {
 }
 
 fn saved(state: &EngineState, folder: &str) -> Project {
-    Project::load(&state.config.projects_dir.join(folder)).unwrap()
+    Project::load(&state.config.projects_dir.join(folder))
+        .unwrap()
+        .0
 }
 
 fn drain_commands(audio: &mut AudioQueues) -> Vec<Command> {
@@ -376,7 +378,7 @@ fn project_open_reports_a_newer_autosave_and_restores_it() {
     add_track(&mut state, "Guitar");
     close(&mut state);
     let folder = state.config.projects_dir.join("song");
-    let mut autosave = Project::load(&folder).unwrap();
+    let mut autosave = Project::load(&folder).unwrap().0;
     let mut bass = autosave.tracks[0].clone();
     bass.name = "Bass".to_string();
     autosave.tracks.push(bass);
@@ -410,7 +412,7 @@ fn autosave_waits_for_a_change_and_the_interval() {
     assert!(autosave_if_due(&mut state, later).unwrap().is_ok());
     assert!(autosave_if_due(&mut state, later).is_none());
     let folder = state.config.projects_dir.join("song");
-    assert_eq!(Project::load_autosave(&folder).unwrap().tracks.len(), 1);
+    assert_eq!(Project::load_autosave(&folder).unwrap().0.tracks.len(), 1);
     assert_eq!(saved(&state, "song").tracks.len(), 0);
 }
 
@@ -422,7 +424,7 @@ fn a_transport_stop_autosaves_a_changed_project() {
     let folder = state.config.projects_dir.join("song");
     assert!(Project::load_autosave(&folder).is_err());
     ok(handle(&mut state, transport(TransportAction::Stop, None)));
-    assert_eq!(Project::load_autosave(&folder).unwrap().tracks.len(), 1);
+    assert_eq!(Project::load_autosave(&folder).unwrap().0.tracks.len(), 1);
 }
 
 #[test]
@@ -1297,7 +1299,7 @@ fn the_daemon_stop_autosaves_the_last_takes() {
         Some(folder.join(xguitare_core::project::AUTOSAVE_FILE))
     );
     assert_eq!(
-        Project::load_autosave(&folder).unwrap().tracks[0]
+        Project::load_autosave(&folder).unwrap().0.tracks[0]
             .items
             .len(),
         1

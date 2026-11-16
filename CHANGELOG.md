@@ -63,6 +63,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Fixed
 
+- A Project file holding an Item that plays nothing (its active Take no longer than its `offset`, which a stop just after a loop wrap could record) opens without that Item, and the Daemon logs `track '<name>': dropped item <id> (<take file>): starts past the end of its take`; the Take file stays on disk. Saving such an Item is refused with `track '<name>' item <id> starts past the end of its take`.
 - `locate` is bounded by where each Item really ends (its active Take less its `offset`), no longer by its longest Take.
 - A Cabinet IR with a NaN or infinite sample is refused with `ir <name>: non-finite sample`.
 - `rack_add cabinet` finds `default-cab.wav` or `bass-cab.wav` under the IR directory as well as the Bank directory.
