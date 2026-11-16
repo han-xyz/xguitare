@@ -409,6 +409,21 @@ fn takes_must_be_a_real_directory() {
 }
 
 #[test]
+fn a_project_without_a_takes_folder_has_no_unused_takes() {
+    let (mut state, _audio, _dir) = state("no-takes-dir");
+    let (folder, _writing) = open_song(&mut state);
+    fs::remove_dir_all(folder.join("takes")).unwrap();
+    assert_eq!(
+        ok(handle(&mut state, Request::TakesUnused)),
+        json!({"files": [], "bytes": 0})
+    );
+    assert_eq!(
+        ok(clean(&mut state, &[])),
+        json!({"deleted": 0, "bytes": 0, "failed": []})
+    );
+}
+
+#[test]
 fn a_failed_save_deletes_nothing_and_keeps_undo() {
     let (mut state, _audio, _dir) = state("clean-save-fails");
     let (folder, _writing) = open_song(&mut state);
@@ -456,16 +471,26 @@ fn a_take_file_swapped_for_a_symlink_before_its_deletion_is_kept() {
     std::os::unix::fs::symlink(&outside, takes.join("y.wav")).unwrap();
     fs::create_dir(takes.join("z.wav")).unwrap();
     let x = fs::metadata(takes.join("x.wav")).unwrap().len();
-    let files = ["takes/x.wav", "takes/y.wav", "takes/z.wav", "y.wav"].map(str::to_string);
+    write_take(&dir.0.join("x.wav"), 10);
+    let files = [
+        "takes/x.wav",
+        "takes/y.wav",
+        "takes/z.wav",
+        "y.wav",
+        "takes/../x.wav",
+    ]
+    .map(str::to_string);
     assert_eq!(
         delete_take_files(&takes, &files),
         json!({"deleted": 1, "bytes": x, "failed": [
             {"file": "takes/y.wav", "error": "not a regular file"},
             {"file": "takes/z.wav", "error": "not a regular file"},
             {"file": "y.wav", "error": "not a take file"},
+            {"file": "takes/../x.wav", "error": "not a take file"},
         ]})
     );
     assert!(!takes.join("x.wav").exists());
+    assert!(dir.0.join("x.wav").is_file());
     assert!(
         fs::symlink_metadata(takes.join("y.wav"))
             .unwrap()

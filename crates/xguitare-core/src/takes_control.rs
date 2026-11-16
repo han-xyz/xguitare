@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -66,6 +67,9 @@ pub fn delete_take_files(takes: &Path, files: &[String]) -> Value {
 }
 
 fn delete_take(takes: &Path, file: &str) -> Result<u64, String> {
+    if !is_cleanable(file) {
+        return Err(NOT_A_TAKE_FILE.to_string());
+    }
     let name = file
         .strip_prefix(TAKES_DIR)
         .and_then(|rest| rest.strip_prefix('/'))
@@ -79,10 +83,12 @@ fn delete_take(takes: &Path, file: &str) -> Result<u64, String> {
     Ok(metadata.len())
 }
 
-/// The open Project's `takes` folder and each regular file `takes/<name>.wav` in it that [`kept_takes`] does not name, with its size, sorted by name; a symlink is never followed.
+/// The open Project's `takes` folder and each regular file `takes/<name>.wav` in it that [`kept_takes`] does not name, with its size, sorted by name; a symlink is never followed. No `takes` folder lists nothing.
 fn unused_takes(state: &EngineState) -> Result<(PathBuf, Vec<(String, u64)>), String> {
     let (dir, kept) = kept_takes(state)?;
-    let takes = takes_dir(dir)?;
+    let Some(takes) = takes_dir(dir)? else {
+        return Ok((dir.join(TAKES_DIR), Vec::new()));
+    };
     let entries =
         fs::read_dir(&takes).map_err(|err| format!("cannot read {}: {err}", takes.display()))?;
     let mut unused = Vec::new();
@@ -110,12 +116,13 @@ fn is_cleanable(file: &str) -> bool {
     is_take_file(file) && !file.contains("..") && !file.contains(is_hidden_char)
 }
 
-/// `<dir>/takes`, refused when it is a symlink or anything but a directory.
-fn takes_dir(dir: &Path) -> Result<PathBuf, String> {
+/// `<dir>/takes`, `None` when it does not exist, refused when it is a symlink or anything but a directory.
+fn takes_dir(dir: &Path) -> Result<Option<PathBuf>, String> {
     let takes = dir.join(TAKES_DIR);
     match fs::symlink_metadata(&takes) {
-        Ok(metadata) if metadata.is_dir() => Ok(takes),
+        Ok(metadata) if metadata.is_dir() => Ok(Some(takes)),
         Ok(_) => Err(NOT_A_DIRECTORY.to_string()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
         Err(err) => Err(format!("cannot read {}: {err}", takes.display())),
     }
 }
