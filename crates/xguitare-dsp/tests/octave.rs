@@ -207,6 +207,28 @@ fn finite_and_bounded_under_loud_input() {
 }
 
 #[test]
+fn output_stays_finite_at_8_khz() {
+    let input: Vec<f32> = (0..8000)
+        .map(|n| 0.25 * (TAU * 110.0 * f64::from(n) / 8000.0).sin() as f32)
+        .collect();
+    for range in [BASS, GUITAR] {
+        for settings in [
+            vec![(UP, 100.0), (RANGE, range)],
+            vec![
+                (OCT1, 100.0),
+                (OCT2, 100.0),
+                (UP, 100.0),
+                (TONE, 2000.0),
+                (RANGE, range),
+            ],
+        ] {
+            let output = run(&mut octave_at(8000.0, &settings), &input);
+            assert!(output.iter().all(|s| s.is_finite()), "range {range}");
+        }
+    }
+}
+
+#[test]
 fn dry_alone_after_reset_is_the_input() {
     for rate in RATES {
         let loud = noise(0.9, rate as usize / 4);

@@ -1,5 +1,6 @@
 use std::f32::consts::{FRAC_1_SQRT_2, FRAC_PI_2};
 
+use super::eq::MAX_FREQ_PER_RATE;
 use super::one_pole_coeff;
 use crate::smooth::Smoother;
 use crate::svf::{Svf, SvfCoefficients};
@@ -21,6 +22,10 @@ const GATE_LEVEL: f32 = 3.162e-4;
 const HOLD_OFF_FRACTION: f32 = 0.45;
 /// The −1 voice switches the note through a 4-pole low-pass at this multiple of the tracked note, so that a strong second harmonic does not land at 3f/2.
 const FOLLOW_RATIO: f32 = 1.3;
+
+fn below_nyquist(hz: f32, sample_rate: f32) -> f32 {
+    hz.min(MAX_FREQ_PER_RATE * sample_rate)
+}
 
 /// The tracker's constants for one `range`.
 struct Tracking {
@@ -156,7 +161,7 @@ impl Octave {
                 sample_rate,
             ),
             up_low_pass_coefficients: SvfCoefficients::low_pass(
-                UP_LOW_PASS_HZ,
+                below_nyquist(UP_LOW_PASS_HZ, sample_rate),
                 FRAC_1_SQRT_2,
                 sample_rate,
             ),
@@ -176,8 +181,11 @@ impl Octave {
 
     fn update_tracking(&mut self) {
         let tracking = &TRACKING[self.values[RANGE] as usize];
-        self.pre_filter_coefficients =
-            SvfCoefficients::low_pass(tracking.pre_filter_hz, FRAC_1_SQRT_2, self.sample_rate);
+        self.pre_filter_coefficients = SvfCoefficients::low_pass(
+            below_nyquist(tracking.pre_filter_hz, self.sample_rate),
+            FRAC_1_SQRT_2,
+            self.sample_rate,
+        );
         self.tracker.prepare(tracking, self.sample_rate);
     }
 
@@ -234,8 +242,11 @@ impl Module for Octave {
         }
         self.input_high_pass_coefficients =
             SvfCoefficients::high_pass(INPUT_HIGH_PASS_HZ, FRAC_1_SQRT_2, sample_rate);
-        self.up_low_pass_coefficients =
-            SvfCoefficients::low_pass(UP_LOW_PASS_HZ, FRAC_1_SQRT_2, sample_rate);
+        self.up_low_pass_coefficients = SvfCoefficients::low_pass(
+            below_nyquist(UP_LOW_PASS_HZ, sample_rate),
+            FRAC_1_SQRT_2,
+            sample_rate,
+        );
         self.update_tracking();
         self.reset();
     }
@@ -294,8 +305,11 @@ impl Module for Octave {
             self.gate
                 .set_target(if self.tracker.is_open() { 1.0 } else { 0.0 });
             let gate = self.gate.next_value();
-            let tone =
-                SvfCoefficients::low_pass(self.tone.next_value(), FRAC_1_SQRT_2, self.sample_rate);
+            let tone = SvfCoefficients::low_pass(
+                below_nyquist(self.tone.next_value(), self.sample_rate),
+                FRAC_1_SQRT_2,
+                self.sample_rate,
+            );
             let sub1 = self.oct1_tone.process(&tone, gate * sub1);
             let sub2 = self.oct2_tone.process(&tone, gate * sub2);
             let up = self.up_voice(input);
