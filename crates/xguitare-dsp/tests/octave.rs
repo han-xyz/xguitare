@@ -64,16 +64,26 @@ fn voice_alone(voice: usize, settings: &[(usize, f32)]) -> Vec<(usize, f32)> {
 
 /// The R3 note: fundamental with 2f at 0.8 and 3f at 0.4, sine phase, first peak at −12 dBFS, decaying 20 dB per second.
 fn plucked(freq: f32, rate: f32) -> Vec<f32> {
+    shaped_note(freq, rate, FIRST_PEAK_DB, 0.8, 0.0)
+}
+
+fn shaped_note(
+    freq: f32,
+    rate: f32,
+    first_peak_db: f64,
+    second: f64,
+    phase_shift: f64,
+) -> Vec<f32> {
     let (freq, rate) = (f64::from(freq), f64::from(rate));
     let shape = |n: usize| {
-        let phase = TAU * freq * n as f64 / rate;
+        let phase = TAU * freq * n as f64 / rate + phase_shift;
         let decay = 10.0_f64.powf(-(n as f64) / rate);
-        (phase.sin() + 0.8 * (2.0 * phase).sin() + 0.4 * (3.0 * phase).sin()) * decay
+        (phase.sin() + second * (2.0 * phase).sin() + 0.4 * (3.0 * phase).sin()) * decay
     };
     let first_peak = (0..(rate / freq).ceil() as usize)
         .map(|n| shape(n).abs())
         .fold(0.0, f64::max);
-    let scale = 10.0_f64.powf(FIRST_PEAK_DB / 20.0) / first_peak;
+    let scale = 10.0_f64.powf(first_peak_db / 20.0) / first_peak;
     (0..(NOTE_SECONDS * rate) as usize)
         .map(|n| (scale * shape(n)) as f32)
         .collect()
@@ -89,12 +99,18 @@ fn hann(frame: &[f32]) -> Vec<f32> {
 }
 
 /// Every frame, per R3, in which a candidate other than `ratio`·f is at least as strong as the target.
-fn tracking_failures(voice: usize, ratio: f32, range: f32, notes: &[f32]) -> Vec<String> {
+fn tracking_failures(
+    voice: usize,
+    ratio: f32,
+    range: f32,
+    notes: &[f32],
+    note: &dyn Fn(f32, f32) -> Vec<f32>,
+) -> Vec<String> {
     let mut failures = Vec::new();
     for rate in RATES {
         for &freq in notes {
             let settings = voice_alone(voice, &[(TONE, 2000.0), (RANGE, range)]);
-            let output = run(&mut octave_at(rate, &settings), &plucked(freq, rate));
+            let output = run(&mut octave_at(rate, &settings), &note(freq, rate));
             let target = ratio * freq;
             let frame = (FRAME_PERIODS * rate / target).ceil() as usize;
             let end = (MEASURE_TO_SECONDS * f64::from(rate)) as usize;
@@ -124,7 +140,17 @@ fn tracking_failures(voice: usize, ratio: f32, range: f32, notes: &[f32]) -> Vec
 }
 
 fn assert_tracks(voice: usize, ratio: f32, range: f32, notes: &[f32]) {
-    let failures = tracking_failures(voice, ratio, range, notes);
+    assert_tracks_note(voice, ratio, range, notes, &plucked);
+}
+
+fn assert_tracks_note(
+    voice: usize,
+    ratio: f32,
+    range: f32,
+    notes: &[f32],
+    note: &dyn Fn(f32, f32) -> Vec<f32>,
+) {
+    let failures = tracking_failures(voice, ratio, range, notes, note);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -179,10 +205,17 @@ fn finite_and_bounded_under_loud_input() {
 
 #[test]
 fn dry_alone_after_reset_is_the_input() {
-    let input = noise(0.5, SAMPLE_RATE as usize / 2);
-    let settings = [(DRY, 100.0), (OCT1, 0.0), (OCT2, 0.0), (UP, 0.0)];
-    let output = run(&mut prepared(Octave::new(), &settings), &input);
-    assert_eq!(output, input);
+    for rate in RATES {
+        let loud = noise(0.9, rate as usize / 4);
+        let mut module = octave_at(rate, &[(OCT1, 100.0), (OCT2, 100.0), (UP, 100.0)]);
+        run(&mut module, &loud);
+        for (idx, value) in [(DRY, 100.0), (OCT1, 0.0), (OCT2, 0.0), (UP, 0.0)] {
+            module.set_param(idx, value);
+        }
+        module.reset();
+        let input = noise(0.5, rate as usize / 2);
+        assert_eq!(run(&mut module, &input), input, "rate {rate}");
+    }
 }
 
 #[test]
@@ -303,4 +336,135 @@ fn range_is_a_choice_of_bass_and_guitar() {
         .map(|param| (param.name, param.labels))
         .collect();
     assert_eq!(labelled, [("range", &["bass", "guitar"][..])]);
+}
+
+fn assert_tracks_variant(first_peak_db: f64, second: f64, phase_shift: f64) {
+    let note = move |f, r| shaped_note(f, r, first_peak_db, second, phase_shift);
+    for (voice, ratio) in [(OCT1, 0.5), (OCT2, 0.25)] {
+        assert_tracks_note(voice, ratio, BASS, &[41.0, 98.0], &note);
+        assert_tracks_note(voice, ratio, GUITAR, &[110.0, 330.0], &note);
+    }
+}
+
+#[test]
+fn tracking_holds_in_cosine_phase() {
+    assert_tracks_variant(FIRST_PEAK_DB, 0.8, std::f64::consts::FRAC_PI_2);
+}
+
+#[test]
+fn tracking_holds_at_minus_30_dbfs() {
+    assert_tracks_variant(-30.0, 0.8, 0.0);
+}
+
+#[test]
+fn tracking_holds_at_minus_3_dbfs() {
+    assert_tracks_variant(-3.0, 0.8, 0.0);
+}
+
+fn strongest_candidate(frame: &[f32], freq: f32, rate: f32) -> f32 {
+    let windowed = hann(frame);
+    let mags: Vec<f32> = CANDIDATES
+        .iter()
+        .map(|c| bin_mag(&windowed, c * freq, rate))
+        .collect();
+    let (best, _) =
+        mags.iter().enumerate().fold(
+            (0, 0.0_f32),
+            |(bi, bm), (i, &m)| if m > bm { (i, m) } else { (bi, bm) },
+        );
+    CANDIDATES[best]
+}
+
+#[test]
+fn legato_change_of_pitch_moves_the_sub_within_100_ms() {
+    let rate = SAMPLE_RATE;
+    let half = rate as usize / 2;
+    for (first, second) in [(110.0, 220.0), (220.0, 110.0)] {
+        let mut input = plucked(first, rate)[..half].to_vec();
+        input.extend_from_slice(&plucked(second, rate)[..half]);
+        let settings = voice_alone(OCT1, &[(TONE, 2000.0), (RANGE, BASS)]);
+        let output = run(&mut octave_at(rate, &settings), &input);
+        let from = half + rate as usize / 10;
+        let frame = (FRAME_PERIODS * rate / (0.5 * second)).ceil() as usize;
+        let best = strongest_candidate(&output[from..from + frame], second, rate);
+        assert!(
+            (best - 0.5).abs() < f32::EPSILON,
+            "{first} to {second} Hz: strongest at {best} x the new note"
+        );
+    }
+}
+
+#[test]
+fn tracking_holds_at_the_range_edges() {
+    assert_tracks(OCT1, 0.5, BASS, &[28.0, 30.0]);
+    assert_tracks(OCT1, 0.5, GUITAR, &[1100.0]);
+}
+
+#[test]
+fn output_does_not_depend_on_the_block_size() {
+    let input = plucked(110.0, SAMPLE_RATE);
+    let settings = [
+        (DRY, 100.0),
+        (OCT1, 100.0),
+        (OCT2, 100.0),
+        (UP, 100.0),
+        (TONE, 800.0),
+    ];
+    let render = |block: usize| {
+        let mut module = Octave::new();
+        for &(idx, value) in &settings {
+            module.set_param(idx, value);
+        }
+        module.prepare(SAMPLE_RATE, 256);
+        module.reset();
+        let mut output = input.clone();
+        let (mut left, mut right) = ([0.0; 256], [0.0; 256]);
+        for chunk in output.chunks_mut(block) {
+            module.process(&mut AudioBuffers {
+                frames: chunk.len(),
+                mono: chunk,
+                left: &mut left,
+                right: &mut right,
+            });
+        }
+        output
+    };
+    let reference = render(BLOCK);
+    for block in [1, 64, 97, 256] {
+        assert_eq!(render(block), reference, "block {block}");
+    }
+}
+
+#[test]
+fn range_switched_while_a_note_rings_stays_bounded() {
+    let rate = SAMPLE_RATE;
+    let mut input = plucked(98.0, rate)[..rate as usize].to_vec();
+    input.extend(vec![0.0; rate as usize / 2]);
+    let settings = [(DRY, 100.0), (OCT1, 100.0), (OCT2, 100.0), (UP, 100.0)];
+    let mut module = octave_at(rate, &settings);
+    let mut output = Vec::new();
+    for (n, chunk) in input.chunks(rate as usize / 20).enumerate() {
+        module.set_param(RANGE, (n % 2) as f32);
+        output.extend(run(&mut module, chunk));
+    }
+    assert!(output.iter().all(|s| s.is_finite()));
+    assert!(peak(&output) < 8.0, "peak {}", peak(&output));
+    let after = peak(&output[rate as usize + rate as usize / 5..]);
+    assert!(db(after) < -60.0, "{} dBFS", db(after));
+}
+
+#[test]
+fn a_note_under_minus_70_dbfs_makes_no_sub() {
+    let sub_peak = |level_db: f32| {
+        let input = sine(
+            10.0_f32.powf(level_db / 20.0),
+            82.0,
+            SAMPLE_RATE,
+            SAMPLE_RATE as usize,
+        );
+        let settings = voice_alone(OCT1, &[(OCT2, 100.0), (TONE, 2000.0)]);
+        peak(&run(&mut octave_at(SAMPLE_RATE, &settings), &input))
+    };
+    assert!(db(sub_peak(-60.0)) > -80.0, "a -60 dBFS note makes a sub");
+    assert!(db(sub_peak(-75.0)) < -120.0, "{} dBFS", db(sub_peak(-75.0)));
 }
