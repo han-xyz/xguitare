@@ -4,7 +4,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ## Unreleased
 
-### Item editing
+### Added
 
 - Items have an id (Control API `items` `id`, first on each `project items` line) and may have a `length`; where Items overlap on a Track the one on top (the newest) is heard, and Item edges fade over 5 ms with a crossfade where one Item cuts into another. A `project.toml` without Item ids loads with ids in file order.
 - Editing Items: CLI `item list|move|trim|split|delete|take` and Control API `item_move`, `item_trim`, `item_split`, `item_delete` and `item_take`; moved Items go on top, a split keeps all Takes on both halves, and while playing the changed Tracks cross over to the edit in 5 ms without rebuilding their Racks.
@@ -14,10 +14,6 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - GUI trimming, Takes and copies in `Arrange`: drag an Item's edge to trim it (snapped, inside its Take; `item_trim` on release) or press `Shift+←`/`Shift+→` (end) and `Ctrl+Shift+←`/`Ctrl+Shift+→` (start) on a focused Item; right-click an Item (or `Shift+F10`) for its Takes, `Split at playhead`, `Duplicate`, `Copy` and `Delete`, and an empty lane for `Paste`; `T` makes the next Take active, `Ctrl+D` duplicates, `Ctrl+C` copies and `Ctrl+V` pastes at the playhead on the selected Track, the new Items selected. Where Items overlap, only the top one, the one heard, is drawn there: the lower one shows as its uncovered stretches, its name once. A GUI copy also puts `xguitare Items: <Take names>` on the system clipboard. Item keyboard names add the Take count and what covers them.
 - Waveforms: the GUI draws each Item's waveform, for the part of its active Take it plays, on its plate in the Track's colour. Control API `take_peaks` pages a Take's peak table (min and max per 256 frames, up to 16384 pairs a reply, with the Take's `frames`); `items` gives each Item's `take_frames` and `status` Tracks their `id`.
 - Clean up Takes: CLI `takes unused` lists the open Project's Take files that no Item, the clipboard or a recording uses, with sizes and a total, and `takes clean --yes` deletes them (without `--yes` it only lists); Control API `takes_unused` and `takes_clean`. Deleting saves the Project first and clears the undo history and the clipboard; it is refused while recording, a symlink in `takes/` is never followed, and a file that cannot be deleted is reported without stopping the rest; the CLI and the GUI send a long list in batches. The GUI's `Project` section has `Clean up Takes…`. Take files are otherwise never deleted.
-- Fixed: `locate` is bounded by where each Item really ends (its active Take less its `offset`), no longer by its longest Take.
-
-### Added
-
 - `autowah` Module, an envelope filter for bass and guitar: the input's envelope sweeps a low-, band- or high-pass filter between `freq_low` and `freq_high`, up or down, with `sensitivity`, `attack`, `decay`, `q`, `dry` and `wet`.
 - `eq` Module, a parametric equaliser: 12 dB/oct `low_cut` and `high_cut`, a low and a high shelf, two bells with their own `q`, and `output`.
 - `blend` Module, a bass DI blend drive: below `crossover` the signal stays clean, above it `presence` and `drive` clip it at `level`; `blend` mixes the clean input with that, and `bass` (40 or 80 Hz), `mid` (500 or 1000 Hz) and `treble` shape the result, also at `blend` 0.
@@ -67,6 +63,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Fixed
 
+- `locate` is bounded by where each Item really ends (its active Take less its `offset`), no longer by its longest Take.
 - A Cabinet IR with a NaN or infinite sample is refused with `ir <name>: non-finite sample`.
 - `rack_add cabinet` finds `default-cab.wav` or `bass-cab.wav` under the IR directory as well as the Bank directory.
 - An IR path error names both directories it looked in.
