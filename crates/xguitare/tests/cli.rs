@@ -1943,7 +1943,7 @@ fn takes_unused_escapes_hidden_characters_in_file_names() {
 /// The Daemon's request line limit, `MAX_LINE` in `socket_server.rs`.
 const MAX_LINE: usize = 64 * 1024;
 
-/// Lists `unused` Take files of 1000 bytes each and deletes them as the Daemon does, refusing a request line over [`MAX_LINE`]; the `takes_clean` numbered `fail_at` (from 1) is refused.
+/// Lists `unused` Take files of 1000 bytes each and deletes them as the Daemon does, refusing a request line over [`MAX_LINE`], except the first file of each batch, which it reports in `failed`; the `takes_clean` numbered `fail_at` (from 1) is refused.
 struct CleaningDaemon {
     unused: Vec<String>,
     fail_at: Option<usize>,
@@ -1974,9 +1974,10 @@ impl Transport for CleaningDaemon {
                     return reply(r#"{"ok":false,"error":"cannot clean takes while recording"}"#);
                 }
                 reply(&format!(
-                    r#"{{"ok":true,"deleted":{},"bytes":{},"failed":[]}}"#,
-                    files.len(),
-                    files.len() * 1000
+                    r#"{{"ok":true,"deleted":{},"bytes":{},"failed":[{{"file":"{}","error":"Permission denied (os error 13)"}}]}}"#,
+                    files.len() - 1,
+                    (files.len() - 1) * 1000,
+                    files[0]
                 ))
             }
             req => panic!("unexpected request {req:?}"),
@@ -2007,21 +2008,43 @@ fn clean_unused(count: usize, fail_at: Option<usize>) -> (Outcome, Vec<Vec<Strin
 #[test]
 fn takes_clean_yes_deletes_thousands_of_takes_in_batches() {
     let (out, cleans) = clean_unused(5000, None);
-    assert_eq!(
-        (out.stdout.as_str(), out.stderr.as_str(), out.code),
-        ("deleted 5000 takes, 5.0 MB freed\n", "", 0)
-    );
     assert_eq!(cleans.concat().len(), 5000);
+    let deleted = 5000 - cleans.len();
+    let undeleted: Vec<String> = cleans
+        .iter()
+        .map(|batch| {
+            format!(
+                "error: could not delete {}: Permission denied (os error 13)",
+                batch[0]
+            )
+        })
+        .collect();
+    assert!(cleans.len() > 1, "one batch only");
+    assert_eq!(
+        (out.stdout, out.stderr, out.code),
+        (
+            format!("deleted {deleted} takes, 5.0 MB freed\n"),
+            undeleted.join("\n") + "\n",
+            1
+        )
+    );
 }
 
 #[test]
 fn takes_clean_yes_stopped_by_an_error_reports_what_went_before() {
     let (out, cleans) = clean_unused(5000, Some(2));
     assert_eq!(cleans.len(), 2, "the run stops at the refused batch");
-    let deleted = format!("deleted {} takes, ", cleans[0].len());
+    let deleted = format!("deleted {} takes, ", cleans[0].len() - 1);
     assert!(out.stdout.starts_with(&deleted), "{}", out.stdout);
     assert_eq!(
-        (out.stderr.as_str(), out.code),
-        ("error: cannot clean takes while recording\n", 1)
+        (out.stderr, out.code),
+        (
+            format!(
+                "error: could not delete {}: Permission denied (os error 13)\n\
+                 error: cannot clean takes while recording\n",
+                cleans[0][0]
+            ),
+            1
+        )
     );
 }

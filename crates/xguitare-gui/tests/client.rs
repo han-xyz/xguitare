@@ -613,8 +613,11 @@ fn a_clean_up_of_thousands_of_takes_goes_in_batches_and_reports_the_total() {
         }
         match request["cmd"].as_str().unwrap() {
             "takes_clean" => {
-                let deleted = request["files"].as_array().unwrap().len();
-                json!({"ok": true, "deleted": deleted, "bytes": deleted * 1000, "failed": []})
+                let files = request["files"].as_array().unwrap();
+                let deleted = files.len() - 1;
+                let failed =
+                    json!([{"file": files[0], "error": "Permission denied (os error 13)"}]);
+                json!({"ok": true, "deleted": deleted, "bytes": deleted * 1000, "failed": failed})
             }
             cmd => serde_json::from_str(reply(cmd)).unwrap(),
         }
@@ -632,14 +635,23 @@ fn a_clean_up_of_thousands_of_takes_goes_in_batches_and_reports_the_total() {
     };
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();
-    assert_eq!(
-        message,
-        Message::Notice("Deleted 5000 Takes, 5.0 MB freed".to_string())
-    );
-    let cleaned: usize = received
+    let batches: Vec<usize> = received
         .try_iter()
         .filter(|request| request["cmd"] == "takes_clean")
         .map(|request| request["files"].as_array().unwrap().len())
-        .sum();
-    assert_eq!(cleaned, 5000);
+        .collect();
+    assert_eq!(batches.iter().sum::<usize>(), 5000);
+    assert!(batches.len() > 1, "one batch only");
+    let deleted = 5000 - batches.len();
+    assert_eq!(
+        message,
+        Message::Error {
+            title: "Could not clean up the Takes",
+            detail: format!(
+                "Deleted {deleted} Takes, 5.0 MB freed; could not delete takes/guitar-0.wav: \
+                 Permission denied (os error 13), and {} more",
+                batches.len() - 1
+            ),
+        }
+    );
 }
