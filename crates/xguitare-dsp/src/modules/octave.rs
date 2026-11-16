@@ -21,8 +21,6 @@ const GATE_LEVEL: f32 = 3.162e-4;
 const HOLD_OFF_FRACTION: f32 = 0.45;
 /// The −1 voice switches the note through a 4-pole low-pass at this multiple of the tracked note, so that a strong second harmonic does not land at 3f/2.
 const FOLLOW_RATIO: f32 = 1.3;
-/// How fast that low-pass's corner glides to a new tracked note.
-const FOLLOW_SECONDS: f32 = 0.01;
 
 /// The tracker's constants for one `range`.
 struct Tracking {
@@ -131,8 +129,6 @@ pub struct Octave {
     oct1_tone: Svf,
     oct2_tone: Svf,
     follow: [Svf; 2],
-    follow_hz: f32,
-    follow_coeff: f32,
     tracker: Tracker,
 }
 
@@ -171,11 +167,10 @@ impl Octave {
             oct1_tone: Svf::new(),
             oct2_tone: Svf::new(),
             follow: [Svf::new(), Svf::new()],
-            follow_hz: 0.0,
-            follow_coeff: 0.0,
             tracker: Tracker::default(),
         };
         octave.update_tracking();
+        octave.reset();
         octave
     }
 
@@ -192,10 +187,8 @@ impl Octave {
 
     /// The pre-filtered note through the low-pass that follows the tracked note.
     fn followed(&mut self, pre_filtered: f32) -> f32 {
-        let target = self.follow_target_hz();
-        self.follow_hz = target + self.follow_coeff * (self.follow_hz - target);
         let coefficients =
-            SvfCoefficients::low_pass(self.follow_hz, FRAC_1_SQRT_2, self.sample_rate);
+            SvfCoefficients::low_pass(self.follow_target_hz(), FRAC_1_SQRT_2, self.sample_rate);
         self.follow.iter_mut().fold(pre_filtered, |signal, filter| {
             filter.process(&coefficients, signal)
         })
@@ -243,7 +236,6 @@ impl Module for Octave {
             SvfCoefficients::high_pass(INPUT_HIGH_PASS_HZ, FRAC_1_SQRT_2, sample_rate);
         self.up_low_pass_coefficients =
             SvfCoefficients::low_pass(UP_LOW_PASS_HZ, FRAC_1_SQRT_2, sample_rate);
-        self.follow_coeff = one_pole_coeff(FOLLOW_SECONDS, sample_rate);
         self.update_tracking();
         self.reset();
     }
@@ -267,7 +259,6 @@ impl Module for Octave {
             filter.reset();
         }
         self.tracker.reset();
-        self.follow_hz = self.follow_target_hz();
     }
 
     fn set_param(&mut self, idx: usize, value: f32) {

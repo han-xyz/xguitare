@@ -582,3 +582,10 @@ fn oct1_level_follows_the_note_to_the_top_of_the_guitar_range() {
         "{low} to {high} Hz: {measured} dB, the pre-filter alone {expected} dB"
     );
 }
+
+#[test]
+fn unprepared_module_outputs_finite_samples() {
+    let input = common::sine(0.25, 110.0, SAMPLE_RATE, 4800);
+    let output = run(&mut Octave::new(), &input);
+    assert!(output.iter().all(|sample| sample.is_finite()));
+}
