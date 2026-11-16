@@ -16,12 +16,12 @@ use xguitare_gui::project_model::{
     ItemSelection, KeyFocus, LoopEdge, MainView, MoveDrag, MovePointer, ProjectRow, Tempo,
     TimelineView, TrackRow, TransportState, TransportView, TrimDrag, ViewSwitch, VisibleTake,
     autosave_offer, bars_beats_text, copied_text, covered_stretches, dragged_loop,
-    esc_clears_selection, grid_lines, hit_test, item_blocks, item_key_to_command, item_menu_labels,
-    item_name, item_node_action, items_in_box, key_active, move_preview, parse_meter, project_end,
-    project_key_to_command, project_name, project_rows, project_tempo, recording_from,
-    recording_span, restored_view, snap_to_beat, still_closing, take_names, time_text, track_rows,
-    transport_view, trim_preview, trim_step_command, undo_text, visible_stretches,
-    waveform_columns,
+    esc_clears_selection, grid_lines, hit_test, item_blocks, item_key_to_command, item_menu_keys,
+    item_menu_labels, item_name, item_node_action, items_in_box, key_active, move_preview,
+    parse_meter, project_end, project_key_to_command, project_name, project_rows, project_tempo,
+    recording_from, recording_span, restored_view, snap_to_beat, still_closing, take_names,
+    time_text, track_rows, transport_view, trim_preview, trim_step_command, undo_text,
+    visible_stretches, waveform_columns,
 };
 
 const RATE: f64 = 48_000.0;
@@ -1457,6 +1457,17 @@ fn item_menu_edits_name_the_count_of_more_than_one_item() {
             "Delete 2 Items"
         ]
     );
+}
+
+#[test]
+fn item_menu_keys_show_only_on_a_selected_item() {
+    let both = selection(&[1, 2]);
+    assert_eq!(
+        item_menu_keys(&both, 2),
+        Some(["S", "Ctrl+D", "Ctrl+C", "Delete"])
+    );
+    assert_eq!(item_menu_keys(&both, 3), None);
+    assert_eq!(item_menu_keys(&ItemSelection::default(), 1), None);
 }
 
 #[test]

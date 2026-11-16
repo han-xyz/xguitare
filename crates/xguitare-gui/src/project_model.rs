@@ -922,6 +922,13 @@ pub fn item_menu_labels(count: usize) -> [String; 4] {
     ]
 }
 
+/// The keys shown beside an Item menu's edits, in [`item_menu_labels`] order, on the menu of the Item `id`: none when it is not selected, since the keys act on the selection and the menu then on that Item alone.
+pub fn item_menu_keys(selection: &ItemSelection, id: u64) -> Option<[&'static str; 4]> {
+    selection
+        .contains(id)
+        .then_some(["S", "Ctrl+D", "Ctrl+C", "Delete"])
+}
+
 /// Pixels inside an Item's start and end that grab the edge rather than the body; at most a third of the Item each.
 pub const EDGE_GRAB_PX: f32 = 6.0;
 

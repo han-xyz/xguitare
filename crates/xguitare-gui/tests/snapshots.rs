@@ -1921,6 +1921,32 @@ fn the_item_menu_chooses_a_take_and_edits_the_item() {
     }
 }
 
+const TWO_ITEM_EDITS: [&str; 4] = [
+    "Split 2 Items at playhead",
+    "Duplicate 2 Items",
+    "Copy 2 Items",
+    "Delete 2 Items",
+];
+
+#[test]
+fn the_item_menu_of_two_selected_items_names_and_deletes_both() {
+    for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
+        let (mut harness, sent, _dir) = harness_with(size, project_snapshot("stopped"));
+        let (from, to) = box_over_both_items(&harness);
+        drag_and_release(&mut harness, from, to);
+        let at = item_rect(&harness, GUITAR_ITEM).center();
+        right_click_at(&mut harness, at);
+        for entry in TWO_ITEM_EDITS {
+            harness.get_by_label(entry);
+        }
+        write_png(&mut harness, &format!("item-menu-two-{suffix}"));
+        sent_now(&sent);
+        harness.get_by_label("Delete 2 Items").click();
+        harness.run_steps(2);
+        assert_eq!(sent_now(&sent), [Command::ItemDelete(vec![1, 2])]);
+    }
+}
+
 #[test]
 fn the_empty_lane_menu_pastes_where_clicked_once_something_is_copied() {
     let (mut harness, sent, _dir) = project_harness("stopped");
