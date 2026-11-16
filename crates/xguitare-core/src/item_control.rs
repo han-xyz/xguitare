@@ -94,6 +94,9 @@ pub(crate) fn item_trim(
     if new_end <= new_start {
         return Err(format!("item {id} would have no frames left"));
     }
+    if (new_start, new_end) == (i128::from(item.position), i128::from(item.end())) {
+        return Ok(changed(project, &[id]));
+    }
     let mut project = project.clone();
     let item = &mut project.tracks[track].items[index];
     item.position = new_start as u64;

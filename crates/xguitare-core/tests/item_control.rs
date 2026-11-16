@@ -440,6 +440,26 @@ fn item_trim_clamps_an_item_on_the_last_frame_of_its_take() {
 }
 
 #[test]
+fn item_trim_to_the_edges_it_has_leaves_history_redo_and_revision_alone() {
+    let (mut state, _audio, _dir) = state("trim-unchanged");
+    open_with(
+        &mut state,
+        vec![("Guitar", vec![item(1, 1000, "takes/a.wav", 4800)])],
+        &TAKES,
+    );
+    ok(handle(&mut state, item_move(&[1], 10, None)));
+    ok(handle(&mut state, Request::ProjectUndo));
+    let revision = state.revision;
+    ok(handle(&mut state, item_trim(1, None, Some(5800))));
+    let status = ok(handle(&mut state, Request::Status));
+    assert_eq!(
+        (&status["undo"], &status["redo"]),
+        (&json!(null), &json!("move Item"))
+    );
+    assert_eq!(state.revision, revision);
+}
+
+#[test]
 fn item_split_cuts_inside_items_and_keeps_every_take_on_both_halves() {
     let (mut state, _audio, _dir) = state("split");
     let mut looped = item(1, 1000, "takes/a.wav", 4800);
