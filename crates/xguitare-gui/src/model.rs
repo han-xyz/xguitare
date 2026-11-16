@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use xguitare_client::ClientError;
+use xguitare_client::{ClientError, TakesCleanStopped};
 use xguitare_core::BankKind;
 use xguitare_core::control::{
     BusRef, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef, TransportAction,
@@ -2477,6 +2477,34 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
         (_, Ok(Response::Ok(_))) => return None,
         (_, Ok(Response::Err { error })) => error,
         (_, Err(err)) => err.to_string(),
+    };
+    Some(Message::Error {
+        title: failure_title(req),
+        detail,
+    })
+}
+
+/// The message for a batched clean-up: [`response_message`]'s for the summed reply, and the error that stopped the batches after what they deleted.
+pub fn takes_cleaned_message(
+    req: &Request,
+    cleaned: Result<Value, TakesCleanStopped>,
+) -> Option<Message> {
+    let (payload, error) = match cleaned {
+        Ok(payload) => return response_message(req, Ok(Response::Ok(payload))),
+        Err(TakesCleanStopped {
+            cleaned: None,
+            error,
+        }) => return response_message(req, Ok(Response::Err { error })),
+        Err(TakesCleanStopped {
+            cleaned: Some(payload),
+            error,
+        }) => (payload, error),
+    };
+    let detail = match response_message(req, Ok(Response::Ok(payload))) {
+        Some(Message::Notice(text) | Message::Error { detail: text, .. }) => {
+            format!("{text}; {error}")
+        }
+        None => error,
     };
     Some(Message::Error {
         title: failure_title(req),

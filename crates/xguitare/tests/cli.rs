@@ -1939,3 +1939,89 @@ fn takes_unused_escapes_hidden_characters_in_file_names() {
         "takes/x\\u{202e}vaw.wav 8 B\ntakes/y\\u{1b}.wav 8 B\n2 unused takes, 16 B\n"
     );
 }
+
+/// The Daemon's request line limit, `MAX_LINE` in `socket_server.rs`.
+const MAX_LINE: usize = 64 * 1024;
+
+/// Lists `unused` Take files of 1000 bytes each and deletes them as the Daemon does, refusing a request line over [`MAX_LINE`]; the `takes_clean` numbered `fail_at` (from 1) is refused.
+struct CleaningDaemon {
+    unused: Vec<String>,
+    fail_at: Option<usize>,
+    cleans: Vec<Vec<String>>,
+}
+
+impl Transport for CleaningDaemon {
+    fn request(&mut self, req: &Request) -> Result<Response, ClientError> {
+        if req.to_line().len() > MAX_LINE {
+            return reply(r#"{"ok":false,"error":"request too long"}"#);
+        }
+        match req {
+            Request::TakesUnused => {
+                let files: Vec<String> = self
+                    .unused
+                    .iter()
+                    .map(|file| format!(r#"{{"file":"{file}","bytes":1000}}"#))
+                    .collect();
+                reply(&format!(
+                    r#"{{"ok":true,"files":[{}],"bytes":{}}}"#,
+                    files.join(","),
+                    self.unused.len() * 1000
+                ))
+            }
+            Request::TakesClean { files } => {
+                self.cleans.push(files.clone());
+                if self.fail_at == Some(self.cleans.len()) {
+                    return reply(r#"{"ok":false,"error":"cannot clean takes while recording"}"#);
+                }
+                reply(&format!(
+                    r#"{{"ok":true,"deleted":{},"bytes":{},"failed":[]}}"#,
+                    files.len(),
+                    files.len() * 1000
+                ))
+            }
+            req => panic!("unexpected request {req:?}"),
+        }
+    }
+}
+
+fn clean_unused(count: usize, fail_at: Option<usize>) -> (Outcome, Vec<Vec<String>>) {
+    let mut daemon = CleaningDaemon {
+        unused: (0..count)
+            .map(|n| format!("takes/guitar-{n}.wav"))
+            .collect(),
+        fail_at,
+        cleans: Vec::new(),
+    };
+    let argv = ["xguitare", "takes", "clean", "--yes"].map(String::from);
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let code = run_cli(&argv, &mut daemon, &mut stdout, &mut stderr, &quiet_env());
+    let outcome = Outcome {
+        code,
+        stdout: String::from_utf8(stdout).unwrap(),
+        stderr: String::from_utf8(stderr).unwrap(),
+        requests: Vec::new(),
+    };
+    (outcome, daemon.cleans)
+}
+
+#[test]
+fn takes_clean_yes_deletes_thousands_of_takes_in_batches() {
+    let (out, cleans) = clean_unused(5000, None);
+    assert_eq!(
+        (out.stdout.as_str(), out.stderr.as_str(), out.code),
+        ("deleted 5000 takes, 5.0 MB freed\n", "", 0)
+    );
+    assert_eq!(cleans.concat().len(), 5000);
+}
+
+#[test]
+fn takes_clean_yes_stopped_by_an_error_reports_what_went_before() {
+    let (out, cleans) = clean_unused(5000, Some(2));
+    assert_eq!(cleans.len(), 2, "the run stops at the refused batch");
+    let deleted = format!("deleted {} takes, ", cleans[0].len());
+    assert!(out.stdout.starts_with(&deleted), "{}", out.stdout);
+    assert_eq!(
+        (out.stderr.as_str(), out.code),
+        ("error: cannot clean takes while recording\n", 1)
+    );
+}

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use xguitare_core::Config;
 use xguitare_gui::client;
-use xguitare_gui::model::{Command, Link, Restore};
+use xguitare_gui::model::{Command, Link, Message, Restore};
 
 const WAIT: Duration = Duration::from_secs(2);
 
@@ -599,4 +599,47 @@ fn a_clean_up_drops_every_cached_peak_table_and_reads_the_unused_takes() {
     }
     commands.send(Command::Quit).unwrap();
     handle.join().unwrap();
+}
+
+#[test]
+fn a_clean_up_of_thousands_of_takes_goes_in_batches_and_reports_the_total() {
+    const MAX_LINE: usize = 64 * 1024;
+    let dir = temp_dir("clean-batches");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_requests(listener, |request| {
+        if request.to_string().len() > MAX_LINE {
+            return json!({"ok": false, "error": "request too long"});
+        }
+        match request["cmd"].as_str().unwrap() {
+            "takes_clean" => {
+                let deleted = request["files"].as_array().unwrap().len();
+                json!({"ok": true, "deleted": deleted, "bytes": deleted * 1000, "failed": []})
+            }
+            cmd => serde_json::from_str(reply(cmd)).unwrap(),
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let files: Vec<String> = (0..5000).map(|n| format!("takes/guitar-{n}.wav")).collect();
+    commands.send(Command::CleanTakes(files)).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let message = loop {
+        assert!(Instant::now() < deadline, "no message");
+        if let Some((message, _)) = snapshots.recv_timeout(WAIT).unwrap().last_message {
+            break message;
+        }
+    };
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    assert_eq!(
+        message,
+        Message::Notice("Deleted 5000 Takes, 5.0 MB freed".to_string())
+    );
+    let cleaned: usize = received
+        .try_iter()
+        .filter(|request| request["cmd"] == "takes_clean")
+        .map(|request| request["files"].as_array().unwrap().len())
+        .sum();
+    assert_eq!(cleaned, 5000);
 }

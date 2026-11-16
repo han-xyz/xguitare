@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use xguitare_client::Transport;
+use xguitare_client::{TakesCleanStopped, Transport, clean_takes_in_batches};
 use xguitare_core::control::{
     IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
 };
@@ -33,7 +33,7 @@ pub struct CliEnv {
     pub stop: Arc<AtomicBool>,
 }
 
-/// Runs one client subcommand against the Daemon; returns the exit code (0 on success and `--help`, 1 after one `error: ...` line on `err`).
+/// Runs one client subcommand against the Daemon; returns the exit code (0 on success and `--help`, 1 after `error: ...` lines on `err`).
 pub fn run_cli(
     argv: &[String],
     transport: &mut dyn Transport,
@@ -85,7 +85,7 @@ fn clean_takes(
     i32::from(written.is_err() || !errors.is_empty())
 }
 
-/// The `takes clean` output, and one `could not delete <file>: <error>` per file the Daemon could not delete.
+/// The `takes clean` output, and one `could not delete <file>: <error>` per file the Daemon could not delete, then the error that stopped the batches.
 fn deleted_takes(
     transport: &mut dyn Transport,
     yes: bool,
@@ -101,9 +101,18 @@ fn deleted_takes(
         }
         return Ok((lines, Vec::new()));
     }
-    let req = Request::TakesClean { files };
-    let payload = request(transport, &req)?;
-    let failures = items(&payload["failed"])
+    let (payload, stopped_by) = match clean_takes_in_batches(&files, |req| transport.request(req)) {
+        Ok(payload) => (payload, None),
+        Err(TakesCleanStopped {
+            cleaned: None,
+            error,
+        }) => return Err(error),
+        Err(TakesCleanStopped {
+            cleaned: Some(payload),
+            error,
+        }) => (payload, Some(error)),
+    };
+    let mut errors: Vec<String> = items(&payload["failed"])
         .map(|failed| {
             format!(
                 "could not delete {}: {}",
@@ -112,7 +121,8 @@ fn deleted_takes(
             )
         })
         .collect();
-    Ok((render(&req, &payload)?, failures))
+    errors.extend(stopped_by);
+    Ok((render(&Request::TakesClean { files }, &payload)?, errors))
 }
 
 fn watch_tuner(

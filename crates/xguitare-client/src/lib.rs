@@ -4,12 +4,14 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use xguitare_core::control::{Request, Response};
+use xguitare_core::control::{Request, Response, Value};
 use xguitare_core::{Config, check_private_dir, current_uid};
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The encoded file names one `takes_clean` request carries at most: half the Daemon's 64 KiB request line, so a batch never reaches it; one name (at most 255 bytes, at most doubled by JSON escaping) always fits.
+const TAKES_CLEAN_BATCH_BYTES: usize = 32 * 1024;
 
 pub trait Transport {
     /// # Errors
@@ -114,6 +116,77 @@ impl Transport for Reconnecting {
         }
         response
     }
+}
+
+/// A batched clean-up that an error stopped.
+#[derive(Debug)]
+pub struct TakesCleanStopped {
+    /// `{deleted, bytes, failed}` summed over the batches before the error; `None` when the first batch failed.
+    pub cleaned: Option<Value>,
+    /// The error reply or [`ClientError`] text of the batch that failed.
+    pub error: String,
+}
+
+/// Sends `takes_clean` for `files` through `request` in batches whose request line stays well under the Daemon's limit; replies `{deleted, bytes, failed}` summed over every batch.
+///
+/// # Errors
+///
+/// The first batch that fails stops the run: [`TakesCleanStopped`] with what the batches before it deleted.
+pub fn clean_takes_in_batches(
+    files: &[String],
+    mut request: impl FnMut(&Request) -> Result<Response, ClientError>,
+) -> Result<Value, TakesCleanStopped> {
+    let mut cleaned: Option<(u64, u64, Vec<Value>)> = None;
+    for batch in takes_clean_batches(files) {
+        let req = Request::TakesClean { files: batch };
+        let error = match request(&req) {
+            Ok(Response::Ok(payload)) => {
+                let (deleted, bytes, failed) = cleaned.get_or_insert_default();
+                *deleted += payload["deleted"].as_u64().unwrap_or(0);
+                *bytes += payload["bytes"].as_u64().unwrap_or(0);
+                failed.extend(payload["failed"].as_array().into_iter().flatten().cloned());
+                continue;
+            }
+            Ok(Response::Err { error }) => error,
+            Err(err) => err.to_string(),
+        };
+        return Err(TakesCleanStopped {
+            cleaned: cleaned.map(cleaned_payload),
+            error,
+        });
+    }
+    Ok(cleaned_payload(cleaned.unwrap_or_default()))
+}
+
+fn takes_clean_batches(files: &[String]) -> Vec<Vec<String>> {
+    let mut batches: Vec<Vec<String>> = Vec::new();
+    let mut batch_bytes = 0;
+    for file in files {
+        let bytes = Value::from(file.as_str()).to_string().len() + 1;
+        match batches.last_mut() {
+            Some(batch) if batch_bytes + bytes <= TAKES_CLEAN_BATCH_BYTES => {
+                batch.push(file.clone());
+                batch_bytes += bytes;
+            }
+            _ => {
+                batches.push(vec![file.clone()]);
+                batch_bytes = bytes;
+            }
+        }
+    }
+    batches
+}
+
+fn cleaned_payload((deleted, bytes, failed): (u64, u64, Vec<Value>)) -> Value {
+    Value::Object(
+        [
+            ("deleted".to_string(), Value::from(deleted)),
+            ("bytes".to_string(), Value::from(bytes)),
+            ("failed".to_string(), Value::Array(failed)),
+        ]
+        .into_iter()
+        .collect(),
+    )
 }
 
 /// Before each connect to the `/tmp` fallback socket: a missing directory means no Daemon, and an existing one must be ours and 0700.

@@ -14,11 +14,12 @@ use crate::model::{
     Command, Link, Message, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn,
     failed_set, failure_title, ir_names, module_types, param_rows, refresh_decision,
     refused_remove, refused_render, requests_until_quit, response_message, spawn_policy,
+    takes_cleaned_message,
 };
 use crate::project_model::{autosave_offer, item_blocks, project_name, still_closing};
 use serde_json::Value;
 use tracing::{info, warn};
-use xguitare_client::{ClientError, Connection};
+use xguitare_client::{ClientError, Connection, clean_takes_in_batches};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 use xguitare_core::project_control::STILL_CLOSING;
@@ -201,6 +202,7 @@ impl Client {
         let sent = requests.len();
         for outgoing in requests {
             match outgoing {
+                Outgoing::Request(Request::TakesClean { files }) => self.clean_takes(files),
                 Outgoing::Request(req) => {
                     self.send(&req);
                 }
@@ -244,13 +246,6 @@ impl Client {
             | Request::ProjectOpen { .. }
             | Request::ProjectSave
             | Request::ProjectClose => self.projects_fetched = false,
-            // A Take file name is used again once its file is gone, maybe for a Take of the same frames.
-            Request::TakesClean { .. } if matches!(response, Ok(Response::Ok(_))) => {
-                self.snapshot.peaks.clear();
-                self.peak_frames.clear();
-                self.refused_peaks.clear();
-                self.snapshot.unused_takes = None;
-            }
             _ => {}
         }
         if let Some(param) = failed_set(req, &response) {
@@ -273,6 +268,25 @@ impl Client {
             self.snapshot.last_message = Some((message, Instant::now()));
         }
         payload
+    }
+
+    /// Sends `takes_clean` for `files` in batches under the Daemon's line limit and notes the summed result.
+    fn clean_takes(&mut self, files: Vec<String>) {
+        let cleaned = clean_takes_in_batches(&files, |batch| self.request(batch));
+        let any_batch_done = match &cleaned {
+            Ok(_) => true,
+            Err(stopped) => stopped.cleaned.is_some(),
+        };
+        // A Take file name is used again once its file is gone, maybe for a Take of the same frames.
+        if any_batch_done {
+            self.snapshot.peaks.clear();
+            self.peak_frames.clear();
+            self.refused_peaks.clear();
+            self.snapshot.unused_takes = None;
+        }
+        if let Some(message) = takes_cleaned_message(&Request::TakesClean { files }, cleaned) {
+            self.snapshot.last_message = Some((message, Instant::now()));
+        }
     }
 
     /// The follow-ups go to the id the Daemon gave the re-added Module, and only when it was added. A Module of a Track is placed by that Track's Rack, read again, since another Track may be selected now.

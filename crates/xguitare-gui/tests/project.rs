@@ -3,12 +3,13 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use xguitare_client::TakesCleanStopped;
 use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, TransportAction};
 use xguitare_core::project::LoopRegion;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{
     CleanTakesView, Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
-    requests_until_quit, response_message, restore, unused_takes,
+    requests_until_quit, response_message, restore, takes_cleaned_message, unused_takes,
 };
 use xguitare_gui::project_model::{
     AutosaveOffer, GridLine, ItemBlock, ItemEdge, ItemHit, ItemKey, ItemKeyPress, ItemNodeAction,
@@ -1921,6 +1922,37 @@ fn takes_clean_names_the_first_file_it_could_not_delete() {
         Some(Message::Error {
             title: "Could not clean up the Takes",
             detail: "Deleted 1 Take, 800 B freed; could not delete takes/b\\u{202e}.wav: Permission denied (os error 13), and 1 more".to_string(),
+        })
+    );
+}
+
+#[test]
+fn a_clean_up_stopped_by_an_error_reports_what_went_before() {
+    let req = Request::TakesClean {
+        files: vec!["takes/a.wav".to_string()],
+    };
+    let stopped = |cleaned: Option<Value>| {
+        takes_cleaned_message(
+            &req,
+            Err(TakesCleanStopped {
+                cleaned,
+                error: "cannot clean takes while recording".to_string(),
+            }),
+        )
+    };
+    assert_eq!(
+        stopped(Some(json!({"deleted": 500, "bytes": 2000, "failed": []}))),
+        Some(Message::Error {
+            title: "Could not clean up the Takes",
+            detail: "Deleted 500 Takes, 2.0 KB freed; cannot clean takes while recording"
+                .to_string(),
+        })
+    );
+    assert_eq!(
+        stopped(None),
+        Some(Message::Error {
+            title: "Could not clean up the Takes",
+            detail: "cannot clean takes while recording".to_string(),
         })
     );
 }
