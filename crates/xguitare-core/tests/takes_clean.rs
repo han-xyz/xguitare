@@ -216,6 +216,53 @@ fn takes_unused_lists_only_regular_wav_files_nothing_references() {
     );
 }
 
+#[test]
+fn the_takes_of_an_item_whose_active_take_is_short_stay_in_use_after_open() {
+    let (mut state, _audio, _dir) = state("short-active-take");
+    ok(handle(
+        &mut state,
+        Request::ProjectNew {
+            name: "Song".to_string(),
+        },
+    ));
+    ok(handle(&mut state, Request::TrackAdd { name: None }));
+    ok(handle(&mut state, Request::ProjectClose));
+    let folder = state.config.projects_dir.join("song");
+    for (name, frames) in [("a", 4800), ("b", 4800), ("c", 100)] {
+        write_take(&folder.join(format!("takes/{name}.wav")), frames);
+    }
+    let mut project = Project::load(&folder).unwrap().0;
+    let pass = |file: &str, frames| Take {
+        file: file.to_string(),
+        frames,
+    };
+    project.tracks[0].items = vec![Item {
+        id: 1,
+        position: 0,
+        offset: 200,
+        length: None,
+        take: 1,
+        takes: vec![
+            pass("takes/a.wav", 4800),
+            pass("takes/b.wav", 4800),
+            pass("takes/c.wav", 100),
+        ],
+    }];
+    project.next_item_id = 2;
+    project.save(&folder).unwrap();
+    let toml = folder.join("project.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    fs::write(&toml, text.replace("take = 1", "take = 2")).unwrap();
+    ok(handle(
+        &mut state,
+        Request::ProjectOpen {
+            name: "Song".to_string(),
+            restore: false,
+        },
+    ));
+    assert_eq!(unused_files(&mut state), Vec::<String>::new());
+}
+
 fn record(state: &mut EngineState) {
     ok(handle(
         state,

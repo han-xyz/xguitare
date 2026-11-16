@@ -663,7 +663,7 @@ Errors:
 
 ## project_open
 
-Opens the Project in `<projects_dir>/<slug of name>/`: loads its active Takes into memory, connects each Track's input (an input that is not a capture port of another client stays unconnected, with a warning in the Daemon log), and plays it instead of the active Preset's Rack. The transport starts stopped at frame 0, with the click and count-in the Project saved. With `"restore":true` it loads `project.autosave.toml` instead of `project.toml`; the Project then counts as changed. An Item whose active Take holds no frames after its `offset` is left out, with `track '<name>': dropped item <id> (<take file>): starts past the end of its take` in the Daemon log; its Take file stays on disk.
+Opens the Project in `<projects_dir>/<slug of name>/`: loads its active Takes into memory, connects each Track's input (an input that is not a capture port of another client stays unconnected, with a warning in the Daemon log), and plays it instead of the active Preset's Rack. The transport starts stopped at frame 0, with the click and count-in the Project saved. With `"restore":true` it loads `project.autosave.toml` instead of `project.toml`; the Project then counts as changed. An Item whose active Take holds no frames after its `offset`, or fewer than `offset + length`, plays the newest of its Takes that does, with `track '<name>': item <id> now plays <take file>: <old take file> ends before the item starts`; the Item keeps all its Takes. An Item none of whose Takes does is left out, with `track '<name>': dropped item <id> (<take file>, ...): starts past the end of its take`; its Take files stay on disk. Each such warning is in the reply's `warnings` and in the Daemon log.
 
 Request:
 
@@ -674,13 +674,14 @@ Request:
 Response:
 
 ```json
-{"ok":true,"autosave_newer":false,"name":"Demo Song","path":"/home/you/Music/xguitare/demo-song","restored":false}
+{"ok":true,"autosave_newer":false,"name":"Demo Song","path":"/home/you/Music/xguitare/demo-song","restored":false,"warnings":[]}
 ```
 
 | Key | Value |
 | --- | --- |
 | `autosave_newer` | `true` when `project.autosave.toml` is newer than `project.toml`: changes since the last save are in the autosave, and a client offers to open it again with `restore`. |
 | `restored` | Whether the autosave was loaded. |
+| `warnings` | What loading changed to open a file an earlier build wrote, one text each as above; empty when nothing. |
 
 Errors:
 

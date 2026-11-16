@@ -45,19 +45,35 @@ pub fn run_cli(
         Ok(cli) => cli,
         Err(code) => return code,
     };
+    let mut warnings = String::new();
     let result = match cli.cmd {
         Cmd::Tuner { watch: true } => watch_tuner(transport, out, env).map(|()| String::new()),
         Cmd::Takes(TakesCmd::Clean { yes }) => return clean_takes(transport, yes, out, err),
         cmd => request_for(cmd, transport).and_then(|req| match req {
             Request::Render { .. } => render_and_wait(transport, out, &req),
-            req => render(&req, &request(transport, &req)?),
+            req => {
+                let payload = request(transport, &req)?;
+                warnings = warning_lines(&payload);
+                render(&req, &payload)
+            }
         }),
     };
     let written = match result {
-        Ok(text) => write!(out, "{text}").map(|()| 0),
+        Ok(text) => write!(err, "{warnings}")
+            .and_then(|()| write!(out, "{text}"))
+            .map(|()| 0),
         Err(message) => writeln!(err, "error: {}", without_control_chars(&message)).map(|()| 1),
     };
     written.unwrap_or(1)
+}
+
+/// A `warning: ...` line for each of the reply's `warnings`, which `project_open` gives.
+fn warning_lines(payload: &Value) -> String {
+    let mut lines = String::new();
+    for warning in items(&payload["warnings"]) {
+        let _ = writeln!(lines, "warning: {}", text(warning));
+    }
+    lines
 }
 
 fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String> {

@@ -573,6 +573,7 @@ pub(crate) fn project_open(
         "path": dir.display().to_string(),
         "autosave_newer": newer,
         "restored": restore,
+        "warnings": warnings.iter().map(ToString::to_string).collect::<Vec<_>>(),
     });
     open(state, dir, project, takes, warnings)?;
     if restore {

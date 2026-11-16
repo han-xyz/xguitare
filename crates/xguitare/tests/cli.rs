@@ -867,6 +867,22 @@ fn project_commands_send_their_requests_and_print_the_answer() {
 }
 
 #[test]
+fn project_open_prints_each_load_warning_on_stderr() {
+    let out = cli(
+        &["project", "open", "song"],
+        reply(
+            r#"{"ok":true,"name":"Song","path":"/p/song","autosave_newer":false,"restored":false,"warnings":["track 'Gtr': item 1 now plays takes/b.wav: takes/c.wav ends before the item starts","track 'Gtr': dropped item 4 (takes/d.wav): starts past the end of its take"]}"#,
+        ),
+    );
+    assert_eq!(out.stdout, "opened Song\n");
+    assert_eq!(
+        out.stderr,
+        "warning: track 'Gtr': item 1 now plays takes/b.wav: takes/c.wav ends before the item starts\nwarning: track 'Gtr': dropped item 4 (takes/d.wav): starts past the end of its take\n"
+    );
+    assert_eq!(out.code, 0);
+}
+
+#[test]
 fn track_commands_take_an_index_or_a_name() {
     let cases: [(&[&str], Request, &str, &str); 5] = [
         (

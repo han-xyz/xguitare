@@ -935,10 +935,12 @@ fn item_ids(project: &Project) -> Vec<u64> {
 #[test]
 fn an_item_starting_at_or_past_the_end_of_its_take_is_dropped_on_load_with_a_warning() {
     let dir = temp_dir("offset-past-take");
-    let (folder, project) = project_with_items(
-        &dir.0,
-        vec![item(1, 0, None, 1000), item(7, 999, None, 1000)],
-    );
+    let mut short = item(7, 999, None, 1000);
+    short.takes.push(Take {
+        file: "takes/gtr-8.wav".to_string(),
+        frames: 500,
+    });
+    let (folder, project) = project_with_items(&dir.0, vec![item(1, 0, None, 1000), short]);
     project.save(&folder).unwrap();
     let text = fs::read_to_string(folder.join(PROJECT_FILE)).unwrap();
     for offset in ["1000", "10000"] {
@@ -955,7 +957,9 @@ fn an_item_starting_at_or_past_the_end_of_its_take_is_dropped_on_load_with_a_war
             let warnings: Vec<String> = warnings.iter().map(ToString::to_string).collect();
             assert_eq!(
                 warnings,
-                ["track 'Gtr': dropped item 7 (takes/gtr-7.wav): starts past the end of its take"],
+                [
+                    "track 'Gtr': dropped item 7 (takes/gtr-7.wav, takes/gtr-8.wav): starts past the end of its take"
+                ],
                 "{file}, offset {offset}"
             );
         }
@@ -964,6 +968,64 @@ fn an_item_starting_at_or_past_the_end_of_its_take_is_dropped_on_load_with_a_war
     loaded.save(&folder).unwrap();
     let (saved, warnings) = Project::load(&folder).unwrap();
     assert_eq!((item_ids(&saved), warnings.len()), (vec![1], 0));
+}
+
+fn loop_item(offset: u64, length: Option<u64>, short_frames: u64) -> Item {
+    let take = |file: &str, frames| Take {
+        file: file.to_string(),
+        frames,
+    };
+    Item {
+        id: 1,
+        position: 0,
+        offset,
+        length,
+        take: 1,
+        takes: vec![
+            take("takes/gtr-1.wav", 4800),
+            take("takes/gtr-2.wav", 4800),
+            take("takes/gtr-3.wav", short_frames),
+        ],
+    }
+}
+
+#[test]
+fn an_item_whose_active_take_is_short_plays_its_newest_take_that_fits_on_load() {
+    let dir = temp_dir("short-active-take");
+    for (case, (offset, length, short_frames)) in [(200, None, 100), (200, Some(4000), 1000)]
+        .into_iter()
+        .enumerate()
+    {
+        let (folder, project) = project_with_items(
+            &dir.0.join(case.to_string()),
+            vec![loop_item(offset, length, short_frames)],
+        );
+        project.save(&folder).unwrap();
+        let text = fs::read_to_string(folder.join(PROJECT_FILE)).unwrap();
+        let short = text.replace("take = 1", "take = 2");
+        for file in [PROJECT_FILE, AUTOSAVE_FILE] {
+            fs::write(folder.join(file), &short).unwrap();
+            let loaded = if file == AUTOSAVE_FILE {
+                Project::load_autosave(&folder)
+            } else {
+                Project::load(&folder)
+            };
+            let (loaded, warnings) = loaded.unwrap();
+            assert_eq!(
+                loaded.tracks[0].items, project.tracks[0].items,
+                "{case} {file}"
+            );
+            let warnings: Vec<String> = warnings.iter().map(ToString::to_string).collect();
+            assert_eq!(
+                warnings,
+                [
+                    "track 'Gtr': item 1 now plays takes/gtr-2.wav: takes/gtr-3.wav ends before the item starts"
+                ],
+                "{case} {file}"
+            );
+            loaded.save(&folder).unwrap();
+        }
+    }
 }
 
 #[test]

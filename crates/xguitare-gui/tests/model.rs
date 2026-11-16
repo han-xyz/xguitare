@@ -695,6 +695,26 @@ fn feedback_expires_after_3s() {
 }
 
 #[test]
+fn project_open_warnings_are_the_notice() {
+    let open = Request::ProjectOpen {
+        name: "song".to_string(),
+        restore: true,
+    };
+    let reply = |warnings| {
+        Ok(Response::Ok(
+            json!({"name": "Song", "path": "/p/song", "autosave_newer": false, "restored": true, "warnings": warnings}),
+        ))
+    };
+    assert_eq!(response_message(&open, reply(json!([]))), None);
+    assert_eq!(
+        response_message(&open, reply(json!(["track 'Gtr': a", "track 'Bass': b"]))),
+        Some(Message::Notice(
+            "track 'Gtr': a; track 'Bass': b".to_string()
+        ))
+    );
+}
+
+#[test]
 fn feedback_only_save_and_errors() {
     let saved = Ok(Response::Ok(json!({"path": "/bank/01-clean.toml"})));
     assert_eq!(

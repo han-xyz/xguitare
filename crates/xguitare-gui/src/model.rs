@@ -2468,6 +2468,15 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
                 first["error"].as_str().unwrap_or_default()
             )
         }
+        (Request::ProjectOpen { .. }, Ok(Response::Ok(payload))) => {
+            let warnings: Vec<&str> = payload["warnings"]
+                .as_array()
+                .map_or_default(Vec::as_slice)
+                .iter()
+                .filter_map(Value::as_str)
+                .collect();
+            return (!warnings.is_empty()).then(|| Message::Notice(warnings.join("; ")));
+        }
         (_, Ok(Response::Ok(_))) => return None,
         (_, Ok(Response::Err { error })) => error,
         (_, Err(err)) => err.to_string(),

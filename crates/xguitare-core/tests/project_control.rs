@@ -14,7 +14,7 @@ use xguitare_core::control::{
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, raise_peak};
 use xguitare_core::metronome::{Metronome, MetronomeSettings};
 use xguitare_core::ports::{AudioPorts, AvailablePort};
-use xguitare_core::project::{PROJECT_FILE, Project};
+use xguitare_core::project::{AUTOSAVE_FILE, Item, PROJECT_FILE, Project, Take};
 use xguitare_core::project_control::{
     ProjectEvent, Projects, add_finished_takes, autosave_if_due, finish_closed, finish_stopped,
     take_project_events,
@@ -398,6 +398,53 @@ fn project_open_reports_a_newer_autosave_and_restores_it() {
     let restored = ok(handle(&mut state, open(true)));
     assert_eq!(restored["restored"], true);
     assert_eq!(status(&mut state)["tracks"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn project_open_answers_with_the_load_warnings() {
+    let (mut state, _audio, _dir) = state("load-warnings");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let folder = state.config.projects_dir.join("song");
+    let open = |restore| Request::ProjectOpen {
+        name: "Song".to_string(),
+        restore,
+    };
+    let opened = ok(handle(&mut state, open(false)));
+    assert_eq!(opened["warnings"], json!([]));
+    close(&mut state);
+    let mut project = Project::load(&folder).unwrap().0;
+    project.tracks[0].items = vec![Item {
+        id: 1,
+        position: 0,
+        offset: 0,
+        length: None,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/gone.wav".to_string(),
+            frames: 10,
+        }],
+    }];
+    project.next_item_id = 2;
+    project.save(&folder).unwrap();
+    project.save_autosave(&folder).unwrap();
+    for file in [PROJECT_FILE, AUTOSAVE_FILE] {
+        let path = folder.join(file);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text.replace("frames = 10", "frames = 0")).unwrap();
+    }
+    for restore in [false, true] {
+        let opened = ok(handle(&mut state, open(restore)));
+        assert_eq!(
+            opened["warnings"],
+            json!([
+                "track 'Guitar': dropped item 1 (takes/gone.wav): starts past the end of its take"
+            ]),
+            "restore {restore}"
+        );
+        close(&mut state);
+    }
 }
 
 #[test]

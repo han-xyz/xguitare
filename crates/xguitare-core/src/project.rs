@@ -247,11 +247,18 @@ pub enum ProjectError {
 /// What [`Project::load`] changed to open a file that an earlier build wrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadWarning {
-    /// An Item that played nothing, its active Take no longer than its `offset`, was left out; `file` is that Take's, which stays on disk.
-    DroppedItem {
+    /// An Item whose active Take did not play past its `offset`, or past `offset + length`, now plays `file`, the newest of its Takes that does; `old_file` is the Take it played, which stays among its Takes.
+    ActiveTakeChanged {
         track: String,
         id: u64,
         file: String,
+        old_file: String,
+    },
+    /// An Item none of whose Takes played past its `offset`, or past `offset + length`, was left out; `files` are its Takes', which stay on disk.
+    DroppedItem {
+        track: String,
+        id: u64,
+        files: Vec<String>,
     },
 }
 
@@ -399,7 +406,7 @@ impl Project {
         Ok((dir, project))
     }
 
-    /// Reads `<dir>/project.toml`, leaving out each Item whose active Take holds no frames after its `offset`, with a [`LoadWarning`] for it; saving refuses such an Item.
+    /// Reads `<dir>/project.toml`; an Item whose active Take does not play past its `offset`, or past `offset + length`, plays the newest of its Takes that does, or is left out when none does, with a [`LoadWarning`] for it; saving refuses such an Item.
     ///
     /// # Errors
     ///
@@ -581,7 +588,7 @@ fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
     }
     let warnings = tracks
         .iter_mut()
-        .flat_map(drop_items_past_their_take)
+        .flat_map(fit_items_to_their_takes)
         .collect();
     if file.buses.len() > MAX_BUSES {
         return Err(ProjectError::TooManyBuses);
@@ -614,21 +621,41 @@ fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
     Ok((project, warnings))
 }
 
-/// Leaves out the Track's Items that [`starts_past_its_take`], which an earlier build could record and save.
-fn drop_items_past_their_take(track: &mut Track) -> Vec<LoadWarning> {
-    let (dropped, kept) = track
-        .items
-        .drain(..)
-        .partition(|item| item.take < item.takes.len() && starts_past_its_take(item));
-    track.items = kept;
-    dropped
-        .into_iter()
-        .map(|item: Item| LoadWarning::DroppedItem {
+/// Makes each Item whose active Take does not [`plays_in`] it play the newest of its Takes that does, and leaves out the Items with none; an earlier build could record and save such an Item.
+fn fit_items_to_their_takes(track: &mut Track) -> Vec<LoadWarning> {
+    let mut warnings = Vec::new();
+    track.items.retain_mut(|item| {
+        let shown: &Item = item;
+        if shown.take >= shown.takes.len() || plays_in(shown, &shown.takes[shown.take]) {
+            return true;
+        }
+        let old_file = shown.takes[shown.take].file.clone();
+        let Some(newest) = shown.takes.iter().rposition(|take| plays_in(shown, take)) else {
+            warnings.push(LoadWarning::DroppedItem {
+                track: track.name.clone(),
+                id: shown.id,
+                files: shown.takes.iter().map(|take| take.file.clone()).collect(),
+            });
+            return false;
+        };
+        item.take = newest;
+        warnings.push(LoadWarning::ActiveTakeChanged {
             track: track.name.clone(),
             id: item.id,
-            file: item.takes[item.take].file.clone(),
-        })
-        .collect()
+            file: item.takes[newest].file.clone(),
+            old_file,
+        });
+        true
+    });
+    warnings
+}
+
+/// Whether `take` holds frames after the Item's `offset`, and all of `offset + length` when it has a `length`.
+fn plays_in(item: &Item, take: &Take) -> bool {
+    take.frames > item.offset
+        && item
+            .length
+            .is_none_or(|length| item.offset.saturating_add(length) <= take.frames)
 }
 
 /// Whether the Item's active Take holds no frames after its `offset`; the active Take exists.
@@ -1094,11 +1121,25 @@ impl std::error::Error for ProjectError {}
 impl fmt::Display for LoadWarning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LoadWarning::DroppedItem { track, id, file } => write!(
+            LoadWarning::ActiveTakeChanged {
+                track,
+                id,
+                file,
+                old_file,
+            } => write!(
                 f,
-                "track '{track}': dropped item {id} ({}): starts past the end of its take",
-                shown_file_name(file)
+                "track '{track}': item {id} now plays {}: {} ends before the item starts",
+                shown_file_name(file),
+                shown_file_name(old_file)
             ),
+            LoadWarning::DroppedItem { track, id, files } => {
+                let files: Vec<String> = files.iter().map(|file| shown_file_name(file)).collect();
+                write!(
+                    f,
+                    "track '{track}': dropped item {id} ({}): starts past the end of its take",
+                    files.join(", ")
+                )
+            }
         }
     }
 }
