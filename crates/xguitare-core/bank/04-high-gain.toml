@@ -33,7 +33,7 @@ type = "cabinet"
 ir = "default-cab.wav"
 
 [module.params]
-level = 9.0
+level = 5.4
 
 [[module]]
 type = "reverb"

@@ -29,7 +29,7 @@ type = "cabinet"
 ir = "bass-cab.wav"
 
 [module.params]
-level = 9.0
+level = 7.9
 
 [[module]]
 type = "delay"

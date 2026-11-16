@@ -32,7 +32,7 @@ type = "cabinet"
 ir = "bass-cab.wav"
 
 [module.params]
-level = 7.7
+level = 7.6
 
 [[module]]
 type = "reverb"

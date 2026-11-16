@@ -38,4 +38,4 @@ type = "cabinet"
 ir = "bass-cab.wav"
 
 [module.params]
-level = -14.5
+level = -17.9

@@ -334,46 +334,141 @@ fn plucked(notes_hz: &[f32], sample_rate: f32, seconds: f32, rms_db: f32) -> Vec
     signal
 }
 
-struct Level {
-    rms_db: f32,
-    peak: f32,
-}
+const SAMPLE_RATE: f32 = 48_000.0;
 
-fn output_level(preset: &xguitare_core::Preset, dir: &std::path::Path, input: &[f32]) -> Level {
+fn render(preset: &xguitare_core::Preset, dir: &std::path::Path, input: &[f32]) -> [Vec<f32>; 2] {
     const BLOCK: usize = 128;
-    let (mut rack, _) = preset.build(48_000.0, BLOCK, dir, dir, 100.0).unwrap();
-    let mut sum = 0.0f64;
-    let mut peak = 0.0f32;
+    let (mut rack, _) = preset.build(SAMPLE_RATE, BLOCK, dir, dir, 100.0).unwrap();
+    let mut output = [
+        Vec::with_capacity(input.len()),
+        Vec::with_capacity(input.len()),
+    ];
     let mut left = [0.0; BLOCK];
     let mut right = [0.0; BLOCK];
     for block in input.as_chunks::<BLOCK>().0 {
         rack.process(block, &mut left, &mut right);
-        sum += left
-            .iter()
-            .chain(&right)
-            .map(|x| f64::from(x * x))
-            .sum::<f64>();
-        peak = left
-            .iter()
-            .chain(&right)
-            .fold(peak, |max, x| max.max(x.abs()));
+        output[0].extend_from_slice(&left);
+        output[1].extend_from_slice(&right);
     }
-    let frames = input.len() / BLOCK * BLOCK;
-    Level {
-        rms_db: (10.0 * (sum / (2 * frames) as f64).log10()) as f32,
-        peak,
-    }
+    output
 }
 
-const CAP_GUITAR_DB: f32 = -13.0;
-const CAP_BASS_DB: f32 = -13.0;
-const PEAK_CEILING_DB: f32 = -1.0;
+struct Biquad {
+    b: [f64; 3],
+    a: [f64; 2],
+}
+
+// ITU-R BS.1770-4 K-weighting at 48 kHz: the high shelf, then the high-pass.
+const K_WEIGHTING: [Biquad; 2] = [
+    Biquad {
+        b: [
+            1.535_124_859_586_97,
+            -2.691_696_189_406_38,
+            1.198_392_810_852_85,
+        ],
+        a: [-1.690_659_293_182_41, 0.732_480_774_215_85],
+    },
+    Biquad {
+        b: [1.0, -2.0, 1.0],
+        a: [-1.990_047_454_833_98, 0.990_072_250_366_21],
+    },
+];
+
+fn k_weighted(channel: &[f32]) -> Vec<f64> {
+    let mut signal: Vec<f64> = channel.iter().map(|&x| f64::from(x)).collect();
+    for Biquad { b, a } in &K_WEIGHTING {
+        let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+        for x in &mut signal {
+            let y = b[0] * *x + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2;
+            (x2, x1, y2, y1) = (x1, *x, y1, y);
+            *x = y;
+        }
+    }
+    signal
+}
+
+fn short_term_max_lufs(channels: &[&[f32]]) -> f32 {
+    let window = (3.0 * SAMPLE_RATE) as usize;
+    let hop = (0.1 * SAMPLE_RATE) as usize;
+    let squares: Vec<Vec<f64>> = channels
+        .iter()
+        .map(|channel| k_weighted(channel).iter().map(|x| x * x).collect())
+        .collect();
+    (0..=channels[0].len() - window)
+        .step_by(hop)
+        .map(|start| {
+            let power: f64 = squares
+                .iter()
+                .map(|channel| channel[start..start + window].iter().sum::<f64>() / window as f64)
+                .sum();
+            (-0.691 + 10.0 * power.log10()) as f32
+        })
+        .fold(f32::NEG_INFINITY, f32::max)
+}
+
+fn true_peak_db(channels: &[&[f32]]) -> f32 {
+    const BLOCK: usize = 128;
+    let mut peak = 0.0f32;
+    for channel in channels {
+        let mut oversampler = xguitare_dsp::oversample::Oversampler4x::new();
+        oversampler.prepare(BLOCK);
+        for block in channel.chunks(BLOCK) {
+            peak = oversampler
+                .upsample(block)
+                .iter()
+                .fold(peak, |max, x| max.max(x.abs()));
+        }
+    }
+    20.0 * peak.log10()
+}
+
+fn sine(freq_hz: f32, amplitude: f32, phase: f32) -> Vec<f32> {
+    (0..(4.0 * SAMPLE_RATE) as usize)
+        .map(|n| {
+            amplitude * (std::f32::consts::TAU * freq_hz * n as f32 / SAMPLE_RATE + phase).sin()
+        })
+        .collect()
+}
+
+#[test]
+fn meter_reads_a_1_khz_sine_at_minus_26_lufs() {
+    let tone = sine(1000.0, 10f32.powf(-23.0 / 20.0), 0.0);
+    let loudness = short_term_max_lufs(&[&tone]);
+    assert!((loudness + 26.0).abs() <= 0.1, "{loudness:.3} LUFS");
+}
+
+#[test]
+fn meter_weights_100_hz_1_2_db_down() {
+    let amplitude = 0.1f32;
+    let unweighted = -0.691 + 10.0 * (amplitude * amplitude / 2.0).log10();
+    let loudness = short_term_max_lufs(&[&sine(100.0, amplitude, 0.0)]);
+    assert!(
+        (loudness - unweighted + 1.2).abs() <= 0.3,
+        "{loudness:.3} LUFS, unweighted {unweighted:.3}"
+    );
+}
+
+#[test]
+fn meter_reads_the_true_peak_between_samples() {
+    let tone = sine(SAMPLE_RATE / 4.0, 0.5, std::f32::consts::FRAC_PI_4);
+    let peak = true_peak_db(&[&tone]);
+    assert!((peak + 6.0).abs() <= 0.3, "{peak:.3} dBTP");
+}
+
+struct Level {
+    loudness_lufs: f32,
+    true_peak_db: f32,
+}
+
+const TARGET_GUITAR_LUFS: f32 = -13.0;
+const TARGET_BASS_LUFS: f32 = -14.0;
+const TRUE_PEAK_CEILING_DB: f32 = -1.0;
 
 fn bank_levels(kind: BankKind, notes_hz: &[f32]) -> Vec<(String, Level)> {
     let temp = temp_dir(&format!("loudness-{kind:?}"));
     let dir = temp.0.join("bank");
     ensure_bank(&dir, kind, 48_000).unwrap();
-    let input = plucked(notes_hz, 48_000.0, 4.0, -18.0);
+    let input = plucked(notes_hz, SAMPLE_RATE, 4.0, -18.0);
     Bank::load_dir(&dir)
         .unwrap()
         .entries
@@ -382,24 +477,35 @@ fn bank_levels(kind: BankKind, notes_hz: &[f32]) -> Vec<(String, Level)> {
             let BankEntry::Valid { preset, .. } = entry else {
                 panic!("invalid starter preset: {entry:?}");
             };
-            (preset.name.clone(), output_level(preset, &dir, &input))
+            let [left, right] = render(preset, &dir, &input);
+            let channels = [left.as_slice(), right.as_slice()];
+            let level = Level {
+                loudness_lufs: short_term_max_lufs(&channels),
+                true_peak_db: true_peak_db(&channels),
+            };
+            (preset.name.clone(), level)
         })
         .collect()
 }
 
-fn assert_headroom_at_one_loudness(kind: BankKind, notes_hz: &[f32], cap_db: f32) {
+fn assert_matched_below_ceiling(kind: BankKind, notes_hz: &[f32], target_lufs: f32) {
     let levels = bank_levels(kind, notes_hz);
     assert_eq!(levels.len(), 13);
     let failures: Vec<String> = levels
         .iter()
         .filter_map(|(name, level)| {
-            let peak_db = 20.0 * level.peak.log10();
-            let rms_db = level.rms_db;
-            let clips = peak_db > PEAK_CEILING_DB;
-            let too_loud = rms_db > cap_db + 0.05;
-            let too_quiet = peak_db < PEAK_CEILING_DB - 0.2 && rms_db < cap_db - 0.2;
+            let Level {
+                loudness_lufs,
+                true_peak_db,
+            } = *level;
+            let clips = true_peak_db > TRUE_PEAK_CEILING_DB;
+            let too_loud = loudness_lufs > target_lufs + 0.05;
+            let too_quiet =
+                loudness_lufs < target_lufs - 0.2 && true_peak_db < TRUE_PEAK_CEILING_DB - 0.2;
             (clips || too_loud || too_quiet).then(|| {
-                format!("{name}: peak {peak_db:.2} dBFS, RMS {rms_db:.2} dB, cap {cap_db} dB")
+                format!(
+                    "{name}: {loudness_lufs:.2} LUFS, {true_peak_db:.2} dBTP, target {target_lufs} LUFS"
+                )
             })
         })
         .collect();
@@ -407,13 +513,13 @@ fn assert_headroom_at_one_loudness(kind: BankKind, notes_hz: &[f32], cap_db: f32
 }
 
 #[test]
-fn guitar_presets_leave_headroom_at_one_loudness() {
-    assert_headroom_at_one_loudness(BankKind::Guitar, &GUITAR_NOTES_HZ, CAP_GUITAR_DB);
+fn guitar_presets_match_loudness_below_true_peak_ceiling() {
+    assert_matched_below_ceiling(BankKind::Guitar, &GUITAR_NOTES_HZ, TARGET_GUITAR_LUFS);
 }
 
 #[test]
-fn bass_presets_leave_headroom_at_one_loudness() {
-    assert_headroom_at_one_loudness(BankKind::Bass, &BASS_NOTES_HZ, CAP_BASS_DB);
+fn bass_presets_match_loudness_below_true_peak_ceiling() {
+    assert_matched_below_ceiling(BankKind::Bass, &BASS_NOTES_HZ, TARGET_BASS_LUFS);
 }
 
 #[test]

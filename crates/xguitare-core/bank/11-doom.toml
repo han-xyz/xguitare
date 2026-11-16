@@ -32,7 +32,7 @@ type = "cabinet"
 ir = "default-cab.wav"
 
 [module.params]
-level = 1.2
+level = -0.8
 high_cut = 5000
 
 [[module]]
