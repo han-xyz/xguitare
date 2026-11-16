@@ -73,7 +73,7 @@ One lane of a Project with its own Rack, its own input and its own Items; what y
 _Avoid_: channel, lane, strip
 
 **Item**:
-A stretch of audio placed on a Track's timeline at a position; it plays one of its Takes, to the Take's end or for its own length. Where Items overlap on a Track, the one on top (the newest) is heard and the ones under it are not.
+A stretch of audio placed on a Track's timeline at a position; it plays one of its Takes, to the Take's end or for its own length. Where Items overlap on a Track, the one on top (the newest, or the one moved or pasted last) is heard and the ones under it are not.
 _Avoid_: clip, region, segment. In the mixer, "clip" means only a meter's flag that the level reached 0 dBFS, never an Item.
 
 **Take**:

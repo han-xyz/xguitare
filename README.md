@@ -366,7 +366,7 @@ created Live at /home/you/Music/xguitare/live
 $ xguitare track add Guitar
 added track 0 Guitar
 $ xguitare track edit 0 --input "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO" --arm on
-track 0 Guitar: input Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO, volume 0 dB, pan 0, mute no, solo no, arm yes
+track 0 Guitar: input Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO, volume 0 dB, pan 0, mute no, solo no, arm yes, to master yes
 $ xguitare record
 recording
 $ xguitare stop
@@ -445,7 +445,7 @@ takes/guitar-3.wav 800 B
 2 unused takes, 1.2 MB
 ```
 
-A file is unused when no Item has it as any of its Takes, active or not, the clipboard does not hold it, and it is not being recorded or written. `xguitare takes clean` prints the same list and `nothing deleted; pass --yes to delete`; `xguitare takes clean --yes` deletes them all (`deleted 2 takes, 1.2 MB freed`); a file that could not be deleted gets an `error: could not delete <file>: <reason>` line and the exit code is 1. Deleting first saves the Project and then clears Undo and the clipboard; it is refused while recording. A symlink in `takes/` is never followed, and file names are shown with control characters and bidi overrides escaped (`\u{202e}`). In the GUI, `Clean up Takes…` in the `Project` section does the same. Nothing else deletes Take files.
+A file is unused when no Item has it as any of its Takes, active or not, the clipboard does not hold it, and it is not being recorded or written. `xguitare takes clean` prints the same list and `nothing deleted; pass --yes to delete`; `xguitare takes clean --yes` deletes them all (`deleted 2 takes, 1.2 MB freed`); a file that could not be deleted gets an `error: could not delete <file>: <reason>` line and the exit code is 1. The CLI and the GUI send a long list in batches, each well under the Daemon's 64 KiB request line. An error from the Daemon stops the clean-up at that batch: the CLI prints what the batches before it deleted, then the `error:` line, and exits 1; the files those batches deleted stay deleted. Deleting first saves the Project and then clears Undo and the clipboard; it is refused while recording. A symlink in `takes/` is never followed, and file names are shown with control characters and bidi overrides escaped (`\u{202e}`). In the GUI, `Clean up Takes…` in the `Project` section does the same. Nothing else deletes Take files.
 
 ### Mixer
 
@@ -516,7 +516,6 @@ While a Project is open and changed, the Daemon writes `project.autosave.toml` e
 - When the disk falls behind, the dropped frames are counted in `status` `disk_overflows` and left out of the Take, which then plays shorter and early from that point; they are not filled with silence.
 - With the loop on, a recording that does not start at the loop start puts its first pass and the passes after the first wrap on separate Items.
 - A Take that cannot be written or loaded is only reported in the Daemon's log.
-- The GUI selects, moves, splits and deletes Items and undoes and redoes; trimming an Item, choosing its Take, duplicating, copying and pasting are done from the CLI and the Control API.
 
 ## GUI
 
@@ -535,7 +534,7 @@ The look is called the Faceplate: dark panels, each Rack unit a faceplate betwee
 
 The left panel has these sections, from the top, each in a framed box; click a section's title strip to close or open it (`Audio` and `Settings` start closed):
 
-- `Project`: with no Project open, `No Project open`, a `Name` field with `New` (creates the Project and opens it, as `xguitare project new` does) and `Open a Project`, a menu of the Projects in `projects_dir`, read again when it opens; choosing one opens it, and an invalid one is greyed out with its error on hover. With a Project open, its name, `audio N MB` (the Take audio it holds in memory), `Save` (`xguitare project save`) and `Close` (`xguitare project close`), and `Clean up Takes…`, a dialog listing the Take files nothing uses any more with their sizes and the total; `Delete n files` deletes them (`xguitare takes clean --yes`), saving the Project and clearing Undo, and a notice says `Deleted n Takes, <size> freed` (an error names the first file that could not be deleted). See [Project view](#project-view).
+- `Project`: with no Project open, `No Project open`, a `Name` field with `New` (creates the Project and opens it, as `xguitare project new` does) and `Open a Project`, a menu of the Projects in `projects_dir`, read again when it opens; choosing one opens it, and an invalid one is greyed out with its error on hover. With a Project open, its name, `audio N MB` (the Take audio it holds in memory), `Save` (`xguitare project save`) and `Close` (`xguitare project close`), and `Clean up Takes…`, a dialog listing the Take files nothing uses any more with their sizes and the total; `Delete n files` deletes them (`xguitare takes clean --yes`), saving the Project and clearing Undo, and a notice says `Deleted n Takes, <size> freed`. When a file could not be deleted, or an error stopped the batches, the error toast `Could not clean up the Takes` says what was deleted and names the first file that was not (`, and 2 more`) or the error. See [Project view](#project-view).
 - `Preset`: the active Preset's name in large type, and under it `Program N` (its Bank position) and `unsaved changes` while the live Rack differs from the Preset file (`modified` in `xguitare status`). `Save` writes the live Rack to the active Preset's file, as `xguitare save` does. `Save as new` opens a name field: type a name and press Enter or the `Save` under it to write a new Preset file in the Bank directory and make it the active Preset, as `xguitare save --as <name>` does; `Cancel` closes the field. An empty or taken name shows the Daemon's error in the error toast (`a preset named 'Funk' already exists`).
 - `Guitar Bank` or `Bass Bank`, after the Bank kind: a search field, which keeps the rows whose name contains the text, in any case, or whose program number is the text, and one row per Bank entry, `program name`, the active Preset highlighted. Click a row to load it. An invalid entry is greyed out; hover over it for the parse error.
 - `Metronome`: `On`/`Off`, the beat light, `Tap`, the tempo, the meter and the volume (see [Metronome](#metronome)).
@@ -577,7 +576,7 @@ Tuner: the Tuner unit's header shows the note and cents (`E1 −3 ct`) and a cen
 
 Changes made elsewhere (the CLI, MIDI program change, an edited Preset file) show up at the next `status` poll, every 50 ms.
 
-Keys: `1` to `9` load programs 0 to 8 (a key for a missing or invalid entry does nothing); `Ctrl+S` saves, like the `Save` button; `M` switches the Metronome on or off and `T` taps its tempo. Keys do nothing while a text field (search, Preset name, value, IR folder) has the text cursor. While a Project is open the keys are those of the Project view below.
+Keys: `1` to `9` load programs 0 to 8, `Ctrl+S` saves, `M` and `T` are the Metronome's; every key of the window is in [Keys](#keys).
 
 When no Daemon answers on the socket, the GUI starts `xguitare run` itself, taken from the directory `xguitare-gui` is in, else from `PATH`, and shows the `Starting the Daemon` banner until it answers. The Daemon's log goes to the GUI's stderr. A Daemon the GUI started is stopped when the window closes; one you started yourself keeps running. If the GUI crashes or is killed, the Daemon it started keeps running and the sound does not stop; the next `xguitare-gui` connects to it. To stop that Daemon, send it SIGTERM: `kill <pid>`, with the pid from the GUI's `starting daemon ... (pid N)` log line or from `pgrep -x xguitare`. If the Daemon goes away, the left panel's `Engine` section shows `Daemon` `disconnected`, the rack the `Daemon disconnected` banner, and the GUI keeps reconnecting.
 
@@ -585,54 +584,73 @@ When no Daemon answers on the socket, the GUI starts `xguitare run` itself, take
 
 While a Project is open the window becomes a small multitrack recorder; with none open it is the window described above.
 
-Views: under the transport bar the main area shows one of three views, chosen with `Rack`, `Arrange` and `Mixer` in the transport bar or with the keys below. `Rack` shows the shown Rack at full height, with the meters and the Tuner, for playing. `Arrange` shows the Tracks and the timeline above the shown Rack, for recording. `Mixer` shows the mixer at full height, for mixing. The shown Rack is the one Rack these views edit: the selected Track's, until a mixer strip's name picks a Bus, the Master or a Track; clicking a Track's row picks that Track's again. The window keeps the last view across restarts; a Project opens in `Arrange` the first time.
-
-| Key | View |
-|---|---|
-| `Ctrl+1` | `Rack` |
-| `Ctrl+2` | `Arrange` |
-| `Ctrl+3` | `Mixer` |
-| `Ctrl+M` | `Mixer`, or back to the view before it while the mixer shows |
-| `Enter` on a focused strip name in `Mixer` | `Rack`, showing that strip's Rack |
+Views: under the transport bar the main area shows one of three views, chosen with `Rack`, `Arrange` and `Mixer` in the transport bar or with the keys below. `Rack` shows the shown Rack at full height, with the meters and the Tuner, for playing. `Arrange` shows the Tracks and the timeline above the shown Rack, for recording. `Mixer` shows the mixer at full height, for mixing. The shown Rack is the one Rack these views edit: the selected Track's, until a mixer strip's name picks a Bus, the Master or a Track; clicking a Track's row picks that Track's again. The window keeps the last view across restarts; a Project opens in `Arrange` the first time. `Ctrl+1`, `Ctrl+2` and `Ctrl+3` switch to `Rack`, `Arrange` and `Mixer`, and `Ctrl+M` to `Mixer` or back to the view before it (see [Keys](#keys)).
 
 - The transport bar across the top: `▶ Play` (lit green while playing or recording), `■ Stop`, `● Record` (lit red while recording, also during the count-in; clicked again it stops), during a count-in a red `count-in: N` with the beats left, the view switch `Rack` `Arrange` `Mixer` (the current view lit amber), `Render` (see below), `Loop` and `Click` (lit while on), the count-in menu in bars (`no count-in`, `count-in 1`, `count-in 2`), the tempo (`120.0 bpm`: drag or type it; sent when the drag ends or on Enter) and the meter (`4/4`: type `3/4` and press Enter; anything else shows an error in the error toast), then a dark display with the position as `bar.beat.hundredths` in large digits and `m:ss.mmm` in amber, on one row from 1280 pixels wide and on two in a narrower window. While `disk_overflows` is above 0 a red `disk too slow: frames dropped N times` follows.
 - In `Arrange`, below it the Tracks, one row each: a tab in the Track's colour and its number, the name (type a new one and press Enter), the input menu (`no input` or a capture port, as `ports` lists them; opening it reads the list again), `R` arm (red), `M` mute, `S` solo (amber while on), a level bar of the Track's input, and volume (−60 to 6 dB) and pan (−1 to 1) as small knobs with a number field under each, sent when a drag ends or a value is typed; double-click a knob for 0 dB or centre. Click a row or its lane to select the Track and show its Rack; the selected row is outlined. `+ Add Track` adds one, as `xguitare track add` does.
-- To the right the timeline: a ruler with bar numbers, the bar and beat grid, each Item (read with the Control API `items` whenever the Revision changes) as a dark plate with a top edge in its Track's colour, labelled with its active Take's name (`guitar-2 (2/2)` when the Item has two Takes) and, under the name, the waveform of the part of that Take the Item plays, in the Track's colour (read with the Control API `take_peaks` once per Take file; until it arrives the plate shows its name only), the loop region shaded and marked along the ruler's foot (amber while the loop is on), and the playhead in red. While recording, after the count-in, each armed Track shows the Take being recorded as a dark red plate in a dashed red outline that grows from where the window first saw the recording to the playhead. Click the ruler to move the playhead there. Drag the loop region's start or end on the ruler to move it; it snaps to the beat and is sent as `loop` on release. Ctrl+wheel over the timeline zooms about the pointer, Shift+wheel or a sideways wheel scrolls it. The strip between the Tracks and the rack can be dragged to resize; the rack keeps at least 120 pixels.
-- Editing Items in `Arrange`: click an Item to select it (an amber ring around the plate, with thicker corners), Ctrl+click to add it to the selection or take it out, click the empty lane to clear the selection; a click on a lane also selects its Track. Drag on an empty lane to draw a box: the Items it touches, on every Track it crosses, are selected (Ctrl+drag adds them). Drag a selected Item to move the selection: a grey plate shows where each Item lands, the grabbed Item's start snaps to the nearest grid line drawn (a white line marks it) while `Snap` left of the ruler is lit, and the Items follow the pointer to other Tracks keeping their distance in Tracks; the move is sent as one `item_move` when you release, and nothing is sent when nothing moved. Hold Alt to turn snapping the other way for that drag, Shift to keep the Items on their Tracks. Items never move before the Project start: the earliest stops at 0 and the others keep their distance. `Snap` is on at first and kept across restarts. While the Project has an edit to undo, the footer names it, `Undo: move 2 Items  Ctrl+Z`. Each Item is also a keyboard stop after the Track headers, in time order, named `Item <Take>, <Track>, bar <n>`; `Tab` moves the focus (a white ring inside the plate) without changing the selection, and the keys below act on the focused Item.
-- Trimming: near an Item's left or right edge the pointer turns into a sideways arrow; drag the edge to trim the Item. The plate and its waveform follow the new edge, which snaps to the grid like a move (Alt turns it the other way) and stays inside the active Take, at least one frame long; one `item_trim` is sent on release.
-- Takes and the Item menu: right-click an Item (or press `Shift+F10` or the menu key on a focused Item) for its Takes, the active one marked (choose one to make it active, `item_take`), then `Split at playhead`, `Duplicate`, `Copy` and `Delete`, which act on the whole selection; a right-click on an Item outside the selection selects only that Item first. Right-click an empty lane for `Paste`, there on that Track (snapped while `Snap` is lit), greyed out while nothing is copied. After a duplicate or paste the new Items are the selection.
-- Overlaps: where Items on one Track overlap, the one later in the Track's list (the newest, moved or pasted last) is heard, and only that is drawn: the Item under it shows as plates for the stretches still heard, each with its Track-colour top edge and waveform, and its name once, in the first of them wide enough, cut short with `…`. A 1-pixel gap of the lane colour runs around the top Item's plate. Clicks and drags there belong to the top Item, and an edge of the lower Item can be grabbed only where it shows: move or trim the top Item to reach an edge hidden under it. An Item's keyboard name adds `Take 2 of 3` when it has several Takes and `partly covered by <Take>` or `covered by <Take>` when Items lie over it.
+- To the right the timeline: a ruler with bar numbers, the bar and beat grid, each Item (read with the Control API `items` whenever the Revision changes) as a dark plate with a top edge in its Track's colour, labelled with its active Take's name (`guitar-2 (2/2)` when the Item has two Takes) and its waveform (see [Editing in the Arrange view](#editing-in-the-arrange-view)), the loop region shaded and marked along the ruler's foot (amber while the loop is on), and the playhead in red. While recording, after the count-in, each armed Track shows the Take being recorded as a dark red plate in a dashed red outline that grows from where the window first saw the recording to the playhead. Click the ruler to move the playhead there. Drag the loop region's start or end on the ruler to move it; it snaps to the beat and is sent as `loop` on release. Ctrl+wheel over the timeline zooms about the pointer, Shift+wheel or a sideways wheel scrolls it. The strip between the Tracks and the rack can be dragged to resize; the rack keeps at least 120 pixels.
 - Under it in `Arrange`, and alone in `Rack`, headed `<name> — Rack`, the rack shows the shown Rack, edited as above; every change goes to that Rack, and `Undo` after a Remove puts the Module back on the Track it was removed from, whichever Track is selected then. Opening, creating or closing a Project drops the Undo. Clicking a Bank row copies that Preset's Modules into the selected Track; while the shown Rack is a Bus or Master Rack the Bank rows are greyed out (`a Preset loads only into a Track`).
 - `Mixer` in the transport bar (or Ctrl+3, or Ctrl+M) shows the mixer panel in place of the Tracks and the rack. It has one column per Track, then one per Bus with `+ Add Bus` after the last, scrolled sideways when they do not fit, and Master at the right edge. A column shows its name, a pan knob (not on Master), a fader with its value in dB under it (+6 dB at the top; sent on release, double-click for 0 dB, or type a value; the lowest value sent is −60 dB, so a Master at `-inf` in `project.toml` shows −60), a stereo meter of the column's output with a 1 s peak hold, a clip LED above it (lit once `status` says clip; click it to reset that column's clip, as `xguitare clip reset` does) and `M` and `S` (not on Master). An `S` drawn dimmer-lit marks a column that sounds only through solo in place. A Track's column also has `to Master` and, per Bus, a Send knob with its level (`off` when turned all the way down) and a `pre` toggle. The columns take the height of the window: the fader is at least 134 pixels tall, a Send row is added per Bus while there is room, and the fader then grows up to 320 pixels; Sends that do not fit scroll inside the column, and in a window too short for the columns the mixer scrolls up and down. The column of the shown Rack has its name framed. Clicking a column's name makes its Rack the shown Rack (`Enter` on a focused name also switches to `Rack`), which `Rack` and `Arrange` then show headed `<name> — Rack`: the Track's, the Bus's or the Master Rack, edited as above; on a Bus or Master Rack the `cabinet` tile is greyed out, with `a cabinet is not allowed on a Bus or Master` on hover. Right-click a Bus's name for `Remove`.
 - `Render` after the view switch in the transport bar (or Ctrl+Alt+R) opens the Render dialog over the darkened window: `Range` `Project` or `Loop` (greyed out with no loop region), `Bits` `24`, `16` or `32f`, and `Name`, which shows the Project folder's name and may be changed. `Render` starts it (see [Render](#render)); a progress bar with `Cancel` follows it, and it ends with `rendered <file>`, the Daemon's error verbatim (in red, with a warning sign), or `render cancelled`. `Close`, Esc or a click outside closes the dialog; a running Render goes on.
 - When `project_open` finds an autosave newer than `project.toml`, a prompt over the darkened window says `A newer autosave exists — <name>` and `It holds the changes since the Project was last saved.`: `Restore` closes the Project and opens it again from `project.autosave.toml`, `Open saved` keeps it as opened.
 
-Item keys in `Arrange`:
-
-| Key | Does |
-| --- | --- |
-| `S` | Split the selected Items at the playhead; with none selected, the selected Track's Items under it. Both halves stay selected. |
-| `Delete`, `Backspace` | Delete the selected Items |
-| `←`, `→` | Move the selected Items one grid step earlier or later (a beat, or more bars when zoomed out) |
-| `Alt+↑`, `Alt+↓` | Move the selected Items to the Track above or below; nothing moves when one would leave the Tracks |
-| `Enter` on a focused Item | Select only that Item |
-| `Ctrl+Enter` on a focused Item | Add the Item to the selection or take it out |
-| `Esc` | Clear the selection; with none, close the error toast |
-| `Shift+←`, `Shift+→` on a focused Item | Trim its end one grid step earlier or later |
-| `Ctrl+Shift+←`, `Ctrl+Shift+→` on a focused Item | Trim its start one grid step earlier or later |
-| `T` | Make the next Take of the one selected Item active (after the last, the first) |
-| `Ctrl+D` | Duplicate the selected Items (`item_duplicate`) |
-| `Ctrl+C` | Copy the selected Items to the Daemon's clipboard (`item_copy`); the system clipboard gets the line `xguitare Items: <Take names>`, so that the next `Ctrl+V` reaches the window |
-| `Ctrl+V` | Paste the copied Items at the playhead on the selected Track (`item_paste`), whatever text the system clipboard holds; in a text field it pastes that text instead |
-| `Shift+F10`, menu key on a focused Item | Open its Item menu |
-
-`S`, `Delete` and `Backspace` act unless a text field has the text cursor; the arrows while no widget has focus, or while an Item has it.
-
-`Ctrl+Z` undoes the last edit of the Project (`project_undo`) and `Ctrl+Shift+Z` redoes it (`project_redo`), in `Rack`, `Arrange` and `Mixer` alike; while a text field has the text cursor they undo and redo its typing instead.
-
-Keys in the Project view (Reaper's): `Space` play or stop, `Ctrl+R` record, `R` turn the loop on or off (with no loop region, the first 4 bars), `Home` move to the start, `End` to the end of the last Item or the loop region, `Ctrl+S` save the Project, `Ctrl+1`, `Ctrl+2`, `Ctrl+3` and `Ctrl+M` change the view (see Views above), `Ctrl+Alt+R` open the Render dialog. The view keys and `Ctrl+Alt+R` do nothing with no Project open. The `1` to `9` keys do not load Presets while a Project is open. `Space`, `R`, `Home` and `End` act only while no knob, button or field has focus (`Esc` releases it); `Ctrl+R`, `Ctrl+S`, the view keys and `Ctrl+Alt+R` act unless a text field has the text cursor.
-
 Window size and position are kept in `~/.local/share/xguitare/app.ron` (`$XDG_DATA_HOME/xguitare/app.ron`). `RUST_LOG` sets the GUI's log level as for the Daemon.
+
+#### Editing in the Arrange view
+
+Each edit in `Arrange` is one Control API request, the same one the `item` commands send (see [Editing Items from the CLI](#editing-items-from-the-cli)), and none works while recording.
+
+- Select: click an Item to select it (an amber ring around the plate, with thicker corners), Ctrl+click to add it to the selection or take it out, click the empty lane to clear the selection; a click on a lane also selects its Track. Drag on an empty lane to draw a box: the Items it touches, on every Track it crosses, are selected (Ctrl+drag adds them). Each Item is also a keyboard stop after the Track headers, in time order, named `Item <Take>, <Track>, bar <n>`, with `Take 2 of 3` added when it has several Takes and `partly covered by <Take>` or `covered by <Take>` when Items lie over it; `Tab` moves the focus (a white ring inside the plate) without changing the selection, `Enter` selects only the focused Item, `Ctrl+Enter` adds it to the selection or takes it out, and `Esc` clears the selection.
+- Move: drag a selected Item to move the selection: a grey plate shows where each Item lands, and the Items follow the pointer to other Tracks keeping their distance in Tracks; the move is sent as one `item_move` when you release, and nothing is sent when nothing moved. Hold Shift to keep the Items on their Tracks. `←` and `→` move the selection one grid step, `Alt+↑` and `Alt+↓` to the Track above or below (nothing moves when one would leave the Tracks). Items never move before the Project start: the earliest stops at 0 and the others keep their distance. Moved Items go on top of their Track.
+- Trim: near an Item's left or right edge the pointer turns into a sideways arrow; drag the edge to trim the Item. The plate and its waveform follow the new edge, which stays inside the active Take, at least one frame long; one `item_trim` is sent on release. On a focused Item, `Shift+←` and `Shift+→` trim its end one grid step, `Ctrl+Shift+←` and `Ctrl+Shift+→` its start.
+- Split: `S`, or `Split at playhead` in the Item menu, splits the selected Items at the playhead; with none selected, the selected Track's Items under it. Both halves keep all the Takes and stay selected.
+- Delete: `Delete` or `Backspace`, or `Delete` in the Item menu, removes the selected Items; their Take files stay in `takes/` until a clean-up.
+- Takes: right-click an Item (or press `Shift+F10` or the menu key on a focused Item) for the Item menu: its Takes first, the active one marked; choose one to make it active (`item_take`). `T` makes the next Take of the one selected Item active (after the last, the first). With the loop on, each pass of a recording is another Take of the same Item.
+- Duplicate, copy and paste: the Item menu's `Split at playhead`, `Duplicate`, `Copy` and `Delete` act on the whole selection; a right-click on an Item outside the selection selects only that Item first. `Duplicate` or `Ctrl+D` copies the selected Items to right after the group they make (`item_duplicate`). `Copy` or `Ctrl+C` puts them in the Daemon's clipboard (`item_copy`), and the system clipboard gets the line `xguitare Items: <Take names>`, so that the next `Ctrl+V` reaches the window. `Ctrl+V` pastes them at the playhead on the selected Track (`item_paste`), whatever text the system clipboard holds; right-click an empty lane for `Paste` there, on that Track, greyed out while nothing is copied. After a duplicate or paste the new Items are the selection.
+- Overlaps: where Items on one Track overlap, the one later in the Track's list (the newest, moved or pasted last) is heard, and only that is drawn: the Item under it shows as plates for the stretches still heard, each with its Track-colour top edge and waveform, and its name once, in the first of them wide enough, cut short with `…`. A 1-pixel gap of the lane colour runs around the top Item's plate. Clicks and drags there belong to the top Item, and an edge of the lower Item can be grabbed only where it shows: move or trim the top Item to reach an edge hidden under it.
+- Fades: every Item fades in and out over 5 ms, and Items that cut into each other cross over (see [Record a Track](#record-a-track)); while playing, an edit is heard after a 5 ms crossfade.
+- Snap: while `Snap` left of the ruler is lit, a dragged Item's start, a dragged edge and a lane `Paste` snap to the nearest grid line drawn (a white line marks it during a drag): a beat, or more bars when zoomed out, the same step as the arrow keys. Hold Alt to turn snapping the other way for that drag. `Snap` is on at first and kept across restarts.
+- Undo: `Ctrl+Z` undoes the last edit of the Project (`project_undo`) and `Ctrl+Shift+Z` redoes it (`project_redo`), in `Rack`, `Arrange` and `Mixer` alike; while a text field has the text cursor they undo and redo its typing instead. Undo takes back Item edits, recorded Takes and Track adds and removes, not mixer, Rack, tempo or loop changes (see [Undo](#undo)). While there is an edit to undo, the footer names it, `Undo: move 2 Items  Ctrl+Z`.
+- Waveforms: under its name each plate draws the waveform of the part of its active Take the Item plays, in the Track's colour, read with the Control API `take_peaks` once per Take file; until it arrives the plate shows its name only.
+- Clean-up: `Clean up Takes…` in the `Project` section lists the Take files nothing uses any more and deletes them (see [Clean up Takes](#clean-up-takes)).
+
+### Keys
+
+Every key of the window. A key does nothing while a text field (search, Preset name, value, IR folder, Track name, tempo) has the text cursor, except `Ctrl+Z`, `Ctrl+Shift+Z` and `Ctrl+V`, which act on the field's text then. `Space`, `R`, `Home`, `End` and the arrows act only while no knob, button or field has the focus, or while an Item has it (`Esc` releases the focus).
+
+| Key | When | Does |
+| --- | --- | --- |
+| `1` to `9` | No Project open | Load programs 0 to 8 (a key for a missing or invalid entry does nothing) |
+| `Ctrl+S` | | Save the Preset, like `Save`; with a Project open, save the Project |
+| `M` | No Project open | Switch the Metronome on or off |
+| `T` | No Project open | Tap the Metronome's tempo |
+| `Tab` | | Move the focus to the next knob, its value field, Track header or Item |
+| `↑`, `↓` | On a focused knob | Change its value by 1 % of the range (1 for a whole-number Parameter) |
+| `Page Up`, `Page Down` | On a focused knob | Change its value by 10 % |
+| `Home`, `End` | On a focused knob | Set it to the minimum or maximum |
+| `Esc` | | Release the focus or close a menu; then clear the Item selection; then close the error toast |
+| `Space` | Project open | Play or stop |
+| `Ctrl+R` | Project open | Record |
+| `R` | Project open | Turn the loop on or off (with no loop region, the first 4 bars) |
+| `Home`, `End` | Project open | Move to the start, or to the end of the last Item or the loop region |
+| `Ctrl+1`, `Ctrl+2`, `Ctrl+3` | Project open | Show `Rack`, `Arrange` or `Mixer` |
+| `Ctrl+M` | Project open | Show `Mixer`, or the view before it while the mixer shows |
+| `Enter` | On a focused strip name in `Mixer` | Show that strip's Rack in `Rack` |
+| `Ctrl+Alt+R` | Project open | Open the Render dialog |
+| `Ctrl+Z`, `Ctrl+Shift+Z` | Project open | Undo or redo the last edit of the Project |
+| `S` | `Arrange` | Split the selected Items at the playhead; with none selected, the selected Track's Items under it |
+| `Delete`, `Backspace` | `Arrange` | Delete the selected Items |
+| `←`, `→` | `Arrange` | Move the selected Items one grid step earlier or later |
+| `Alt+↑`, `Alt+↓` | `Arrange` | Move the selected Items to the Track above or below |
+| `Enter` | On a focused Item | Select only that Item |
+| `Ctrl+Enter` | On a focused Item | Add the Item to the selection or take it out |
+| `Shift+←`, `Shift+→` | On a focused Item | Trim its end one grid step earlier or later |
+| `Ctrl+Shift+←`, `Ctrl+Shift+→` | On a focused Item | Trim its start one grid step earlier or later |
+| `T` | `Arrange`, one Item selected | Make its next Take active (after the last, the first) |
+| `Ctrl+D` | `Arrange` | Duplicate the selected Items |
+| `Ctrl+C` | `Arrange` | Copy the selected Items |
+| `Ctrl+V` | `Arrange` | Paste the copied Items at the playhead on the selected Track |
+| `Shift+F10`, menu key | On a focused Item | Open its Item menu |
 
 ## MIDI
 
