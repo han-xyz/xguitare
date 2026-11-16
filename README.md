@@ -97,7 +97,7 @@ type = "cabinet"
 ir = "default-cab.wav"
 
 [module.params]
-level = 12.0
+level = 10.0
 
 [[module]]
 type = "delay"
@@ -153,6 +153,8 @@ The guitar starter Bank ends with five metal Presets (programs 8 to 12):
 - Stoner: a fuzz-into-amp sound in the manner of stoner rock: `drive` and `fuzz` into `preamp`, a mid-forward `tonestack`, cabinet, a short `delay` and `reverb`.
 
 A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy the five files `09-thrash.toml`, `10-djent.toml`, `11-doom.toml`, `12-buzzsaw.toml` and `13-stoner.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) directory into your Bank directory, renumbering them if those numbers are taken; the Daemon watches the Bank directory and picks up the new files without a restart.
+
+The starter Presets of both Banks are level-matched and leave 1 dB of headroom on a test signal (plucked notes at −18 dB RMS peak no higher than −1 dBFS), but hot playing or a hot input can still go above full scale: lower the cabinet `level` or the interface gain.
 
 ### Bass
 
