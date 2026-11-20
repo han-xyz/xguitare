@@ -29,6 +29,7 @@ mod state;
 pub mod take_capture;
 pub mod take_peaks;
 pub mod takes_control;
+mod transport_control;
 pub mod tuner;
 pub mod watch;
 

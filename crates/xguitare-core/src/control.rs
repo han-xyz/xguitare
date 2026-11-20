@@ -21,9 +21,9 @@ use crate::mixer_control::{
 use crate::ports::AudioPorts;
 use crate::project::{LoopRegion, MAX_BUSES, MAX_TRACKS};
 use crate::project_control::{
-    Projects, TrackChange, click, items, project_close, project_list, project_new, project_open,
-    project_redo, project_save, project_undo, set_loop, status_fields, target_rack, tempo,
-    track_add, track_remove, track_select, track_set, transport,
+    Projects, TrackChange, items, project_close, project_list, project_new, project_open,
+    project_redo, project_save, project_undo, status_fields, target_rack, track_add, track_remove,
+    track_select, track_set,
 };
 use crate::project_sync::{rebuild_arrangement, rebuild_arrangement_slots};
 pub use crate::rack_control::passthrough_rack;
@@ -35,6 +35,7 @@ use crate::render_control::{render, render_cancel};
 use crate::settings_control::{connected, port_names, set_ports, set_settings, settings};
 use crate::take_peaks::peak_page;
 use crate::takes_control::{takes_clean, takes_unused};
+use crate::transport_control::{click, set_loop, tempo, transport};
 use crate::tuner::Tuner;
 use crate::{Bank, BuildWarning, Config, Ports, Preset};
 pub use xguitare_protocol::{

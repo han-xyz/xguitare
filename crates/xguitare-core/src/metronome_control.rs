@@ -12,10 +12,11 @@ use crate::metronome::{
     VOLUME_DB,
 };
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
-use crate::project_control::{click, open_project_state, tempo};
+use crate::project_control::open_project_state;
 use crate::project_sync::{CLICK_COMMANDS, send};
 use crate::settings_control::save_state;
 use crate::state::SavedMetronome;
+use crate::transport_control::{click, tempo};
 
 /// Changes the Metronome and returns its state. With no Project open it plays its own tempo and meter, saved in `state.toml` with the volume; with one open `on` is the Project's click and `bpm` and `meter` its tempo and meter.
 pub(crate) fn metronome(
