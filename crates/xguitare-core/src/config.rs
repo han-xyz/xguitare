@@ -10,9 +10,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::engine::SWITCHER_MAX_FRAMES;
 use crate::state::{SavedState, read_state};
 pub use xguitare_protocol::BankKind;
+use xguitare_protocol::default_socket;
 
 const CONFIG_FILE: &str = "config.toml";
-const SOCKET_FILE: &str = "xguitare.sock";
 const STATE_FILE: &str = "state.toml";
 const BANK_DIR: &str = "bank";
 const PROJECTS_DIR: &str = "Music/xguitare";
@@ -216,10 +216,8 @@ impl Config {
     }
 
     fn default_for(dirs: &ProjectDirs, config_dir: &Path) -> Result<Config, ConfigError> {
-        let (socket_dir, socket_is_fallback) = match dirs.runtime_dir() {
-            Some(dir) => (dir.to_path_buf(), false),
-            None => (fallback_runtime_dir()?, true),
-        };
+        let runtime_dir = dirs.runtime_dir();
+        let socket = default_socket(runtime_dir, current_uid).map_err(ConfigError::Uid)?;
         let bank_dir = config_dir.join(BANK_DIR);
         let home = BaseDirs::new().ok_or(ConfigError::NoHomeDir)?;
         Ok(Config {
@@ -229,8 +227,8 @@ impl Config {
             buffer_size: 128,
             crossfade_ms: 20.0,
             ir_max_ms: 100.0,
-            socket: socket_dir.join(SOCKET_FILE),
-            socket_is_fallback,
+            socket,
+            socket_is_fallback: runtime_dir.is_none(),
             ports: Ports {
                 input: AUTO_PORT.to_string(),
                 output_left: AUTO_PORT.to_string(),
@@ -359,11 +357,6 @@ fn socket_dir_error(dir: &Path, reason: String) -> SocketDirError {
 /// The I/O error when `/proc/self` cannot be read.
 pub fn current_uid() -> std::io::Result<u32> {
     Ok(fs::metadata("/proc/self")?.uid())
-}
-
-fn fallback_runtime_dir() -> Result<PathBuf, ConfigError> {
-    let uid = current_uid().map_err(ConfigError::Uid)?;
-    Ok(PathBuf::from(format!("/tmp/xguitare-{uid}")))
 }
 
 impl fmt::Display for SocketDirError {

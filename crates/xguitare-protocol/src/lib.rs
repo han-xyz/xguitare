@@ -1,5 +1,5 @@
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::de::{Deserializer, Error as _};
 use serde::ser::{SerializeMap, Serializer};
@@ -14,6 +14,8 @@ const BAD_POSITION: &str = "position must be <bar>.<beat> or <seconds>s";
 const OFF: &str = "off";
 const BAD_LEVEL: &str = "level must be a number in dB or \"off\"";
 const SECONDS_SUFFIX: char = 's';
+const SOCKET_FILE: &str = "xguitare.sock";
+const FALLBACK_SOCKET_DIR_PREFIX: &str = "/tmp/xguitare-";
 
 /// The frames one min/max pair of a peak table covers.
 pub const FRAMES_PER_PEAK: usize = 256;
@@ -482,6 +484,22 @@ pub fn shown_file_name(name: &str) -> String {
 /// A control character, or a bidi override or isolate (U+202A–U+202E, U+2066–U+2069), which can make shown text read as other text.
 pub fn is_hidden_char(c: char) -> bool {
     c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// The Daemon's socket when the config names none: `xguitare.sock` in `runtime_dir`, else in the `/tmp/xguitare-<uid>` fallback directory; `uid` is called only for the fallback.
+///
+/// # Errors
+///
+/// The error of `uid`.
+pub fn default_socket<E>(
+    runtime_dir: Option<&Path>,
+    uid: impl FnOnce() -> Result<u32, E>,
+) -> Result<PathBuf, E> {
+    let dir = match runtime_dir {
+        Some(dir) => dir.to_path_buf(),
+        None => PathBuf::from(format!("{FALLBACK_SOCKET_DIR_PREFIX}{}", uid()?)),
+    };
+    Ok(dir.join(SOCKET_FILE))
 }
 
 /// The frame of `<bar>.<beat>` or `<bar>` (both from 1, the beat within `beats_per_bar`) or `<seconds>s`, at `sample_rate` and `tempo_bpm`, rounded; not bounded.
