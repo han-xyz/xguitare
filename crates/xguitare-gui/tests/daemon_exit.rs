@@ -15,6 +15,7 @@ use xguitare_gui::model::{Command, Link, respawn_delay};
 
 const WAIT: Duration = Duration::from_secs(5);
 const STAND_IN_SOCKET: &str = "XGUITARE_STAND_IN_SOCKET";
+const STAND_IN_TEST: &str = "stand_in_daemon";
 /// Long enough for the window to connect to the bound socket and wait on its `status` reply.
 const STAND_IN_LIFETIME: Duration = Duration::from_millis(300);
 const STAND_IN_LINE_LEN: usize = 5_000;
@@ -36,6 +37,9 @@ fn stand_in_line() -> String {
 #[test]
 #[ignore = "the stand-in Daemon the other test starts: it binds the socket, as `xguitare run` does before JACK, and exits"]
 fn stand_in_daemon() {
+    if !env::args().any(|arg| arg == STAND_IN_TEST) {
+        return;
+    }
     let Some(socket) = env::var_os(STAND_IN_SOCKET) else {
         return;
     };
@@ -61,7 +65,7 @@ fn a_daemon_that_exits_before_answering_is_shown_and_started_again_later() {
     fs::write(
         &fake_daemon,
         format!(
-            "#!/bin/sh\necho started >> {}\n{STAND_IN_SOCKET}={} exec {} --exact stand_in_daemon --ignored --nocapture\n",
+            "#!/bin/sh\necho started >> {}\n{STAND_IN_SOCKET}={} exec {} --exact {STAND_IN_TEST} --ignored --nocapture\n",
             starts.display(),
             socket.display(),
             env::current_exe().unwrap().display()
@@ -74,7 +78,7 @@ fn a_daemon_that_exits_before_answering_is_shown_and_started_again_later() {
         dir.0.display(),
         env::var("PATH").unwrap_or_default()
     );
-    // SAFETY: this test binary holds this one test, so no other thread reads the environment yet.
+    // SAFETY: the only other test here, the stand-in, reads the environment only in a process started with its name as the filter, where this test does not run.
     unsafe { env::set_var("PATH", path) };
     let config_path = dir.0.join("config.toml");
     fs::write(&config_path, "").unwrap();
