@@ -2,9 +2,8 @@ use serde_json::{Value, json};
 
 use crate::control::EngineState;
 use crate::project_control::loaded_peaks;
+pub use crate::protocol::FRAMES_PER_PEAK;
 
-/// The frames one min/max pair of a peak table covers.
-pub const FRAMES_PER_PEAK: usize = 256;
 /// The most pairs one `take_peaks` reply carries.
 pub const MAX_PEAKS_PER_REPLY: usize = 16_384;
 const FULL_SCALE: f32 = 127.0;

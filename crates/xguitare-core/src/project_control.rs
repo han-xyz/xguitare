@@ -26,6 +26,7 @@ use crate::project::{
     AUTOSAVE_FILE, Item, LoadWarning, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project,
     Track, autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
+pub use crate::protocol::{STILL_CLOSING, position_frame};
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
 use crate::take_capture::{
@@ -39,10 +40,7 @@ const PROJECT_IS_OPEN: &str = "a project is open; close it first";
 const NO_TRACKS: &str = "the project has no tracks";
 const NOTHING_ARMED: &str = "no track is armed";
 const NEEDS_POSITION: &str = "locate needs a position";
-const BAD_POSITION: &str = "position must be <bar>.<beat> or <seconds>s";
 const POSITION_TOO_FAR: &str = "position is more than an hour past the end of the project";
-/// The answer to `project_new` and `project_open` while a closed Project still gets its last Takes.
-pub const STILL_CLOSING: &str = "a project is still closing; try again";
 /// How far past the Project's last Item or loop end `locate` may move the playhead.
 const LOCATE_SECONDS_PAST_END: f64 = 3600.0;
 const DEFAULT_TRACK_NAME: &str = "Track";
@@ -55,7 +53,6 @@ const UNDO_WHILE_RECORDING: &str = "cannot undo while recording";
 const REDO_WHILE_RECORDING: &str = "cannot redo while recording";
 const NOTHING_TO_UNDO: &str = "nothing to undo";
 const NOTHING_TO_REDO: &str = "nothing to redo";
-const SECONDS_SUFFIX: char = 's';
 
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
 #[derive(Default)]
@@ -1724,36 +1721,6 @@ fn text_frame(project: &Project, text: &str) -> Result<f64, String> {
         project.tempo_bpm,
         project.meter.0,
     )
-}
-
-/// The frame of `<bar>.<beat>` or `<bar>` (both from 1, the beat within `beats_per_bar`) or `<seconds>s`, at `sample_rate` and `tempo_bpm`, rounded; not bounded.
-///
-/// # Errors
-///
-/// `position must be <bar>.<beat> or <seconds>s` for any other text, a negative time, or a bar or beat of 0 or a beat past the bar.
-pub fn position_frame(
-    text: &str,
-    sample_rate: u32,
-    tempo_bpm: f64,
-    beats_per_bar: u32,
-) -> Result<f64, String> {
-    if let Some(seconds) = text.strip_suffix(SECONDS_SUFFIX) {
-        let seconds: f64 = seconds.parse().map_err(|_| BAD_POSITION)?;
-        if !seconds.is_finite() || seconds.is_sign_negative() {
-            return Err(BAD_POSITION.to_string());
-        }
-        return Ok((seconds * f64::from(sample_rate)).round());
-    }
-    let (bar, beat) = text.split_once('.').unwrap_or((text, "1"));
-    let (Ok(bar), Ok(beat)) = (bar.parse::<u64>(), beat.parse::<u64>()) else {
-        return Err(BAD_POSITION.to_string());
-    };
-    let beats_per_bar = u64::from(beats_per_bar);
-    if bar == 0 || beat == 0 || beat > beats_per_bar {
-        return Err(BAD_POSITION.to_string());
-    }
-    let beat_index = (bar - 1) as f64 * beats_per_bar as f64 + (beat - 1) as f64;
-    Ok((beat_index * (f64::from(sample_rate) * 60.0 / tempo_bpm)).round())
 }
 
 /// The last frame any Item or the loop region reaches.
