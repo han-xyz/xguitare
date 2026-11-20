@@ -229,3 +229,24 @@ fn reconnecting_recovers_after_error() {
     drop(transport);
     server.join().unwrap();
 }
+
+#[test]
+fn fallback_path_that_is_a_file_is_refused() {
+    let dir = TempDir::new("fallback-file");
+    let fallback = dir.path.join("fallback");
+    fs::write(&fallback, "").unwrap();
+    let config = ClientConfig {
+        socket: fallback.join("s.sock"),
+        socket_is_fallback: true,
+        ..dir.config()
+    };
+    let err = Connection::connect(&config).err().unwrap();
+    assert!(matches!(&err, ClientError::InsecureSocketDir(_)), "{err:?}");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "refusing socket directory {}: not a directory",
+            fallback.display()
+        )
+    );
+}

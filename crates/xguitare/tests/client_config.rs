@@ -67,3 +67,26 @@ fn malformed_client_keys_give_the_daemon_config_error() {
         Config::load(Some(&missing)).unwrap_err().to_string()
     );
 }
+
+#[test]
+fn io_and_mistyped_socket_errors_match_the_daemon_config() {
+    let (dir, _) = config_file("io", "");
+    let directory = dir.0.clone();
+    let (_mistyped, mistyped) = config_file("socket-type", "socket = 3\n");
+    for path in [directory, mistyped] {
+        let daemon = Config::load(Some(&path)).unwrap_err().to_string();
+        let client = ClientConfig::load(Some(&path)).unwrap_err().to_string();
+        assert_eq!(client, daemon, "{}", path.display());
+    }
+}
+
+#[test]
+fn a_client_ignores_the_daemons_keys_and_defaults_its_own() {
+    let (_dir, path) = config_file(
+        "ignored",
+        "buffer_size = 0\nunknown_key = 1\n[ports]\nbogus = 1\n",
+    );
+    let client = ClientConfig::load(Some(&path)).unwrap();
+    assert!(client.tuner_mute);
+    assert_eq!(client.bank_kind, xguitare_core::BankKind::Guitar);
+}
