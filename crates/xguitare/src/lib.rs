@@ -471,7 +471,7 @@ where
     match result {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err}");
+            let _ = writeln!(io::stderr(), "error: {err}");
             1
         }
     }

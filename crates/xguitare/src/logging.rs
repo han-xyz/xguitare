@@ -5,5 +5,6 @@ pub fn init() {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
+        .log_internal_errors(false)
         .init();
 }
