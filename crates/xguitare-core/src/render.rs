@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::Config;
 use crate::arrangement::{Arrangement, ArrangementCommand};
 use crate::atomic_file::has_no_hard_links;
 use crate::build::{ArrangementError, build_arrangement};
 use crate::project::{Item, Project};
+pub use crate::protocol::{RenderBits, RenderRange};
 
 /// The most frames one [`Render::step`] renders.
 pub const RENDER_BLOCK: usize = 1024;
@@ -24,33 +25,6 @@ const WAV_EXTENSION: &str = "wav";
 const TAIL_QUIET_LEVEL: f32 = 3.162_277_7e-5;
 const TAIL_QUIET_SECONDS: f32 = 0.5;
 const TAIL_MAX_SECONDS: u32 = 10;
-const BAD_BITS: &str = "bits must be 16, 24 or \"32f\"";
-const FLOAT_BITS: &str = "32f";
-
-/// What a Render plays: the Project from frame 0 to the end of its last Item plus the tail, or the loop region exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RenderRange {
-    Project,
-    Loop,
-}
-
-/// The sample format of the WAV a Render writes; on the wire `16`, `24` or `"32f"`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "BitsOnWire", into = "BitsOnWire")]
-pub enum RenderBits {
-    /// 16-bit integer with TPDF dither.
-    Pcm16,
-    Pcm24,
-    Float32,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-enum BitsOnWire {
-    Depth(u32),
-    Word(String),
-}
 
 #[derive(Debug)]
 pub enum RenderError {
@@ -376,7 +350,7 @@ pub fn run_render(
     link: impl Fn(&Path, &Path) -> io::Result<()>,
 ) {
     let outcome =
-        open_part(job, render.bits().spec(render.sample_rate())).and_then(|(part, writer)| {
+        open_part(job, wav_spec(render.bits(), render.sample_rate())).and_then(|(part, writer)| {
             let written = write_wav(&mut render, writer, &part, job).and_then(|finished| {
                 if finished {
                     link_final(&part, job, link)?;
@@ -542,42 +516,17 @@ impl Dither {
     }
 }
 
-impl RenderBits {
-    fn spec(self, sample_rate: u32) -> WavSpec {
-        let (bits_per_sample, sample_format) = match self {
-            RenderBits::Pcm16 => (16, SampleFormat::Int),
-            RenderBits::Pcm24 => (24, SampleFormat::Int),
-            RenderBits::Float32 => (32, SampleFormat::Float),
-        };
-        WavSpec {
-            channels: 2,
-            sample_rate,
-            bits_per_sample,
-            sample_format,
-        }
-    }
-}
-
-impl TryFrom<BitsOnWire> for RenderBits {
-    type Error = &'static str;
-
-    fn try_from(bits: BitsOnWire) -> Result<Self, Self::Error> {
-        match bits {
-            BitsOnWire::Depth(16) => Ok(RenderBits::Pcm16),
-            BitsOnWire::Depth(24) => Ok(RenderBits::Pcm24),
-            BitsOnWire::Word(word) if word == FLOAT_BITS => Ok(RenderBits::Float32),
-            BitsOnWire::Depth(_) | BitsOnWire::Word(_) => Err(BAD_BITS),
-        }
-    }
-}
-
-impl From<RenderBits> for BitsOnWire {
-    fn from(bits: RenderBits) -> Self {
-        match bits {
-            RenderBits::Pcm16 => BitsOnWire::Depth(16),
-            RenderBits::Pcm24 => BitsOnWire::Depth(24),
-            RenderBits::Float32 => BitsOnWire::Word(FLOAT_BITS.to_string()),
-        }
+fn wav_spec(bits: RenderBits, sample_rate: u32) -> WavSpec {
+    let (bits_per_sample, sample_format) = match bits {
+        RenderBits::Pcm16 => (16, SampleFormat::Int),
+        RenderBits::Pcm24 => (24, SampleFormat::Int),
+        RenderBits::Float32 => (32, SampleFormat::Float),
+    };
+    WavSpec {
+        channels: 2,
+        sample_rate,
+        bits_per_sample,
+        sample_format,
     }
 }
 
