@@ -19,7 +19,6 @@ pub mod ports;
 mod preset;
 pub mod project;
 pub mod project_control;
-pub mod protocol;
 mod registry;
 pub mod render;
 pub mod render_control;

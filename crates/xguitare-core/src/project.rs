@@ -12,9 +12,9 @@ use crate::atomic_file::{slug, temp_path};
 use crate::preset::{
     CABINET_TYPE, ModuleEntry, module_entries, parse_modules, parse_stereo_modules,
 };
-pub(crate) use crate::protocol::is_hidden_char;
-pub use crate::protocol::{LoopRegion, shown_file_name};
 use crate::{Preset, PresetError, PresetModule};
+pub(crate) use xguitare_protocol::is_hidden_char;
+pub use xguitare_protocol::{LoopRegion, shown_file_name};
 
 pub const PROJECT_FILE: &str = "project.toml";
 pub const AUTOSAVE_FILE: &str = "project.autosave.toml";

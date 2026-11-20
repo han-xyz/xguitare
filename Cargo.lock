@@ -4927,6 +4927,7 @@ dependencies = [
  "serde_json",
  "toml",
  "xguitare-dsp",
+ "xguitare-protocol",
 ]
 
 [[package]]
@@ -4953,6 +4954,14 @@ dependencies = [
  "tracing-subscriber",
  "xguitare-client",
  "xguitare-core",
+]
+
+[[package]]
+name = "xguitare-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -7,6 +7,7 @@ version.workspace = true
 
 [dependencies]
 xguitare-dsp = { path = "../xguitare-dsp" }
+xguitare-protocol = { path = "../xguitare-protocol" }
 directories = "6.0.0"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.2.1"

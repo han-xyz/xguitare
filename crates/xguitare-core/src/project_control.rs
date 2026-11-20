@@ -26,7 +26,6 @@ use crate::project::{
     AUTOSAVE_FILE, Item, LoadWarning, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project,
     Track, autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
-pub use crate::protocol::{STILL_CLOSING, position_frame};
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
 use crate::take_capture::{
@@ -34,6 +33,7 @@ use crate::take_capture::{
 };
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Config, Preset, PresetModule};
+pub use xguitare_protocol::{STILL_CLOSING, position_frame};
 
 pub(crate) const NO_PROJECT: &str = "no project open";
 const PROJECT_IS_OPEN: &str = "a project is open; close it first";

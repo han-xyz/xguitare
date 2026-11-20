@@ -17,8 +17,8 @@ const SECONDS_SUFFIX: char = 's';
 
 /// The frames one min/max pair of a peak table covers.
 pub const FRAMES_PER_PEAK: usize = 256;
-/// The answer to `project_new` and `project_open` while a closed Project still gets its last Takes.
 pub const SILENCE_DB: f64 = -120.0;
+/// The answer to `project_new` and `project_open` while a closed Project still gets its last Takes.
 pub const STILL_CLOSING: &str = "a project is still closing; try again";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -480,7 +480,7 @@ pub fn shown_file_name(name: &str) -> String {
 }
 
 /// A control character, or a bidi override or isolate (U+202A–U+202E, U+2066–U+2069), which can make shown text read as other text.
-pub(crate) fn is_hidden_char(c: char) -> bool {
+pub fn is_hidden_char(c: char) -> bool {
     c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 

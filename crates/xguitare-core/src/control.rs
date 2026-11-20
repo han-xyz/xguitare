@@ -33,10 +33,6 @@ use crate::project_control::{
     rebuild_arrangement_slots, set_loop, set_rack_modules, status_fields, target_rack, tempo,
     track_add, track_remove, track_select, track_set, transport,
 };
-pub use crate::protocol::{
-    BusRef, IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef,
-    TransportAction, Value,
-};
 use crate::render_control::{render, render_cancel};
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
 use crate::take_peaks::peak_page;
@@ -47,6 +43,10 @@ use crate::{
     PresetModule, list_irs,
 };
 use crate::{ResolveError, resolve};
+pub use xguitare_protocol::{
+    BusRef, IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef,
+    TransportAction, Value,
+};
 
 const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";

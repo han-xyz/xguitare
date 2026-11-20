@@ -13,7 +13,7 @@ use crate::arrangement::{Arrangement, ArrangementCommand};
 use crate::atomic_file::has_no_hard_links;
 use crate::build::{ArrangementError, build_arrangement};
 use crate::project::{Item, Project};
-pub use crate::protocol::{RenderBits, RenderRange};
+pub use xguitare_protocol::{RenderBits, RenderRange};
 
 /// The most frames one [`Render::step`] renders.
 pub const RENDER_BLOCK: usize = 1024;

@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    BusRef, ConnectionId, EngineState, Request, SendLevel, TrackRef, handle_line, open_connection,
-    passthrough_rack,
+    ConnectionId, EngineState, handle_line, open_connection, passthrough_rack,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, MeterPoint, RackSwitcher, engine_queues,
@@ -666,41 +665,4 @@ fn mixer_changes_mark_the_project_for_autosave() {
     assert!(autosave_if_due(&mut s.state, later).is_some_and(|saved| saved.is_ok()));
     let folder = s.state.config.projects_dir.join("song");
     assert!(folder.join(PROJECT_FILE).is_file());
-}
-
-#[test]
-fn mixer_requests_write_the_documented_lines() {
-    let send = Request::SendSet {
-        track: TrackRef::Index(0),
-        bus: BusRef::Name("Verb".to_string()),
-        level: Some(SendLevel::Off),
-        pre: None,
-    };
-    assert_eq!(
-        send.to_line(),
-        r#"{"cmd":"send_set","track":0,"bus":"Verb","level":"off","pre":null}"#
-    );
-    let get = Request::Get {
-        param: None,
-        track: None,
-        bus: None,
-        master: true,
-    };
-    assert_eq!(get.to_line(), r#"{"cmd":"get","param":null,"master":true}"#);
-    let reset = Request::ClipReset {
-        track: None,
-        bus: Some(BusRef::Index(2)),
-        master: false,
-    };
-    assert_eq!(reset.to_line(), r#"{"cmd":"clip_reset","bus":2}"#);
-    let level = Request::SendSet {
-        track: TrackRef::Index(1),
-        bus: BusRef::Index(0),
-        level: Some(SendLevel::Db(-6.0)),
-        pre: Some(true),
-    };
-    assert_eq!(
-        level.to_line(),
-        r#"{"cmd":"send_set","track":1,"bus":0,"level":-6.0,"pre":true}"#
-    );
 }

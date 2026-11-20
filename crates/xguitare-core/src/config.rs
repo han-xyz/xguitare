@@ -8,8 +8,8 @@ use directories::{BaseDirs, ProjectDirs};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::engine::SWITCHER_MAX_FRAMES;
-pub use crate::protocol::BankKind;
 use crate::state::{SavedState, read_state};
+pub use xguitare_protocol::BankKind;
 
 const CONFIG_FILE: &str = "config.toml";
 const SOCKET_FILE: &str = "xguitare.sock";
