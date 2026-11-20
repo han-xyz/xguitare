@@ -3075,6 +3075,47 @@ fn a_daemon_that_exited_at_once_shows_its_last_line_whole_on_hover() {
     }
 }
 
+fn daemon_exited_snapshot(last_line: &str) -> Snapshot {
+    let mut snapshot = funk_snapshot();
+    snapshot.link = Link::Exited {
+        status: "exit status 1".to_string(),
+        last_line: Some(last_line.to_string()),
+        retry_at: std::time::Instant::now() + std::time::Duration::from_secs(40),
+    };
+    snapshot.status = None;
+    snapshot.tuner = None;
+    snapshot
+}
+
+#[test]
+fn an_elided_daemon_error_line_is_read_whole_by_keyboard() {
+    let (mut harness, _, _dir) = harness_with(MIN_WINDOW, daemon_exited_snapshot(DAEMON_EXIT_LINE));
+    let detail_has_focus =
+        |harness: &Harness<App>| harness.get_by_label("Error detail").is_focused();
+    for _ in 0..120 {
+        if detail_has_focus(&harness) {
+            break;
+        }
+        harness.key_press(Key::Tab);
+        harness.run_steps(2);
+    }
+    assert!(detail_has_focus(&harness), "never focused");
+    harness.run_steps(60);
+    assert!(detail_has_focus(&harness), "lost focus");
+    harness.get_by_label(DAEMON_EXIT_LINE);
+}
+
+#[test]
+fn a_short_daemon_error_line_is_no_tab_stop() {
+    let (mut harness, _, _dir) =
+        harness_with(MIN_WINDOW, daemon_exited_snapshot("error: no JACK server"));
+    for _ in 0..3 {
+        harness.key_press(Key::Tab);
+        harness.run_steps(2);
+    }
+    assert!(harness.query_by_label("Error detail").is_none());
+}
+
 const SAVED: &str = "saved bank/funk.toml";
 
 /// The footer's top, read off the [`SAVED`] notice it shows.

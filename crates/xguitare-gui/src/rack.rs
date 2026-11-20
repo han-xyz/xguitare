@@ -38,6 +38,7 @@ use crate::widgets::{self, KnobSize};
 
 const NO_IR: &str = "none";
 const CABINET: &str = "cabinet";
+const ERROR_DETAIL_LABEL: &str = "Error detail";
 const RAIL_WIDTH: i8 = 14;
 const RACK_MAX_WIDTH: f32 = 1060.0;
 const UNIT_GAP: f32 = 4.0;
@@ -349,7 +350,7 @@ fn paint_muted_icon(painter: &Painter, left: Pos2, ink: Color32) {
     );
 }
 
-/// The open panel as wide as the rack and above it: the title, and under it what the window does meanwhile. A wait is edged in the lit colour with a lit ring; an error in the danger colour with a filled danger mark and a third line. The detail line, elided to fit, shows whole on hover.
+/// The open panel as wide as the rack and above it: the title, and under it what the window does meanwhile. A wait is edged in the lit colour with a lit ring; an error in the danger colour with a filled danger mark and a third line. The detail line, elided to fit, is a Tab stop and shows whole on hover or keyboard focus.
 fn link_banner_strip(ui: &mut Ui, banner: &LinkBanner) {
     let colours = palette();
     let (height, edge) = if banner.is_error {
@@ -398,8 +399,17 @@ fn link_banner_strip(ui: &mut Ui, banner: &LinkBanner) {
     let detail_rect =
         Rect::from_min_size(pos2(text_left, detail_top), vec2(text_width, line_height));
     if detail != banner.detail {
-        ui.interact(detail_rect, response.id.with("detail"), Sense::hover())
-            .on_hover_text(&banner.detail);
+        let detail_response = ui.interact(
+            detail_rect,
+            response.id.with("detail"),
+            Sense::hover() | Sense::focusable_noninteractive(),
+        );
+        detail_response.widget_info(|| WidgetInfo::labeled(Role::Label, true, ERROR_DETAIL_LABEL));
+        if detail_response.has_focus() {
+            detail_response.show_tooltip_text(&banner.detail);
+        } else {
+            detail_response.on_hover_text(&banner.detail);
+        }
     }
     let painter = ui.painter();
     painter.rect(

@@ -78,7 +78,7 @@ fn a_daemon_that_exits_before_answering_is_shown_and_started_again_later() {
         dir.0.display(),
         env::var("PATH").unwrap_or_default()
     );
-    // SAFETY: the only other test here, the stand-in, reads the environment only in a process started with its name as the filter, where this test does not run.
+    // SAFETY: the stand-in is ignored, so it runs beside this test only when a run passes both names as filters together with `--include-ignored`; any other run keeps the two apart.
     unsafe { env::set_var("PATH", path) };
     let config_path = dir.0.join("config.toml");
     fs::write(&config_path, "").unwrap();
