@@ -1445,7 +1445,7 @@ pub fn autosave_offer(
 }
 
 pub fn still_closing(response: &Result<Response, ClientError>) -> bool {
-    matches!(response, Ok(Response::Err { error }) if error == STILL_CLOSING)
+    matches!(response, Ok(Response::Err { error, .. }) if error == STILL_CLOSING)
 }
 
 #[derive(Debug, Clone, PartialEq)]

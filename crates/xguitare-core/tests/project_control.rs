@@ -97,13 +97,13 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
 fn ok((response, _): (Response, Vec<BuildWarning>)) -> Value {
     match response {
         Response::Ok(payload) => payload,
-        Response::Err { error } => panic!("expected ok, got error {error}"),
+        Response::Err { error, .. } => panic!("expected ok, got error {error}"),
     }
 }
 
 fn error((response, _): (Response, Vec<BuildWarning>)) -> String {
     match response {
-        Response::Err { error } => error,
+        Response::Err { error, .. } => error,
         Response::Ok(payload) => panic!("expected error, got {payload}"),
     }
 }
@@ -1257,18 +1257,18 @@ fn a_project_still_closing_cannot_be_opened_until_its_last_takes_are_saved() {
         name: "Song".to_string(),
         restore: false,
     };
+    let still_closing =
+        Response::err_code("a project is still closing; try again", "still_closing");
+    assert_eq!(handle(&mut state, open.clone()).0, still_closing);
     assert_eq!(
-        error(handle(&mut state, open.clone())),
-        "a project is still closing; try again"
-    );
-    assert_eq!(
-        error(handle(
+        handle(
             &mut state,
             Request::ProjectNew {
                 name: "Other".to_string()
             }
-        )),
-        "a project is still closing; try again"
+        )
+        .0,
+        still_closing
     );
     let Some(ProjectEvent::Closed(closed)) = take_project_events(&mut state).pop() else {
         panic!("close should end with a Closed event");

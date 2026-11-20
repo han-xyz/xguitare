@@ -213,7 +213,7 @@ impl Client {
         } else if queued_refresh_unused {
             let reply = match self.request(&Request::TakesUnused) {
                 Ok(Response::Ok(payload)) => Ok(payload),
-                Ok(Response::Err { error }) => Err(error),
+                Ok(Response::Err { error, .. }) => Err(error),
                 Err(err) => Err(err.to_string()),
             };
             self.snapshot.unused_takes = Some((reply, Instant::now()));
@@ -395,7 +395,7 @@ impl Client {
         }
         match self.request(&Request::Status) {
             Ok(Response::Ok(status)) => self.on_status(status),
-            Ok(Response::Err { error }) => warn!("status: {error}"),
+            Ok(Response::Err { error, .. }) => warn!("status: {error}"),
             Err(_) => {}
         }
         if self.connection.is_some() {
@@ -412,7 +412,7 @@ impl Client {
                 }
                 Some(payload)
             }
-            Ok(Response::Err { error }) => {
+            Ok(Response::Err { error, .. }) => {
                 warn!("tuner: {error}");
                 None
             }
@@ -496,7 +496,7 @@ impl Client {
                 self.modules_fetched = true;
                 self.modules_warned = false;
             }
-            Ok(Response::Err { error }) => {
+            Ok(Response::Err { error, .. }) => {
                 if !self.modules_warned {
                     warn!("modules: {error}; retrying");
                     self.modules_warned = true;
@@ -529,7 +529,7 @@ impl Client {
     fn fetch_once(&mut self, req: &Request) -> Option<Value> {
         match self.request(req) {
             Ok(Response::Ok(payload)) => Some(payload),
-            Ok(Response::Err { error }) => {
+            Ok(Response::Err { error, .. }) => {
                 warn!("{req:?}: {error}");
                 None
             }
@@ -606,7 +606,7 @@ impl Client {
             };
             let page = match self.request(&request) {
                 Ok(Response::Ok(page)) => page,
-                Ok(Response::Err { error }) => {
+                Ok(Response::Err { error, .. }) => {
                     warn!("{request:?}: {error}");
                     return Err(());
                 }
@@ -753,7 +753,7 @@ fn log_rack_ir(response: &Result<Response, ClientError>) {
             payload["id"].as_str().unwrap_or_default(),
             payload["ir"].as_str().unwrap_or_default()
         ),
-        Ok(Response::Err { error }) => info!("rack_ir: error: {error}"),
+        Ok(Response::Err { error, .. }) => info!("rack_ir: error: {error}"),
         Err(err) => info!("rack_ir: error: {err}"),
     }
 }

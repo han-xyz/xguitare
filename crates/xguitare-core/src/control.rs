@@ -43,9 +43,10 @@ use crate::{
     PresetModule, list_irs,
 };
 use crate::{ResolveError, resolve};
+use xguitare_protocol::STILL_CLOSING;
 pub use xguitare_protocol::{
-    BusRef, IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef,
-    TransportAction, Value,
+    BusRef, CODE_STILL_CLOSING, IndexOrName, PROTOCOL_VERSION, Position, Request, Response,
+    SILENCE_DB, SendLevel, TrackRef, TransportAction, Value,
 };
 
 const NO_PRESET: &str = "no preset loaded";
@@ -436,6 +437,7 @@ fn handle_from(
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
+        Err(error) if error == STILL_CLOSING => Response::err_code(error, CODE_STILL_CLOSING),
         Err(error) => Response::err(error),
     };
     (response, warnings)
@@ -597,6 +599,7 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         "connections": connections,
         "metronome": metronome_status(state),
+        "protocol_version": PROTOCOL_VERSION,
     });
     if let Some(fields) = payload.as_object_mut() {
         fields.extend(status_fields(state, &peaks.tracks, &peaks.mix));

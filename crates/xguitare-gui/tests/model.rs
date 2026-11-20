@@ -74,7 +74,7 @@ fn registry_modules(test: &str) -> serde_json::Value {
     .with_revision(0);
     match handle(&mut state, Request::Modules).0 {
         Response::Ok(payload) => payload,
-        Response::Err { error } => panic!("modules: {error}"),
+        Response::Err { error, .. } => panic!("modules: {error}"),
     }
 }
 

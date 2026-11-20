@@ -150,7 +150,7 @@ pub fn clean_takes_in_batches(
                 failed.extend(payload["failed"].as_array().into_iter().flatten().cloned());
                 continue;
             }
-            Ok(Response::Err { error }) => error,
+            Ok(Response::Err { error, .. }) => error,
             Err(err) => err.to_string(),
         };
         return Err(TakesCleanStopped {

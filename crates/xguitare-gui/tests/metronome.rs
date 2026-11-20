@@ -222,7 +222,7 @@ impl Drop for TempDir {
 fn ok(request: Request, state: &mut EngineState) -> Value {
     match handle(state, request).0 {
         Response::Ok(payload) => payload,
-        Response::Err { error } => panic!("expected ok, got error {error}"),
+        Response::Err { error, .. } => panic!("expected ok, got error {error}"),
     }
 }
 

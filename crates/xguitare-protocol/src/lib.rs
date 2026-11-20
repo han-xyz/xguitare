@@ -22,6 +22,10 @@ pub const FRAMES_PER_PEAK: usize = 256;
 pub const SILENCE_DB: f64 = -120.0;
 /// The answer to `project_new` and `project_open` while a closed Project still gets its last Takes.
 pub const STILL_CLOSING: &str = "a project is still closing; try again";
+/// The `code` of the [`STILL_CLOSING`] error.
+pub const CODE_STILL_CLOSING: &str = "still_closing";
+/// The Control API version a `status` reply carries as `protocol_version`. It goes up when a request or reply field is removed or changes meaning, never for an addition: clients ignore fields and error codes they do not know.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -361,11 +365,11 @@ pub enum Position {
     Text(String),
 }
 
-/// One Control API reply; on the wire `{"ok":true, ...payload fields}` or `{"ok":false,"error":"..."}`.
+/// One Control API reply; on the wire `{"ok":true, ...payload fields}` or `{"ok":false,"error":"..."}`, with `"code":"..."` after `error` when the error has one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Response {
     Ok(Value),
-    Err { error: String },
+    Err { error: String, code: Option<String> },
 }
 
 impl Request {
@@ -382,6 +386,14 @@ impl Response {
     pub fn err(error: impl Into<String>) -> Response {
         Response::Err {
             error: error.into(),
+            code: None,
+        }
+    }
+
+    pub fn err_code(error: impl Into<String>, code: impl Into<String>) -> Response {
+        Response::Err {
+            error: error.into(),
+            code: Some(code.into()),
         }
     }
 
@@ -542,9 +554,12 @@ impl Serialize for Response {
                     map.serialize_entry(key, value)?;
                 }
             }
-            Response::Err { error } => {
+            Response::Err { error, code } => {
                 map.serialize_entry("ok", &false)?;
                 map.serialize_entry("error", error)?;
+                if let Some(code) = code {
+                    map.serialize_entry("code", code)?;
+                }
             }
         }
         map.end()
@@ -557,7 +572,10 @@ impl<'de> Deserialize<'de> for Response {
         match fields.remove("ok") {
             Some(Value::Bool(true)) => Ok(Response::Ok(Value::Object(fields))),
             Some(Value::Bool(false)) => match fields.remove("error") {
-                Some(Value::String(error)) => Ok(Response::err(error)),
+                Some(Value::String(error)) => Ok(match fields.remove("code") {
+                    Some(Value::String(code)) => Response::err_code(error, code),
+                    _ => Response::err(error),
+                }),
                 _ => Err(D::Error::custom(
                     "error response without an \"error\" string",
                 )),

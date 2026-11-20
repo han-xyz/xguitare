@@ -95,13 +95,13 @@ fn tmp_files(dir: &Path) -> Vec<PathBuf> {
 fn ok((response, _): (Response, Vec<BuildWarning>)) -> Value {
     match response {
         Response::Ok(payload) => payload,
-        Response::Err { error } => panic!("expected ok, got error {error}"),
+        Response::Err { error, .. } => panic!("expected ok, got error {error}"),
     }
 }
 
 fn error((response, _): (Response, Vec<BuildWarning>)) -> String {
     match response {
-        Response::Err { error } => error,
+        Response::Err { error, .. } => error,
         Response::Ok(payload) => panic!("expected error, got {payload}"),
     }
 }
@@ -166,6 +166,7 @@ fn status_reports_fields() {
             "disk_overflows": 0,
             "count_in_remaining": 0,
             "loaded_audio_bytes": 0,
+            "protocol_version": 1,
         })
     );
 }

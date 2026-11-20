@@ -1,7 +1,7 @@
 use serde_json::json;
 use xguitare_protocol::{
-    BankKind, IndexOrName, LoopRegion, Position, RenderBits, RenderRange, Request, Response,
-    SendLevel, TransportAction, position_frame, shown_file_name,
+    BankKind, CODE_STILL_CLOSING, IndexOrName, LoopRegion, PROTOCOL_VERSION, Position, RenderBits,
+    RenderRange, Request, Response, SendLevel, TransportAction, position_frame, shown_file_name,
 };
 
 fn name(text: &str) -> IndexOrName {
@@ -537,6 +537,25 @@ fn responses_write_ok_with_flattened_payload_and_error_shape() {
     assert!(Response::from_line(r#"{"ok":false}"#).is_err());
     assert!(Response::from_line(r#"{"ok":"yes"}"#).is_err());
     assert!(Response::from_line(r#"{"error":"x"}"#).is_err());
+}
+
+#[test]
+fn an_error_code_is_written_when_given_and_any_code_or_extra_field_parses() {
+    assert_eq!(PROTOCOL_VERSION, 1);
+    let closing = Response::err_code("a project is still closing; try again", CODE_STILL_CLOSING);
+    let line =
+        r#"{"ok":false,"error":"a project is still closing; try again","code":"still_closing"}"#;
+    assert_eq!(serde_json::to_string(&closing).unwrap(), line);
+    assert_eq!(Response::from_line(line).unwrap(), closing);
+    assert_eq!(
+        Response::from_line(r#"{"ok":false,"error":"x","code":"from_a_newer_daemon","hint":1}"#)
+            .unwrap(),
+        Response::err_code("x", "from_a_newer_daemon")
+    );
+    assert_eq!(
+        Response::from_line(r#"{"ok":false,"error":"x","hint":[1]}"#).unwrap(),
+        Response::err("x")
+    );
 }
 
 #[test]

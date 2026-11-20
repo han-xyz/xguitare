@@ -518,7 +518,7 @@ fn apply_program_changes(state: &mut EngineState) {
                 let name = state.active.as_ref().map_or("", |(_, preset)| &preset.name);
                 info!("loaded {program} {name}");
             }
-            Response::Err { error } => warn!("midi program {program}: {error}"),
+            Response::Err { error, .. } => warn!("midi program {program}: {error}"),
         }
     }
 }

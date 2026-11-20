@@ -79,7 +79,7 @@ fn warning_lines(payload: &Value) -> String {
 fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String> {
     match transport.request(req).map_err(|e| e.to_string())? {
         Response::Ok(payload) => Ok(payload),
-        Response::Err { error } => Err(error),
+        Response::Err { error, .. } => Err(error),
     }
 }
 

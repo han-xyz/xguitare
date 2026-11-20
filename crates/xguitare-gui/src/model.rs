@@ -2432,7 +2432,7 @@ pub fn refused_remove(req: &Request, response: &Result<Response, ClientError>) -
 /// The error of a `render` that the Daemon refused or that never reached it, verbatim.
 pub fn refused_render(req: &Request, response: &Result<Response, ClientError>) -> Option<String> {
     match (req, response) {
-        (Request::Render { .. }, Ok(Response::Err { error })) => Some(error.clone()),
+        (Request::Render { .. }, Ok(Response::Err { error, .. })) => Some(error.clone()),
         (Request::Render { .. }, Err(err)) => Some(err.to_string()),
         _ => None,
     }
@@ -2476,7 +2476,7 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
             return (!warnings.is_empty()).then(|| Message::Notice(warnings.join("; ")));
         }
         (_, Ok(Response::Ok(_))) => return None,
-        (_, Ok(Response::Err { error })) => error,
+        (_, Ok(Response::Err { error, .. })) => error,
         (_, Err(err)) => err.to_string(),
     };
     Some(Message::Error {
