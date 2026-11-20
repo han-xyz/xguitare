@@ -8,6 +8,7 @@ use std::time::Duration;
 use xguitare_client::{TakesCleanStopped, Transport, clean_takes_in_batches};
 use xguitare_core::control::{
     IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
+    newer_protocol_warning,
 };
 
 use xguitare_core::project::shown_file_name;
@@ -67,11 +68,14 @@ pub fn run_cli(
     written.unwrap_or(1)
 }
 
-/// A `warning: ...` line for each of the reply's `warnings`, which `project_open` gives.
+/// A `warning: ...` line for each of the reply's `warnings`, which `project_open` gives, and one for a `status` from a Daemon with a newer protocol.
 fn warning_lines(payload: &Value) -> String {
     let mut lines = String::new();
     for warning in items(&payload["warnings"]) {
         let _ = writeln!(lines, "warning: {}", text(warning));
+    }
+    if let Some(warning) = newer_protocol_warning(payload) {
+        let _ = writeln!(lines, "warning: {warning}");
     }
     lines
 }
@@ -1007,6 +1011,9 @@ fn render_status(payload: &Value) -> String {
         "callback_last_us",
     ] {
         let _ = writeln!(lines, "{key}: {}", status_text(key, &payload[key]));
+    }
+    if let Some(version) = payload["protocol_version"].as_u64() {
+        let _ = writeln!(lines, "protocol_version: {version}");
     }
     lines.push_str("connections:\n");
     for connection in items(&payload["connections"]) {

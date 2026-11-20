@@ -43,13 +43,18 @@ impl Drop for TempDir {
 
 /// Runs `xguitare <args> status` with the user's directories pointed into `dir`, against a listener at `socket` that answers one `status`.
 fn status_through(dir: &TempDir, socket: &Path, args: &[&str]) -> Output {
+    status_answered(dir, socket, args, STATUS_REPLY.to_string())
+}
+
+/// As `status_through`, with `reply` as the listener's answer.
+fn status_answered(dir: &TempDir, socket: &Path, args: &[&str], reply: String) -> Output {
     let listener = UnixListener::bind(socket).unwrap();
     let daemon = thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         let mut request = String::new();
         BufReader::new(&stream).read_line(&mut request).unwrap();
         (&stream)
-            .write_all(format!("{STATUS_REPLY}\n").as_bytes())
+            .write_all(format!("{reply}\n").as_bytes())
             .unwrap();
         request
     });
@@ -112,4 +117,40 @@ fn bad_daemon_only_keys_do_not_stop_a_client_command() {
     .unwrap();
     let output = status_through(&dir, &dir.derived_socket(), &[]);
     assert_status_printed(&output);
+}
+
+fn status_with_version(test: &str, version: u32) -> Output {
+    let dir = TempDir::new(test);
+    let reply = STATUS_REPLY.replace(
+        "\"ok\":true",
+        &format!("\"ok\":true,\"protocol_version\":{version}"),
+    );
+    status_answered(&dir, &dir.derived_socket(), &[], reply)
+}
+
+#[test]
+fn status_prints_the_daemon_protocol_version() {
+    let output = status_with_version("version", 1);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\nprotocol_version: 1\n"), "{stdout}");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+}
+
+#[test]
+fn a_newer_daemon_protocol_gets_one_warning_line() {
+    let output = status_with_version("newer", 2);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "warning: the Daemon speaks protocol 2, this xguitare knows 1; update xguitare\n"
+    );
+    assert_status_printed(&output);
+}
+
+#[test]
+fn a_status_without_a_version_prints_no_version_line() {
+    let dir = TempDir::new("unversioned");
+    let output = status_through(&dir, &dir.derived_socket(), &[]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("protocol_version"), "{stdout}");
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
 }

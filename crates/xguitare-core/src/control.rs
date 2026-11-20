@@ -46,7 +46,7 @@ use crate::{ResolveError, resolve};
 use xguitare_protocol::STILL_CLOSING;
 pub use xguitare_protocol::{
     BusRef, CODE_STILL_CLOSING, IndexOrName, PROTOCOL_VERSION, Position, Request, Response,
-    SILENCE_DB, SendLevel, TrackRef, TransportAction, Value,
+    SILENCE_DB, SendLevel, TrackRef, TransportAction, Value, newer_protocol_warning,
 };
 
 const NO_PRESET: &str = "no preset loaded";
