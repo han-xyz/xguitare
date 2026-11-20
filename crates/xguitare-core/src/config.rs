@@ -8,6 +8,7 @@ use directories::{BaseDirs, ProjectDirs};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::engine::SWITCHER_MAX_FRAMES;
+pub use crate::protocol::BankKind;
 use crate::state::{SavedState, read_state};
 
 const CONFIG_FILE: &str = "config.toml";
@@ -67,15 +68,6 @@ pub struct Ports {
     pub input: String,
     pub output_left: String,
     pub output_right: String,
-}
-
-/// Which starter Bank the first run seeds into a missing `bank_dir`; without a `bank_dir` in the config file, `[banks]` in `state.toml` can name each kind's directory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BankKind {
-    #[default]
-    Guitar,
-    Bass,
 }
 
 #[derive(Debug)]
@@ -372,15 +364,6 @@ pub fn current_uid() -> std::io::Result<u32> {
 fn fallback_runtime_dir() -> Result<PathBuf, ConfigError> {
     let uid = current_uid().map_err(ConfigError::Uid)?;
     Ok(PathBuf::from(format!("/tmp/xguitare-{uid}")))
-}
-
-impl fmt::Display for BankKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            BankKind::Guitar => "guitar",
-            BankKind::Bass => "bass",
-        })
-    }
 }
 
 impl fmt::Display for SocketDirError {
