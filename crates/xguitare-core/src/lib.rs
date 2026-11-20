@@ -31,6 +31,7 @@ pub mod take_peaks;
 pub mod takes_control;
 mod transport_control;
 pub mod tuner;
+mod undo_control;
 pub mod watch;
 
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
