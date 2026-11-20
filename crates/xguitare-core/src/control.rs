@@ -22,10 +22,10 @@ use crate::ports::AudioPorts;
 use crate::project::{LoopRegion, MAX_BUSES, MAX_TRACKS};
 use crate::project_control::{
     Projects, TrackChange, click, items, project_close, project_list, project_new, project_open,
-    project_redo, project_save, project_undo, rebuild_arrangement, rebuild_arrangement_slots,
-    set_loop, status_fields, target_rack, tempo, track_add, track_remove, track_select, track_set,
-    transport,
+    project_redo, project_save, project_undo, set_loop, status_fields, target_rack, tempo,
+    track_add, track_remove, track_select, track_set, transport,
 };
+use crate::project_sync::{rebuild_arrangement, rebuild_arrangement_slots};
 pub use crate::rack_control::passthrough_rack;
 use crate::rack_control::{
     active_program, bypass, get, ir_list, list, load, modules, rack_add, rack_ir, rack_move,

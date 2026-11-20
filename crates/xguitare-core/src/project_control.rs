@@ -11,7 +11,7 @@ use serde_json::{Map, Value, json};
 use crate::arrangement::ArrangementCommand;
 use crate::arrangement::Transport;
 use crate::atomic_file::slug;
-use crate::build::{ENGINE_BUSY, build_arrangement, swap_arrangement};
+use crate::build::ENGINE_BUSY;
 use crate::control::{
     BusRef, EngineState, IndexOrName, MixPeaks, Position, TrackRef, TransportAction, peak_db,
 };
@@ -19,12 +19,16 @@ use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
 use crate::item_control::CopiedItem;
-use crate::metronome_control::click_volume_db;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
     AUTOSAVE_FILE, Item, LoadWarning, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project,
     Track, autosave_due, autosave_newer, check_project, check_track, checked_name,
+};
+pub use crate::project_sync::project_rate_warning;
+use crate::project_sync::{
+    Layout, NOTHING_MOVED, click_commands, commit, rate_mismatch, send, start_arrangement,
+    swap_project, swap_project_with_ids,
 };
 use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
@@ -32,7 +36,7 @@ use crate::take_capture::{
     FinishedTake, Latency, TrackReader, WritingTakes, add_finished_take, load_take,
 };
 use crate::take_peaks::peak_table;
-use crate::{BuildWarning, Config, Preset, PresetModule};
+use crate::{BuildWarning, Preset, PresetModule};
 pub use xguitare_protocol::{STILL_CLOSING, position_frame};
 
 pub(crate) const NO_PROJECT: &str = "no project open";
@@ -45,8 +49,6 @@ const POSITION_TOO_FAR: &str = "position is more than an hour past the end of th
 const LOCATE_SECONDS_PAST_END: f64 = 3600.0;
 const DEFAULT_TRACK_NAME: &str = "Track";
 const MASTER_NAME: &str = "Master";
-/// `moved_from` when no Track or Bus moved.
-const NOTHING_MOVED: (usize, usize) = (MAX_TRACKS, MAX_BUSES);
 const ONE_TARGET: &str = "give track, bus or master, not more than one";
 const EDITING_WHILE_RECORDING: &str = "cannot edit items while recording";
 const UNDO_WHILE_RECORDING: &str = "cannot undo while recording";
@@ -57,7 +59,7 @@ const NOTHING_TO_REDO: &str = "nothing to redo";
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
 #[derive(Default)]
 pub struct Projects {
-    open: Option<OpenProject>,
+    pub(crate) open: Option<OpenProject>,
     pub(crate) events: Vec<ProjectEvent>,
     /// Closed Projects that recorded and whose last Takes the Daemon has not yet added and saved.
     closing: usize,
@@ -67,24 +69,24 @@ pub struct Projects {
     pub(crate) render_reported: bool,
 }
 
-struct OpenProject {
+pub(crate) struct OpenProject {
     dir: PathBuf,
-    project: Project,
-    takes: HashMap<String, Arc<[f32]>>,
+    pub(crate) project: Project,
+    pub(crate) takes: HashMap<String, Arc<[f32]>>,
     /// The peak table of each Take in `takes`, with the samples it was built from, kept by [`sync_peaks`].
     peaks: HashMap<String, (Arc<[f32]>, Vec<i8>)>,
     selected: usize,
     /// Whether the last transport request was `record`; `play` and `stop` end it.
-    recording: bool,
+    pub(crate) recording: bool,
     /// Whether `record` was requested since it was opened, so Takes may still be on their way when it closes.
     recorded: bool,
     /// One id per Track, in Track order, that stays the Track's while others are added or removed; finished Takes name their Track by it.
-    track_ids: Vec<u64>,
+    pub(crate) track_ids: Vec<u64>,
     next_track_id: u64,
     /// Never reused, so a client holding a removed Bus's id cannot reach a new Bus by it.
     next_bus_id: u64,
     /// Whether the Project changed since it was opened, saved or autosaved.
-    changed: bool,
+    pub(crate) changed: bool,
     last_autosave: Instant,
     /// Finished Takes not yet in `project` because the Engine was busy; [`add_finished_takes`] retries them.
     unplaced: Vec<FinishedTake>,
@@ -1469,186 +1471,6 @@ pub(crate) fn loaded_peaks<'a>(
         .ok_or_else(|| format!("no such take: {file}"))
 }
 
-/// Builds `project`'s Arrangement, swaps it in and makes `project` the open Project's; on an error nothing changes.
-pub(crate) fn swap_project(
-    state: &mut EngineState,
-    project: Project,
-    warnings: &mut Vec<BuildWarning>,
-) -> Result<(), String> {
-    swap_project_moving(state, project, NOTHING_MOVED, warnings)
-}
-
-/// [`swap_project`] after a removal: the clip flags from Track `moved_from.0` and Bus `moved_from.1` on are cleared once the new Arrangement runs alone.
-pub(crate) fn swap_project_moving(
-    state: &mut EngineState,
-    project: Project,
-    moved_from: (usize, usize),
-    warnings: &mut Vec<BuildWarning>,
-) -> Result<(), String> {
-    let track_ids = state
-        .projects
-        .open
-        .as_ref()
-        .ok_or(NO_PROJECT)?
-        .track_ids
-        .clone();
-    swap_project_with_ids(state, project, track_ids, moved_from, warnings)
-}
-
-/// [`swap_project_moving`] for a `project` whose Tracks have the ids `track_ids`.
-fn swap_project_with_ids(
-    state: &mut EngineState,
-    project: Project,
-    track_ids: Vec<u64>,
-    moved_from: (usize, usize),
-    warnings: &mut Vec<BuildWarning>,
-) -> Result<(), String> {
-    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
-    if rate_mismatch(open.project.sample_rate, state.sample_rate).is_none() {
-        let (readers, build_warnings) = start_arrangement(
-            &state.config,
-            &mut state.queues,
-            state.sample_rate,
-            state.max_frames,
-            &Layout {
-                project: &project,
-                takes: &open.takes,
-                track_ids: &track_ids,
-                moved_from,
-            },
-        )?;
-        warnings.extend(build_warnings);
-        state.projects.events.push(ProjectEvent::Readers(readers));
-    }
-    open_project_mut(state).track_ids = track_ids;
-    commit(state, project);
-    Ok(())
-}
-
-/// The commands [`rebuild_arrangement`] may push.
-pub(crate) fn rebuild_arrangement_slots(state: &EngineState) -> usize {
-    if state.projects.open.is_some() { 4 } else { 0 }
-}
-
-/// After a quantum or sample-rate change, rebuilds the open Project's Arrangement at the Engine's rate and `max_frames` and swaps it in; while the Project's rate differs from the Engine's, closes the Arrangement instead, so nothing plays or records at the wrong rate.
-pub(crate) fn rebuild_arrangement(state: &mut EngineState) -> Result<Vec<BuildWarning>, String> {
-    let Some(open) = state.projects.open.as_ref() else {
-        return Ok(Vec::new());
-    };
-    if rate_mismatch(open.project.sample_rate, state.sample_rate).is_some() {
-        state.queues.drain_from_audio();
-        state
-            .queues
-            .commands
-            .push(Command::CloseArrangement)
-            .map_err(|_| ENGINE_BUSY.to_string())?;
-        open_project_mut(state).recording = false;
-        return Ok(Vec::new());
-    }
-    let (readers, warnings) = start_arrangement(
-        &state.config,
-        &mut state.queues,
-        state.sample_rate,
-        state.max_frames,
-        &Layout {
-            project: &open.project,
-            takes: &open.takes,
-            track_ids: &open.track_ids,
-            moved_from: NOTHING_MOVED,
-        },
-    )?;
-    let clicks = click_commands(state, &open.project);
-    state.projects.events.push(ProjectEvent::Readers(readers));
-    send(state, &clicks)?;
-    Ok(warnings)
-}
-
-/// Why the open Project does not play: its sample rate differs from the Engine's.
-pub fn project_rate_warning(state: &EngineState) -> Option<String> {
-    let open = state.projects.open.as_ref()?;
-    rate_mismatch(open.project.sample_rate, state.sample_rate)
-}
-
-fn rate_mismatch(project_rate: u32, engine_rate: f32) -> Option<String> {
-    let engine_rate = engine_rate as u32;
-    (project_rate != engine_rate).then(|| {
-        format!("project rate {project_rate} Hz differs from the engine rate {engine_rate} Hz")
-    })
-}
-
-/// How many commands `click` sends.
-pub(crate) const CLICK_COMMANDS: usize = 3;
-
-fn click_commands(state: &EngineState, project: &Project) -> [ArrangementCommand; CLICK_COMMANDS] {
-    [
-        ArrangementCommand::Click(project.click),
-        ArrangementCommand::CountIn(project.count_in),
-        ArrangementCommand::ClickVolume(click_volume_db(state)),
-    ]
-}
-
-pub(crate) fn commit(state: &mut EngineState, project: Project) {
-    let open = open_project_mut(state);
-    open.project = project;
-    open.changed = true;
-    state.revision += 1;
-}
-
-/// What [`start_arrangement`] builds an Arrangement from.
-struct Layout<'a> {
-    project: &'a Project,
-    takes: &'a HashMap<String, Arc<[f32]>>,
-    track_ids: &'a [u64],
-    /// The first Track and Bus index that moved or went since the running Arrangement, as [`Arrangement::clear_clips_from`] takes them.
-    moved_from: (usize, usize),
-}
-
-fn start_arrangement(
-    config: &Config,
-    queues: &mut crate::engine::EngineQueues,
-    sample_rate: f32,
-    max_frames: usize,
-    layout: &Layout,
-) -> Result<(TrackReaders, Vec<BuildWarning>), String> {
-    let Layout {
-        project,
-        takes,
-        track_ids,
-        moved_from,
-    } = *layout;
-    let (mut arrangement, warnings) =
-        build_arrangement(config, project, takes, sample_rate, max_frames)
-            .map_err(|err| err.to_string())?;
-    arrangement.clear_clips_from(moved_from.0, moved_from.1);
-    let readers = project
-        .tracks
-        .iter()
-        .zip(track_ids)
-        .zip(arrangement.take_readers())
-        .map(|((track, &track_id), reader)| TrackReader {
-            track_id,
-            name: track.name.clone(),
-            reader,
-        })
-        .collect();
-    swap_arrangement(queues, arrangement)?;
-    Ok((readers, warnings))
-}
-
-pub(crate) fn send(state: &mut EngineState, commands: &[ArrangementCommand]) -> Result<(), String> {
-    if state.queues.commands.slots() < commands.len() {
-        return Err(ENGINE_BUSY.to_string());
-    }
-    for command in commands {
-        state
-            .queues
-            .commands
-            .push(Command::Arrangement(command.clone()))
-            .map_err(|_| ENGINE_BUSY.to_string())?;
-    }
-    Ok(())
-}
-
 pub(crate) fn resolve_track(project: &Project, track: &TrackRef) -> Result<usize, String> {
     resolve_ref(
         "track",
@@ -1760,7 +1582,7 @@ pub(crate) fn new_bus_id(state: &mut EngineState) -> u64 {
     open.next_bus_id - 1
 }
 
-fn open_project_mut(state: &mut EngineState) -> &mut OpenProject {
+pub(crate) fn open_project_mut(state: &mut EngineState) -> &mut OpenProject {
     state
         .projects
         .open

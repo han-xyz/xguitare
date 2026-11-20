@@ -12,7 +12,8 @@ use crate::metronome::{
     VOLUME_DB,
 };
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
-use crate::project_control::{CLICK_COMMANDS, click, open_project_state, send, tempo};
+use crate::project_control::{click, open_project_state, tempo};
+use crate::project_sync::{CLICK_COMMANDS, send};
 use crate::settings_control::save_state;
 use crate::state::SavedMetronome;
 

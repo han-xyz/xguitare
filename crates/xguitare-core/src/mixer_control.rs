@@ -7,9 +7,9 @@ use crate::project::{
     Bus, MAX_BUSES, MAX_TRACKS, Project, ProjectError, Send, Track, check_project, checked_bus_name,
 };
 use crate::project_control::{
-    check_one_target, commit, current_project, new_bus_id, resolve_bus, resolve_track, send,
-    swap_project, swap_project_moving,
+    check_one_target, current_project, new_bus_id, resolve_bus, resolve_track,
 };
+use crate::project_sync::{commit, send, swap_project, swap_project_moving};
 
 const DEFAULT_BUS_NAME: &str = "Bus";
 
