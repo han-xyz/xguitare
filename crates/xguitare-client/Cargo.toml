@@ -6,7 +6,10 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-xguitare-core = { path = "../xguitare-core" }
+xguitare-protocol = { path = "../xguitare-protocol" }
+directories = "6.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
 
 [lints]
 workspace = true

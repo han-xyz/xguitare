@@ -2,7 +2,7 @@ mod common;
 
 use common::{TempDir, serve};
 use xguitare_client::{Transport, UnixSocketTransport};
-use xguitare_core::control::{Request, Response};
+use xguitare_protocol::{Request, Response};
 
 #[test]
 fn one_shot_round_trip() {

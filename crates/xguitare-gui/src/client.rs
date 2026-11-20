@@ -19,7 +19,7 @@ use crate::model::{
 use crate::project_model::{autosave_offer, item_blocks, project_name, still_closing};
 use serde_json::Value;
 use tracing::{info, warn};
-use xguitare_client::{ClientError, Connection, clean_takes_in_batches};
+use xguitare_client::{ClientConfig, ClientError, Connection, clean_takes_in_batches};
 use xguitare_core::Config;
 use xguitare_core::control::{Request, Response};
 use xguitare_core::project_control::STILL_CLOSING;
@@ -423,7 +423,7 @@ impl Client {
     }
 
     fn connect(&mut self, now: Instant) {
-        let err = match Connection::connect(&self.config) {
+        let err = match Connection::connect(&client_config(&self.config)) {
             Ok(connection) => {
                 self.connection = Some(connection);
                 self.last_ignored_error = None;
@@ -757,6 +757,15 @@ fn log_rack_ir(response: &Result<Response, ClientError>) {
         ),
         Ok(Response::Err { error }) => info!("rack_ir: error: {error}"),
         Err(err) => info!("rack_ir: error: {err}"),
+    }
+}
+
+fn client_config(config: &Config) -> ClientConfig {
+    ClientConfig {
+        socket: config.socket.clone(),
+        socket_is_fallback: config.socket_is_fallback,
+        tuner_mute: config.tuner_mute,
+        bank_kind: config.bank_kind,
     }
 }
 

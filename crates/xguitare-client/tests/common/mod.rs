@@ -4,7 +4,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::thread;
 
-use xguitare_core::Config;
+use xguitare_client::ClientConfig;
 
 pub struct TempDir {
     pub path: PathBuf,
@@ -22,13 +22,13 @@ impl TempDir {
         self.path.join("s.sock")
     }
 
-    pub fn config(&self) -> Config {
+    pub fn config(&self) -> ClientConfig {
         let path = self.path.join("config.toml");
         fs::write(&path, "").unwrap();
-        Config {
+        ClientConfig {
             socket: self.socket(),
             socket_is_fallback: false,
-            ..Config::load(Some(&path)).unwrap()
+            ..ClientConfig::load(Some(&path)).unwrap()
         }
     }
 }

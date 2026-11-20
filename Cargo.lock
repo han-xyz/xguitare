@@ -4912,7 +4912,10 @@ dependencies = [
 name = "xguitare-client"
 version = "0.1.0"
 dependencies = [
- "xguitare-core",
+ "directories",
+ "serde",
+ "toml",
+ "xguitare-protocol",
 ]
 
 [[package]]

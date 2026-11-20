@@ -7,9 +7,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use common::{TempDir, answer, serve};
-use xguitare_client::{ClientError, Connection, Reconnecting, Transport, UnixSocketTransport};
-use xguitare_core::control::{Request, Response};
-use xguitare_core::{Config, check_private_dir};
+use xguitare_client::{
+    ClientConfig, ClientError, Connection, Reconnecting, Transport, UnixSocketTransport,
+    check_private_dir,
+};
+use xguitare_protocol::{Request, Response};
 
 const STATUS: &str = r#"{"ok":true,"preset":"Clean","revision":3}"#;
 const LIST: &str = r#"{"ok":true,"active":0,"entries":[]}"#;
@@ -109,7 +111,7 @@ fn symlinked_fallback_dir_is_refused() {
     let link = dir.path.join("link");
     fs::create_dir(&target).unwrap();
     std::os::unix::fs::symlink(&target, &link).unwrap();
-    let config = Config {
+    let config = ClientConfig {
         socket: link.join("s.sock"),
         socket_is_fallback: true,
         ..dir.config()
@@ -134,7 +136,7 @@ fn client_refuses_foreign_fallback_dir() {
     let fallback = dir.path.join("fallback");
     fs::create_dir(&fallback).unwrap();
     fs::set_permissions(&fallback, fs::Permissions::from_mode(0o755)).unwrap();
-    let config = Config {
+    let config = ClientConfig {
         socket: fallback.join("s.sock"),
         socket_is_fallback: true,
         ..dir.config()
@@ -156,9 +158,7 @@ fn client_refuses_foreign_fallback_dir() {
     let uid = fs::metadata(&fallback).unwrap().uid();
     assert!(check_private_dir(&fallback, uid).is_ok());
     assert_eq!(
-        check_private_dir(&fallback, uid + 1)
-            .unwrap_err()
-            .to_string(),
+        check_private_dir(&fallback, uid + 1).unwrap_err(),
         format!(
             "refusing socket directory {}: owned by uid {uid}, not {}",
             fallback.display(),
@@ -171,7 +171,7 @@ fn client_refuses_foreign_fallback_dir() {
 fn fallback_dir_checked_on_every_request() {
     let dir = TempDir::new("fallback-every-request");
     let fallback = dir.path.join("fallback");
-    let config = Config {
+    let config = ClientConfig {
         socket: fallback.join("s.sock"),
         socket_is_fallback: true,
         ..dir.config()

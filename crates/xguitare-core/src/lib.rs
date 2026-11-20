@@ -32,8 +32,8 @@ pub mod watch;
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
 pub use bank::{Bank, BankEntry};
 pub use config::{
-    AUTO_PORT, BankKind, Config, ConfigError, Ports, SOCKET_DIR_MODE, SocketDirError,
-    check_private_dir, current_uid, secure_socket_dir,
+    AUTO_PORT, BankKind, Config, ConfigError, Ports, SOCKET_DIR_MODE, SocketDirError, current_uid,
+    secure_socket_dir,
 };
 pub use ir::{IrError, load_ir};
 pub use irdir::list_irs;

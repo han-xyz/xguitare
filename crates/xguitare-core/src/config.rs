@@ -310,22 +310,6 @@ pub fn secure_socket_dir(dir: &Path) -> Result<(), SocketDirError> {
     Ok(())
 }
 
-/// Refuses `dir` unless it is a real directory owned by `uid` with mode 0700; unlike `secure_socket_dir` it never changes the mode.
-///
-/// # Errors
-///
-/// A [`SocketDirError`] naming `dir` when it is a symlink, not a directory, owned by another uid, or not mode 0700.
-pub fn check_private_dir(dir: &Path, uid: u32) -> Result<(), SocketDirError> {
-    let mode = owned_dir(dir, uid)?.mode() & 0o777;
-    if mode != SOCKET_DIR_MODE {
-        return Err(socket_dir_error(
-            dir,
-            format!("mode {mode:04o}, not {SOCKET_DIR_MODE:04o}"),
-        ));
-    }
-    Ok(())
-}
-
 fn owned_dir(dir: &Path, uid: u32) -> Result<fs::Metadata, SocketDirError> {
     let meta = fs::symlink_metadata(dir).map_err(|err| socket_dir_error(dir, err.to_string()))?;
     if meta.file_type().is_symlink() {

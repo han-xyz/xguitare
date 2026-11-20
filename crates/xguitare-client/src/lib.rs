@@ -4,8 +4,11 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use xguitare_core::control::{Request, Response, Value};
-use xguitare_core::{Config, check_private_dir, current_uid};
+use config::current_uid;
+pub use config::{ClientConfig, ClientConfigError, check_private_dir};
+use xguitare_protocol::{Request, Response, Value};
+
+mod config;
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
@@ -31,11 +34,11 @@ pub enum ClientError {
 
 /// Connects to the Daemon's socket once per request: one request line out, one response line back.
 pub struct UnixSocketTransport {
-    config: Config,
+    config: ClientConfig,
 }
 
 impl UnixSocketTransport {
-    pub fn from_config(config: &Config) -> Self {
+    pub fn from_config(config: &ClientConfig) -> Self {
         UnixSocketTransport {
             config: config.clone(),
         }
@@ -59,7 +62,7 @@ impl Connection {
     /// # Errors
     ///
     /// [`ClientError::NotRunning`] when no Daemon listens at the config's socket, [`ClientError::InsecureSocketDir`] when its `/tmp` fallback directory is not ours and 0700, [`ClientError::Io`] for any other connect failure.
-    pub fn connect(config: &Config) -> Result<Connection, ClientError> {
+    pub fn connect(config: &ClientConfig) -> Result<Connection, ClientError> {
         let reader = connect(config, READ_TIMEOUT, WRITE_TIMEOUT)?;
         Ok(Connection {
             path: config.socket.clone(),
@@ -91,12 +94,12 @@ impl Transport for Connection {
 
 /// A `Connection` that reconnects on the request after an error; the failed request's error is returned unchanged and not retried.
 pub struct Reconnecting {
-    config: Config,
+    config: ClientConfig,
     connection: Option<Connection>,
 }
 
 impl Reconnecting {
-    pub fn new(config: Config) -> Reconnecting {
+    pub fn new(config: ClientConfig) -> Reconnecting {
         Reconnecting {
             config,
             connection: None,
@@ -190,7 +193,7 @@ fn cleaned_payload((deleted, bytes, failed): (u64, u64, Vec<Value>)) -> Value {
 }
 
 /// Before each connect to the `/tmp` fallback socket: a missing directory means no Daemon, and an existing one must be ours and 0700.
-fn check_fallback_dir(config: &Config) -> Result<(), ClientError> {
+fn check_fallback_dir(config: &ClientConfig) -> Result<(), ClientError> {
     let Some(dir) = config.socket.parent().filter(|_| config.socket_is_fallback) else {
         return Ok(());
     };
@@ -201,11 +204,11 @@ fn check_fallback_dir(config: &Config) -> Result<(), ClientError> {
         _ => {}
     }
     let uid = current_uid().map_err(ClientError::Io)?;
-    check_private_dir(dir, uid).map_err(|err| ClientError::InsecureSocketDir(err.to_string()))
+    check_private_dir(dir, uid).map_err(ClientError::InsecureSocketDir)
 }
 
 fn connect(
-    config: &Config,
+    config: &ClientConfig,
     read_timeout: Duration,
     write_timeout: Duration,
 ) -> Result<BufReader<UnixStream>, ClientError> {

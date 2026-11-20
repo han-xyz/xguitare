@@ -13,8 +13,7 @@ use std::sync::atomic::AtomicBool;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use signal_hook::consts::{SIGINT, SIGTERM};
-use xguitare_client::{Reconnecting, Transport, UnixSocketTransport};
-use xguitare_core::Config;
+use xguitare_client::{ClientConfig, Reconnecting, Transport, UnixSocketTransport};
 
 pub use cli::{CliEnv, run_cli};
 
@@ -484,7 +483,7 @@ fn run_client(
     config_path: Option<&Path>,
     stops_on_signal: bool,
 ) -> Result<i32, String> {
-    let config = Config::load(config_path).map_err(|err| err.to_string())?;
+    let config = ClientConfig::load(config_path).map_err(|err| err.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
     if stops_on_signal {
         for signal in [SIGINT, SIGTERM] {
