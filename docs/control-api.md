@@ -13,7 +13,17 @@ The protocol a client uses to inspect and change the running Daemon: which Prese
 - A connection that sends nothing for 300 seconds is closed by the Daemon; a client that keeps one open reconnects.
 - One Daemon per socket: the Daemon holds an exclusive `flock` on `<socket>.lock` (e.g. `xguitare.sock.lock`) while it runs, and a second Daemon on the same socket exits with `error: another Daemon is running`.
 
-Every response has a boolean `ok`. On success it carries the request's payload keys next to `"ok":true`; on failure it is exactly `{"ok":false,"error":"<message>"}`. Key order in responses is not significant.
+Every response has a boolean `ok`. On success it carries the request's payload keys next to `"ok":true`; on failure it is `{"ok":false,"error":"<message>"}`, and an error a client may act on also carries a machine-readable `code`, e.g. `{"ok":false,"error":"a project is still closing; try again","code":"still_closing"}`. Key order in responses is not significant.
+
+| `code` | Error |
+| --- | --- |
+| `still_closing` | `a project is still closing; try again` from `project_new` and `project_open`. |
+
+A client ignores a `code` and a reply key it does not know, and treats an error without a `code` by its `error` text, as a Daemon from before codes sends none.
+
+### Versioning
+
+`status` carries `protocol_version`, now `1`. It goes up when a request or reply field is removed or changes meaning; an addition (a new request, reply key or `code`) leaves it as it is, because an old client ignores what it does not know and a new client handles a reply without it. A `status` without `protocol_version` comes from a Daemon from before versioning, which speaks version 1. The CLI's `status` prints a `warning:` line, and the GUI a notice, when the Daemon's version is higher than their own.
 
 Errors any request can return:
 
@@ -63,7 +73,7 @@ Request:
 Response:
 
 ```json
-{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"clipboard":0,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"id":0,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"id":1,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
+{"ok":true,"buffer_size":128,"callback_last_us":926,"callback_max_us":1484,"click":{"count_in":1,"on":true},"connections":[{"from":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL"},{"from":"xguitare:out_r","to":"Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR"}],"count_in_remaining":0,"disk_overflows":0,"input_peak_db":-96.1,"loaded_audio_bytes":3840000,"loop":{"end":172800,"on":true,"start":0},"metronome":{"beat":2,"bpm":100.0,"meter":[3,4],"on":true,"volume_db":-12.0},"modified":false,"muted":false,"output_peak_db":-120.0,"position":{"bars_beats":"1.1","frames":0},"prepared_frames":128,"preset":"Clean","program":0,"project":"Demo Song","project_warning":null,"protocol_version":1,"render":{"file":"/home/you/Music/xguitare/demo-song/renders/demo-song.wav","name":"demo-song","progress":1.0,"range":"project","state":"done"},"revision":10,"sample_rate":48000,"selected":1,"undo":"move 2 Items","redo":null,"clipboard":0,"tempo":{"bpm":100.0,"meter":[3,4]},"tracks":[{"armed":true,"clip":false,"id":0,"input":"Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO","input_peak_db":-120.0,"mute":false,"name":"Track 1","pan":-0.25,"peak_db":[-14.2,-17.9],"sends":[{"bus":0,"level_db":-6.0,"pre":false}],"solo":false,"to_master":true,"volume_db":-3.0},{"armed":false,"clip":false,"id":1,"input":null,"input_peak_db":-120.0,"mute":false,"name":"Bass","pan":0.0,"peak_db":[-120.0,-120.0],"sends":[],"solo":false,"to_master":true,"volume_db":0.0}],"buses":[{"clip":false,"id":0,"mute":false,"name":"Verb","pan":0.0,"peak_db":[-30.1,-29.8],"solo":false,"volume_db":0.0}],"master":{"clip":false,"peak_db":[-13.9,-16.8],"volume_db":0.0},"transport":"stopped","xruns":0}
 ```
 
 | Key | Value |
@@ -88,6 +98,7 @@ Response:
 | `loaded_audio_bytes` | Bytes of Take audio the open Project holds in memory (4 per frame); `0` when no Project is open. |
 | `project_warning` | Why the open Project does not play, e.g. `project rate 48000 Hz differs from the engine rate 44100 Hz` after a sample-rate change: the transport stops, Takes still open are finished, and `play` and `record` are refused until the rates match; `null` otherwise. |
 | `render` | The running Render, or the last one until the next starts (also after its Project is closed, until another Project is opened or created); `null` before the first and after `project_new` or `project_open`. `name`, `range` (`project` or `loop`), `progress` from 0 to 1 (the tail after the last Item does not count), `state` (`running`, `done`, `cancelled` or `failed`), `file` (the WAV it writes or wrote) and, when it failed, `error`. |
+| `protocol_version` | The Control API version the Daemon speaks (see Versioning). |
 | `project` | Name of the open Project; `null` when none is open. The keys below are `null` (`tracks` and `buses` empty) while no Project is open. |
 | `transport` | `stopped`, `playing` or `recording` (also during the count-in), as the audio thread runs it. |
 | `position` | The playhead: `frames` from the Project start, counted from 0, and `bars_beats` as `<bar>.<beat>`, counted from 1 at the Project's tempo and meter. |
@@ -655,7 +666,7 @@ Errors:
 | `error` | When |
 | --- | --- |
 | `a project is open; close it first` | A Project is open. |
-| `a project is still closing; try again` | A Project that recorded and closed less than about 200 ms ago is still getting its last Takes added and saved. |
+| `a project is still closing; try again` | A Project that recorded and closed less than about 200 ms ago is still getting its last Takes added and saved. The reply carries `"code":"still_closing"`. |
 | `project name must not be empty` | The name has no ASCII letter or digit. |
 | `a project named '<name>' already exists` | The folder is already there. |
 | `<path>: <reason>` | A folder or file cannot be written. |

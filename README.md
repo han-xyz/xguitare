@@ -190,7 +190,7 @@ Two more bass Presets (programs 13 and 14) also end in `limiter` and cabinet:
 
 Every subcommand except `run` and `tuner --watch` sends one request to the running Daemon and exits 0 on success; `tuner --watch` keeps requesting until Ctrl-C; on an error it prints one `error: ...` line to stderr and exits 1. `xguitare --help` lists them.
 
-`status` shows the active Preset, whether it is `modified` (the live Rack differs from the Preset file), the Revision, whether Mute is on, input and output peaks since the last `status` (each client connection, such as the GUI, keeps its own), audio settings and port connections:
+`status` shows the active Preset, whether it is `modified` (the live Rack differs from the Preset file), the Revision, whether Mute is on, input and output peaks since the last `status` (each client connection, such as the GUI, keeps its own), audio settings, the Control API version the Daemon speaks (`protocol_version`, with a `warning:` line on stderr when it is newer than this `xguitare`'s) and port connections:
 
 ```console
 $ xguitare status
@@ -207,6 +207,7 @@ output_peak_db: -120.0
 xruns: 0
 callback_max_us: 1228
 callback_last_us: 764
+protocol_version: 1
 connections:
   Scarlett Solo 4th Gen Input 1 Inst/Line:capture_MONO -> xguitare-4242:in
   xguitare-4242:out_l -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FL
