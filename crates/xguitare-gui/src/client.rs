@@ -20,8 +20,10 @@ use crate::model::{
 use crate::project_model::{autosave_offer, item_blocks, project_name, still_closing};
 use serde_json::Value;
 use tracing::{info, warn};
-use xguitare_client::{ClientConfig, ClientError, Connection, clean_takes_in_batches};
-use xguitare_protocol::{Request, Response, STILL_CLOSING, newer_protocol_warning};
+use xguitare_client::{
+    ClientConfig, ClientError, Connection, clean_takes_in_batches, newer_protocol_warning,
+};
+use xguitare_protocol::{Request, Response, STILL_CLOSING};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);

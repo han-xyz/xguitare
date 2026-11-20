@@ -43,11 +43,11 @@ use crate::{
     PresetModule, list_irs,
 };
 use crate::{ResolveError, resolve};
-use xguitare_protocol::STILL_CLOSING;
 pub use xguitare_protocol::{
-    BusRef, CODE_STILL_CLOSING, IndexOrName, PROTOCOL_VERSION, Position, Request, Response,
-    SILENCE_DB, SendLevel, TrackRef, TransportAction, Value, newer_protocol_warning,
+    BusRef, IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef,
+    TransportAction, Value,
 };
+use xguitare_protocol::{CODE_STILL_CLOSING, PROTOCOL_VERSION, STILL_CLOSING};
 
 const NO_PRESET: &str = "no preset loaded";
 const ACTIVE_REMOVED: &str = "active preset file was removed; load a preset first";

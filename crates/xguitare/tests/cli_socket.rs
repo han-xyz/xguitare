@@ -43,11 +43,11 @@ impl Drop for TempDir {
 
 /// Runs `xguitare <args> status` with the user's directories pointed into `dir`, against a listener at `socket` that answers one `status`.
 fn status_through(dir: &TempDir, socket: &Path, args: &[&str]) -> Output {
-    status_answered(dir, socket, args, STATUS_REPLY.to_string())
+    answered(dir, socket, args, "status", STATUS_REPLY.to_string())
 }
 
-/// As `status_through`, with `reply` as the listener's answer.
-fn status_answered(dir: &TempDir, socket: &Path, args: &[&str], reply: String) -> Output {
+/// Runs `xguitare <args> <cmd>` as `status_through` does, with `reply` as the listener's answer.
+fn answered(dir: &TempDir, socket: &Path, args: &[&str], cmd: &str, reply: String) -> Output {
     let listener = UnixListener::bind(socket).unwrap();
     let daemon = thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
@@ -60,7 +60,7 @@ fn status_answered(dir: &TempDir, socket: &Path, args: &[&str], reply: String) -
     });
     let output = Command::new(env!("CARGO_BIN_EXE_xguitare"))
         .args(args)
-        .arg("status")
+        .arg(cmd)
         .env("HOME", dir.0.join("home"))
         .env("XDG_CONFIG_HOME", dir.0.join("config"))
         .env("XDG_RUNTIME_DIR", dir.0.join("runtime"))
@@ -68,7 +68,7 @@ fn status_answered(dir: &TempDir, socket: &Path, args: &[&str], reply: String) -
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(0), "{stderr}");
-    assert_eq!(daemon.join().unwrap(), "{\"cmd\":\"status\"}\n");
+    assert_eq!(daemon.join().unwrap(), format!("{{\"cmd\":\"{cmd}\"}}\n"));
     output
 }
 
@@ -119,18 +119,9 @@ fn bad_daemon_only_keys_do_not_stop_a_client_command() {
     assert_status_printed(&output);
 }
 
-fn status_with_version(test: &str, version: u32) -> Output {
-    let dir = TempDir::new(test);
-    let reply = STATUS_REPLY.replace(
-        "\"ok\":true",
-        &format!("\"ok\":true,\"protocol_version\":{version}"),
-    );
-    status_answered(&dir, &dir.derived_socket(), &[], reply)
-}
-
 #[test]
 fn status_prints_the_daemon_protocol_version() {
-    let output = status_with_version("version", 1);
+    let output = status_with_raw_version("version", "1");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\nprotocol_version: 1\n"), "{stdout}");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "");
@@ -138,7 +129,7 @@ fn status_prints_the_daemon_protocol_version() {
 
 #[test]
 fn a_newer_daemon_protocol_gets_one_warning_line() {
-    let output = status_with_version("newer", 2);
+    let output = status_with_raw_version("newer", "2");
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         "warning: the Daemon speaks protocol 2, this xguitare knows 1; update xguitare\n"
@@ -161,7 +152,7 @@ fn status_with_raw_version(test: &str, raw: &str) -> Output {
         "\"ok\":true",
         &format!("\"ok\":true,\"protocol_version\":{raw}"),
     );
-    status_answered(&dir, &dir.derived_socket(), &[], reply)
+    answered(&dir, &dir.derived_socket(), &[], "status", reply)
 }
 
 #[test]
@@ -187,4 +178,12 @@ fn a_version_that_is_not_a_higher_whole_number_gives_no_warning_and_no_crash() {
             None => assert!(!stdout.contains("protocol_version"), "{raw}: {stdout}"),
         }
     }
+}
+
+#[test]
+fn only_a_status_reply_is_checked_for_a_newer_protocol() {
+    let dir = TempDir::new("list-version");
+    let reply = r#"{"ok":true,"active":0,"entries":[],"protocol_version":2}"#.to_string();
+    let output = answered(&dir, &dir.derived_socket(), &[], "list", reply);
+    assert_eq!(String::from_utf8_lossy(&output.stderr), "");
 }

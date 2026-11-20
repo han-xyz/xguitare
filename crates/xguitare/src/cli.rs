@@ -5,10 +5,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use xguitare_client::{TakesCleanStopped, Transport, clean_takes_in_batches};
+use xguitare_client::{
+    TakesCleanStopped, Transport, clean_takes_in_batches, newer_protocol_warning,
+};
 use xguitare_core::control::{
     IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
-    newer_protocol_warning,
 };
 
 use xguitare_core::project::shown_file_name;
@@ -54,7 +55,7 @@ pub fn run_cli(
             Request::Render { .. } => render_and_wait(transport, out, &req),
             req => {
                 let payload = request(transport, &req)?;
-                warnings = warning_lines(&payload);
+                warnings = warning_lines(&req, &payload);
                 render(&req, &payload)
             }
         }),
@@ -69,12 +70,14 @@ pub fn run_cli(
 }
 
 /// A `warning: ...` line for each of the reply's `warnings`, which `project_open` gives, and one for a `status` from a Daemon with a newer protocol.
-fn warning_lines(payload: &Value) -> String {
+fn warning_lines(req: &Request, payload: &Value) -> String {
     let mut lines = String::new();
     for warning in items(&payload["warnings"]) {
         let _ = writeln!(lines, "warning: {}", text(warning));
     }
-    if let Some(warning) = newer_protocol_warning(payload) {
+    if matches!(req, Request::Status)
+        && let Some(warning) = newer_protocol_warning(payload)
+    {
         let _ = writeln!(lines, "warning: {warning}");
     }
     lines

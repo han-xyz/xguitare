@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use config::current_uid;
 pub use config::{ClientConfig, ClientConfigError, check_private_dir};
-use xguitare_protocol::{Request, Response, Value};
+use xguitare_protocol::{PROTOCOL_VERSION, Request, Response, Value};
 
 mod config;
 
@@ -119,6 +119,16 @@ impl Transport for Reconnecting {
         }
         response
     }
+}
+
+/// The warning for a `status` reply whose `protocol_version` is higher than [`PROTOCOL_VERSION`]; `None` when it is not higher or is missing (an older Daemon).
+pub fn newer_protocol_warning(status: &Value) -> Option<String> {
+    let daemon = status["protocol_version"].as_u64()?;
+    (daemon > u64::from(PROTOCOL_VERSION)).then(|| {
+        format!(
+            "the Daemon speaks protocol {daemon}, this xguitare knows {PROTOCOL_VERSION}; update xguitare"
+        )
+    })
 }
 
 /// A batched clean-up that an error stopped.

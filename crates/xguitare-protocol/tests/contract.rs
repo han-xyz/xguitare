@@ -1,8 +1,7 @@
 use serde_json::json;
 use xguitare_protocol::{
     BankKind, CODE_STILL_CLOSING, IndexOrName, LoopRegion, PROTOCOL_VERSION, Position, RenderBits,
-    RenderRange, Request, Response, SendLevel, TransportAction, newer_protocol_warning,
-    position_frame, shown_file_name,
+    RenderRange, Request, Response, SendLevel, TransportAction, position_frame, shown_file_name,
 };
 
 fn name(text: &str) -> IndexOrName {
@@ -614,28 +613,5 @@ fn an_error_with_a_code_of_another_shape_parses_as_an_error_with_its_text() {
     assert_eq!(
         serde_json::to_string(&Response::err("boom")).unwrap(),
         r#"{"ok":false,"error":"boom"}"#
-    );
-}
-
-#[test]
-fn only_a_strictly_higher_integer_protocol_version_gets_a_warning() {
-    let warning = |version: &str| newer_protocol_warning(&serde_json::from_str(version).unwrap());
-    let text = |daemon: &str| {
-        Some(format!(
-            "the Daemon speaks protocol {daemon}, this xguitare knows 1; update xguitare"
-        ))
-    };
-    assert_eq!(warning(r#"{"ok":true}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":null}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":"2"}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":-3}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":2.5}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":1e30}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":0}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":1}"#), None);
-    assert_eq!(warning(r#"{"protocol_version":2}"#), text("2"));
-    assert_eq!(
-        warning(r#"{"protocol_version":18446744073709551615}"#),
-        text("18446744073709551615")
     );
 }

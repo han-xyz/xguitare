@@ -27,16 +27,6 @@ pub const CODE_STILL_CLOSING: &str = "still_closing";
 /// The Control API version a `status` reply carries as `protocol_version`. It goes up when a request or reply field is removed or changes meaning, never for an addition: clients ignore fields and error codes they do not know.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// The warning for a `status` reply whose `protocol_version` is higher than [`PROTOCOL_VERSION`]; `None` when it is not higher or is missing (an older Daemon).
-pub fn newer_protocol_warning(status: &Value) -> Option<String> {
-    let daemon = status["protocol_version"].as_u64()?;
-    (daemon > u64::from(PROTOCOL_VERSION)).then(|| {
-        format!(
-            "the Daemon speaks protocol {daemon}, this xguitare knows {PROTOCOL_VERSION}; update xguitare"
-        )
-    })
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
