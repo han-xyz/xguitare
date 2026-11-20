@@ -77,7 +77,8 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - `crossfade_ms` (above 0 to 1000) and `ir_max_ms` (above 0 to 10000) out of range, NaN or infinite are refused when the config loads.
 - A preamp `stages` change no longer jumps in level.
 - The CLI and the GUI refuse a fallback socket directory that is not yours or not mode 0700.
-- A Daemon the GUI started that exits before it answers (a bad config key, JACK not running) is no longer started again every 5 s behind a `Daemon disconnected` banner: the rack shows `The Daemon exited` with the Daemon's last stderr line, and the GUI waits for a Daemon you start.
+- A Daemon the GUI started that exits before it answers (a bad config key, JACK not running) is no longer started again every 5 s behind a `Daemon disconnected` banner: the rack shows the red `The Daemon exited` banner with the Daemon's last stderr line and when it starts again, and the GUI starts it again after a pause that grows from 5 s to 60 s; a Daemon you start is picked up at once.
+- A Daemon keeps running when its stderr goes away, such as one the GUI started after the GUI crashes: a failed log write is dropped instead of ending the Daemon.
 
 ### Known
 
