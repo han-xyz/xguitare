@@ -1,6 +1,6 @@
 # Control API
 
-The protocol a client uses to inspect and change the running Daemon: which Preset is active, the Bank, Parameter values and the Rack's layout. The `xguitare` CLI is one client of it; a GUI or script can be another. Request and response types are in `crates/xguitare-core/src/control.rs`; the socket server is `crates/xguitare/src/socket_server.rs`.
+The protocol a client uses to inspect and change the running Daemon: which Preset is active, the Bank, Parameter values and the Rack's layout. The `xguitare` CLI is one client of it; a GUI or script can be another. Request and response types are in the crate `xguitare-protocol` (`crates/xguitare-protocol/src/lib.rs`; `xguitare-core` re-exports them from `control` for now, see ADR-0006); the Daemon answers requests in `crates/xguitare-core/src/control.rs`, and the socket server is `crates/xguitare/src/socket_server.rs`.
 
 ## Transport
 
