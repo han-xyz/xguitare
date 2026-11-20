@@ -3047,26 +3047,31 @@ fn a_lost_daemon_shows_its_banner_and_pauses_the_rack() {
     assert_eq!(sent_now(&sent), []);
 }
 
-const DAEMON_EXIT_LINE: &str = "error: /home/me/.config/xguitare/config.toml: buffer_size = 0 is out of range; it must be a power of two from 16 to 4096";
+const DAEMON_EXIT_LINE: &str = "error: cannot open JACK client \"xguitare\" on server \"default\": Failure | ServerFailed; check that PipeWire is up (systemctl --user status pipewire wireplumber) and pipewire-jack puts libjack.so.0 first on the library path; see /usr/share/doc/pipewire/jack.md and /home/me/.config/xguitare/config.toml";
 
 #[test]
-fn a_daemon_that_exited_at_once_shows_its_last_line() {
-    assert_eq!(DAEMON_EXIT_LINE.chars().count(), 120);
-    let mut snapshot = funk_snapshot();
-    snapshot.link = Link::Exited {
-        status: "exit status 1".to_string(),
-        last_line: Some(format!("\u{1b}[31m{DAEMON_EXIT_LINE}\u{1b}[0m")),
-        retry_at: std::time::Instant::now() + std::time::Duration::from_secs(5),
-    };
-    snapshot.status = None;
-    snapshot.tuner = None;
+fn a_daemon_that_exited_at_once_shows_its_last_line_whole_on_hover() {
+    assert_eq!(DAEMON_EXIT_LINE.chars().count(), 300);
     for (size, name) in [
         (MIN_WINDOW, "daemon-exited-1024x640"),
         (DEFAULT_WINDOW, "daemon-exited-1280x800"),
     ] {
-        let (mut harness, _, _dir) = harness_with(size, snapshot.clone());
-        harness.get_by_label(&format!("The Daemon exited. {DAEMON_EXIT_LINE}"));
+        let mut snapshot = funk_snapshot();
+        snapshot.link = Link::Exited {
+            status: "exit status 1".to_string(),
+            last_line: Some(format!("\u{1b}[31m{DAEMON_EXIT_LINE}\u{1b}[0m")),
+            retry_at: std::time::Instant::now() + std::time::Duration::from_secs(40),
+        };
+        snapshot.status = None;
+        snapshot.tuner = None;
+        let (mut harness, _, _dir) = harness_with(size, snapshot);
+        harness.get_by_label_contains(&format!(
+            "The Daemon exited. {DAEMON_EXIT_LINE}. Controls are paused. Starting it again in "
+        ));
         write_png(&mut harness, name);
+        harness.get_by_role(Role::Alert).hover();
+        harness.run_steps(60);
+        harness.get_by_label(DAEMON_EXIT_LINE);
     }
 }
 

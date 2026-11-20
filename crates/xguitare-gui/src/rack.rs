@@ -17,7 +17,7 @@ use crate::eq_model::{
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
     CHEVRON_WIDTH, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged,
-    EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP, HiddenFixed, KnobKey, LayoutDrop, Link,
+    EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP, HiddenFixed, KnobKey, LayoutDrop, Link, LinkBanner,
     METER_FLOOR_DB, MOVE_BUTTON_GAP, MOVE_BUTTON_SIDE, MOVE_BUTTONS_WIDTH, Message, NO_SIGNAL,
     OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, RULE_WIDTH, RackItem, RackLayout,
     SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH,
@@ -31,8 +31,8 @@ use crate::model::{
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
 use crate::theme::{
-    self, ICON_STROKE_WIDTH, LINK_BANNER_EDGE_WIDTH, LINK_BANNER_HEIGHT, LINK_RING_RADIUS,
-    MUTED_ICON_SIZE, MUTED_ICON_WIDTH, Rgb, colour, palette,
+    self, ICON_STROKE_WIDTH, LINK_BANNER_EDGE_WIDTH, LINK_BANNER_ERROR_HEIGHT, LINK_BANNER_HEIGHT,
+    LINK_RING_RADIUS, MUTED_ICON_SIZE, MUTED_ICON_WIDTH, Rgb, colour, palette,
 };
 use crate::widgets::{self, KnobSize};
 
@@ -130,7 +130,7 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
     let muted_by_tuner = *view.tuner.open && *view.tuner.muted_by_us;
     let paused = snapshot.link != Link::Connected;
     if let Some(banner) = link_banner(&snapshot.link, view.knobs.now) {
-        link_banner_strip(ui, banner.title, &banner.detail);
+        link_banner_strip(ui, &banner);
     }
     if let Some(text) = mute_banner(snapshot.status.as_ref(), muted_by_tuner) {
         mute_banner_strip(ui, &text);
@@ -349,55 +349,98 @@ fn paint_muted_icon(painter: &Painter, left: Pos2, ink: Color32) {
     );
 }
 
-/// The open panel edged in the lit colour with a lit ring, as wide as the rack and above it: the title, and under it what the window does meanwhile.
-fn link_banner_strip(ui: &mut Ui, title: &str, detail: &str) {
+/// The open panel as wide as the rack and above it: the title, and under it what the window does meanwhile. A wait is edged in the lit colour with a lit ring; an error in the danger colour with a filled danger mark and a third line. The detail line, elided to fit, shows whole on hover.
+fn link_banner_strip(ui: &mut Ui, banner: &LinkBanner) {
     let colours = palette();
+    let (height, edge) = if banner.is_error {
+        (LINK_BANNER_ERROR_HEIGHT, colours.danger)
+    } else {
+        (LINK_BANNER_HEIGHT, colours.lit)
+    };
     let width = ui.available_width().min(RACK_MAX_WIDTH);
     let left = ui.cursor().left() + (ui.available_width() - width) / 2.0;
-    let rect = Rect::from_min_size(
-        pos2(left, ui.cursor().top()),
-        vec2(width, LINK_BANNER_HEIGHT),
-    );
+    let rect = Rect::from_min_size(pos2(left, ui.cursor().top()), vec2(width, height));
     let response = ui.allocate_rect(rect, Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, format!("{title}. {detail}")));
+    let label = match &banner.hint {
+        Some(hint) => format!("{}. {}. {hint}", banner.title, banner.detail),
+        None => format!("{}. {}", banner.title, banner.detail),
+    };
+    response.widget_info(|| WidgetInfo::labeled(Role::Alert, true, label.clone()));
+    let mark = pos2(
+        rect.left() + theme::SPACE_L + LINK_RING_RADIUS,
+        rect.center().y,
+    );
+    let text_left = mark.x + LINK_RING_RADIUS + theme::SPACE_M;
+    let text_width = rect.right() - theme::SPACE_L - text_left;
+    let line_height = ui
+        .painter()
+        .layout_no_wrap(banner.detail.clone(), theme::body(), colour(colours.text))
+        .size()
+        .y;
+    let elided = |text: &str| {
+        elide_to_width(text, text_width, |text| {
+            ui.painter()
+                .layout_no_wrap(text.to_string(), theme::body(), colour(colours.text))
+                .size()
+                .x
+        })
+    };
+    let detail = elided(&banner.detail);
+    let hint = banner.hint.as_deref().map(elided);
+    let (title_bottom, detail_top) = if hint.is_some() {
+        (
+            rect.center().y - line_height / 2.0 - 1.0,
+            rect.center().y - line_height / 2.0,
+        )
+    } else {
+        (rect.center().y - 1.0, rect.center().y + 1.0)
+    };
+    let detail_rect =
+        Rect::from_min_size(pos2(text_left, detail_top), vec2(text_width, line_height));
+    if detail != banner.detail {
+        ui.interact(detail_rect, response.id.with("detail"), Sense::hover())
+            .on_hover_text(&banner.detail);
+    }
     let painter = ui.painter();
     painter.rect(
         rect,
         theme::RADIUS_CONTROL,
         colour(colours.panel_open),
-        Stroke::new(LINK_BANNER_EDGE_WIDTH, colour(colours.lit)),
+        Stroke::new(LINK_BANNER_EDGE_WIDTH, colour(edge)),
         StrokeKind::Inside,
     );
-    let ring = pos2(
-        rect.left() + theme::SPACE_L + LINK_RING_RADIUS,
-        rect.center().y,
-    );
-    painter.circle_stroke(
-        ring,
-        LINK_RING_RADIUS,
-        Stroke::new(ICON_STROKE_WIDTH, colour(colours.lit)),
-    );
-    let text_left = ring.x + LINK_RING_RADIUS + theme::SPACE_M;
+    if banner.is_error {
+        painter.circle_filled(mark, LINK_RING_RADIUS, colour(colours.danger));
+    } else {
+        painter.circle_stroke(
+            mark,
+            LINK_RING_RADIUS,
+            Stroke::new(ICON_STROKE_WIDTH, colour(colours.lit)),
+        );
+    }
     painter.text(
-        pos2(text_left, rect.center().y - 1.0),
+        pos2(text_left, title_bottom),
         Align2::LEFT_BOTTOM,
-        title,
+        banner.title,
         theme::dialog_title(),
         colour(colours.text),
     );
-    let detail = elide_to_width(detail, rect.right() - theme::SPACE_L - text_left, |text| {
-        painter
-            .layout_no_wrap(text.to_string(), theme::body(), colour(colours.text))
-            .size()
-            .x
-    });
     painter.text(
-        pos2(text_left, rect.center().y + 1.0),
+        detail_rect.left_top(),
         Align2::LEFT_TOP,
         detail,
         theme::body(),
         colour(colours.text),
     );
+    if let Some(hint) = hint {
+        painter.text(
+            pos2(text_left, detail_rect.bottom() + 1.0),
+            Align2::LEFT_TOP,
+            hint,
+            theme::body(),
+            colour(colours.text),
+        );
+    }
 }
 
 /// How a unit's faceplate looks: its fill, its 1 px top edge, and the Rack position its ears show.

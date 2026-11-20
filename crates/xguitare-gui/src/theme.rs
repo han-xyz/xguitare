@@ -430,6 +430,8 @@ pub const MUTED_ICON_SIZE: f32 = SPACE_L;
 pub const MUTED_ICON_WIDTH: f32 = MUTED_ICON_SIZE * 1.5;
 /// The disconnected banner: two text lines, its lit edge and the ring before them.
 pub const LINK_BANNER_HEIGHT: f32 = 2.0 * CONTROL_HEIGHT + SPACE_S;
+/// The banner of a Daemon that exited: three text lines, its danger edge and the filled mark before them.
+pub const LINK_BANNER_ERROR_HEIGHT: f32 = 3.0 * CONTROL_HEIGHT + SPACE_S;
 pub const LINK_BANNER_EDGE_WIDTH: f32 = 2.0;
 pub const LINK_RING_RADIUS: f32 = SPACE_S;
 pub const TOAST_WIDTH: f32 = 330.0;
