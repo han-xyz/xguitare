@@ -549,6 +549,25 @@ fn unknown_cmd_is_error() {
 }
 
 #[test]
+fn error_replies_carry_no_code_except_still_closing() {
+    let (mut state, _audio, _dir) = state("no-codes");
+    let connection = open_connection(&mut state);
+    for line in [
+        r#"{"cmd":"bogus"}"#,
+        "{\"cmd\":",
+        r#"{"cmd":"load","preset":"Nope"}"#,
+        r#"{"cmd":"set","param":"nope.level","value":1}"#,
+        r#"{"cmd":"project_close"}"#,
+        r#"{"cmd":"project_open","name":"Absent","restore":false}"#,
+    ] {
+        let reply = handle_line(&mut state, None, connection, line).0;
+        let response: Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(response["ok"], false, "{line}: {reply}");
+        assert!(response.get("code").is_none(), "{line}: {reply}");
+    }
+}
+
+#[test]
 fn malformed_json_is_error() {
     let (mut state, _audio, _dir) = state("malformed");
     let connection = open_connection(&mut state);

@@ -777,6 +777,29 @@ fn only_a_closing_project_is_retried() {
 }
 
 #[test]
+fn a_retry_needs_the_code_or_exactly_the_old_text_without_one() {
+    let parsed = |line: &str| Ok(Response::from_line(line).unwrap());
+    assert!(still_closing(&parsed(
+        r#"{"ok":false,"error":"a project is still closing; try again","code":"still_closing"}"#
+    )));
+    assert!(still_closing(&parsed(
+        r#"{"ok":false,"error":"a project is still closing; try again","code":null}"#
+    )));
+    assert!(!still_closing(&parsed(
+        r#"{"ok":false,"error":"a project is still closing; try again later"}"#
+    )));
+    assert!(!still_closing(&parsed(
+        r#"{"ok":false,"error":"x: a project is still closing; try again"}"#
+    )));
+    assert!(!still_closing(&parsed(
+        r#"{"ok":false,"error":"closing, please wait","code":"busy"}"#
+    )));
+    assert!(!still_closing(&parsed(
+        r#"{"ok":false,"error":"no project 'x'","code":"still_closing_not"}"#
+    )));
+}
+
+#[test]
 fn project_save_reports_its_path() {
     let saved = Ok(Response::Ok(json!({"path": "/x/demo-song/project.toml"})));
     assert_eq!(

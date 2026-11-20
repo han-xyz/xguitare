@@ -705,3 +705,81 @@ fn a_newer_daemon_protocol_shows_one_notice_per_connection() {
         )]
     );
 }
+
+fn notices_for_connections(test: &str, versions: &[&str]) -> Vec<Message> {
+    let versions: Vec<String> = versions.iter().map(ToString::to_string).collect();
+    let dir = temp_dir(test);
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let (answered, done) = mpsc::channel();
+    thread::spawn(move || {
+        for version in &versions {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(&stream);
+            let mut writer = &stream;
+            let mut line = String::new();
+            let mut statuses = 0;
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                let request: Value = serde_json::from_str(&line).unwrap();
+                let cmd = request["cmd"].as_str().unwrap();
+                let body = match cmd {
+                    "status" => format!(
+                        r#"{{"ok":true,"preset":"Clean","program":0,"revision":1{version}}}"#
+                    ),
+                    cmd => reply(cmd).to_string(),
+                };
+                writer.write_all(format!("{body}\n").as_bytes()).unwrap();
+                line.clear();
+                if cmd == "status" {
+                    statuses += 1;
+                    if statuses == 3 {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = answered.send(());
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    done.recv_timeout(Duration::from_secs(10)).unwrap();
+    thread::sleep(Duration::from_millis(300));
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    let mut seen: Vec<(Message, Instant)> = Vec::new();
+    for (message, at) in snapshots.try_iter().filter_map(|s| s.last_message) {
+        if !seen.iter().any(|(_, shown_at)| *shown_at == at) {
+            seen.push((message, at));
+        }
+    }
+    seen.into_iter()
+        .map(|(message, _)| message)
+        .filter(|message| matches!(message, Message::Notice(_)))
+        .collect()
+}
+
+#[test]
+fn a_reconnect_to_a_newer_daemon_shows_the_notice_again() {
+    let notice = Message::Notice(
+        "the Daemon speaks protocol 2, this xguitare knows 1; update xguitare".to_string(),
+    );
+    assert_eq!(
+        notices_for_connections(
+            "newer-reconnect",
+            &[r#","protocol_version":2"#, r#","protocol_version":2"#]
+        ),
+        [notice.clone(), notice]
+    );
+}
+
+#[test]
+fn no_notice_for_a_daemon_without_a_higher_version() {
+    for (test, version) in [
+        ("no-version", ""),
+        ("same-version", r#","protocol_version":1"#),
+        ("text-version", r#","protocol_version":"9""#),
+        ("negative-version", r#","protocol_version":-4"#),
+    ] {
+        assert_eq!(notices_for_connections(test, &[version]), [], "{test}");
+    }
+}

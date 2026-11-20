@@ -154,3 +154,37 @@ fn a_status_without_a_version_prints_no_version_line() {
     assert!(!stdout.contains("protocol_version"), "{stdout}");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "");
 }
+
+fn status_with_raw_version(test: &str, raw: &str) -> Output {
+    let dir = TempDir::new(test);
+    let reply = STATUS_REPLY.replace(
+        "\"ok\":true",
+        &format!("\"ok\":true,\"protocol_version\":{raw}"),
+    );
+    status_answered(&dir, &dir.derived_socket(), &[], reply)
+}
+
+#[test]
+fn a_version_that_is_not_a_higher_whole_number_gives_no_warning_and_no_crash() {
+    for (raw, shown) in [
+        ("\"2\"", None),
+        ("-1", None),
+        ("2.5", None),
+        ("null", None),
+        ("100000000000000000000000", None),
+        ("0", Some("0")),
+        ("1", Some("1")),
+    ] {
+        let output = status_with_raw_version("odd-version", raw);
+        assert_status_printed(&output);
+        assert_eq!(String::from_utf8_lossy(&output.stderr), "", "{raw}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        match shown {
+            Some(n) => assert!(
+                stdout.contains(&format!("\nprotocol_version: {n}\n")),
+                "{raw}: {stdout}"
+            ),
+            None => assert!(!stdout.contains("protocol_version"), "{raw}: {stdout}"),
+        }
+    }
+}
