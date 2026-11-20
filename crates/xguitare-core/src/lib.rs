@@ -1,5 +1,6 @@
 mod address;
 pub mod arrangement;
+pub mod atomic_file;
 mod bank;
 pub mod build;
 mod config;

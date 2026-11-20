@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::control::{slug, temp_path};
+use crate::atomic_file::{slug, temp_path};
 use crate::preset::{
     CABINET_TYPE, ModuleEntry, module_entries, parse_modules, parse_stereo_modules,
 };

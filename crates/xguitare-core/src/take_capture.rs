@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use hound::WavReader;
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use crate::control::slug;
+use crate::atomic_file::slug;
 use crate::project::{Item, Project, TAKES_DIR, Take, Track};
 
 /// A Take ring holds at least this many seconds, so the disk thread may fall that far behind before frames drop.

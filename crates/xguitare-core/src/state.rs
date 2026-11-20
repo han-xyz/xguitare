@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::control::temp_path;
+use crate::atomic_file::temp_path;
 use crate::metronome::{BAD_BPM, BAD_VOLUME, VOLUME_DB};
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
 use crate::{BankKind, Ports};

@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::{self, ErrorKind, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::fs;
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 
 use serde::de::{Deserializer, Error as _};
 use serde::ser::{SerializeMap, Serializer};
@@ -14,6 +13,7 @@ use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 
 pub use serde_json::Value;
 
+use crate::atomic_file::{slug, write_new, write_through};
 use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
 use crate::engine::{
     Command, EngineQueues, EngineShared, FadeLengths, MeterPoint, MixMeters, SWITCHER_MAX_FRAMES,
@@ -66,8 +66,6 @@ const PROJECTS_DIR_NOT_ABSOLUTE: &str = "projects_dir must be an absolute path";
 const PRESET_INTO_TRACK: &str = "a Preset loads only into a Track";
 const OFF: &str = "off";
 const BAD_LEVEL: &str = "level must be a number in dB or \"off\"";
-/// Linux `EPERM`, which `hard_link` returns on a filesystem without hard links; `EACCES` shares its `ErrorKind`.
-const EPERM: i32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -1176,19 +1174,6 @@ fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<Pat
     Err(format!("cannot save {}: file exists", file.display()))
 }
 
-/// The name lowercased, ASCII letters and digits kept, every other run of characters one `-`, no `-` at either end.
-pub(crate) fn slug(name: &str) -> String {
-    let mut slug = String::new();
-    for c in name.to_lowercase().chars() {
-        if c.is_ascii_alphanumeric() {
-            slug.push(c);
-        } else if !slug.is_empty() && !slug.ends_with('-') {
-            slug.push('-');
-        }
-    }
-    slug.trim_end_matches('-').to_string()
-}
-
 /// One more than the highest number before the first `-` among the Bank's file names, at most `u64::MAX`.
 fn next_prefix(bank: &Bank) -> u64 {
     bank.entries
@@ -1204,85 +1189,6 @@ fn next_prefix(bank: &Bank) -> u64 {
         .max()
         .unwrap_or(0)
         .saturating_add(1)
-}
-
-/// Replaces the file `path` names, through a symlink, by a temp file and rename beside it, keeping the old file's mode.
-fn write_through(path: &Path, text: &str) -> io::Result<()> {
-    let target = if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
-        fs::canonicalize(path)?
-    } else {
-        path.to_path_buf()
-    };
-    let permissions = match fs::metadata(&target) {
-        Ok(meta) => Some(meta.permissions()),
-        Err(err) if err.kind() == ErrorKind::NotFound => None,
-        Err(err) => return Err(err),
-    };
-    let tmp = temp_path(&target);
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    if let Some(permissions) = &permissions {
-        options.mode(permissions.mode());
-    }
-    let mut file = options.open(&tmp)?;
-    let written = file
-        .write_all(text.as_bytes())
-        .and_then(|()| match permissions {
-            Some(permissions) => file.set_permissions(permissions),
-            None => Ok(()),
-        })
-        .and_then(|()| fs::rename(&tmp, &target));
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    written
-}
-
-/// Creates the file `path` names with `text` by `link`ing a temp file beside it to `path` (`save` with `as` passes `fs::hard_link`), so a file or symlink already there fails with `AlreadyExists` and is left as it is. When the filesystem has no hard links (EPERM, EOPNOTSUPP, EXDEV), `path` is created and written directly, still never replacing a file.
-///
-/// # Errors
-///
-/// `AlreadyExists` when `path` already names a file or symlink; the I/O error when the temp file or `path` cannot be created or written.
-pub fn write_new(
-    path: &Path,
-    text: &str,
-    link: impl Fn(&Path, &Path) -> io::Result<()>,
-) -> io::Result<()> {
-    let tmp = temp_path(path);
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    let written = file
-        .write_all(text.as_bytes())
-        .and_then(|()| link(&tmp, path));
-    let _ = fs::remove_file(&tmp);
-    match written {
-        Err(err) if has_no_hard_links(&err) => create_and_write(path, text),
-        written => written,
-    }
-}
-
-pub(crate) fn has_no_hard_links(err: &io::Error) -> bool {
-    matches!(
-        err.kind(),
-        ErrorKind::Unsupported | ErrorKind::CrossesDevices
-    ) || err.raw_os_error() == Some(EPERM)
-}
-
-fn create_and_write(path: &Path, text: &str) -> io::Result<()> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    let written = file.write_all(text.as_bytes());
-    if written.is_err() {
-        let _ = fs::remove_file(path);
-    }
-    written
-}
-
-/// `<file name>.<pid>.<n>.tmp` beside `target`, unique within this process.
-pub(crate) fn temp_path(target: &Path) -> PathBuf {
-    static SAVES: AtomicU64 = AtomicU64::new(0);
-    let n = SAVES.fetch_add(1, Ordering::Relaxed);
-    let mut name = target.file_name().unwrap_or_default().to_owned();
-    name.push(format!(".{}.{n}.tmp", std::process::id()));
-    target.with_file_name(name)
 }
 
 fn modules() -> Value {

@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use serde_json::{Value, json};
+use xguitare_core::atomic_file::write_new;
 use xguitare_core::control::{
     EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, follow_sample_rate,
     handle, handle_line, needs_reprepare, open_connection, passthrough_rack, prepared_max_frames,
-    reprepare, write_new,
+    reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,

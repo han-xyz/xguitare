@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::Config;
 use crate::arrangement::{Arrangement, ArrangementCommand};
+use crate::atomic_file::has_no_hard_links;
 use crate::build::{ArrangementError, build_arrangement};
-use crate::control::has_no_hard_links;
 use crate::project::{Item, Project};
 
 /// The most frames one [`Render::step`] renders.
