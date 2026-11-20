@@ -764,11 +764,7 @@ fn a_newer_autosave_is_offered_once_opened() {
 
 #[test]
 fn only_a_closing_project_is_retried() {
-    let error = |text: &str| {
-        Ok(Response::Err {
-            error: text.to_string(),
-        })
-    };
+    let error = |text: &str| Ok(Response::err(text.to_string()));
     assert!(still_closing(&error(
         "a project is still closing; try again"
     )));

@@ -2497,7 +2497,7 @@ pub fn takes_cleaned_message(
         Err(TakesCleanStopped {
             cleaned: None,
             error,
-        }) => return response_message(req, Ok(Response::Err { error })),
+        }) => return response_message(req, Ok(Response::err(error))),
         Err(TakesCleanStopped {
             cleaned: Some(payload),
             error,

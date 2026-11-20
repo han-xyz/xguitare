@@ -786,7 +786,7 @@ fn handle_from(
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
-        Err(error) => Response::Err { error },
+        Err(error) => Response::err(error),
     };
     (response, warnings)
 }
@@ -804,12 +804,7 @@ pub fn handle_line(
 ) -> (String, Vec<BuildWarning>) {
     let (response, warnings) = match serde_json::from_str(line) {
         Ok(req) => handle_from(state, ports, connection, req),
-        Err(err) => (
-            Response::Err {
-                error: format!("invalid request: {err}"),
-            },
-            Vec::new(),
-        ),
+        Err(err) => (Response::err(format!("invalid request: {err}")), Vec::new()),
     };
     let line = serde_json::to_string(&response).expect("a Response always serialises to JSON");
     (line, warnings)
@@ -939,6 +934,12 @@ impl Request {
 }
 
 impl Response {
+    pub fn err(error: impl Into<String>) -> Response {
+        Response::Err {
+            error: error.into(),
+        }
+    }
+
     /// # Errors
     ///
     /// The JSON error when `line` is not a Response.
@@ -1763,7 +1764,7 @@ impl<'de> Deserialize<'de> for Response {
         match fields.remove("ok") {
             Some(Value::Bool(true)) => Ok(Response::Ok(Value::Object(fields))),
             Some(Value::Bool(false)) => match fields.remove("error") {
-                Some(Value::String(error)) => Ok(Response::Err { error }),
+                Some(Value::String(error)) => Ok(Response::err(error)),
                 _ => Err(D::Error::custom(
                     "error response without an \"error\" string",
                 )),

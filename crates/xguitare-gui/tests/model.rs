@@ -438,11 +438,7 @@ const FAILURE_TITLES: [(&str, &str); 46] = [
 
 #[test]
 fn a_failed_command_names_its_action() {
-    let refused = || {
-        Ok(Response::Err {
-            error: "refused".to_string(),
-        })
-    };
+    let refused = || Ok(Response::err("refused".to_string()));
     for (request, title) in FAILURE_TITLES {
         let request: Request =
             serde_json::from_str(request).unwrap_or_else(|err| panic!("{request}: {err}"));
@@ -712,9 +708,7 @@ fn feedback_only_save_and_errors() {
         response_message(&Request::Save { name: None }, saved),
         Some(Message::Notice("saved /bank/01-clean.toml".to_string()))
     );
-    let busy = Ok(Response::Err {
-        error: "engine busy".to_string(),
-    });
+    let busy = Ok(Response::err("engine busy".to_string()));
     let set = Request::Set {
         param: "preamp.gain".to_string(),
         value: 42.0,
@@ -833,9 +827,7 @@ fn hold_cleared_on_set_error() {
         bus: None,
         master: false,
     };
-    let busy = Ok(Response::Err {
-        error: "engine busy".to_string(),
-    });
+    let busy = Ok(Response::err("engine busy".to_string()));
     let failed = failed_set(&set, &busy).unwrap();
     assert_eq!(failed, "preamp.gain");
     throttle.forget(&failed);
@@ -2085,9 +2077,7 @@ fn refused_remove_names_its_id_only_on_an_error() {
         bus: None,
         master: false,
     };
-    let refused = Ok(Response::Err {
-        error: "busy".into(),
-    });
+    let refused = Ok(Response::err("busy"));
     assert_eq!(refused_remove(&remove, &refused).as_deref(), Some("preamp"));
     assert_eq!(refused_remove(&remove, &Ok(Response::Ok(json!({})))), None);
     assert_eq!(
