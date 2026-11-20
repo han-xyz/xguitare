@@ -20,7 +20,7 @@ use crate::project_model::{autosave_offer, item_blocks, project_name, still_clos
 use serde_json::Value;
 use tracing::{info, warn};
 use xguitare_client::{ClientConfig, ClientError, Connection, clean_takes_in_batches};
-use xguitare_protocol::{Request, Response, STILL_CLOSING};
+use xguitare_protocol::{Request, Response, STILL_CLOSING, newer_protocol_warning};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -448,6 +448,10 @@ impl Client {
         if self.snapshot.link != Link::Connected {
             info!("connected to {}", self.config.socket.display());
             self.snapshot.link = Link::Connected;
+            if let Some(warning) = newer_protocol_warning(&status) {
+                warn!("{warning}");
+                self.snapshot.last_message = Some((Message::Notice(warning), Instant::now()));
+            }
         }
         if !self.modules_fetched {
             self.fetch_modules();

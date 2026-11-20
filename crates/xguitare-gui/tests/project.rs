@@ -768,6 +768,10 @@ fn only_a_closing_project_is_retried() {
     assert!(still_closing(&error(
         "a project is still closing; try again"
     )));
+    assert!(still_closing(&Ok(Response::err_code(
+        "closing, please wait",
+        "still_closing"
+    ))));
     assert!(!still_closing(&error("no project 'x'")));
     assert!(!still_closing(&Ok(Response::Ok(json!({})))));
 }

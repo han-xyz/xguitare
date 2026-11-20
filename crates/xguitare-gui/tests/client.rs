@@ -673,3 +673,35 @@ fn a_clean_up_in_batches_shows_an_error_with_the_files_of_every_batch_not_delete
         }
     );
 }
+
+#[test]
+fn a_newer_daemon_protocol_shows_one_notice_per_connection() {
+    const NEWER_STATUS: &str =
+        r#"{"ok":true,"preset":"Clean","program":0,"revision":1,"protocol_version":2}"#;
+    let dir = temp_dir("newer-protocol");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let received = serve_and_record(listener, |cmd| match cmd {
+        "status" => NEWER_STATUS.to_string(),
+        cmd => reply(cmd).to_string(),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    for _ in 0..4 {
+        next_arrival(&received, "status");
+    }
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    let mut shown: Vec<(Message, Instant)> = snapshots
+        .try_iter()
+        .filter_map(|snapshot| snapshot.last_message)
+        .collect();
+    shown.dedup();
+    let messages: Vec<Message> = shown.into_iter().map(|(message, _)| message).collect();
+    assert_eq!(
+        messages,
+        [Message::Notice(
+            "the Daemon speaks protocol 2, this xguitare knows 1; update xguitare".to_string()
+        )]
+    );
+}

@@ -4,7 +4,8 @@ use std::ops::Range;
 use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_protocol::{
-    FRAMES_PER_PEAK, LoopRegion, Request, Response, SILENCE_DB, STILL_CLOSING, TransportAction,
+    CODE_STILL_CLOSING, FRAMES_PER_PEAK, LoopRegion, Request, Response, SILENCE_DB, STILL_CLOSING,
+    TransportAction,
 };
 
 use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
@@ -1444,8 +1445,15 @@ pub fn autosave_offer(
     })
 }
 
+/// Whether the Daemon answered that a Project is still closing: by its `code`, or by the text from a Daemon that sends no codes.
 pub fn still_closing(response: &Result<Response, ClientError>) -> bool {
-    matches!(response, Ok(Response::Err { error, .. }) if error == STILL_CLOSING)
+    match response {
+        Ok(Response::Err {
+            code: Some(code), ..
+        }) => code == CODE_STILL_CLOSING,
+        Ok(Response::Err { error, code: None }) => error == STILL_CLOSING,
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
