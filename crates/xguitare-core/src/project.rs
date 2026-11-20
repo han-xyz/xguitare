@@ -12,6 +12,8 @@ use crate::atomic_file::{slug, temp_path};
 use crate::preset::{
     CABINET_TYPE, ModuleEntry, module_entries, parse_modules, parse_stereo_modules,
 };
+pub(crate) use crate::protocol::is_hidden_char;
+pub use crate::protocol::{LoopRegion, shown_file_name};
 use crate::{Preset, PresetError, PresetModule};
 
 pub const PROJECT_FILE: &str = "project.toml";
@@ -53,15 +55,6 @@ pub struct Project {
     pub next_item_id: u64,
     pub buses: Vec<Bus>,
     pub master: Master,
-}
-
-/// Start and end in frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoopRegion {
-    pub start: u64,
-    pub end: u64,
-    pub on: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -836,24 +829,6 @@ pub(crate) fn check_track(track: &Track) -> Result<(), ProjectError> {
 )]
 fn is_zero(frames: &u64) -> bool {
     *frames == 0
-}
-
-/// `name` with each control character and each Unicode bidi override or isolate escaped as `escape_debug` writes it, so a file name shown to people reads as the name it is.
-pub fn shown_file_name(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if is_hidden_char(c) {
-                c.escape_debug().to_string()
-            } else {
-                c.to_string()
-            }
-        })
-        .collect()
-}
-
-/// A control character, or a bidi override or isolate (U+202A–U+202E, U+2066–U+2069), which can make shown text read as other text.
-pub(crate) fn is_hidden_char(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 /// Whether `file` is `takes/<name>.wav`: one file directly in the Project's `takes/` folder.

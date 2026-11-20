@@ -70,3 +70,30 @@ impl From<RenderBits> for BitsOnWire {
         }
     }
 }
+
+/// Start and end in frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoopRegion {
+    pub start: u64,
+    pub end: u64,
+    pub on: bool,
+}
+
+/// `name` with each control character and each Unicode bidi override or isolate escaped as `escape_debug` writes it, so a file name shown to people reads as the name it is.
+pub fn shown_file_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if is_hidden_char(c) {
+                c.escape_debug().to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
+/// A control character, or a bidi override or isolate (U+202A–U+202E, U+2066–U+2069), which can make shown text read as other text.
+pub(crate) fn is_hidden_char(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
