@@ -32,7 +32,7 @@ pub mod watch;
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
 pub use bank::{Bank, BankEntry};
 pub use config::{
-    AUTO_PORT, BankKind, Config, ConfigError, Ports, SOCKET_DIR_MODE, SocketDirError, current_uid,
+    AUTO_PORT, BankKind, Config, ConfigError, Ports, SOCKET_DIR_MODE, SocketDirError,
     secure_socket_dir,
 };
 pub use ir::{IrError, load_ir};

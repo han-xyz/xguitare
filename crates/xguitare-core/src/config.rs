@@ -339,7 +339,7 @@ fn socket_dir_error(dir: &Path, reason: String) -> SocketDirError {
 /// # Errors
 ///
 /// The I/O error when `/proc/self` cannot be read.
-pub fn current_uid() -> std::io::Result<u32> {
+pub(crate) fn current_uid() -> std::io::Result<u32> {
     Ok(fs::metadata("/proc/self")?.uid())
 }
 
