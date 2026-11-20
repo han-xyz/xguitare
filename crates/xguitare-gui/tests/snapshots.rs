@@ -3054,8 +3054,9 @@ fn a_daemon_that_exited_at_once_shows_its_last_line() {
     assert_eq!(DAEMON_EXIT_LINE.chars().count(), 120);
     let mut snapshot = funk_snapshot();
     snapshot.link = Link::Exited {
-        status: "exit status: 1".to_string(),
+        status: "exit status 1".to_string(),
         last_line: Some(format!("\u{1b}[31m{DAEMON_EXIT_LINE}\u{1b}[0m")),
+        retry_at: std::time::Instant::now() + std::time::Duration::from_secs(5),
     };
     snapshot.status = None;
     snapshot.tuner = None;

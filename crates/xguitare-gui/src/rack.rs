@@ -129,8 +129,8 @@ pub fn rack_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut RackView) -> Vec<C
     let order = view.layout.order(&ids);
     let muted_by_tuner = *view.tuner.open && *view.tuner.muted_by_us;
     let paused = snapshot.link != Link::Connected;
-    if let Some((title, detail)) = link_banner(&snapshot.link, view.knobs.now) {
-        link_banner_strip(ui, title, &detail);
+    if let Some(banner) = link_banner(&snapshot.link, view.knobs.now) {
+        link_banner_strip(ui, banner.title, &banner.detail);
     }
     if let Some(text) = mute_banner(snapshot.status.as_ref(), muted_by_tuner) {
         mute_banner_strip(ui, &text);

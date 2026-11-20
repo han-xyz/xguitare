@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::process::{Child, Command as Process, Stdio};
+use std::process::{Child, Command as Process, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
@@ -13,8 +14,8 @@ use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::model::{
     Command, Link, Message, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn,
     failed_set, failure_title, ir_names, may_start_daemon, module_types, param_rows,
-    refresh_decision, refused_remove, refused_render, requests_until_quit, response_message,
-    spawn_policy, takes_cleaned_message,
+    refresh_decision, refused_remove, refused_render, requests_until_quit, respawn_delay,
+    response_message, spawn_policy, takes_cleaned_message,
 };
 use crate::project_model::{autosave_offer, item_blocks, project_name, still_closing};
 use serde_json::Value;
@@ -26,6 +27,9 @@ pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const DAEMON_EXECUTABLE: &str = "xguitare";
 const REOPEN_TRIES: u32 = 40;
+const KEPT_LINE_MAX: usize = 4_096;
+const STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+const STDERR_DRAIN_POLL: Duration = Duration::from_millis(10);
 
 pub fn spawn(
     config: ClientConfig,
@@ -56,6 +60,10 @@ struct Client {
     daemon: Option<Child>,
     /// Copies the started Daemon's stderr to ours and ends with its last non-empty line.
     daemon_stderr: Option<JoinHandle<Option<String>>>,
+    /// Whether a Daemon answered a `status` since the last spawn.
+    daemon_answered: bool,
+    /// The started Daemons that exited before answering since the last connection.
+    early_exits: u32,
     revision: Option<u64>,
     modules_fetched: bool,
     modules_warned: bool,
@@ -87,6 +95,8 @@ impl Client {
             last_spawn: None,
             daemon: None,
             daemon_stderr: None,
+            daemon_answered: false,
+            early_exits: 0,
             revision: None,
             modules_fetched: false,
             modules_warned: false,
@@ -443,7 +453,7 @@ impl Client {
         }
         self.failures += 1;
         if self.daemon.is_none()
-            && may_start_daemon(&self.snapshot.link)
+            && may_start_daemon(&self.snapshot.link, now)
             && spawn_policy(self.failures, self.last_spawn, now)
         {
             self.spawn_daemon(&err, now);
@@ -451,6 +461,8 @@ impl Client {
     }
 
     fn on_status(&mut self, status: Value) {
+        self.daemon_answered = true;
+        self.early_exits = 0;
         if self.snapshot.link != Link::Connected {
             info!("connected to {}", self.config.socket.display());
             self.snapshot.link = Link::Connected;
@@ -671,13 +683,16 @@ impl Client {
         self.projects_fetched = false;
         self.snapshot.status = None;
         self.snapshot.tuner = None;
-        self.snapshot.link = Link::Disconnected {
-            since: Instant::now(),
-        };
+        if !matches!(self.snapshot.link, Link::Exited { .. }) {
+            self.snapshot.link = Link::Disconnected {
+                since: Instant::now(),
+            };
+        }
     }
 
     fn spawn_daemon(&mut self, reason: &ClientError, now: Instant) {
         self.last_spawn = Some(now);
+        self.daemon_answered = false;
         let executable = daemon_executable();
         let mut process = Process::new(&executable);
         if let Some(path) = &self.config_path {
@@ -700,7 +715,9 @@ impl Client {
                     .take()
                     .map(|stderr| thread::spawn(|| copy_stderr(stderr)));
                 self.daemon = Some(child);
-                self.snapshot.link = Link::Starting { since: now };
+                if !matches!(self.snapshot.link, Link::Exited { .. }) {
+                    self.snapshot.link = Link::Starting { since: now };
+                }
             }
             Err(err) => warn!("cannot start daemon {}: {err}", executable.display()),
         }
@@ -726,15 +743,20 @@ impl Client {
             .daemon_stderr
             .take()
             .and_then(|reader| reader.join().ok().flatten());
-        if matches!(self.snapshot.link, Link::Starting { .. }) {
-            self.snapshot.link = match status {
-                Some(status) => Link::Exited {
-                    status: status.to_string(),
-                    last_line,
-                },
-                None => Link::Disconnected { since: now },
-            };
+        if self.daemon_answered {
+            return;
         }
+        self.snapshot.link = match status {
+            Some(status) => {
+                self.early_exits += 1;
+                Link::Exited {
+                    status: exit_status_text(status),
+                    last_line,
+                    retry_at: now + respawn_delay(self.early_exits),
+                }
+            }
+            None => Link::Disconnected { since: now },
+        };
     }
 
     /// SIGTERM lets the Daemon disconnect from JACK and remove its socket; SIGKILL only after the timeout.
@@ -751,6 +773,7 @@ impl Client {
         while Instant::now() < deadline {
             match child.try_wait() {
                 Ok(Some(status)) => {
+                    self.drain_daemon_stderr();
                     info!("daemon stopped: {status}");
                     return;
                 }
@@ -764,6 +787,21 @@ impl Client {
         warn!("daemon did not stop; killing it");
         if let Err(err) = child.kill().and_then(|()| child.wait().map(drop)) {
             warn!("cannot kill daemon: {err}");
+        }
+        self.drain_daemon_stderr();
+    }
+
+    /// Waits a bounded time for the reader to copy the last lines of a reaped Daemon: a process that inherited the pipe may hold it open.
+    fn drain_daemon_stderr(&mut self) {
+        let Some(reader) = self.daemon_stderr.take() else {
+            return;
+        };
+        let deadline = Instant::now() + STDERR_DRAIN_TIMEOUT;
+        while !reader.is_finished() && Instant::now() < deadline {
+            thread::sleep(STDERR_DRAIN_POLL);
+        }
+        if reader.is_finished() {
+            let _ = reader.join();
         }
     }
 }
@@ -788,22 +826,36 @@ fn log_rack_ir(response: &Result<Response, ClientError>) {
     }
 }
 
-/// Each line goes to our stderr as the Daemon wrote it, so the log reads as if the Daemon wrote there itself.
+/// Each line goes to our stderr as the Daemon wrote it, so the log reads as if the Daemon wrote there itself; only the first [`KEPT_LINE_MAX`] bytes of a line are kept.
 fn copy_stderr(stderr: impl Read) -> Option<String> {
     let mut reader = BufReader::new(stderr);
-    let mut line = Vec::new();
+    let mut piece = Vec::new();
     let mut last = None;
+    let mut starts_a_line = true;
     loop {
-        line.clear();
-        match reader.read_until(b'\n', &mut line) {
+        piece.clear();
+        match (&mut reader)
+            .take(KEPT_LINE_MAX as u64)
+            .read_until(b'\n', &mut piece)
+        {
             Ok(0) | Err(_) => return last,
             Ok(_) => {}
         }
-        let _ = io::stderr().write_all(&line);
-        let text = String::from_utf8_lossy(&line);
-        if !text.trim().is_empty() {
+        let _ = io::stderr().write_all(&piece);
+        let text = String::from_utf8_lossy(&piece);
+        if starts_a_line && !text.trim().is_empty() {
             last = Some(text.trim_end().to_string());
         }
+        starts_a_line = piece.ends_with(b"\n");
+    }
+}
+
+/// `exit status 1` or `signal 9`, as a sentence says it.
+fn exit_status_text(status: ExitStatus) -> String {
+    match (status.code(), status.signal()) {
+        (Some(code), _) => format!("exit status {code}"),
+        (None, Some(signal)) => format!("signal {signal}"),
+        (None, None) => status.to_string(),
     }
 }
 

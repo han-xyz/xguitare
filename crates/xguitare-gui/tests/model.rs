@@ -21,17 +21,19 @@ use xguitare_gui::model::{
     counts_toward_spawn, ear_holes, elide_to_width, engine_readout, esc_dismisses_toast,
     failed_set, filter_bank, forget_removed_units, format_value, in_tune, ir_names, key_step,
     key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
-    knob_value_from_drag, ladder_segments, latency_ms, may_start_daemon, module_types, move_target,
-    open_units_from_string, open_units_to_string, param_label, param_rows, parse_typed_value,
-    peak_db, peak_text, port_choices, quit_commands, rack_channels, refresh_decision,
-    refused_remove, remember_removes, requests_until_quit, response_message, set_ports_command,
-    set_settings_command, settings_draft, shortcuts_active, spawn_policy, tuner_header_text,
-    tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
+    knob_value_from_drag, ladder_segments, latency_ms, link_banner, may_start_daemon, module_types,
+    move_target, open_units_from_string, open_units_to_string, param_label, param_rows,
+    parse_typed_value, peak_db, peak_text, port_choices, quit_commands, rack_channels,
+    refresh_decision, refused_remove, remember_removes, requests_until_quit, respawn_delay,
+    response_message, set_ports_command, set_settings_command, settings_draft, shortcuts_active,
+    spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text, typed_value,
+    unit_suffix,
 };
 use xguitare_gui::model::{
-    CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RackItem, RemovedUnit, Restore, ScreenRect,
-    UnitStyle, bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects, knob_arcs,
-    knob_origin, module_title, mute_banner, palette_place, paused, restore, shown_undo, unit_style,
+    CLOSED_KNOB_WIDTH, Dragged, KnobArcs, LinkBanner, Outgoing, RackItem, RemovedUnit, Restore,
+    ScreenRect, UnitStyle, bypassed, closed_unit_rows, drag_outcome, drop_slot, focus_ring_rects,
+    knob_arcs, knob_origin, module_title, mute_banner, palette_place, paused, restore, shown_undo,
+    unit_style,
 };
 use xguitare_gui::model::{
     ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
@@ -213,10 +215,13 @@ fn refresh_decision_on_revision_change() {
 #[test]
 fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
     let now = Instant::now();
-    assert_eq!(
-        xguitare_gui::model::link_banner(&Link::Connected, now),
-        None
-    );
+    assert_eq!(link_banner(&Link::Connected, now), None);
+    let waiting = |title: &'static str, detail: &str| LinkBanner {
+        title,
+        detail: detail.to_string(),
+        hint: None,
+        is_error: false,
+    };
     for (millis, detail) in [
         (0, "Reconnecting\u{2026} Controls are paused."),
         (1_200, "Reconnecting for 1 s. Controls are paused."),
@@ -224,20 +229,20 @@ fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
     ] {
         let since = now.checked_sub(Duration::from_millis(millis)).unwrap();
         assert_eq!(
-            xguitare_gui::model::link_banner(&Link::Disconnected { since }, now),
-            Some(("Daemon disconnected", detail.to_string()))
+            link_banner(&Link::Disconnected { since }, now),
+            Some(waiting("Daemon disconnected", detail))
         );
     }
     assert_eq!(
-        xguitare_gui::model::link_banner(
+        link_banner(
             &Link::Starting {
                 since: now.checked_sub(Duration::from_secs(3)).unwrap()
             },
             now
         ),
-        Some((
+        Some(waiting(
             "Starting the Daemon",
-            "Waited 3 s so far. Controls are paused.".to_string()
+            "Waited 3 s so far. Controls are paused."
         ))
     );
 }
@@ -255,17 +260,48 @@ fn link_banner_shows_the_last_clean_stderr_line_of_a_daemon_that_exited() {
             Some("\u{1b}]0;title\u{7}cannot open JACK"),
             "cannot open JACK",
         ),
-        (Some("\u{1b}[0m  "), "exit status: 1"),
-        (None, "exit status: 1"),
+        (
+            Some("\u{202e}abc\u{200e}\u{200f}\u{202a}\u{2066}d\u{2069}"),
+            "abcd",
+        ),
+        (Some("\u{1b}[0m  "), "exit status 1"),
+        (None, "exit status 1"),
     ] {
         let link = Link::Exited {
-            status: "exit status: 1".to_string(),
+            status: "exit status 1".to_string(),
             last_line: last_line.map(str::to_string),
+            retry_at: now + Duration::from_secs(5),
         };
         assert_eq!(
-            xguitare_gui::model::link_banner(&link, now),
-            Some(("The Daemon exited", detail.to_string())),
+            link_banner(&link, now).map(|banner| banner.detail),
+            Some(detail.to_string()),
             "{last_line:?}"
+        );
+    }
+}
+
+#[test]
+fn link_banner_of_a_daemon_that_exited_is_an_error_that_says_when_it_starts_again() {
+    let now = Instant::now();
+    for (left, seconds) in [
+        (Duration::from_millis(9_200), "10 s"),
+        (Duration::from_secs(5), "5 s"),
+    ] {
+        let link = Link::Exited {
+            status: "exit status 1".to_string(),
+            last_line: Some("cannot open JACK".to_string()),
+            retry_at: now + left,
+        };
+        assert_eq!(
+            link_banner(&link, now),
+            Some(LinkBanner {
+                title: "The Daemon exited",
+                detail: "cannot open JACK".to_string(),
+                hint: Some(format!(
+                    "Controls are paused. Starting it again in {seconds}; a Daemon you start yourself is picked up at once."
+                )),
+                is_error: true,
+            })
         );
     }
 }
@@ -283,14 +319,24 @@ fn elide_to_width_cuts_a_line_to_fit_with_an_ellipsis() {
 }
 
 #[test]
-fn no_daemon_is_started_again_after_one_exited_before_answering() {
+fn a_daemon_that_exited_before_answering_is_started_again_after_a_growing_pause() {
+    let delays: Vec<u64> = (1..=7)
+        .map(|exits| respawn_delay(exits).as_secs())
+        .collect();
+    assert_eq!(delays, [5, 10, 20, 40, 60, 60, 60]);
     let now = Instant::now();
-    assert!(may_start_daemon(&Link::Disconnected { since: now }));
-    assert!(may_start_daemon(&Link::Starting { since: now }));
-    assert!(!may_start_daemon(&Link::Exited {
-        status: "exit status: 1".to_string(),
+    assert!(may_start_daemon(&Link::Disconnected { since: now }, now));
+    assert!(may_start_daemon(&Link::Starting { since: now }, now));
+    let exited = |retry_at| Link::Exited {
+        status: "exit status 1".to_string(),
         last_line: None,
-    }));
+        retry_at,
+    };
+    assert!(!may_start_daemon(
+        &exited(now + Duration::from_millis(1)),
+        now
+    ));
+    assert!(may_start_daemon(&exited(now), now));
 }
 
 #[test]

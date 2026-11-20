@@ -7,7 +7,7 @@ use serde_json::Value;
 use xguitare_client::{ClientError, TakesCleanStopped};
 use xguitare_protocol::{
     BankKind, BusRef, LoopRegion, Position, RenderBits, RenderRange, Request, Response, SILENCE_DB,
-    SendLevel, TrackRef, TransportAction, shown_file_name,
+    SendLevel, TrackRef, TransportAction, is_hidden_char, shown_file_name,
 };
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
@@ -16,6 +16,8 @@ use crate::theme::{self, FOCUS_RING_GAP, FOCUS_RING_WIDTH, Rgb, palette};
 
 pub const SPAWN_AFTER_FAILURES: u32 = 3;
 pub const SPAWN_BACKOFF: Duration = Duration::from_secs(5);
+pub const RESPAWN_FIRST_DELAY: Duration = Duration::from_secs(5);
+pub const RESPAWN_MAX_DELAY: Duration = Duration::from_secs(60);
 pub const METER_FLOOR_DB: f64 = -60.0;
 pub const SET_INTERVAL: Duration = Duration::from_millis(30);
 pub const FEEDBACK_FOR: Duration = Duration::from_secs(3);
@@ -50,10 +52,11 @@ pub enum Link {
     Starting {
         since: Instant,
     },
-    /// A Daemon this window started exited before it ever answered: its exit status and its last non-empty stderr line as written.
+    /// A Daemon this window started exited before it ever answered: its exit status, its last non-empty stderr line as written, and when the window starts it again.
     Exited {
         status: String,
         last_line: Option<String>,
+        retry_at: Instant,
     },
 }
 
@@ -1359,9 +1362,19 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
     }
 }
 
-/// After a Daemon this window started exited before answering, starting it again would fail the same way, so only a connection ends that state.
-pub fn may_start_daemon(link: &Link) -> bool {
-    !matches!(link, Link::Exited { .. })
+/// After a Daemon this window started exited before answering, it is started again only at the `retry_at` [`respawn_delay`] set.
+pub fn may_start_daemon(link: &Link, now: Instant) -> bool {
+    match link {
+        Link::Exited { retry_at, .. } => now >= *retry_at,
+        Link::Connected | Link::Disconnected { .. } | Link::Starting { .. } => true,
+    }
+}
+
+/// The pause before starting the Daemon again after its `early_exits`-th exit in a row before answering: doubling from [`RESPAWN_FIRST_DELAY`] up to [`RESPAWN_MAX_DELAY`].
+pub fn respawn_delay(early_exits: u32) -> Duration {
+    RESPAWN_FIRST_DELAY
+        .saturating_mul(1 << early_exits.saturating_sub(1).min(4))
+        .min(RESPAWN_MAX_DELAY)
 }
 
 pub fn spawn_policy(failures: u32, last_spawn: Option<Instant>, now: Instant) -> bool {
@@ -1803,37 +1816,65 @@ pub fn engine_readout(status: Option<&Value>) -> Vec<(String, String)> {
     .collect()
 }
 
-/// The banner's title and detail while the Daemon is not connected; the client thread retries on its own.
-pub fn link_banner(link: &Link, now: Instant) -> Option<(&'static str, String)> {
+/// What the banner says while the Daemon is not connected; the client thread retries on its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkBanner {
+    pub title: &'static str,
+    pub detail: String,
+    /// A third line, under the detail.
+    pub hint: Option<String>,
+    /// Drawn as an error rather than as a wait.
+    pub is_error: bool,
+}
+
+pub fn link_banner(link: &Link, now: Instant) -> Option<LinkBanner> {
     const PAUSED: &str = "Controls are paused.";
+    let waiting = |title, detail| LinkBanner {
+        title,
+        detail,
+        hint: None,
+        is_error: false,
+    };
     match link {
         Link::Connected => None,
-        Link::Disconnected { since } => Some((
+        Link::Disconnected { since } => Some(waiting(
             "Daemon disconnected",
             match seconds_since(*since, now) {
                 0 => format!("Reconnecting\u{2026} {PAUSED}"),
                 seconds => format!("Reconnecting for {seconds} s. {PAUSED}"),
             },
         )),
-        Link::Starting { since } => Some((
+        Link::Starting { since } => Some(waiting(
             "Starting the Daemon",
             match seconds_since(*since, now) {
                 0 => format!("Waiting for it\u{2026} {PAUSED}"),
                 seconds => format!("Waited {seconds} s so far. {PAUSED}"),
             },
         )),
-        Link::Exited { status, last_line } => Some((
-            "The Daemon exited",
-            last_line
+        Link::Exited {
+            status,
+            last_line,
+            retry_at,
+        } => Some(LinkBanner {
+            title: "The Daemon exited",
+            detail: last_line
                 .as_deref()
                 .map(without_escapes)
                 .filter(|line| !line.is_empty())
                 .unwrap_or_else(|| status.clone()),
-        )),
+            hint: Some(format!(
+                "{PAUSED} Starting it again {}; a Daemon you start yourself is picked up at once.",
+                match seconds_until(*retry_at, now) {
+                    0 => "now".to_string(),
+                    seconds => format!("in {seconds} s"),
+                }
+            )),
+            is_error: true,
+        }),
     }
 }
 
-/// `line` without ANSI escape sequences (CSI, OSC and two-byte ones) and other control characters, trimmed.
+/// `line` without ANSI escape sequences (CSI, OSC and two-byte ones), control characters and bidi marks, overrides and isolates, trimmed.
 fn without_escapes(line: &str) -> String {
     let mut shown = String::with_capacity(line.len());
     let mut chars = line.chars();
@@ -1854,7 +1895,7 @@ fn without_escapes(line: &str) -> String {
                 }
                 _ => {}
             },
-            c if c.is_control() => {}
+            c if is_hidden_char(c) || matches!(c, '\u{200e}' | '\u{200f}') => {}
             c => shown.push(c),
         }
     }
@@ -1876,6 +1917,11 @@ pub fn elide_to_width(text: &str, max_width: f32, width_of: impl Fn(&str) -> f32
 
 fn seconds_since(since: Instant, now: Instant) -> u64 {
     now.saturating_duration_since(since).as_secs()
+}
+
+fn seconds_until(until: Instant, now: Instant) -> u64 {
+    let left = until.saturating_duration_since(now);
+    left.as_secs() + u64::from(left.subsec_nanos() > 0)
 }
 
 #[derive(Debug, Clone, PartialEq)]
