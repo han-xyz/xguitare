@@ -23,10 +23,10 @@ use crate::model::{
     SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH,
     autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text, chip_click, choice_buttons,
     choice_step, choice_text, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
-    format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value, layout_drop,
-    link_banner, module_title, move_target, mute_banner, open_knob_rows, open_knobs_width,
-    open_unit_height, param_label, param_rows, paused, peak_db, peak_text, rack_ear_labels,
-    tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
+    elide_to_width, format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value,
+    layout_drop, link_banner, module_title, move_target, mute_banner, open_knob_rows,
+    open_knobs_width, open_unit_height, param_label, param_rows, paused, peak_db, peak_text,
+    rack_ear_labels, tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
@@ -385,6 +385,12 @@ fn link_banner_strip(ui: &mut Ui, title: &str, detail: &str) {
         theme::dialog_title(),
         colour(colours.text),
     );
+    let detail = elide_to_width(detail, rect.right() - theme::SPACE_L - text_left, |text| {
+        painter
+            .layout_no_wrap(text.to_string(), theme::body(), colour(colours.text))
+            .size()
+            .x
+    });
     painter.text(
         pos2(text_left, rect.center().y + 1.0),
         Align2::LEFT_TOP,

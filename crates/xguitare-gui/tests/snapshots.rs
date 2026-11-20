@@ -3047,6 +3047,28 @@ fn a_lost_daemon_shows_its_banner_and_pauses_the_rack() {
     assert_eq!(sent_now(&sent), []);
 }
 
+const DAEMON_EXIT_LINE: &str = "error: /home/me/.config/xguitare/config.toml: buffer_size = 0 is out of range; it must be a power of two from 16 to 4096";
+
+#[test]
+fn a_daemon_that_exited_at_once_shows_its_last_line() {
+    assert_eq!(DAEMON_EXIT_LINE.chars().count(), 120);
+    let mut snapshot = funk_snapshot();
+    snapshot.link = Link::Exited {
+        status: "exit status: 1".to_string(),
+        last_line: Some(format!("\u{1b}[31m{DAEMON_EXIT_LINE}\u{1b}[0m")),
+    };
+    snapshot.status = None;
+    snapshot.tuner = None;
+    for (size, name) in [
+        (MIN_WINDOW, "daemon-exited-1024x640"),
+        (DEFAULT_WINDOW, "daemon-exited-1280x800"),
+    ] {
+        let (mut harness, _, _dir) = harness_with(size, snapshot.clone());
+        harness.get_by_label(&format!("The Daemon exited. {DAEMON_EXIT_LINE}"));
+        write_png(&mut harness, name);
+    }
+}
+
 const SAVED: &str = "saved bank/funk.toml";
 
 /// The footer's top, read off the [`SAVED`] notice it shows.

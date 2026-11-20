@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::io;
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::model::{
     Command, Link, Message, Outgoing, Restore, Snapshot, bank_rows, counts_toward_spawn,
-    failed_set, failure_title, ir_names, module_types, param_rows, refresh_decision,
-    refused_remove, refused_render, requests_until_quit, response_message, spawn_policy,
-    takes_cleaned_message,
+    failed_set, failure_title, ir_names, may_start_daemon, module_types, param_rows,
+    refresh_decision, refused_remove, refused_render, requests_until_quit, response_message,
+    spawn_policy, takes_cleaned_message,
 };
 use crate::project_model::{autosave_offer, item_blocks, project_name, still_closing};
 use serde_json::Value;
@@ -54,6 +54,8 @@ struct Client {
     failures: u32,
     last_spawn: Option<Instant>,
     daemon: Option<Child>,
+    /// Copies the started Daemon's stderr to ours and ends with its last non-empty line.
+    daemon_stderr: Option<JoinHandle<Option<String>>>,
     revision: Option<u64>,
     modules_fetched: bool,
     modules_warned: bool,
@@ -84,6 +86,7 @@ impl Client {
             failures: 0,
             last_spawn: None,
             daemon: None,
+            daemon_stderr: None,
             revision: None,
             modules_fetched: false,
             modules_warned: false,
@@ -439,7 +442,10 @@ impl Client {
             return;
         }
         self.failures += 1;
-        if self.daemon.is_none() && spawn_policy(self.failures, self.last_spawn, now) {
+        if self.daemon.is_none()
+            && may_start_daemon(&self.snapshot.link)
+            && spawn_policy(self.failures, self.last_spawn, now)
+        {
             self.spawn_daemon(&err, now);
         }
     }
@@ -681,14 +687,18 @@ impl Client {
             .arg("run")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
         match process.spawn() {
-            Ok(child) => {
+            Ok(mut child) => {
                 info!(
                     "starting daemon {} (pid {}): {reason}",
                     executable.display(),
                     child.id()
                 );
+                self.daemon_stderr = child
+                    .stderr
+                    .take()
+                    .map(|stderr| thread::spawn(|| copy_stderr(stderr)));
                 self.daemon = Some(child);
                 self.snapshot.link = Link::Starting { since: now };
             }
@@ -700,14 +710,30 @@ impl Client {
         let Some(child) = &mut self.daemon else {
             return;
         };
-        match child.try_wait() {
+        let status = match child.try_wait() {
             Ok(None) => return,
-            Ok(Some(status)) => warn!("daemon exited: {status}"),
-            Err(err) => warn!("daemon state unknown: {err}"),
-        }
+            Ok(Some(status)) => {
+                warn!("daemon exited: {status}");
+                Some(status)
+            }
+            Err(err) => {
+                warn!("daemon state unknown: {err}");
+                None
+            }
+        };
         self.daemon = None;
+        let last_line = self
+            .daemon_stderr
+            .take()
+            .and_then(|reader| reader.join().ok().flatten());
         if matches!(self.snapshot.link, Link::Starting { .. }) {
-            self.snapshot.link = Link::Disconnected { since: now };
+            self.snapshot.link = match status {
+                Some(status) => Link::Exited {
+                    status: status.to_string(),
+                    last_line,
+                },
+                None => Link::Disconnected { since: now },
+            };
         }
     }
 
@@ -759,6 +785,25 @@ fn log_rack_ir(response: &Result<Response, ClientError>) {
         ),
         Ok(Response::Err { error, .. }) => info!("rack_ir: error: {error}"),
         Err(err) => info!("rack_ir: error: {err}"),
+    }
+}
+
+/// Each line goes to our stderr as the Daemon wrote it, so the log reads as if the Daemon wrote there itself.
+fn copy_stderr(stderr: impl Read) -> Option<String> {
+    let mut reader = BufReader::new(stderr);
+    let mut line = Vec::new();
+    let mut last = None;
+    loop {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) | Err(_) => return last,
+            Ok(_) => {}
+        }
+        let _ = io::stderr().write_all(&line);
+        let text = String::from_utf8_lossy(&line);
+        if !text.trim().is_empty() {
+            last = Some(text.trim_end().to_string());
+        }
     }
 }
 

@@ -18,15 +18,15 @@ use xguitare_gui::model::{
     ParamRow, PeakHold, PortChoices, PortSelection, SECTIONS, Section, SettingsDraft, Throttle,
     TunerReading, add_after, add_command, add_place, add_places, autoscroll_delta, bank_kind,
     bank_rows, bank_rows_for_rack, cabinet_ir, cents_fraction, cents_text, chip_columns,
-    counts_toward_spawn, ear_holes, engine_readout, esc_dismisses_toast, failed_set, filter_bank,
-    forget_removed_units, format_value, in_tune, ir_names, key_step, key_to_command,
-    knob_angle_deg, knob_fraction, knob_param_value, knob_points, knob_value_from_drag,
-    ladder_segments, latency_ms, module_types, move_target, open_units_from_string,
-    open_units_to_string, param_label, param_rows, parse_typed_value, peak_db, peak_text,
-    port_choices, quit_commands, rack_channels, refresh_decision, refused_remove, remember_removes,
-    requests_until_quit, response_message, set_ports_command, set_settings_command, settings_draft,
-    shortcuts_active, spawn_policy, tuner_header_text, tuner_reading, tuner_toggle, typed_text,
-    typed_value, unit_suffix,
+    counts_toward_spawn, ear_holes, elide_to_width, engine_readout, esc_dismisses_toast,
+    failed_set, filter_bank, forget_removed_units, format_value, in_tune, ir_names, key_step,
+    key_to_command, knob_angle_deg, knob_fraction, knob_param_value, knob_points,
+    knob_value_from_drag, ladder_segments, latency_ms, may_start_daemon, module_types, move_target,
+    open_units_from_string, open_units_to_string, param_label, param_rows, parse_typed_value,
+    peak_db, peak_text, port_choices, quit_commands, rack_channels, refresh_decision,
+    refused_remove, remember_removes, requests_until_quit, response_message, set_ports_command,
+    set_settings_command, settings_draft, shortcuts_active, spawn_policy, tuner_header_text,
+    tuner_reading, tuner_toggle, typed_text, typed_value, unit_suffix,
 };
 use xguitare_gui::model::{
     CLOSED_KNOB_WIDTH, Dragged, KnobArcs, Outgoing, RackItem, RemovedUnit, Restore, ScreenRect,
@@ -240,6 +240,57 @@ fn link_banner_names_the_lost_daemon_and_the_paused_controls() {
             "Waited 3 s so far. Controls are paused.".to_string()
         ))
     );
+}
+
+#[test]
+fn link_banner_shows_the_last_clean_stderr_line_of_a_daemon_that_exited() {
+    let now = Instant::now();
+    for (last_line, detail) in [
+        (
+            Some("\u{1b}[31merror\u{1b}[0m: config.toml: buffer_size must be at least 16"),
+            "error: config.toml: buffer_size must be at least 16",
+        ),
+        (Some("tab\there\u{7}"), "tabhere"),
+        (
+            Some("\u{1b}]0;title\u{7}cannot open JACK"),
+            "cannot open JACK",
+        ),
+        (Some("\u{1b}[0m  "), "exit status: 1"),
+        (None, "exit status: 1"),
+    ] {
+        let link = Link::Exited {
+            status: "exit status: 1".to_string(),
+            last_line: last_line.map(str::to_string),
+        };
+        assert_eq!(
+            xguitare_gui::model::link_banner(&link, now),
+            Some(("The Daemon exited", detail.to_string())),
+            "{last_line:?}"
+        );
+    }
+}
+
+#[test]
+fn elide_to_width_cuts_a_line_to_fit_with_an_ellipsis() {
+    let width_of = |text: &str| text.chars().count() as f32;
+    assert_eq!(elide_to_width("short", 5.0, width_of), "short");
+    assert_eq!(
+        elide_to_width("a longer line", 6.0, width_of),
+        "a lon\u{2026}"
+    );
+    assert_eq!(elide_to_width("été plus", 3.0, width_of), "ét\u{2026}");
+    assert_eq!(elide_to_width("abc", 0.0, width_of), "");
+}
+
+#[test]
+fn no_daemon_is_started_again_after_one_exited_before_answering() {
+    let now = Instant::now();
+    assert!(may_start_daemon(&Link::Disconnected { since: now }));
+    assert!(may_start_daemon(&Link::Starting { since: now }));
+    assert!(!may_start_daemon(&Link::Exited {
+        status: "exit status: 1".to_string(),
+        last_line: None,
+    }));
 }
 
 #[test]

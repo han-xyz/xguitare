@@ -44,8 +44,17 @@ pub const AUTOSCROLL_MAX_PX: f32 = 12.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Link {
     Connected,
-    Disconnected { since: Instant },
-    Starting { since: Instant },
+    Disconnected {
+        since: Instant,
+    },
+    Starting {
+        since: Instant,
+    },
+    /// A Daemon this window started exited before it ever answered: its exit status and its last non-empty stderr line as written.
+    Exited {
+        status: String,
+        last_line: Option<String>,
+    },
 }
 
 /// What the client thread last saw; the payloads are the Control API's `status`, `list`, `get`, `tuner`, `ports`, `settings`, `project_list` and `items` replies as sent, `module_types` the `modules` reply of the current connection, `irs` the last `ir_list` reply's names, `autosave_offer` the Project whose `project_open` answered that its autosave is newer.
@@ -1350,6 +1359,11 @@ pub fn key_to_command(key: KeyEvent, rows: &[BankRow]) -> Option<Command> {
     }
 }
 
+/// After a Daemon this window started exited before answering, starting it again would fail the same way, so only a connection ends that state.
+pub fn may_start_daemon(link: &Link) -> bool {
+    !matches!(link, Link::Exited { .. })
+}
+
 pub fn spawn_policy(failures: u32, last_spawn: Option<Instant>, now: Instant) -> bool {
     failures >= SPAWN_AFTER_FAILURES
         && last_spawn.is_none_or(|spawned| now.duration_since(spawned) >= SPAWN_BACKOFF)
@@ -1808,7 +1822,56 @@ pub fn link_banner(link: &Link, now: Instant) -> Option<(&'static str, String)> 
                 seconds => format!("Waited {seconds} s so far. {PAUSED}"),
             },
         )),
+        Link::Exited { status, last_line } => Some((
+            "The Daemon exited",
+            last_line
+                .as_deref()
+                .map(without_escapes)
+                .filter(|line| !line.is_empty())
+                .unwrap_or_else(|| status.clone()),
+        )),
     }
+}
+
+/// `line` without ANSI escape sequences (CSI, OSC and two-byte ones) and other control characters, trimmed.
+fn without_escapes(line: &str) -> String {
+    let mut shown = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{1b}' => match chars.next() {
+                Some('[') => {
+                    chars.find(|c| ('\u{40}'..='\u{7e}').contains(c));
+                }
+                Some(']') => {
+                    let mut previous = None;
+                    for c in chars.by_ref() {
+                        if c == '\u{7}' || (previous == Some('\u{1b}') && c == '\\') {
+                            break;
+                        }
+                        previous = Some(c);
+                    }
+                }
+                _ => {}
+            },
+            c if c.is_control() => {}
+            c => shown.push(c),
+        }
+    }
+    shown.trim().to_string()
+}
+
+/// `text` when `width_of` it fits `max_width`, else its longest prefix that fits with an ellipsis after it, empty when not even that fits.
+pub fn elide_to_width(text: &str, max_width: f32, width_of: impl Fn(&str) -> f32) -> String {
+    if width_of(text) <= max_width {
+        return text.to_string();
+    }
+    text.char_indices()
+        .map(|(end, _)| format!("{}\u{2026}", &text[..end]))
+        .take_while(|elided| width_of(elided) <= max_width)
+        .last()
+        .filter(|elided| elided.chars().count() > 1)
+        .unwrap_or_default()
 }
 
 fn seconds_since(since: Instant, now: Instant) -> u64 {
