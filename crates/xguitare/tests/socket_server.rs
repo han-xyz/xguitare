@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -9,12 +8,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
-use xguitare_core::control::{EngineState, PeakMeters, Value};
+use xguitare_core::control::{EngineState, Value};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
-use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{Item, Project, Take};
-use xguitare_core::project_control::Projects;
 use xguitare_core::take_peaks::{FRAMES_PER_PEAK, MAX_PEAKS_PER_REPLY};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config, Ports};
@@ -70,26 +67,18 @@ fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Se
     let config = empty_config(&dir);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let shared = Arc::new(EngineShared::default());
-    let state = EngineState {
-        bank: Bank {
+    let state = EngineState::new(
+        Bank {
             dir: dir.clone(),
             entries: Vec::new(),
         },
-        active: None,
-        shared: Arc::clone(&shared),
+        Arc::clone(&shared),
         queues,
         tuner,
         config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+        48_000.0,
+        128,
+    );
     let stop = Arc::new(AtomicBool::new(false));
     let thread = socket
         .spawn(

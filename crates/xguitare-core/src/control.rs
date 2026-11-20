@@ -433,6 +433,55 @@ pub struct EngineState {
     pub metronome: Metronome,
 }
 
+impl EngineState {
+    /// No active Preset, no connections, revision 1, unmodified; the rest starts empty.
+    pub fn new(
+        bank: Bank,
+        shared: Arc<EngineShared>,
+        queues: EngineQueues,
+        tuner: Tuner,
+        config: Config,
+        sample_rate: f32,
+        max_frames: usize,
+    ) -> EngineState {
+        EngineState {
+            bank,
+            active: None,
+            shared,
+            queues,
+            tuner,
+            config,
+            connections: Vec::new(),
+            sample_rate,
+            max_frames,
+            revision: 1,
+            modified: false,
+            peaks: PeakMeters::default(),
+            saved: HashMap::new(),
+            projects: Projects::default(),
+            metronome: Metronome::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_active(mut self, active: Option<(PathBuf, Preset)>) -> EngineState {
+        self.active = active;
+        self
+    }
+
+    #[must_use]
+    pub fn with_connections(mut self, connections: Vec<(String, String)>) -> EngineState {
+        self.connections = connections;
+        self
+    }
+
+    #[must_use]
+    pub fn with_revision(mut self, revision: u64) -> EngineState {
+        self.revision = revision;
+        self
+    }
+}
+
 /// One Control API connection, from `open_connection` to `close_connection`; `status` reports and clears only its own peaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConnectionId(u64);

@@ -4,10 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
+use xguitare_core::control::{EngineState, Request, Response, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
-use xguitare_core::metronome::Metronome;
-use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config};
@@ -34,23 +32,16 @@ fn state(test: &str) -> (EngineState, AudioQueues) {
     config.bank_dir = dir;
     let (queues, audio, tap) = engine_queues(QUEUE_CAPACITY);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let state = EngineState {
+    let state = EngineState::new(
         bank,
-        active,
-        shared: Arc::new(EngineShared::default()),
+        Arc::new(EngineShared::default()),
         queues,
         tuner,
         config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+        48_000.0,
+        128,
+    )
+    .with_active(active);
     (state, audio)
 }
 

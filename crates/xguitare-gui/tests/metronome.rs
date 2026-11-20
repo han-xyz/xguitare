@@ -1,13 +1,10 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use xguitare_core::control::{EngineState, PeakMeters, Request, Response, handle};
+use xguitare_core::control::{EngineState, Request, Response, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
-use xguitare_core::metronome::Metronome;
-use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
 use xguitare_gui::metronome_model::{
@@ -242,23 +239,15 @@ fn the_daemon_status_gives_the_metronome_view() {
     let mut config = Config::load(Some(&config_path)).unwrap();
     config.bank_dir.clone_from(&bank_dir);
     let (queues, _audio, tap) = engine_queues(16);
-    let mut state = EngineState {
-        bank: Bank::load_dir(&bank_dir).unwrap(),
-        active: None,
-        shared: Arc::new(EngineShared::default()),
+    let mut state = EngineState::new(
+        Bank::load_dir(&bank_dir).unwrap(),
+        Arc::new(EngineShared::default()),
         queues,
-        tuner: Tuner::new(tap, 48_000.0, config.tuner_reference_hz),
+        Tuner::new(tap, 48_000.0, config.tuner_reference_hz),
         config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+        48_000.0,
+        128,
+    );
     ok(
         Request::Metronome {
             on: Some(true),

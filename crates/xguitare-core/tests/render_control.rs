@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,11 +5,10 @@ use std::sync::atomic::Ordering;
 
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use serde_json::{Value, json};
-use xguitare_core::control::{ConnectionId, EngineState, PeakMeters, handle_line, open_connection};
+use xguitare_core::control::{ConnectionId, EngineState, handle_line, open_connection};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
-use xguitare_core::metronome::Metronome;
 use xguitare_core::project::{Item, PROJECT_FILE, Project, Take, Track};
-use xguitare_core::project_control::{ProjectEvent, Projects, take_project_events};
+use xguitare_core::project_control::{ProjectEvent, take_project_events};
 use xguitare_core::render::RenderTask;
 use xguitare_core::render_control::{RenderFinished, cancel_render, finished_render};
 use xguitare_core::tuner::Tuner;
@@ -50,23 +48,7 @@ fn session(test: &str) -> Session {
     shared.sample_rate.store(48_000, Ordering::Relaxed);
     let (queues, audio, tap) = engine_queues(64);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let mut state = EngineState {
-        bank,
-        active: None,
-        shared,
-        queues,
-        tuner,
-        config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+    let mut state = EngineState::new(bank, shared, queues, tuner, config, 48_000.0, 128);
     let connection = open_connection(&mut state);
     Session {
         state,

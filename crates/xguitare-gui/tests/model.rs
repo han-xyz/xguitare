@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,10 +8,8 @@ use serde_json::json;
 use xguitare_client::ClientError;
 use xguitare_core::control::Request;
 use xguitare_core::control::Response;
-use xguitare_core::control::{EngineState, PeakMeters, SILENCE_DB, handle};
+use xguitare_core::control::{EngineState, SILENCE_DB, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
-use xguitare_core::metronome::Metronome;
-use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankKind, Config};
 use xguitare_gui::model::{
@@ -61,26 +59,19 @@ fn registry_modules(test: &str) -> serde_json::Value {
     let config = Config::load(Some(&path)).unwrap();
     let (queues, _, tap) = engine_queues(1);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let mut state = EngineState {
-        bank: Bank {
+    let mut state = EngineState::new(
+        Bank {
             dir: dir.0.clone(),
             entries: Vec::new(),
         },
-        active: None,
-        shared: Arc::new(EngineShared::default()),
+        Arc::new(EngineShared::default()),
         queues,
         tuner,
         config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 0,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+        48_000.0,
+        128,
+    )
+    .with_revision(0);
     match handle(&mut state, Request::Modules).0 {
         Response::Ok(payload) => payload,
         Response::Err { error } => panic!("modules: {error}"),

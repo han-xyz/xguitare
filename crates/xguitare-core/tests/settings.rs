@@ -1,19 +1,14 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use xguitare_core::control::{
-    EngineState, PeakMeters, Request, Response, handle, handle_with_ports,
-};
+use xguitare_core::control::{EngineState, Request, Response, handle, handle_with_ports};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
-use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
-use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BankKind, BuildWarning, Config, Ports};
 
@@ -103,26 +98,20 @@ fn state(test: &str, config_toml: &str) -> (EngineState, AudioQueues, TempDir) {
     let active = Some((file.clone(), preset.clone()));
     let (queues, audio, tap) = engine_queues(64);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let state = EngineState {
+    let state = EngineState::new(
         bank,
-        active,
-        shared: Arc::new(EngineShared::default()),
+        Arc::new(EngineShared::default()),
         queues,
         tuner,
         config,
-        connections: vec![
-            link("old:capture_1", OWN_INPUT),
-            link(OWN_LEFT, "card:playback_FL"),
-        ],
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+        48_000.0,
+        128,
+    )
+    .with_active(active)
+    .with_connections(vec![
+        link("old:capture_1", OWN_INPUT),
+        link(OWN_LEFT, "card:playback_FL"),
+    ]);
     (state, audio, TempDir(dir))
 }
 

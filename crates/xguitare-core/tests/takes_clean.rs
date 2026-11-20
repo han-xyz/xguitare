@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -7,16 +6,11 @@ use std::sync::{Arc, PoisonError};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
-use xguitare_core::control::{
-    EngineState, PeakMeters, Request, Response, TrackRef, TransportAction, handle,
-};
+use xguitare_core::control::{EngineState, Request, Response, TrackRef, TransportAction, handle};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
-use xguitare_core::metronome::Metronome;
 use xguitare_core::project::AUTOSAVE_FILE;
 use xguitare_core::project::{Item, Project, Take};
-use xguitare_core::project_control::{
-    ProjectEvent, Projects, add_finished_takes, take_project_events,
-};
+use xguitare_core::project_control::{ProjectEvent, add_finished_takes, take_project_events};
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan, WritingTakes};
 use xguitare_core::takes_control::delete_take_files;
 use xguitare_core::tuner::Tuner;
@@ -44,23 +38,15 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     shared.sample_rate.store(48_000, Ordering::Relaxed);
     let (queues, audio, tap) = engine_queues(64);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let state = EngineState {
-        bank: Bank::load_dir(&bank_dir).unwrap(),
-        active: None,
+    let state = EngineState::new(
+        Bank::load_dir(&bank_dir).unwrap(),
         shared,
         queues,
         tuner,
         config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+        48_000.0,
+        128,
+    );
     (state, audio, TempDir(dir))
 }
 

@@ -16,17 +16,16 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::build;
 use xguitare_core::control::{
-    EngineState, PeakMeters, Reprepare, Request, Response, follow_sample_rate, handle,
-    needs_reprepare, passthrough_rack, reprepare,
+    EngineState, Reprepare, Request, Response, follow_sample_rate, handle, needs_reprepare,
+    passthrough_rack, reprepare,
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
-use xguitare_core::metronome::Metronome;
 use xguitare_core::ports::{AudioPorts, capture_track_inputs};
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
-    ClosedProject, LastTakes, ProjectEvent, Projects, add_finished_takes, autosave_if_due,
-    close_for_stop, finish_closed, finish_stopped, project_rate_warning, take_project_events,
+    ClosedProject, LastTakes, ProjectEvent, add_finished_takes, autosave_if_due, close_for_stop,
+    finish_closed, finish_stopped, project_rate_warning, take_project_events,
 };
 use xguitare_core::render::RenderTask;
 use xguitare_core::render_control::{RenderFinished, cancel_render, finished_render};
@@ -96,23 +95,19 @@ pub fn run(config_path: Option<&Path>) -> Result<(), DaemonError> {
     let connections = session.connect(&config.ports);
     let sample_rate = session.built_sample_rate() as f32;
     let tuner = Tuner::new(tap, sample_rate, config.tuner_reference_hz);
-    let state = Arc::new(Mutex::new(EngineState {
-        bank,
-        active,
-        shared: Arc::clone(&shared),
-        queues,
-        tuner,
-        config,
-        connections,
-        sample_rate,
-        max_frames: session.max_frames(),
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    }));
+    let state = Arc::new(Mutex::new(
+        EngineState::new(
+            bank,
+            Arc::clone(&shared),
+            queues,
+            tuner,
+            config,
+            sample_rate,
+            session.max_frames(),
+        )
+        .with_active(active)
+        .with_connections(connections),
+    ));
     let mut bank_watch = BankWatch::start(&state_guard(&state).bank.dir);
     let session = Arc::new(session);
     let ports: SharedPorts = Arc::downgrade(&session) as Weak<_>;

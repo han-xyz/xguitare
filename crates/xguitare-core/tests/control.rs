@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::fs;
 use std::io;
@@ -10,16 +9,14 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::atomic_file::write_new;
 use xguitare_core::control::{
-    EngineState, PeakMeters, Reprepare, Request, Response, change_sample_rate, follow_sample_rate,
-    handle, handle_line, needs_reprepare, open_connection, passthrough_rack, prepared_max_frames,
+    EngineState, Reprepare, Request, Response, change_sample_rate, follow_sample_rate, handle,
+    handle_line, needs_reprepare, open_connection, passthrough_rack, prepared_max_frames,
     reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
     engine_queues, raise_peak,
 };
-use xguitare_core::metronome::Metronome;
-use xguitare_core::project_control::Projects;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::apply;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, ModuleRegistry, Preset, PresetModule};
@@ -69,23 +66,12 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     config.bank_dir.clone_from(&dir.0);
     let (queues, audio, tap) = engine_queues(QUEUE_CAPACITY);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let state = EngineState {
-        bank,
-        active,
-        shared,
-        queues,
-        tuner,
-        config,
-        connections: vec![("system:capture_1".to_string(), "xguitare:in".to_string())],
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+    let state = EngineState::new(bank, shared, queues, tuner, config, 48_000.0, 128)
+        .with_active(active)
+        .with_connections(vec![(
+            "system:capture_1".to_string(),
+            "xguitare:in".to_string(),
+        )]);
     (state, audio, dir)
 }
 

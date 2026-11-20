@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,15 +7,15 @@ use std::time::{Duration, Instant};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, PeakMeters, Position, Request, Response, TrackRef, TransportAction,
-    follow_sample_rate, handle, handle_with_ports, reprepare,
+    EngineState, Position, Request, Response, TrackRef, TransportAction, follow_sample_rate,
+    handle, handle_with_ports, reprepare,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, raise_peak};
-use xguitare_core::metronome::{Metronome, MetronomeSettings};
+use xguitare_core::metronome::MetronomeSettings;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{AUTOSAVE_FILE, Item, PROJECT_FILE, Project, Take};
 use xguitare_core::project_control::{
-    ProjectEvent, Projects, add_finished_takes, autosave_if_due, finish_closed, finish_stopped,
+    ProjectEvent, add_finished_takes, autosave_if_due, finish_closed, finish_stopped,
     take_project_events,
 };
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
@@ -90,23 +89,8 @@ fn state(test: &str) -> (EngineState, AudioQueues, TempDir) {
     shared.sample_rate.store(48_000, Ordering::Relaxed);
     let (queues, audio, tap) = engine_queues(64);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
-    let state = EngineState {
-        bank,
-        active,
-        shared,
-        queues,
-        tuner,
-        config,
-        connections: Vec::new(),
-        sample_rate: 48_000.0,
-        max_frames: 128,
-        revision: 1,
-        modified: false,
-        peaks: PeakMeters::default(),
-        saved: HashMap::new(),
-        projects: Projects::default(),
-        metronome: Metronome::default(),
-    };
+    let state =
+        EngineState::new(bank, shared, queues, tuner, config, 48_000.0, 128).with_active(active);
     (state, audio, TempDir(dir))
 }
 
