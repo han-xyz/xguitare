@@ -23,6 +23,7 @@ mod rack_control;
 mod registry;
 pub mod render;
 pub mod render_control;
+mod settings_control;
 mod state;
 pub mod take_capture;
 pub mod take_peaks;

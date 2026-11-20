@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::arrangement::ArrangementCommand;
 use crate::build::ENGINE_BUSY;
-use crate::control::{EngineState, save_state};
+use crate::control::EngineState;
 use crate::engine::Command;
 use crate::metronome::{
     BAD_BPM, BAD_VOLUME, DEFAULT_BPM, DEFAULT_METER, DEFAULT_VOLUME_DB, MetronomeSettings,
@@ -13,6 +13,7 @@ use crate::metronome::{
 };
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
 use crate::project_control::{CLICK_COMMANDS, click, open_project_state, send, tempo};
+use crate::settings_control::save_state;
 use crate::state::SavedMetronome;
 
 /// Changes the Metronome and returns its state. With no Project open it plays its own tempo and meter, saved in `state.toml` with the volume; with one open `on` is the Project's click and `bpm` and `meter` its tempo and meter.
