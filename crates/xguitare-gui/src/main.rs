@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use clap::Parser;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing_subscriber::EnvFilter;
-use xguitare_core::Config;
+use xguitare_client::ClientConfig;
 use xguitare_gui::app::App;
 
 const APP_NAME: &str = "xguitare";
@@ -45,7 +45,7 @@ fn main() -> ExitCode {
 }
 
 fn run(config_path: Option<PathBuf>) -> Result<(), String> {
-    let config = Config::load(config_path.as_deref()).map_err(|err| err.to_string())?;
+    let config = ClientConfig::load(config_path.as_deref()).map_err(|err| err.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGINT, SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&stop)).map_err(|err| err.to_string())?;

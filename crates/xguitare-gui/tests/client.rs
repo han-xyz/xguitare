@@ -9,7 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use xguitare_core::Config;
+use xguitare_client::ClientConfig;
 use xguitare_gui::client;
 use xguitare_gui::model::{Command, Link, Message, Restore};
 
@@ -30,13 +30,13 @@ fn temp_dir(test: &str) -> TempDir {
     TempDir(path)
 }
 
-fn config(dir: &TempDir) -> Config {
+fn config(dir: &TempDir) -> ClientConfig {
     let path = dir.0.join("config.toml");
     fs::write(&path, "").unwrap();
-    Config {
+    ClientConfig {
         socket: dir.0.join("s.sock"),
         socket_is_fallback: false,
-        ..Config::load(Some(&path)).unwrap()
+        ..ClientConfig::load(Some(&path)).unwrap()
     }
 }
 

@@ -8,8 +8,7 @@ use egui::{
     WidgetInfo, pos2, vec2,
 };
 use serde_json::Value;
-use xguitare_core::control::SendLevel;
-use xguitare_core::render::{RenderBits, RenderRange};
+use xguitare_protocol::{RenderBits, RenderRange, SendLevel};
 
 use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,

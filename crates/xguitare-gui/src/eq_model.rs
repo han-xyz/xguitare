@@ -1,4 +1,5 @@
-use xguitare_core::{EQ_MAX_FREQ_PER_RATE, eq_response_db};
+use xguitare_dsp::eq_response_db;
+use xguitare_dsp::modules::eq::MAX_FREQ_PER_RATE as EQ_MAX_FREQ_PER_RATE;
 
 use crate::model::{CLOSED_KNOB_WIDTH, ParamRow, format_value};
 

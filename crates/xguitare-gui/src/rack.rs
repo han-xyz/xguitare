@@ -7,7 +7,7 @@ use egui::{
     Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
     WidgetInfo, WidgetText, pos2, vec2,
 };
-use xguitare_core::control::SILENCE_DB;
+use xguitare_protocol::SILENCE_DB;
 
 use crate::eq_model::{
     EQ, EQ_AXIS_LABEL_HEIGHT, EQ_BAND_TITLE_HEIGHT, EQ_CURVE_POINTS, EQ_MINI_HEIGHT,

@@ -5,8 +5,7 @@ use egui::{
     Stroke, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
 use serde_json::Value;
-use xguitare_core::control::TransportAction;
-use xguitare_core::project::LoopRegion;
+use xguitare_protocol::{LoopRegion, TransportAction};
 
 use std::collections::HashMap;
 use std::sync::Arc;

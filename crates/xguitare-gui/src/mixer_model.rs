@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use xguitare_core::control::{BusRef, SILENCE_DB, SendLevel, TrackRef};
+use xguitare_protocol::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
 use crate::model::{Band, Command, LADDER_RED_DB, LADDER_YELLOW_DB, Segment, acts_on_rack};
 use crate::project_model::{project_name, track_rows};

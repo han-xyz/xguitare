@@ -15,12 +15,13 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state, default_wgpu_setup};
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
+use xguitare_client::ClientConfig;
 use xguitare_core::control::TrackRef;
 use xguitare_core::control::TransportAction;
 use xguitare_core::project::LoopRegion;
 use xguitare_core::render::{RenderBits, RenderRange};
 use xguitare_core::take_peaks::FRAMES_PER_PEAK;
-use xguitare_core::{BankKind, Config, ModuleRegistry};
+use xguitare_core::{BankKind, ModuleRegistry};
 use xguitare_gui::app::App;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{Command, Link, Message, ModuleType, Restore, Snapshot, TrackEdit};
@@ -43,7 +44,7 @@ impl Drop for TempDir {
     }
 }
 
-fn bass_config() -> (Config, TempDir) {
+fn bass_config() -> (ClientConfig, TempDir) {
     static HARNESSES: AtomicUsize = AtomicUsize::new(0);
     let dir = TempDir(PathBuf::from(format!(
         "/tmp/xguitare-snap-{}-{}",
@@ -54,7 +55,7 @@ fn bass_config() -> (Config, TempDir) {
     fs::create_dir_all(&dir.0).unwrap();
     let path = dir.0.join("config.toml");
     fs::write(&path, "bank_kind = \"bass\"\n").unwrap();
-    (Config::load(Some(&path)).unwrap(), dir)
+    (ClientConfig::load(Some(&path)).unwrap(), dir)
 }
 
 fn param(module: &str, name: &str, value: f64, spec: (f64, f64, f64, &str, bool)) -> Value {

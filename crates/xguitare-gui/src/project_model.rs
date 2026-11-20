@@ -3,10 +3,9 @@ use std::ops::Range;
 
 use serde_json::Value;
 use xguitare_client::ClientError;
-use xguitare_core::control::{Request, Response, SILENCE_DB, TransportAction};
-use xguitare_core::project::LoopRegion;
-use xguitare_core::project_control::STILL_CLOSING;
-use xguitare_core::take_peaks::FRAMES_PER_PEAK;
+use xguitare_protocol::{
+    FRAMES_PER_PEAK, LoopRegion, Request, Response, SILENCE_DB, STILL_CLOSING, TransportAction,
+};
 
 use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
 use crate::theme::{Rgb, TRACK_COLOURS};

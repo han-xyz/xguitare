@@ -4957,6 +4957,8 @@ dependencies = [
  "tracing-subscriber",
  "xguitare-client",
  "xguitare-core",
+ "xguitare-dsp",
+ "xguitare-protocol",
 ]
 
 [[package]]

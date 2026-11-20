@@ -15,11 +15,13 @@ signal-hook = "0.4.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 xguitare-client = { path = "../xguitare-client" }
-xguitare-core = { path = "../xguitare-core" }
+xguitare-dsp = { path = "../xguitare-dsp" }
+xguitare-protocol = { path = "../xguitare-protocol" }
 
 [dev-dependencies]
 egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot", "eframe"] }
 egui_system_font_provider = "0.37.0"
+xguitare-core = { path = "../xguitare-core" }
 
 [lints]
 workspace = true

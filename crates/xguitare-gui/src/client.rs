@@ -20,9 +20,7 @@ use crate::project_model::{autosave_offer, item_blocks, project_name, still_clos
 use serde_json::Value;
 use tracing::{info, warn};
 use xguitare_client::{ClientConfig, ClientError, Connection, clean_takes_in_batches};
-use xguitare_core::Config;
-use xguitare_core::control::{Request, Response};
-use xguitare_core::project_control::STILL_CLOSING;
+use xguitare_protocol::{Request, Response, STILL_CLOSING};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -30,7 +28,7 @@ const DAEMON_EXECUTABLE: &str = "xguitare";
 const REOPEN_TRIES: u32 = 40;
 
 pub fn spawn(
-    config: Config,
+    config: ClientConfig,
     config_path: Option<PathBuf>,
     stop: Arc<AtomicBool>,
     repaint: impl Fn() + Send + 'static,
@@ -48,7 +46,7 @@ pub fn spawn(
     reason = "independent per-request fetch flags, not states of one machine"
 )]
 struct Client {
-    config: Config,
+    config: ClientConfig,
     config_path: Option<PathBuf>,
     stop: Arc<AtomicBool>,
     connection: Option<Connection>,
@@ -76,7 +74,7 @@ struct Client {
 }
 
 impl Client {
-    fn new(config: Config, config_path: Option<PathBuf>, stop: Arc<AtomicBool>) -> Client {
+    fn new(config: ClientConfig, config_path: Option<PathBuf>, stop: Arc<AtomicBool>) -> Client {
         Client {
             config,
             config_path,
@@ -423,7 +421,7 @@ impl Client {
     }
 
     fn connect(&mut self, now: Instant) {
-        let err = match Connection::connect(&client_config(&self.config)) {
+        let err = match Connection::connect(&self.config) {
             Ok(connection) => {
                 self.connection = Some(connection);
                 self.last_ignored_error = None;
@@ -757,15 +755,6 @@ fn log_rack_ir(response: &Result<Response, ClientError>) {
         ),
         Ok(Response::Err { error }) => info!("rack_ir: error: {error}"),
         Err(err) => info!("rack_ir: error: {err}"),
-    }
-}
-
-fn client_config(config: &Config) -> ClientConfig {
-    ClientConfig {
-        socket: config.socket.clone(),
-        socket_is_fallback: config.socket_is_fallback,
-        tuner_mute: config.tuner_mute,
-        bank_kind: config.bank_kind,
     }
 }
 

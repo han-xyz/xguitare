@@ -7,7 +7,7 @@ use egui::{
     Frame, Grid, Id, Key, LayerId, Layout, Margin, Order, Painter, Pos2, Rect, Response, RichText,
     Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, pos2, vec2,
 };
-use xguitare_core::BankKind;
+use xguitare_protocol::BankKind;
 
 use crate::metronome_model::{
     BPM_RANGE, BeatLight, DEFAULT_VOLUME_DB, METER_CHOICES, VOLUME_DB_RANGE, metronome_view,

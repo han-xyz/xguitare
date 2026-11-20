@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use xguitare_core::Config;
+use xguitare_client::ClientConfig;
 use xguitare_gui::client;
 use xguitare_gui::model::Command;
 
@@ -62,10 +62,10 @@ fn quit_stops_a_daemon_the_gui_started() {
     unsafe { env::set_var("PATH", path) };
     let config_path = dir.0.join("config.toml");
     fs::write(&config_path, "").unwrap();
-    let config = Config {
+    let config = ClientConfig {
         socket: dir.0.join("s.sock"),
         socket_is_fallback: false,
-        ..Config::load(Some(&config_path)).unwrap()
+        ..ClientConfig::load(Some(&config_path)).unwrap()
     };
 
     let (commands, _snapshots, handle) =

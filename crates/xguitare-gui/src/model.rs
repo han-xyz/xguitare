@@ -5,12 +5,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use xguitare_client::{ClientError, TakesCleanStopped};
-use xguitare_core::BankKind;
-use xguitare_core::control::{
-    BusRef, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef, TransportAction,
+use xguitare_protocol::{
+    BankKind, BusRef, LoopRegion, Position, RenderBits, RenderRange, Request, Response, SILENCE_DB,
+    SendLevel, TrackRef, TransportAction, shown_file_name,
 };
-use xguitare_core::project::{LoopRegion, shown_file_name};
-use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
 use crate::project_model::{AutosaveOffer, MainView};
@@ -1367,7 +1365,7 @@ pub fn counts_toward_spawn(err: &ClientError) -> bool {
 pub enum Outgoing {
     Request(Request),
     Restore(Restore),
-    /// `project_close`, then `project_open` with `restore`, sent again while the Daemon answers [`STILL_CLOSING`](xguitare_core::project_control::STILL_CLOSING).
+    /// `project_close`, then `project_open` with `restore`, sent again while the Daemon answers [`STILL_CLOSING`](xguitare_protocol::STILL_CLOSING).
     RestoreAutosave(String),
 }
 

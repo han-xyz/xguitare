@@ -9,8 +9,8 @@ use std::time::Instant;
 use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
 use serde_json::Value;
 use tracing::{error, info};
-use xguitare_core::control::{BusRef, TrackRef};
-use xguitare_core::{BankKind, Config};
+use xguitare_client::ClientConfig;
+use xguitare_protocol::{BankKind, BusRef, TrackRef};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
@@ -117,7 +117,7 @@ pub struct App {
 impl App {
     pub fn new(
         cc: &eframe::CreationContext,
-        config: &Config,
+        config: &ClientConfig,
         config_path: Option<PathBuf>,
         stop: Arc<AtomicBool>,
     ) -> App {
@@ -136,7 +136,7 @@ impl App {
     )]
     pub fn with_snapshot(
         cc: &eframe::CreationContext,
-        config: &Config,
+        config: &ClientConfig,
         snapshot: Snapshot,
         commands: Sender<Command>,
     ) -> App {
@@ -150,7 +150,7 @@ impl App {
     /// An App with no client thread: each Snapshot sent on `snapshots` arrives as a client update and its commands go to `commands`.
     pub fn with_updates(
         cc: &eframe::CreationContext,
-        config: &Config,
+        config: &ClientConfig,
         snapshots: Receiver<Snapshot>,
         commands: Sender<Command>,
     ) -> App {
@@ -160,7 +160,7 @@ impl App {
 
     fn assemble(
         cc: &eframe::CreationContext,
-        config: &Config,
+        config: &ClientConfig,
         commands: Sender<Command>,
         snapshots: Receiver<Snapshot>,
         client: Option<JoinHandle<()>>,
