@@ -8,13 +8,10 @@ use std::time::Duration;
 use xguitare_client::{
     TakesCleanStopped, Transport, clean_takes_in_batches, newer_protocol_warning,
 };
-use xguitare_core::control::{
-    IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TransportAction, Value,
+use xguitare_protocol::{
+    IndexOrName, Position, RenderBits, RenderRange, Request, Response, SILENCE_DB, SendLevel,
+    TransportAction, Value, position_frame, shown_file_name,
 };
-
-use xguitare_core::project::shown_file_name;
-use xguitare_core::project_control::position_frame;
-use xguitare_core::render::{RenderBits, RenderRange};
 
 use crate::{
     BusCmd, BypassState, ClipCmd, ClipKind, Cmd, IrCmd, ItemCmd, MetronomeCmd, MuteState,

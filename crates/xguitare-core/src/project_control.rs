@@ -12,7 +12,7 @@ use crate::arrangement::ArrangementCommand;
 use crate::arrangement::Transport;
 use crate::atomic_file::slug;
 use crate::build::ENGINE_BUSY;
-use crate::control::{BusRef, EngineState, IndexOrName, MixPeaks, TrackRef, peak_db};
+use crate::control::{EngineState, MixPeaks, peak_db};
 use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
@@ -20,8 +20,8 @@ use crate::item_control::CopiedItem;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
-    AUTOSAVE_FILE, Item, LoadWarning, LoopRegion, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project,
-    Track, autosave_due, autosave_newer, check_project, check_track, checked_name,
+    AUTOSAVE_FILE, Item, LoadWarning, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track,
+    autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
 pub use crate::project_sync::project_rate_warning;
 use crate::project_sync::{
@@ -35,7 +35,7 @@ use crate::take_capture::{
 };
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Preset, PresetModule};
-pub use xguitare_protocol::{STILL_CLOSING, position_frame};
+use xguitare_protocol::{BusRef, IndexOrName, LoopRegion, STILL_CLOSING, TrackRef};
 
 pub(crate) const NO_PROJECT: &str = "no project open";
 const PROJECT_IS_OPEN: &str = "a project is open; close it first";

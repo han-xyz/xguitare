@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::arrangement::ArrangementCommand;
-use crate::control::{BusRef, EngineState, MixPeaks, SendLevel, TrackRef, peak_db};
+use crate::control::{EngineState, MixPeaks, peak_db};
 use crate::engine::{MeterPoint, MixMeters};
 use crate::project::{
     Bus, MAX_BUSES, MAX_TRACKS, Project, ProjectError, Send, Track, check_project, checked_bus_name,
@@ -10,6 +10,7 @@ use crate::project_control::{
     check_one_target, current_project, new_bus_id, resolve_bus, resolve_track,
 };
 use crate::project_sync::{commit, send, swap_project, swap_project_moving};
+use xguitare_protocol::{BusRef, SendLevel, TrackRef};
 
 const DEFAULT_BUS_NAME: &str = "Bus";
 

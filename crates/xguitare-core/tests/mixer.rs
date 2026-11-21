@@ -7,8 +7,9 @@ use xguitare_core::build::build_stereo_rack;
 use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, MeterPoint, RackSwitcher, engine_queues,
 };
-use xguitare_core::project::{Bus, LoopRegion, Master, Project, Send, Track};
+use xguitare_core::project::{Bus, Master, Project, Send, Track};
 use xguitare_dsp::{Gain, Module, Rack, StereoRack};
+use xguitare_protocol::LoopRegion;
 
 const RATE: f32 = 48_000.0;
 const BLOCK: usize = 256;

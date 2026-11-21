@@ -3,7 +3,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use xguitare_client::ClientConfig;
-use xguitare_core::{BankKind, Config};
+use xguitare_core::Config;
+use xguitare_protocol::BankKind;
 
 struct TempDir(PathBuf);
 

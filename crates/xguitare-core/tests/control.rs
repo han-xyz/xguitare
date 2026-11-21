@@ -9,9 +9,8 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::atomic_file::write_new;
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, change_sample_rate, follow_sample_rate, handle,
-    handle_line, needs_reprepare, open_connection, passthrough_rack, prepared_max_frames,
-    reprepare,
+    EngineState, Reprepare, change_sample_rate, follow_sample_rate, handle, handle_line,
+    needs_reprepare, open_connection, passthrough_rack, prepared_max_frames, reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
@@ -20,6 +19,7 @@ use xguitare_core::engine::{
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::apply;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, ModuleRegistry, Preset, PresetModule};
+use xguitare_protocol::{Request, Response};
 
 const QUEUE_CAPACITY: usize = 64;
 

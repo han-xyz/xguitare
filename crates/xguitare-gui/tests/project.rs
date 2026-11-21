@@ -4,8 +4,6 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use xguitare_client::TakesCleanStopped;
-use xguitare_core::control::{BusRef, Position, Request, Response, TrackRef, TransportAction};
-use xguitare_core::project::LoopRegion;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{
     CleanTakesView, Command, KeyEvent, KeyModifiers, Message, Outgoing, RemovedUnit, TrackEdit,
@@ -22,6 +20,9 @@ use xguitare_gui::project_model::{
     recording_from, recording_span, restored_view, snap_to_beat, still_closing, take_names,
     time_text, track_rows, transport_view, trim_preview, trim_step_command, undo_text,
     visible_stretches, waveform_columns,
+};
+use xguitare_protocol::{
+    BusRef, LoopRegion, Position, Request, Response, TrackRef, TransportAction,
 };
 
 const RATE: f64 = 48_000.0;

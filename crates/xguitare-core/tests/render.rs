@@ -8,12 +8,12 @@ use std::sync::Arc;
 use hound::{SampleFormat, WavReader};
 use xguitare_core::arrangement::ArrangementCommand;
 use xguitare_core::build::build_arrangement;
-use xguitare_core::project::{Bus, Item, LoopRegion, Master, Project, Send, Take, Track};
+use xguitare_core::project::{Bus, Item, Master, Project, Send, Take, Track};
 use xguitare_core::render::{
-    RENDER_BLOCK, Render, RenderBits, RenderError, RenderJob, RenderRange, RenderState, RenderStep,
-    run_render,
+    RENDER_BLOCK, Render, RenderError, RenderJob, RenderState, RenderStep, run_render,
 };
 use xguitare_core::{Config, PresetModule};
+use xguitare_protocol::{LoopRegion, RenderBits, RenderRange};
 
 const RATE: u32 = 48_000;
 const HALF_SECOND: usize = RATE as usize / 2;

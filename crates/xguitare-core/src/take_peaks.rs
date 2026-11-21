@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::control::EngineState;
 use crate::project_control::loaded_peaks;
-pub use xguitare_protocol::FRAMES_PER_PEAK;
+use xguitare_protocol::FRAMES_PER_PEAK;
 
 /// The most pairs one `take_peaks` reply carries.
 pub const MAX_PEAKS_PER_REPLY: usize = 16_384;

@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
-use xguitare_protocol::position_frame;
+use xguitare_protocol::{LoopRegion, Position, TransportAction, position_frame};
 
 use crate::arrangement::ArrangementCommand;
-use crate::control::{EngineState, Position, TransportAction};
-use crate::project::{Item, LoopRegion, Project, check_project};
+use crate::control::EngineState;
+use crate::project::{Item, Project, check_project};
 use crate::project_control::{NO_PROJECT, autosave_on_stop, open_project_mut};
 use crate::project_sync::{click_commands, commit, project_rate_warning, send};
 

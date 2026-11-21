@@ -16,17 +16,15 @@ use egui_kittest::wgpu::{WgpuTestRenderer, create_render_state, default_wgpu_set
 use egui_system_font_provider::SystemFontProvider;
 use serde_json::{Value, json};
 use xguitare_client::ClientConfig;
-use xguitare_core::control::TrackRef;
-use xguitare_core::control::TransportAction;
-use xguitare_core::project::LoopRegion;
-use xguitare_core::render::{RenderBits, RenderRange};
-use xguitare_core::take_peaks::FRAMES_PER_PEAK;
-use xguitare_core::{BankKind, ModuleRegistry};
+use xguitare_core::ModuleRegistry;
 use xguitare_gui::app::App;
 use xguitare_gui::mixer_model::{MixerTarget, ShownRack};
 use xguitare_gui::model::{Command, Link, Message, ModuleType, Restore, Snapshot, TrackEdit};
 use xguitare_gui::project_model::AutosaveOffer;
 use xguitare_gui::theme::palette;
+use xguitare_protocol::{
+    BankKind, FRAMES_PER_PEAK, LoopRegion, RenderBits, RenderRange, TrackRef, TransportAction,
+};
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
 const DEFAULT_WINDOW: Vec2 = Vec2::new(1280.0, 800.0);

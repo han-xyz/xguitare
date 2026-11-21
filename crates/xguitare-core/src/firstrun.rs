@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use xguitare_dsp::synth_ir::{bass_cabinet, default_cabinet};
 
-use crate::BankKind;
+use xguitare_protocol::BankKind;
 
 pub(crate) const DEFAULT_IR: &str = "default-cab.wav";
 pub(crate) const BASS_IR: &str = "bass-cab.wav";

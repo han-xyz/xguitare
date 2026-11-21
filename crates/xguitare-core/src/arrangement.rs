@@ -12,10 +12,10 @@ use crate::engine::{MeterPoint, MixMeters, set_module_bypass, set_module_param};
 use crate::flatten::{PlacedTake, flatten, item_fade_frames};
 use crate::metronome::{Blip, DEFAULT_VOLUME_DB};
 use crate::project::{
-    Bus, LoopRegion, MAX_BUSES, MAX_TRACKS, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM,
-    Track,
+    Bus, MAX_BUSES, MAX_TRACKS, METER_BEATS, METER_NOTES, Master, Project, TEMPO_BPM, Track,
 };
 use crate::take_capture::{RING_SECONDS, TakeReader, TakeRecorder, take_ring};
+use xguitare_protocol::LoopRegion;
 
 const MIN_VOLUME_DB: f32 = -60.0;
 const MAX_VOLUME_DB: f32 = 6.0;

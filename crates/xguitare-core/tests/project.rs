@@ -4,9 +4,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use xguitare_core::Preset;
 use xguitare_core::project::{
-    AUTOSAVE_FILE, Item, LoopRegion, Master, PROJECT_FILE, Project, Send, Take, Track,
-    autosave_due, autosave_newer,
+    AUTOSAVE_FILE, Item, Master, PROJECT_FILE, Project, Send, Take, Track, autosave_due,
+    autosave_newer,
 };
+use xguitare_protocol::LoopRegion;
 
 const TWO_TRACKS: &str = r#"name = "Song"
 sample_rate = 48000

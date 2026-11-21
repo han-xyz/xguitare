@@ -6,8 +6,9 @@ use xguitare_core::engine::{
     Command, EngineQueues, EngineShared, FadeLengths, RackSwitcher, engine_queues,
 };
 use xguitare_core::metronome::{MetronomeSettings, TapTempo};
-use xguitare_core::project::{LoopRegion, Master, Project};
+use xguitare_core::project::{Master, Project};
 use xguitare_dsp::{Rack, StereoRack};
+use xguitare_protocol::LoopRegion;
 
 const RATE: f32 = 48_000.0;
 const BLOCK: usize = 128;

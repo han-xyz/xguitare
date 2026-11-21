@@ -4,12 +4,13 @@ use std::path::PathBuf;
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
-use xguitare_core::project::{LoopRegion, Master, Project, Take, Track};
+use xguitare_core::project::{Master, Project, Take, Track};
 use xguitare_core::take_capture::{
     FinishedTake, Latency, ReadStop, TakePlacement, TakeSpan, add_finished_take, add_take,
     next_take_file, take_position, take_ring,
 };
 use xguitare_dsp::{Rack, StereoRack};
+use xguitare_protocol::LoopRegion;
 
 struct TempDir(PathBuf);
 

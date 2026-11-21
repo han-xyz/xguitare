@@ -1,7 +1,6 @@
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use xguitare_core::control::{BusRef, SendLevel, TrackRef};
 use xguitare_gui::mixer_model::{
     Audibility, MixerColumn, MixerTarget, RackFocus, RenderSent, RenderView, STRIP_MAX_WIDTH,
     STRIP_MIN_WIDTH, SendView, ShownRack, StereoPeakHold, StripFit, StripRow, aim_rack_commands,
@@ -10,6 +9,7 @@ use xguitare_gui::mixer_model::{
 };
 use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command, progress_text_place};
 use xguitare_gui::project_model::{MainView, project_key_to_command};
+use xguitare_protocol::{BusRef, SendLevel, TrackRef};
 
 fn track(name: &str, mute: bool, solo: bool, sends: &[usize]) -> Value {
     let sends: Vec<Value> = sends

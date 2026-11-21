@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use xguitare_core::control::{EngineState, Request, Response, handle};
+use xguitare_core::control::{EngineState, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config};
+use xguitare_protocol::{Request, Response};
 
 const QUEUE_CAPACITY: usize = 64;
 const CLEAN: &str = "name = \"Clean\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = -3\n";

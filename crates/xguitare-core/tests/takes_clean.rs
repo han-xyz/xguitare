@@ -6,7 +6,7 @@ use std::sync::{Arc, PoisonError};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
-use xguitare_core::control::{EngineState, Request, Response, TrackRef, TransportAction, handle};
+use xguitare_core::control::{EngineState, handle};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::project::AUTOSAVE_FILE;
 use xguitare_core::project::{Item, Project, Take};
@@ -15,6 +15,7 @@ use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan, WritingTakes}
 use xguitare_core::takes_control::delete_take_files;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BuildWarning, Config};
+use xguitare_protocol::{Request, Response, TrackRef, TransportAction};
 
 struct TempDir(PathBuf);
 

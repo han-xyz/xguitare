@@ -5,10 +5,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::Ports;
 use crate::atomic_file::temp_path;
 use crate::metronome::{BAD_BPM, BAD_VOLUME, VOLUME_DB};
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
-use crate::{BankKind, Ports};
+use xguitare_protocol::BankKind;
 
 const STATE_FILE_MODE: u32 = 0o600;
 

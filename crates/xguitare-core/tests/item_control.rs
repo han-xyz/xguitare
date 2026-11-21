@@ -6,13 +6,14 @@ use std::sync::atomic::Ordering;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
 use xguitare_core::arrangement::ArrangementCommand;
-use xguitare_core::control::{EngineState, Request, Response, TrackRef, TransportAction, handle};
+use xguitare_core::control::{EngineState, handle};
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues};
 use xguitare_core::flatten::PlacedTake;
 use xguitare_core::metronome::MetronomeSettings;
 use xguitare_core::project::{Item, Project, Take};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BuildWarning, Config};
+use xguitare_protocol::{Request, Response, TrackRef, TransportAction};
 
 struct TempDir(PathBuf);
 

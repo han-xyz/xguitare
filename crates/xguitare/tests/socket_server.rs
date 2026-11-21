@@ -8,13 +8,14 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use xguitare::socket_server::{IDLE_TIMEOUT, MAX_CONNECTIONS, bind};
-use xguitare_core::control::{EngineState, Value};
+use xguitare_core::control::EngineState;
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues, raise_peak};
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{Item, Project, Take};
-use xguitare_core::take_peaks::{FRAMES_PER_PEAK, MAX_PEAKS_PER_REPLY};
+use xguitare_core::take_peaks::MAX_PEAKS_PER_REPLY;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config, Ports};
+use xguitare_protocol::{FRAMES_PER_PEAK, Value};
 
 struct NoPorts;
 

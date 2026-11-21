@@ -14,7 +14,7 @@ use crate::preset::{
 };
 use crate::{Preset, PresetError, PresetModule};
 pub(crate) use xguitare_protocol::is_hidden_char;
-pub use xguitare_protocol::{LoopRegion, shown_file_name};
+use xguitare_protocol::{LoopRegion, shown_file_name};
 
 pub const PROJECT_FILE: &str = "project.toml";
 pub const AUTOSAVE_FILE: &str = "project.autosave.toml";

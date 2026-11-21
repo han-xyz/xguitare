@@ -37,16 +37,13 @@ pub mod watch;
 pub use address::{AddressError, ParamAddress, ResolveError, resolve};
 pub use bank::{Bank, BankEntry};
 pub use config::{
-    AUTO_PORT, BankKind, Config, ConfigError, Ports, SOCKET_DIR_MODE, SocketDirError,
-    secure_socket_dir,
+    AUTO_PORT, Config, ConfigError, Ports, SOCKET_DIR_MODE, SocketDirError, secure_socket_dir,
 };
 pub use ir::{IrError, load_ir};
 pub use irdir::list_irs;
 pub use preset::{BuildError, BuildWarning, Preset, PresetError, PresetModule};
 pub use registry::ModuleRegistry;
 pub use state::{Banks, SavedMetronome, SavedState};
-pub use xguitare_dsp::eq_response_db;
-pub use xguitare_dsp::modules::eq::MAX_FREQ_PER_RATE as EQ_MAX_FREQ_PER_RATE;
 
 fn line_col(text: &str, offset: usize) -> (usize, usize) {
     let before = &text[..offset.min(text.len())];

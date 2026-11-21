@@ -17,6 +17,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 xguitare-client = { path = "../xguitare-client" }
 xguitare-core = { path = "../xguitare-core" }
 xguitare-dsp = { path = "../xguitare-dsp" }
+xguitare-protocol = { path = "../xguitare-protocol" }
 
 [lints]
 workspace = true

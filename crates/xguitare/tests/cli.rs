@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use xguitare::{CliEnv, run_cli, run_main};
 use xguitare_client::{ClientError, Transport};
-use xguitare_core::control::{
-    BusRef, Position, Request, Response, SendLevel, TrackRef, TransportAction,
+use xguitare_protocol::{
+    BusRef, Position, RenderBits, RenderRange, Request, Response, SendLevel, TrackRef,
+    TransportAction,
 };
-use xguitare_core::render::{RenderBits, RenderRange};
 
 struct Canned {
     replies: VecDeque<Result<Response, ClientError>>,

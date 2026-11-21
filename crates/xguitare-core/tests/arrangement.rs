@@ -7,9 +7,10 @@ use xguitare_core::engine::{
     Command, EngineShared, FadeLengths, FromAudio, RackSwitcher, engine_queues,
 };
 use xguitare_core::flatten::{PlacedTake, flatten, item_fade_frames};
-use xguitare_core::project::{Item, LoopRegion, Master, Project, Take, Track};
+use xguitare_core::project::{Item, Master, Project, Take, Track};
 use xguitare_core::take_capture::{ReadStop, TakeReader, TakeSpan};
 use xguitare_dsp::{Gain, Module, Rack, StereoRack};
+use xguitare_protocol::LoopRegion;
 
 const RATE: u32 = 48_000;
 const BLOCK: usize = 256;

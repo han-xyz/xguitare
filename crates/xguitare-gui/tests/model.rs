@@ -6,12 +6,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use xguitare_client::ClientError;
-use xguitare_core::control::Request;
-use xguitare_core::control::Response;
-use xguitare_core::control::{EngineState, SILENCE_DB, handle};
+use xguitare_core::control::{EngineState, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
-use xguitare_core::{Bank, BankKind, Config};
+use xguitare_core::{Bank, Config};
 use xguitare_gui::model::{
     AddPlace, Band, BankRow, ClipLatch, Command, Direction, EAR_HOLE_RADIUS, EAR_WIDTH, Feedback,
     KeyEvent, KeyModifiers, KnobKey, LADDER_SEGMENTS, Link, Message, ModuleType, NO_SIGNAL,
@@ -41,6 +39,7 @@ use xguitare_gui::model::{
     open_unit_height,
 };
 use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for, palette};
+use xguitare_protocol::{BankKind, Request, Response, SILENCE_DB};
 
 struct TempDir(PathBuf);
 

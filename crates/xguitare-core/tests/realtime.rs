@@ -12,9 +12,10 @@ use xguitare_core::engine::{
 };
 use xguitare_core::flatten::{flatten, item_fade_frames};
 use xguitare_core::metronome::MetronomeSettings;
-use xguitare_core::project::{Bus, Item, LoopRegion, Master, Project, Send, Take, Track};
+use xguitare_core::project::{Bus, Item, Master, Project, Send, Take, Track};
 use xguitare_core::{ModuleRegistry, PresetModule};
 use xguitare_dsp::{Gain, Module, Rack, StereoRack};
+use xguitare_protocol::LoopRegion;
 
 #[cfg(debug_assertions)]
 #[global_allocator]

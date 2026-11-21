@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use xguitare_core::control::{EngineState, Request, Response, handle, handle_with_ports};
+use xguitare_core::control::{EngineState, handle, handle_with_ports};
 use xguitare_core::engine::{AudioQueues, EngineShared, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::tuner::Tuner;
-use xguitare_core::{Bank, BankEntry, BankKind, BuildWarning, Config, Ports};
+use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Ports};
+use xguitare_protocol::{BankKind, Request, Response};
 
 const OWN_INPUT: &str = "xguitare:in";
 const OWN_LEFT: &str = "xguitare:out_l";

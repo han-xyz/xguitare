@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, Position, Request, Response, TrackRef, TransportAction, follow_sample_rate,
-    handle, handle_with_ports, reprepare,
+    EngineState, follow_sample_rate, handle, handle_with_ports, reprepare,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, raise_peak};
 use xguitare_core::metronome::MetronomeSettings;
@@ -21,6 +20,7 @@ use xguitare_core::project_control::{
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Ports};
+use xguitare_protocol::{Position, Request, Response, TrackRef, TransportAction};
 
 const CAPTURE: &str = "card:capture_1";
 

@@ -19,7 +19,7 @@ use crate::mixer_control::{
     BusChange, bus_add, bus_remove, bus_set, clip_reset, master_set, send_set,
 };
 use crate::ports::AudioPorts;
-use crate::project::{LoopRegion, MAX_BUSES, MAX_TRACKS};
+use crate::project::{MAX_BUSES, MAX_TRACKS};
 use crate::project_control::{
     Projects, TrackChange, items, project_close, project_list, project_new, project_open,
     project_save, status_fields, target_rack, track_add, track_remove, track_select, track_set,
@@ -38,11 +38,8 @@ use crate::transport_control::{click, set_loop, tempo, transport};
 use crate::tuner::Tuner;
 use crate::undo_control::{project_redo, project_undo};
 use crate::{Bank, BuildWarning, Config, Ports, Preset};
-pub use xguitare_protocol::{
-    BusRef, IndexOrName, Position, Request, Response, SILENCE_DB, SendLevel, TrackRef,
-    TransportAction, Value,
-};
 use xguitare_protocol::{CODE_STILL_CLOSING, PROTOCOL_VERSION, STILL_CLOSING};
+use xguitare_protocol::{LoopRegion, Request, Response, SILENCE_DB, Value};
 
 const NANOS_PER_MICRO: u64 = 1_000;
 const NO_AUDIO_PORTS: &str = "audio ports are not available";

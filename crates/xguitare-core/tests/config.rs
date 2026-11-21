@@ -2,7 +2,8 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
-use xguitare_core::{BankKind, Config, secure_socket_dir};
+use xguitare_core::{Config, secure_socket_dir};
+use xguitare_protocol::BankKind;
 
 fn config_file(test: &str, contents: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("xguitare-config-{}-{test}", std::process::id()));

@@ -4906,6 +4906,7 @@ dependencies = [
  "xguitare-client",
  "xguitare-core",
  "xguitare-dsp",
+ "xguitare-protocol",
 ]
 
 [[package]]

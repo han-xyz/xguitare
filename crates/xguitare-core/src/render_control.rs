@@ -7,9 +7,8 @@ use serde_json::{Value, json};
 
 use crate::control::EngineState;
 use crate::project_control::{NO_PROJECT, ProjectEvent, open_project_state};
-use crate::render::{
-    RENDERS_DIR, Render, RenderBits, RenderJob, RenderRange, RenderState, RenderTask,
-};
+use crate::render::{RENDERS_DIR, Render, RenderJob, RenderState, RenderTask};
+use xguitare_protocol::{RenderBits, RenderRange};
 
 const RENDER_RUNNING: &str = "a render is already running";
 const NO_RENDER_RUNNING: &str = "no render running";

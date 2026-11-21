@@ -88,5 +88,5 @@ fn a_client_ignores_the_daemons_keys_and_defaults_its_own() {
     );
     let client = ClientConfig::load(Some(&path)).unwrap();
     assert!(client.tuner_mute);
-    assert_eq!(client.bank_kind, xguitare_core::BankKind::Guitar);
+    assert_eq!(client.bank_kind, xguitare_protocol::BankKind::Guitar);
 }

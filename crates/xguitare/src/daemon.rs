@@ -16,8 +16,8 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use tracing::{error, info, warn};
 use xguitare_core::build;
 use xguitare_core::control::{
-    EngineState, Reprepare, Request, Response, follow_sample_rate, handle, needs_reprepare,
-    passthrough_rack, reprepare,
+    EngineState, Reprepare, follow_sample_rate, handle, needs_reprepare, passthrough_rack,
+    reprepare,
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
@@ -32,8 +32,9 @@ use xguitare_core::render_control::{RenderFinished, cancel_render, finished_rend
 use xguitare_core::take_capture::Latency;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
-use xguitare_core::{Bank, BankEntry, BankKind, Config, ConfigError, Preset, SocketDirError};
+use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
+use xguitare_protocol::{BankKind, Request, Response};
 
 use crate::disk_writer::{DiskThread, TakeWriter};
 use crate::jack_adapter::{self, JackError, Session};

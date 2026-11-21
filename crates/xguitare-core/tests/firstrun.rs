@@ -2,7 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use xguitare_core::firstrun::{Created, ensure_bank};
-use xguitare_core::{Bank, BankEntry, BankKind, ModuleRegistry};
+use xguitare_core::{Bank, BankEntry, ModuleRegistry};
+use xguitare_protocol::BankKind;
 
 struct TempDir(PathBuf);
 

@@ -1,11 +1,12 @@
 use serde_json::{Value, json};
 
-use crate::control::{EngineState, TrackRef};
+use crate::control::EngineState;
 use crate::project::{Item, Project};
 use crate::project_control::{
     clipboard, current_project, edit_items, editable_project, fill_clipboard, gone_take_file,
     item_json, resolve_track,
 };
+use xguitare_protocol::TrackRef;
 
 const NO_ITEMS: &str = "give at least one item";
 const CLIPBOARD_EMPTY: &str = "clipboard is empty";

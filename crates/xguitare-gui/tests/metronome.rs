@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use xguitare_core::control::{EngineState, Request, Response, handle};
+use xguitare_core::control::{EngineState, handle};
 use xguitare_core::engine::{EngineShared, engine_queues};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
@@ -13,6 +13,7 @@ use xguitare_gui::metronome_model::{
 };
 use xguitare_gui::model::{Command, KeyEvent, Outgoing, requests_until_quit};
 use xguitare_gui::project_model::{KeyFocus, key_active, project_key_to_command};
+use xguitare_protocol::{Request, Response};
 
 fn status(on: bool, beat: u32) -> Value {
     json!({

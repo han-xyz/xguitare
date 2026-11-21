@@ -6,8 +6,9 @@ use std::sync::Arc;
 use xguitare_core::build::{build_arrangement, build_rack, build_stereo_rack, swap_arrangement};
 use xguitare_core::engine::{Command, engine_queues};
 use xguitare_core::firstrun::ensure_bank;
-use xguitare_core::project::{Item, LoopRegion, Master, Project, Take, Track};
-use xguitare_core::{Bank, BankEntry, BankKind, Config, Preset};
+use xguitare_core::project::{Item, Master, Project, Take, Track};
+use xguitare_core::{Bank, BankEntry, Config, Preset};
+use xguitare_protocol::{BankKind, LoopRegion};
 
 struct TempDir(PathBuf);
 

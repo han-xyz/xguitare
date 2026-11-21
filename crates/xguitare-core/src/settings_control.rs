@@ -11,7 +11,8 @@ use crate::ports::{AudioPorts, AvailablePort, connect_plan};
 use crate::project_control::create_projects_dir;
 use crate::rack_control::passthrough_rack;
 use crate::state::{SavedState, read_state_bytes, restore_state, write_state};
-use crate::{Bank, BankEntry, BankKind, BuildWarning, Config, Ports, Preset};
+use crate::{Bank, BankEntry, BuildWarning, Config, Ports, Preset};
+use xguitare_protocol::BankKind;
 
 const BANK_DIR_IN_CONFIG: &str = "bank_dir is set in config.toml; edit it there";
 const PROJECTS_DIR_NOT_ABSOLUTE: &str = "projects_dir must be an absolute path";

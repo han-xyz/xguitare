@@ -9,9 +9,10 @@ use hound::{SampleFormat, WavReader};
 use xguitare::disk_writer::{DiskThread, TakeWriter};
 use xguitare_core::arrangement::{Arrangement, ArrangementCommand};
 use xguitare_core::engine::{Command, FadeLengths, RackSwitcher, engine_queues};
-use xguitare_core::project::{LoopRegion, Master, Project, Track};
+use xguitare_core::project::{Master, Project, Track};
 use xguitare_core::take_capture::{FinishedTake, TakeSpan, TrackReader, WritingTakes, take_ring};
 use xguitare_dsp::{Rack, StereoRack};
+use xguitare_protocol::LoopRegion;
 
 struct TempDir(PathBuf);
 
