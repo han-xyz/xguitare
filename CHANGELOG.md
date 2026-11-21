@@ -71,6 +71,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Fixed
 
+- Preset, Project and state saves are written durably: the file is synced before the rename and the directory after; on a filesystem that refuses fsync the save still succeeds, without that guarantee.
 - A Project file holding an Item whose active Take does not play past its `offset` (which a stop just after a loop wrap could record) opens with that Item playing the newest of its Takes that does, keeping all its Takes, and warns `track '<name>': item <id> now plays <take file>: <old take file> ends before the item starts`; an Item none of whose Takes plays is left out with `track '<name>': dropped item <id> (<take files>): starts past the end of its take`, its Take files staying on disk. The warnings are in the `project_open` reply, the Daemon log, the CLI's stderr and the GUI's footer. Saving such an Item is refused with `track '<name>' item <id> starts past the end of its take`.
 - `locate` is bounded by where each Item really ends (its active Take less its `offset`), no longer by its longest Take.
 - A Cabinet IR with a NaN or infinite sample is refused with `ir <name>: non-finite sample`.
@@ -80,7 +81,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - A preamp `stages` change no longer jumps in level.
 - The CLI and the GUI refuse a fallback socket directory that is not yours or not mode 0700.
 - A Daemon the GUI started that exits before it answers (a bad config key, JACK not running) is no longer started again every 5 s behind a `Daemon disconnected` banner: the rack shows the red `The Daemon exited` banner with the Daemon's last stderr line and when it starts again, and the GUI starts it again after a pause that grows from 5 s to 60 s; a Daemon you start is picked up at once.
-- A Take being recorded when the Daemon crashes or is killed is no longer an unreadable file: its WAV is flushed once per second of audio, so the file under `takes/` plays up to the last second before the crash; it is not added to the Project (`takes unused` lists it).
+- A Take being recorded when the Daemon crashes or is killed is no longer an unreadable file: its file under `takes/` is a valid WAV from its creation and holds the audio up to its last flush, so at most about one second is lost; it is not added to the Project (`takes unused` lists it).
 - A Daemon keeps running when its stderr goes away, such as one the GUI started after the GUI crashes: a failed log write is dropped instead of ending the Daemon.
 
 ### Known
