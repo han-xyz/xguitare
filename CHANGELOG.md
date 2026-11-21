@@ -67,6 +67,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 - A second `xguitare run` on the same socket exits with `error: another Daemon is running` (it was `error: daemon already running at <socket>`); the running Daemon holds a lock on `<socket>.lock`, e.g. `xguitare.sock.lock`.
 - `xguitare rack` with no subcommand prints one `error:` line and exits 1.
 - The CLI's commands other than `run`, and the GUI, read only the config keys they use (`socket`, `bank_kind`, `tuner_mute`), so an unknown key or a wrong Daemon-only key such as `buffer_size = 0` or a bad `[ports]` entry no longer stops them; `xguitare run` still refuses it.
+- The minimum Rust version for the Daemon and CLI is 1.89 (was 1.88, README) because `File::try_lock` needs it; every crate now declares `rust-version`, and CI checks the Daemon and CLI on 1.89, builds with `--locked` and runs `cargo deny check advisories licenses` (`deny.toml`).
 
 ### Fixed
 

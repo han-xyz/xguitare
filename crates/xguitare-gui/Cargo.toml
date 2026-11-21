@@ -3,6 +3,7 @@ name = "xguitare-gui"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+rust-version = "1.95"
 version.workspace = true
 
 [dependencies]
