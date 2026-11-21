@@ -31,6 +31,7 @@ pub enum TakeWarning {
     Create { file: String, error: String },
     Write { file: String, error: String },
     Finish { file: String, error: String },
+    Flush { file: String, error: String },
     Abandoned { file: String },
 }
 
@@ -46,6 +47,9 @@ impl fmt::Display for TakeWarning {
             TakeWarning::Finish { file, error } => {
                 write!(f, "cannot finish take {file}: {error}; dropping this take")
             }
+            TakeWarning::Flush { file, error } => {
+                write!(f, "cannot flush take {file}: {error}; dropping this take")
+            }
             TakeWarning::Abandoned { file } => write!(
                 f,
                 "take {file} lost its end mark; its file is kept but not placed"
@@ -58,6 +62,7 @@ struct TrackWriter {
     readers: VecDeque<TrackReader>,
     output: Output,
     written: u64,
+    unflushed: u64,
 }
 
 enum Output {
@@ -96,12 +101,13 @@ impl TakeWriter {
                     readers: VecDeque::from([reader]),
                     output: Output::Closed,
                     written: 0,
+                    unflushed: 0,
                 });
             }
         }
     }
 
-    /// Writes what the rings hold and returns the Takes that ended, each closed in its own file, with the warnings for the Takes dropped on the way.
+    /// Writes what the rings hold, flushing each open Take's file once per second of audio so a copy or a crash leaves it readable up to the last flush, and returns the Takes that ended, each closed in its own file, with the warnings for the Takes dropped on the way.
     pub fn drain(&mut self) -> Drained {
         let mut drained = Drained::default();
         for track in &mut self.tracks {
@@ -195,12 +201,27 @@ impl TrackWriter {
                 error: err.to_string(),
             });
             self.output = Output::Failed;
+            return;
+        }
+        self.unflushed += samples.len() as u64;
+        if self.unflushed < u64::from(spec.sample_rate) {
+            return;
+        }
+        self.unflushed = 0;
+        if let Err(err) = wav.flush() {
+            unmark_writing(writing, file);
+            warnings.push(TakeWarning::Flush {
+                file: file.clone(),
+                error: err.to_string(),
+            });
+            self.output = Output::Failed;
         }
     }
 
     /// Ends the Take: finalizes its file and returns its name, or `None` when it had no frames or failed.
     fn close(&mut self, writing: &WritingTakes, warnings: &mut Vec<TakeWarning>) -> Option<String> {
         self.written = 0;
+        self.unflushed = 0;
         match std::mem::replace(&mut self.output, Output::Closed) {
             Output::Writing { file, wav } => match wav.finalize() {
                 Ok(()) => Some(file),

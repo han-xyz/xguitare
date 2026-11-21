@@ -356,3 +356,35 @@ fn a_take_that_lost_its_end_mark_is_a_warning_and_leaves_the_writing_set() {
     assert!(!writing_files(&writing).contains(&"takes/t-65.wav".to_string()));
     assert_eq!(wav_samples(&dir.0, "takes/t-65.wav"), [0.5]);
 }
+
+#[test]
+fn a_take_file_copied_while_still_written_holds_all_but_its_last_second() {
+    const RATE: usize = 48_000;
+    const CHUNK: usize = RATE / 10;
+    let dir = temp_dir("crash");
+    let mut writer = TakeWriter::new(dir.0.clone(), RATE as u32, WritingTakes::default());
+    let (mut recorder, reader) = take_ring(RATE);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
+    let input = ramp(RATE * 7 / 2);
+    let mut written = 0;
+    for checkpoint in [RATE * 3 / 2, RATE * 7 / 2] {
+        while written < checkpoint {
+            recorder.push(written as u64, &input[written..written + CHUNK]);
+            written += CHUNK;
+            assert_eq!(writer.drain(), Drained::default());
+        }
+        let copy = format!("takes/copy-{checkpoint}.wav");
+        fs::copy(dir.0.join("takes/t-1.wav"), dir.0.join(&copy)).unwrap();
+        let recovered = wav_samples(&dir.0, &copy);
+        assert!(
+            recovered.len() >= written - RATE,
+            "{} frames recovered of {written}",
+            recovered.len()
+        );
+        assert_eq!(recovered, input[..recovered.len()]);
+    }
+}

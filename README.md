@@ -547,6 +547,7 @@ While a Project is open and changed, the Daemon writes `project.autosave.toml` e
 - When the disk falls behind, the dropped frames are counted in `status` `disk_overflows` and left out of the Take, which then plays shorter and early from that point; they are not filled with silence.
 - With the loop on, a recording that does not start at the loop start puts its first pass and the passes after the first wrap on separate Items.
 - A Take that cannot be written or loaded is only reported in the Daemon's log.
+- If the Daemon crashes or is killed while recording, the Take's file stays under `takes/` as a valid WAV holding the audio up to the last whole second (the file is flushed once per second of audio). The Project does not list it: `xguitare takes unused` shows it, and it is not added back to a Track.
 
 ## GUI
 
