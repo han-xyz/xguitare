@@ -172,7 +172,7 @@ fn save_leaves_no_temp_file() {
 }
 
 #[test]
-fn save_keeps_the_default_mode_and_the_error_text() {
+fn save_gives_the_default_mode() {
     let dir = temp_dir("save-mode");
     fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
     let project = Project::load(&dir.0).unwrap().0;
@@ -180,6 +180,13 @@ fn save_keeps_the_default_mode_and_the_error_text() {
     project.save(&dir.0).unwrap();
     fs::write(dir.0.join("plain"), "").unwrap();
     assert_eq!(mode(&dir.0.join(PROJECT_FILE)), mode(&dir.0.join("plain")));
+}
+
+#[test]
+fn a_failed_save_names_the_project_file() {
+    let dir = temp_dir("save-error");
+    fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
     let blocked = temp_dir("save-blocked");
     fs::create_dir_all(blocked.0.join(PROJECT_FILE).join("inside")).unwrap();
     let message = project.save(&blocked.0).unwrap_err().to_string();

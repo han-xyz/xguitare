@@ -37,7 +37,7 @@ pub(crate) fn write_through(path: &Path, text: &str) -> io::Result<()> {
 
 /// Replaces the file `path` names by `bytes`: a temp file beside it is created new, written, given exactly `mode` when one is passed (the default mode under the umask otherwise), synced and renamed onto `path`, then the parent directory is synced.
 ///
-/// The directory sync is best effort: once the rename has succeeded the new content is in place and `Ok` is returned even when the sync fails, so only its survival across a power loss is unconfirmed.
+/// On a filesystem that refuses `fsync` (`InvalidInput` or `Unsupported`) the file is renamed unsynced, since durability is not available there; any other sync error fails the replace. The directory sync is best effort: once the rename has succeeded the new content is in place and `Ok` is returned even when the sync fails, so only its survival across a power loss is unconfirmed.
 ///
 /// # Errors
 ///
@@ -56,7 +56,7 @@ pub fn replace(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
             Some(mode) => file.set_permissions(fs::Permissions::from_mode(mode)),
             None => Ok(()),
         })
-        .and_then(|()| file.sync_all())
+        .and_then(|()| sync_file(&file))
         .and_then(|()| fs::rename(&tmp, path));
     if written.is_err() {
         let _ = fs::remove_file(&tmp);
@@ -64,6 +64,15 @@ pub fn replace(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
     }
     let _ = sync_parent_dir(path);
     Ok(())
+}
+
+fn sync_file(file: &File) -> io::Result<()> {
+    match file.sync_all() {
+        Err(err) if matches!(err.kind(), ErrorKind::InvalidInput | ErrorKind::Unsupported) => {
+            Ok(())
+        }
+        synced => synced,
+    }
 }
 
 fn sync_parent_dir(path: &Path) -> io::Result<()> {
