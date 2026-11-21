@@ -1,7 +1,6 @@
 [licenses]
 allow = [
     "Apache-2.0",
-    "BSD-1-Clause",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
