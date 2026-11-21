@@ -388,3 +388,177 @@ fn a_take_file_copied_while_still_written_holds_all_but_its_last_second() {
         assert_eq!(recovered, input[..recovered.len()]);
     }
 }
+
+const FAILURE_CASE_VAR: &str = "TAKE_WRITER_FAILURE_CASE";
+
+fn run_under_file_size_limit(case: &str) {
+    let exe = std::env::current_exe().unwrap();
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("trap '' XFSZ; ulimit -f 1; exec \"$0\" --exact file_size_limit_child --nocapture")
+        .arg(exe)
+        .env(FAILURE_CASE_VAR, case)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child for {case} failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn single_warning(drained: &Drained) -> &TakeWarning {
+    assert_eq!(drained.finished, []);
+    let [warning] = &drained.warnings[..] else {
+        panic!("expected one warning, got {:?}", drained.warnings);
+    };
+    warning
+}
+
+#[test]
+fn file_size_limit_child() {
+    let Ok(case) = std::env::var(FAILURE_CASE_VAR) else {
+        return;
+    };
+    let (sample_rate, frames) = match case.as_str() {
+        "write" => (48_000, 3000),
+        "finish" => (48_000, 1000),
+        "flush" => (1000, 1000),
+        other => panic!("unknown case {other}"),
+    };
+    let dir = temp_dir(&format!("limit-{case}"));
+    let writing = WritingTakes::default();
+    let mut writer = TakeWriter::new(dir.0.clone(), sample_rate, Arc::clone(&writing));
+    let (mut recorder, reader) = take_ring(4000);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
+    recorder.push(0, &vec![0.5; frames]);
+    let file = "takes/t-1.wav".to_string();
+    if case == "finish" {
+        recorder.end_take(false);
+    }
+    let drained = writer.drain();
+    let warning = single_warning(&drained);
+    let (error, prefix) = match (case.as_str(), warning) {
+        ("write", TakeWarning::Write { file: f, error }) if *f == file => (error, "write"),
+        ("finish", TakeWarning::Finish { file: f, error }) if *f == file => (error, "finish"),
+        ("flush", TakeWarning::Flush { file: f, error }) if *f == file => (error, "flush"),
+        _ => panic!("wrong warning for {case}: {warning:?}"),
+    };
+    assert_eq!(
+        warning.to_string(),
+        format!("cannot {prefix} take {file}: {error}; dropping this take")
+    );
+    assert_eq!(writing_files(&writing), Vec::<String>::new());
+    recorder.end_take(false);
+    assert_eq!(writer.drain(), Drained::default());
+}
+
+#[test]
+fn a_take_whose_write_fails_is_a_warning_and_leaves_the_writing_set() {
+    run_under_file_size_limit("write");
+}
+
+#[test]
+fn a_take_whose_flush_fails_is_a_warning_and_leaves_the_writing_set() {
+    run_under_file_size_limit("flush");
+}
+
+#[test]
+fn a_take_whose_finish_fails_is_a_warning_and_leaves_the_writing_set() {
+    run_under_file_size_limit("finish");
+}
+
+#[test]
+fn each_track_writes_its_own_file_and_its_finished_take_carries_its_track_id() {
+    let dir = temp_dir("tracks");
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, WritingTakes::default());
+    let (mut first, first_reader) = take_ring(1000);
+    let (mut second, second_reader) = take_ring(1000);
+    writer.add_readers(vec![
+        TrackReader {
+            track_id: 5,
+            name: "Lead Gtr".to_string(),
+            reader: first_reader,
+        },
+        TrackReader {
+            track_id: 7,
+            name: "Bass".to_string(),
+            reader: second_reader,
+        },
+    ]);
+    let (a, b) = (ramp(120), vec![0.25; 80]);
+    first.push(10, &a);
+    first.end_take(false);
+    second.push(20, &b);
+    second.end_take(false);
+    let mut finished = writer.drain().finished;
+    finished.sort_by_key(|take| take.track_id);
+    assert_eq!(
+        finished,
+        [
+            FinishedTake {
+                track_id: 5,
+                file: "takes/lead-gtr-1.wav".to_string(),
+                span: TakeSpan {
+                    start: 10,
+                    frames: 120,
+                    loop_take: false,
+                },
+            },
+            FinishedTake {
+                track_id: 7,
+                file: "takes/bass-1.wav".to_string(),
+                span: TakeSpan {
+                    start: 20,
+                    frames: 80,
+                    loop_take: false,
+                },
+            },
+        ]
+    );
+    assert_eq!(wav_samples(&dir.0, "takes/lead-gtr-1.wav"), a);
+    assert_eq!(wav_samples(&dir.0, "takes/bass-1.wav"), b);
+}
+
+#[test]
+fn a_take_file_is_flushed_once_per_second_of_audio_and_each_take_counts_from_zero() {
+    const RATE: usize = 48_000;
+    const CHUNK: usize = RATE / 10;
+    let dir = temp_dir("flush-cadence");
+    let mut writer = TakeWriter::new(dir.0.clone(), RATE as u32, WritingTakes::default());
+    let (mut recorder, reader) = take_ring(RATE);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
+    let mut push = |frames: usize| {
+        recorder.push(0, &vec![0.5; frames]);
+        assert_eq!(writer.drain(), Drained::default());
+    };
+    let recovered = |file: &str| {
+        let copy = format!("{file}.copy");
+        fs::copy(dir.0.join(file), dir.0.join(&copy)).unwrap();
+        wav_samples(&dir.0, &copy).len()
+    };
+    for _ in 0..10 {
+        push(CHUNK);
+    }
+    assert_eq!(recovered("takes/t-1.wav"), RATE);
+    for _ in 0..5 {
+        push(CHUNK);
+    }
+    assert_eq!(recovered("takes/t-1.wav"), RATE);
+
+    drop(push);
+    recorder.end_take(false);
+    assert_eq!(writer.drain().finished.len(), 1);
+    recorder.push(0, &vec![0.5; RATE / 2]);
+    assert_eq!(writer.drain(), Drained::default());
+    assert_eq!(recovered("takes/t-2.wav"), 0);
+}

@@ -1,5 +1,7 @@
 use std::fs;
+use std::io;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -70,5 +72,62 @@ fn disk_thread_reports_each_finished_take() {
             ("takes/a-2.wav", 32, true),
             ("takes/b-1.wav", 16, false),
         ]
+    );
+}
+
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl io::Write for LogBuffer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn disk_thread_logs_a_take_warning_with_its_text() {
+    let log = LogBuffer::default();
+    let sink = log.clone();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish(),
+    )
+    .unwrap();
+    let dir = temp_dir("warning");
+    fs::remove_dir(dir.0.join("takes")).unwrap();
+    let disk = DiskThread::spawn(TakeWriter::new(
+        dir.0.clone(),
+        48_000,
+        WritingTakes::default(),
+    ))
+    .unwrap();
+    let (mut recorder, reader) = take_ring(1000);
+    disk.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "a".to_string(),
+        reader,
+    }]);
+    recorder.push(0, &[0.5; 64]);
+    recorder.end_take(false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let logged = || String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    while !logged().contains("dropping this take") && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(disk.stop(), []);
+    let logged = logged();
+    assert!(
+        logged.contains("WARN") && logged.contains("cannot create take takes/a-1.wav: "),
+        "{logged}"
     );
 }
