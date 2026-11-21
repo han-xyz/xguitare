@@ -32,6 +32,15 @@ fn entries(dir: &Path) -> Vec<PathBuf> {
     entries
 }
 
+unsafe extern "C" {
+    fn umask(mask: u32) -> u32;
+}
+
+fn set_umask_022() {
+    // SAFETY: `umask` only swaps the process's file-creation mask.
+    unsafe { umask(0o022) };
+}
+
 fn mode(path: &Path) -> u32 {
     fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -82,17 +91,36 @@ fn replace_in_a_read_only_directory_keeps_the_old_file() {
 #[test]
 fn replace_sets_a_mode_the_umask_would_mask() {
     let dir = temp_dir("exact-mode");
+    set_umask_022();
     let file = dir.0.join("preset.toml");
     replace(&file, b"text", Some(0o666)).unwrap();
     assert_eq!(mode(&file), 0o666);
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    replace(&file, b"text", Some(0o664)).unwrap();
+    assert_eq!(mode(&file), 0o664);
 }
 
 #[test]
 fn replace_without_a_mode_gives_the_default() {
     let dir = temp_dir("default-mode");
+    set_umask_022();
     let file = dir.0.join("project.toml");
     let plain = dir.0.join("plain");
     fs::write(&plain, "").unwrap();
     replace(&file, b"text", None).unwrap();
     assert_eq!(mode(&file), mode(&plain));
+    assert_eq!(mode(&file), 0o644);
+}
+
+#[test]
+fn replace_returns_ok_when_only_the_directory_sync_fails() {
+    let dir = temp_dir("dir-sync");
+    let file = dir.0.join("state.toml");
+    fs::write(&file, "old").unwrap();
+    fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o300)).unwrap();
+    let result = replace(&file, b"new", None);
+    fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o755)).unwrap();
+    result.unwrap();
+    assert_eq!(fs::read(&file).unwrap(), b"new");
+    assert_eq!(entries(&dir.0), vec![file]);
 }

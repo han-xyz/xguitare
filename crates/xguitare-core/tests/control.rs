@@ -707,7 +707,8 @@ fn failed_save_leaves_no_tmp() {
     fs::create_dir(&target).unwrap();
     fs::write(target.join("occupied"), "").unwrap();
     let message = error(handle(&mut state, Request::Save { name: None }));
-    assert!(message.starts_with("cannot save"), "{message}");
+    let prefix = format!("cannot save {}: ", target.display());
+    assert!(message.starts_with(&prefix), "{message}");
     assert_eq!(tmp_files(&state.config.bank_dir), Vec::<PathBuf>::new());
 }
 

@@ -437,6 +437,10 @@ fn set_settings_engine_busy_changes_nothing() {
         fs::read_to_string(&state_file).unwrap(),
         "ir_dir = \"/srv/xg/irs\"\n"
     );
+    assert_eq!(
+        fs::metadata(&state_file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 #[test]

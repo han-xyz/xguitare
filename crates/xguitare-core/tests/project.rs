@@ -1,4 +1,5 @@
 use std::fs::{self, File};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -74,6 +75,10 @@ fn temp_dir(test: &str) -> TempDir {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     TempDir(dir)
+}
+
+fn mode(path: &Path) -> u32 {
+    fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
 
 fn load_error(dir: &Path, text: &str) -> String {
@@ -164,6 +169,22 @@ fn save_leaves_no_temp_file() {
         .map(|entry| entry.unwrap().file_name())
         .collect();
     assert_eq!(names, vec![PROJECT_FILE]);
+}
+
+#[test]
+fn save_keeps_the_default_mode_and_the_error_text() {
+    let dir = temp_dir("save-mode");
+    fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
+    let project = Project::load(&dir.0).unwrap().0;
+    fs::remove_file(dir.0.join(PROJECT_FILE)).unwrap();
+    project.save(&dir.0).unwrap();
+    fs::write(dir.0.join("plain"), "").unwrap();
+    assert_eq!(mode(&dir.0.join(PROJECT_FILE)), mode(&dir.0.join("plain")));
+    let blocked = temp_dir("save-blocked");
+    fs::create_dir_all(blocked.0.join(PROJECT_FILE).join("inside")).unwrap();
+    let message = project.save(&blocked.0).unwrap_err().to_string();
+    let prefix = format!("{}: ", blocked.0.join(PROJECT_FILE).display());
+    assert!(message.starts_with(&prefix), "{message}");
 }
 
 #[test]
