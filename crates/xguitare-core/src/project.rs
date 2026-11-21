@@ -1,14 +1,14 @@
 use std::collections::HashSet;
 use std::fmt;
-use std::fs::{self, File};
-use std::io::{self, ErrorKind, Write};
+use std::fs;
+use std::io::{self, ErrorKind};
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::atomic_file::{slug, temp_path};
+use crate::atomic_file::{replace, slug};
 use crate::preset::{
     CABINET_TYPE, ModuleEntry, module_entries, parse_modules, parse_stereo_modules,
 };
@@ -972,20 +972,7 @@ fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
     };
     let text = toml::to_string_pretty(&file)
         .expect("a checked Project serialises: every frame fits a TOML integer");
-    replace_file(path, text.as_bytes()).map_err(io_error(path))
-}
-
-fn replace_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = temp_path(path);
-    let mut file = File::create_new(&tmp)?;
-    let written = file
-        .write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .and_then(|()| fs::rename(&tmp, path));
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    written
+    replace(path, text.as_bytes(), None).map_err(io_error(path))
 }
 
 fn io_error(path: &Path) -> impl Fn(io::Error) -> ProjectError + '_ {

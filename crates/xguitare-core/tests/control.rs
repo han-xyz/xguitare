@@ -611,6 +611,15 @@ fn save_keeps_mode() {
 }
 
 #[test]
+fn save_keeps_a_mode_the_umask_would_mask() {
+    let (mut state, _audio, _dir) = state("save-keeps-664");
+    let file = state.config.bank_dir.join("01-clean.toml");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o664)).unwrap();
+    ok(handle(&mut state, Request::Save { name: None }));
+    assert_eq!(fs::metadata(&file).unwrap().mode() & 0o777, 0o664);
+}
+
+#[test]
 fn save_through_symlink() {
     let (mut state, _audio, dir) = state("save-through-symlink");
     let link = state.config.bank_dir.join("01-clean.toml");

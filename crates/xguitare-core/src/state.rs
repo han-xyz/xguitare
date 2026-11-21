@@ -1,12 +1,11 @@
-use std::fs::{self, OpenOptions};
-use std::io::{self, ErrorKind, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs;
+use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::Ports;
-use crate::atomic_file::temp_path;
+use crate::atomic_file::replace;
 use crate::metronome::{BAD_BPM, BAD_VOLUME, VOLUME_DB};
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
 use xguitare_protocol::BankKind;
@@ -130,7 +129,7 @@ pub(crate) fn read_state(path: &Path) -> (SavedState, Option<String>) {
 /// Replaces `path` by a new file of mode 0600 holding `state`, written beside it and renamed into place.
 pub(crate) fn write_state(path: &Path, state: &SavedState) -> io::Result<()> {
     let text = toml::to_string(state).map_err(io::Error::other)?;
-    write_private(path, text.as_bytes())
+    replace(path, text.as_bytes(), Some(STATE_FILE_MODE))
 }
 
 /// The bytes of `path`, or `None` when there is no such file, for `restore_state`.
@@ -145,24 +144,7 @@ pub(crate) fn read_state_bytes(path: &Path) -> io::Result<Option<Vec<u8>>> {
 /// Puts back what `read_state_bytes` returned: the old bytes, or no file.
 pub(crate) fn restore_state(path: &Path, bytes: Option<&[u8]>) -> io::Result<()> {
     match bytes {
-        Some(bytes) => write_private(path, bytes),
+        Some(bytes) => replace(path, bytes, Some(STATE_FILE_MODE)),
         None => fs::remove_file(path),
     }
-}
-
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = temp_path(path);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(STATE_FILE_MODE)
-        .open(&tmp)?;
-    let written = file
-        .write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .and_then(|()| fs::rename(&tmp, path));
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    written
 }

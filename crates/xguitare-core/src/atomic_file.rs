@@ -1,4 +1,4 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -20,36 +20,58 @@ pub(crate) fn slug(name: &str) -> String {
     slug.trim_end_matches('-').to_string()
 }
 
-/// Replaces the file `path` names, through a symlink, by a temp file and rename beside it, keeping the old file's mode.
+/// Replaces the file `path` names, through a symlink, by `replace` beside it, keeping the old file's mode.
 pub(crate) fn write_through(path: &Path, text: &str) -> io::Result<()> {
     let target = if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
         fs::canonicalize(path)?
     } else {
         path.to_path_buf()
     };
-    let permissions = match fs::metadata(&target) {
-        Ok(meta) => Some(meta.permissions()),
+    let mode = match fs::metadata(&target) {
+        Ok(meta) => Some(meta.permissions().mode()),
         Err(err) if err.kind() == ErrorKind::NotFound => None,
         Err(err) => return Err(err),
     };
-    let tmp = temp_path(&target);
+    replace(&target, text.as_bytes(), mode)
+}
+
+/// Replaces the file `path` names by `bytes`: a temp file beside it is created new, written, given exactly `mode` when one is passed (the default mode under the umask otherwise), synced and renamed onto `path`, then the parent directory is synced.
+///
+/// The directory sync is best effort: once the rename has succeeded the new content is in place and `Ok` is returned even when the sync fails, so only its survival across a power loss is unconfirmed.
+///
+/// # Errors
+///
+/// The I/O error of the step that failed up to and including the rename; `path` is then untouched and the temp file removed.
+pub fn replace(path: &Path, bytes: &[u8], mode: Option<u32>) -> io::Result<()> {
+    let tmp = temp_path(path);
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
-    if let Some(permissions) = &permissions {
-        options.mode(permissions.mode());
+    if let Some(mode) = mode {
+        options.mode(mode);
     }
     let mut file = options.open(&tmp)?;
     let written = file
-        .write_all(text.as_bytes())
-        .and_then(|()| match permissions {
-            Some(permissions) => file.set_permissions(permissions),
+        .write_all(bytes)
+        .and_then(|()| match mode {
+            Some(mode) => file.set_permissions(fs::Permissions::from_mode(mode)),
             None => Ok(()),
         })
-        .and_then(|()| fs::rename(&tmp, &target));
+        .and_then(|()| file.sync_all())
+        .and_then(|()| fs::rename(&tmp, path));
     if written.is_err() {
         let _ = fs::remove_file(&tmp);
+        return written;
     }
-    written
+    let _ = sync_parent_dir(path);
+    Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> io::Result<()> {
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    File::open(dir)?.sync_all()
 }
 
 /// Creates the file `path` names with `text` by `link`ing a temp file beside it to `path` (`save` with `as` passes `fs::hard_link`), so a file or symlink already there fails with `AlreadyExists` and is left as it is. When the filesystem has no hard links (EPERM, EOPNOTSUPP, EXDEV), `path` is created and written directly, still never replacing a file.
