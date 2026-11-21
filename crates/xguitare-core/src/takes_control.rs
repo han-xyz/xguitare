@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::control::EngineState;
-use crate::project::{TAKES_DIR, is_hidden_char, is_take_file};
+use crate::project::{TAKES_DIR, is_take_file};
 use crate::project_control::{forget_takes, is_recording, kept_takes};
-use xguitare_protocol::shown_file_name;
+use xguitare_protocol::{is_hidden_char, shown_file_name};
 
 const NOT_A_DIRECTORY: &str = "takes is not a directory";
 const CLEANING_WHILE_RECORDING: &str = "cannot clean takes while recording";

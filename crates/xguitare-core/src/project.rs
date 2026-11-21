@@ -13,7 +13,6 @@ use crate::preset::{
     CABINET_TYPE, ModuleEntry, module_entries, parse_modules, parse_stereo_modules,
 };
 use crate::{Preset, PresetError, PresetModule};
-pub(crate) use xguitare_protocol::is_hidden_char;
 use xguitare_protocol::{LoopRegion, shown_file_name};
 
 pub const PROJECT_FILE: &str = "project.toml";
