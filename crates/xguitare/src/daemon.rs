@@ -30,13 +30,14 @@ use xguitare_core::project_control::{
 use xguitare_core::render::RenderTask;
 use xguitare_core::render_control::{RenderFinished, cancel_render, finished_render};
 use xguitare_core::take_capture::Latency;
+use xguitare_core::take_writer::TakeWriter;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::watch::{Action, FileStamp, apply, changed_paths};
 use xguitare_core::{Bank, BankEntry, Config, ConfigError, Preset, SocketDirError};
 use xguitare_dsp::Rack;
 use xguitare_protocol::{BankKind, Request, Response};
 
-use crate::disk_writer::{DiskThread, TakeWriter};
+use crate::disk_writer::DiskThread;
 use crate::jack_adapter::{self, JackError, Session};
 use crate::socket_server::{self, SharedPorts, SocketError};
 

@@ -28,6 +28,7 @@ mod settings_control;
 mod state;
 pub mod take_capture;
 pub mod take_peaks;
+pub mod take_writer;
 pub mod takes_control;
 mod transport_control;
 pub mod tuner;
