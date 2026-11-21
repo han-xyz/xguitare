@@ -207,7 +207,8 @@ fn take_peaks(state: &mut EngineState, connection: ConnectionId) -> Peaks {
         .peaks
         .meters
         .get_mut(&connection)
-        .map_or_default(std::mem::take)
+        .map(std::mem::take)
+        .unwrap_or_default()
 }
 
 /// Handles one request; the build warnings of a `load` or a Rack edit come back beside the Response for the caller to log. `ports` and `set_ports` fail here with `audio ports are not available`; `handle_with_ports` serves them.

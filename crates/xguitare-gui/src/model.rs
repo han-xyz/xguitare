@@ -1159,7 +1159,8 @@ pub fn rack_channels(
                         .iter()
                         .find(|module_type| module_type.type_name == row.module_type)
                 })
-                .map_or_default(|module_type| module_type.channels.clone());
+                .map(|module_type| module_type.channels.clone())
+                .unwrap_or_default();
             (id.clone(), channels)
         })
         .collect()
@@ -1277,7 +1278,8 @@ pub fn bank_rows(list_payload: &Value) -> (Vec<BankRow>, usize) {
     let active = list_payload["active"].as_u64();
     let entries = list_payload["entries"]
         .as_array()
-        .map_or_default(Vec::as_slice);
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let rows: Vec<BankRow> = entries
         .iter()
         .filter_map(|entry| {
@@ -2180,7 +2182,8 @@ pub fn param_label(param: &str) -> String {
     let mut chars = words.chars();
     chars
         .next()
-        .map_or_default(|first| first.to_uppercase().chain(chars).collect())
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// Module ids shown other than in sentence case.
@@ -2561,7 +2564,10 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
             let takes = if deleted == 1 { "Take" } else { "Takes" };
             let freed = size_text(payload["bytes"].as_u64().unwrap_or(0));
             let notice = format!("Deleted {deleted} {takes}, {freed} freed");
-            let failed = payload["failed"].as_array().map_or_default(Vec::as_slice);
+            let failed = payload["failed"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
             let Some(first) = failed.first() else {
                 return Some(Message::Notice(notice));
             };
@@ -2578,7 +2584,8 @@ pub fn response_message(req: &Request, response: Result<Response, ClientError>) 
         (Request::ProjectOpen { .. }, Ok(Response::Ok(payload))) => {
             let warnings: Vec<&str> = payload["warnings"]
                 .as_array()
-                .map_or_default(Vec::as_slice)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
                 .iter()
                 .filter_map(Value::as_str)
                 .collect();
@@ -2633,7 +2640,10 @@ pub struct UnusedTakes {
 }
 
 pub fn unused_takes(reply: &Value) -> UnusedTakes {
-    let entries = reply["files"].as_array().map_or_default(Vec::as_slice);
+    let entries = reply["files"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let (files, rows) = entries
         .iter()
         .filter_map(|entry| {

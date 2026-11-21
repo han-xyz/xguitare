@@ -328,7 +328,8 @@ pub fn eq_curve_name(rows: &[ParamRow]) -> String {
     let text = |param: &str| {
         rows.iter()
             .find(|row| row.param == param)
-            .map_or_default(|row| format_value(row, row.value))
+            .map(|row| format_value(row, row.value))
+            .unwrap_or_default()
     };
     format!(
         "EQ curve: Low cut {}; Low {} at {}; Mid 1 {} at {}, Q {}; Mid 2 {} at {}, Q {}; High {} at {}; High cut {}; Output {}",

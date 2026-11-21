@@ -453,7 +453,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
         return commands;
     };
     let rate = sample_rate(status);
-    let items = snapshot.items.as_ref().map_or_default(item_blocks);
+    let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
     let ids: Vec<u64> = items.iter().map(|item| item.id).collect();
     if ids != view.seen {
         view.selection
@@ -499,7 +499,8 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
     let ports = snapshot
         .ports
         .as_ref()
-        .map_or_default(|ports| port_choices(ports).capture);
+        .map(|ports| port_choices(ports).capture)
+        .unwrap_or_default();
     let body = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.right_bottom());
     ui.scope_builder(UiBuilder::new().max_rect(body), |ui| {
         if rows.is_empty() {
@@ -1165,7 +1166,8 @@ fn item_menu(
 ) -> Option<Command> {
     let names = menu
         .payload
-        .map_or_default(|payload| take_names(payload, item.id));
+        .map(|payload| take_names(payload, item.id))
+        .unwrap_or_default();
     let mut command = None;
     for (take, name) in names.iter().enumerate() {
         let active = take == item.take;
