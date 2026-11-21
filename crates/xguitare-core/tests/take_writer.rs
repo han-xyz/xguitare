@@ -389,6 +389,22 @@ fn a_take_file_copied_while_still_written_holds_all_but_its_last_second() {
     }
 }
 
+#[test]
+fn a_take_file_copied_right_after_its_first_samples_is_a_valid_wav() {
+    let dir = temp_dir("first-samples");
+    let mut writer = TakeWriter::new(dir.0.clone(), 48_000, WritingTakes::default());
+    let (mut recorder, reader) = take_ring(1000);
+    writer.add_readers(vec![TrackReader {
+        track_id: 0,
+        name: "t".to_string(),
+        reader,
+    }]);
+    recorder.push(0, &[0.5; 10]);
+    assert_eq!(writer.drain(), Drained::default());
+    fs::copy(dir.0.join("takes/t-1.wav"), dir.0.join("takes/copy.wav")).unwrap();
+    assert_eq!(wav_samples(&dir.0, "takes/copy.wav"), Vec::<f32>::new());
+}
+
 const FAILURE_CASE_VAR: &str = "TAKE_WRITER_FAILURE_CASE";
 
 fn run_under_file_size_limit(case: &str) {

@@ -107,7 +107,7 @@ impl TakeWriter {
         }
     }
 
-    /// Writes what the rings hold, flushing each open Take's file once per second of audio so a copy or a crash leaves it readable up to the last flush, and returns the Takes that ended, each closed in its own file, with the warnings for the Takes dropped on the way.
+    /// Writes what the rings hold, flushing each Take's file when it is created and once per second of audio after, so a copy or a crash leaves it readable up to the last flush, and returns the Takes that ended, each closed in its own file, with the warnings for the Takes dropped on the way.
     pub fn drain(&mut self) -> Drained {
         let mut drained = Drained::default();
         for track in &mut self.tracks {
@@ -187,6 +187,7 @@ impl TrackWriter {
                     Output::Failed
                 }
             };
+            self.flush(writing, warnings);
         }
         let Output::Writing { file, wav } = &mut self.output else {
             return;
@@ -208,6 +209,13 @@ impl TrackWriter {
             return;
         }
         self.unflushed = 0;
+        self.flush(writing, warnings);
+    }
+
+    fn flush(&mut self, writing: &WritingTakes, warnings: &mut Vec<TakeWarning>) {
+        let Output::Writing { file, wav } = &mut self.output else {
+            return;
+        };
         if let Err(err) = wav.flush() {
             unmark_writing(writing, file);
             warnings.push(TakeWarning::Flush {
