@@ -411,7 +411,7 @@ fn run_under_file_size_limit(case: &str) {
     let exe = std::env::current_exe().unwrap();
     let output = std::process::Command::new("sh")
         .arg("-c")
-        .arg("trap '' XFSZ; ulimit -f 1; exec \"$0\" --exact file_size_limit_child --nocapture")
+        .arg("trap '' XFSZ; ulimit -f 1; exec \"$0\" --ignored --exact file_size_limit_child --nocapture")
         .arg(exe)
         .env(FAILURE_CASE_VAR, case)
         .output()
@@ -433,6 +433,7 @@ fn single_warning(drained: &Drained) -> &TakeWarning {
 }
 
 #[test]
+#[ignore = "run by the wrapper tests under a file size limit"]
 fn file_size_limit_child() {
     let Ok(case) = std::env::var(FAILURE_CASE_VAR) else {
         return;
