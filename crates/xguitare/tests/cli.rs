@@ -2085,3 +2085,85 @@ fn takes_clean_yes_stopped_by_an_error_reports_what_went_before() {
         )
     );
 }
+
+macro_rules! reply_fixture {
+    ($name:literal) => {
+        include_str!(concat!(
+            "../../xguitare-protocol/tests/fixtures/replies/",
+            $name,
+            ".json"
+        ))
+    };
+}
+
+const NO_PROJECT_STATUS: &str = "preset: -\nprogram: -\nmodified: no\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 1\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -120.0\nxruns: 0\ncallback_max_us: 0\ncallback_last_us: 0\nprotocol_version: 1\nconnections:\ndisk_overflows: 0\nmetronome: off, 120 bpm 4/4, volume -12 dB, beat 0\nproject: -\n";
+const PROJECT_STATUS_HEAD: &str = "preset: -\nprogram: -\nmodified: no\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: {revision}\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -120.0\nxruns: 0\ncallback_max_us: 0\ncallback_last_us: 0\nprotocol_version: 1\nconnections:\ndisk_overflows: 0\nmetronome: off, 120 bpm 4/4, volume -12 dB, beat 0\nproject: Song\n";
+const PROJECT_STATUS_TAIL: &str = "transport: stopped\nposition: 1.1 (frame 0)\ntempo: 120 bpm 4/4\nloop: off 0..0\nclick off, count-in 0 bars\nundo: -, redo: -\ntracks:\n  0* Guitar: -; input -; 0 dB, pan 0; peak -120.0 dB; out -120.0/-120.0 dB\n      send Verb: -6 dB, pre\n  1  Bass: -; input -; 0 dB, pan 0; peak -120.0 dB; out -120.0/-120.0 dB\nbuses:\n  0 Verb: -; 0 dB, pan 0; out -120.0/-120.0 dB\nmaster: {master} dB; out -120.0/-120.0 dB\n";
+
+fn project_status(revision: &str, render: &str, master: &str) -> String {
+    PROJECT_STATUS_HEAD.replace("{revision}", revision)
+        + render
+        + &PROJECT_STATUS_TAIL.replace("{master}", master)
+}
+
+#[test]
+fn real_daemon_replies_print_their_pinned_text() {
+    let cases: [(&[&str], &str, String); 8] = [
+        (
+            &["status"],
+            reply_fixture!("status-no-project"),
+            NO_PROJECT_STATUS.to_string(),
+        ),
+        (
+            &["status"],
+            reply_fixture!("status-project-render-running"),
+            project_status(
+                "10",
+                "render: song (project) running 0% <temp>/projects/song/renders/song.wav\n",
+                "-3",
+            ),
+        ),
+        (
+            &["status"],
+            reply_fixture!("status-project-render-failed"),
+            project_status(
+                "11",
+                "render: song (project) failed 0% <temp>/projects/song/renders/song.wav: disk full\n",
+                "-",
+            ),
+        ),
+        (
+            &["item", "list"],
+            reply_fixture!("items"),
+            "1 Guitar 2.1 0.04s take 1/1\n".to_string(),
+        ),
+        (
+            &["get"],
+            reply_fixture!("get-plain"),
+            "gain.level = -3 dB\ngain.bypass = no\n".to_string(),
+        ),
+        (
+            &["get"],
+            reply_fixture!("get-cabinet-ir"),
+            "cabinet.level = 0 dB\ncabinet.ir = ir.wav\ncabinet.bypass = no\n".to_string(),
+        ),
+        (
+            &["get"],
+            reply_fixture!("get-choice"),
+            "autowah.mode = 0\nautowah.bypass = no\n".to_string(),
+        ),
+        (
+            &["get"],
+            reply_fixture!("get-bypassed"),
+            "gate.threshold = -60 dB\ngate.attack = 1 ms\ngate.release = 100 ms\ngate.hysteresis = 6 dB\ngate.bypass = yes\n".to_string(),
+        ),
+    ];
+    for (argv, fixture, expected) in cases {
+        let out = cli(argv, reply(fixture.trim_end()));
+        assert_eq!(
+            (out.code, out.stderr.as_str(), out.stdout.as_str()),
+            (0, "", expected.as_str()),
+            "{argv:?}"
+        );
+    }
+}
