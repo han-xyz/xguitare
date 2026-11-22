@@ -21,6 +21,8 @@ pub const TAKES_DIR: &str = "takes";
 pub const MAX_TRACKS: usize = 16;
 pub const MAX_BUSES: usize = 8;
 pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
+/// The `format` this build writes and the highest it reads; it goes up whenever a build that knows only the old number could not read the file (a key added, removed or changed in meaning), because the reader refuses unknown keys (ADR-0008).
+const PROJECT_FORMAT: i64 = 1;
 
 const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 const DEFAULT_TEMPO_BPM: f64 = 120.0;
@@ -234,6 +236,8 @@ pub enum ProjectError {
         bus: u64,
     },
     SendLevel(String),
+    NewerFormat(i64),
+    Format,
 }
 
 /// What [`Project::load`] changed to open a file that an earlier build wrote.
@@ -254,9 +258,18 @@ pub enum LoadWarning {
     },
 }
 
+/// Read before [`ProjectFile`] and without `deny_unknown_fields`, so a file from a newer format is refused by its `format`, not by a key this build does not know.
+#[derive(Deserialize)]
+struct FormatFile {
+    #[serde(default)]
+    format: Option<toml::Value>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectFile {
+    #[serde(default)]
+    format: Option<i64>,
     name: String,
     sample_rate: u32,
     tempo_bpm: f64,
@@ -550,7 +563,7 @@ fn checked_strip_name<'a>(
 
 fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
     let text = fs::read_to_string(path).map_err(io_error(path))?;
-    let file: ProjectFile = toml::from_str(&text).map_err(|error| {
+    let syntax_error = |error: toml::de::Error| {
         let (line, col) = crate::toml_position(&text, &error);
         ProjectError::Syntax {
             path: path.to_path_buf(),
@@ -558,7 +571,10 @@ fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
             col,
             msg: error.message().to_string(),
         }
-    })?;
+    };
+    let format: FormatFile = toml::from_str(&text).map_err(syntax_error)?;
+    check_format(format.format.as_ref())?;
+    let file: ProjectFile = toml::from_str(&text).map_err(syntax_error)?;
     if file.tracks.len() > MAX_TRACKS {
         return Err(ProjectError::TooManyTracks);
     }
@@ -611,6 +627,18 @@ fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
     };
     check_project(&project)?;
     Ok((project, warnings))
+}
+
+/// A missing `format` is 1, the format of files written before the key.
+fn check_format(format: Option<&toml::Value>) -> Result<(), ProjectError> {
+    match format {
+        None => Ok(()),
+        Some(&toml::Value::Integer(format)) if format > PROJECT_FORMAT => {
+            Err(ProjectError::NewerFormat(format))
+        }
+        Some(&toml::Value::Integer(format)) if format >= 1 => Ok(()),
+        Some(_) => Err(ProjectError::Format),
+    }
 }
 
 /// Makes each Item whose active Take does not [`plays_in`] it play the newest of its Takes that does, and leaves out the Items with none; an earlier build could record and save such an Item.
@@ -921,6 +949,7 @@ fn master_from_file(file: MasterFile) -> Result<Master, ProjectError> {
 fn write(path: &Path, project: &Project) -> Result<(), ProjectError> {
     check_project(project)?;
     let file = ProjectFile {
+        format: Some(PROJECT_FORMAT),
         name: project.name.clone(),
         sample_rate: project.sample_rate,
         tempo_bpm: project.tempo_bpm,
@@ -1073,6 +1102,13 @@ impl fmt::Display for ProjectError {
                 f,
                 "track '{track}' send level must be -inf or between -60 and 6 dB"
             ),
+            ProjectError::NewerFormat(format) => write!(
+                f,
+                "project format {format} is newer than this xguitare (reads up to {PROJECT_FORMAT})"
+            ),
+            ProjectError::Format => {
+                f.write_str("project format must be a whole number of 1 or more")
+            }
         }
     }
 }

@@ -375,6 +375,76 @@ fn syntax_error_names_file_and_position() {
 }
 
 #[test]
+fn a_saved_project_starts_with_format_1() {
+    let dir = temp_dir("format-saved");
+    let (folder, project) = Project::new(&dir.0, "Song").unwrap();
+    project.save_autosave(&folder).unwrap();
+    for file in [PROJECT_FILE, AUTOSAVE_FILE] {
+        let text = fs::read_to_string(folder.join(file)).unwrap();
+        assert_eq!(text.lines().next(), Some("format = 1"), "{file}");
+    }
+}
+
+#[test]
+fn a_project_without_a_format_key_loads() {
+    let dir = temp_dir("format-missing");
+    fs::write(dir.0.join(PROJECT_FILE), TWO_TRACKS).unwrap();
+    let without = Project::load(&dir.0).unwrap();
+    fs::write(
+        dir.0.join(PROJECT_FILE),
+        format!("format = 1\n{TWO_TRACKS}"),
+    )
+    .unwrap();
+    assert_eq!(Project::load(&dir.0).unwrap(), without);
+}
+
+#[test]
+fn a_project_from_a_newer_format_is_refused() {
+    let dir = temp_dir("format-newer");
+    assert_eq!(
+        load_error(&dir.0, &format!("format = 2\n{TWO_TRACKS}")),
+        "project format 2 is newer than this xguitare (reads up to 1)"
+    );
+}
+
+#[test]
+fn a_newer_format_with_unknown_keys_is_refused_by_its_format() {
+    let dir = temp_dir("format-newer-keys");
+    let text = format!("format = 3\nfuture = true\n{TWO_TRACKS}")
+        .replace("pan = 0.0", "pan = 0.0\nwidth = 1.0");
+    assert_eq!(
+        load_error(&dir.0, &text),
+        "project format 3 is newer than this xguitare (reads up to 1)"
+    );
+}
+
+#[test]
+fn an_autosave_from_a_newer_format_is_refused() {
+    let dir = temp_dir("format-newer-autosave");
+    fs::write(
+        dir.0.join(AUTOSAVE_FILE),
+        format!("format = 2\n{TWO_TRACKS}"),
+    )
+    .unwrap();
+    assert_eq!(
+        Project::load_autosave(&dir.0).unwrap_err().to_string(),
+        "project format 2 is newer than this xguitare (reads up to 1)"
+    );
+}
+
+#[test]
+fn a_format_of_zero_is_refused() {
+    let dir = temp_dir("format-zero");
+    for format in ["0", "-1", "1.5", "\"1\""] {
+        assert_eq!(
+            load_error(&dir.0, &format!("format = {format}\n{TWO_TRACKS}")),
+            "project format must be a whole number of 1 or more",
+            "{format}"
+        );
+    }
+}
+
+#[test]
 fn autosave_due_after_sixty_seconds_while_dirty() {
     let last_save = Instant::now();
     let later = |secs| last_save + Duration::from_secs(secs);

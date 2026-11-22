@@ -381,13 +381,15 @@ Projects live under `projects_dir`, by default `~/Music/xguitare`; the GUI's `Se
 
 ```text
 ~/Music/xguitare/demo-song/
-  project.toml            name, sample rate, tempo, meter, loop, click, count-in, Master, Buses, Tracks with their Modules, Sends, Items and Takes
+  project.toml            format, name, sample rate, tempo, meter, loop, click, count-in, Master, Buses, Tracks with their Modules, Sends, Items and Takes
   project.autosave.toml   the latest autosave, when there is one
   takes/guitar-1.wav      one mono 32-bit float WAV per Take, at the Project's sample rate
   renders/demo-song.wav   each Render, a stereo WAV (see Render)
 ```
 
 Take files are deleted only by a clean-up (see [Clean up Takes](#clean-up-takes)); otherwise never, also not when their Item or Track is removed. `project.toml` names each Take file `takes/<name>.wav`; any other path is an error when the Project is opened or saved.
+
+`project.toml` and the autosave start with `format = 1`, the file format this xguitare writes and the highest it reads. A file without `format` is read as format 1; a file from a newer xguitare is refused with `project format <n> is newer than this xguitare (reads up to 1)`. An xguitare from before the key refuses a file that has it.
 
 ### Record a Track
 
