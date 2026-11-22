@@ -5,7 +5,7 @@ use egui::{
     Stroke, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
 use serde_json::Value;
-use xguitare_protocol::{LoopRegion, TransportAction};
+use xguitare_protocol::{ItemsReply, LoopRegion, TransportAction};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -522,7 +522,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
                 ));
             }
             let menu = MenuContext {
-                payload: snapshot.items.as_ref(),
+                items: snapshot.items.as_ref(),
                 clipboard: status["clipboard"].as_u64().unwrap_or_default() > 0,
             };
             commands.extend(item_nodes(
@@ -1150,9 +1150,9 @@ fn take_entry(name: &str, active: bool) -> Button<'static> {
     Button::new(RichText::new(name).color(lit)).shortcut_text(RichText::new(TAKE_MARK).color(lit))
 }
 
-/// What the Item and lane menus need besides the Items: the `items` payload for the Take names, and whether the clipboard holds anything.
+/// What the Item and lane menus need besides the Items: the `items` reply for the Take names, and whether the clipboard holds anything.
 struct MenuContext<'a> {
-    payload: Option<&'a Value>,
+    items: Option<&'a ItemsReply>,
     clipboard: bool,
 }
 
@@ -1165,8 +1165,8 @@ fn item_menu(
     focus_first: bool,
 ) -> Option<Command> {
     let names = menu
-        .payload
-        .map(|payload| take_names(payload, item.id))
+        .items
+        .map(|items| take_names(items, item.id))
         .unwrap_or_default();
     let mut command = None;
     for (take, name) in names.iter().enumerate() {

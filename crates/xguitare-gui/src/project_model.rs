@@ -4,8 +4,8 @@ use std::ops::Range;
 use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_protocol::{
-    CODE_STILL_CLOSING, FRAMES_PER_PEAK, LoopRegion, Request, Response, SILENCE_DB, STILL_CLOSING,
-    TransportAction,
+    CODE_STILL_CLOSING, FRAMES_PER_PEAK, ItemStatus, ItemsReply, LoopRegion, Request, Response,
+    SILENCE_DB, STILL_CLOSING, TransportAction,
 };
 
 use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
@@ -446,56 +446,46 @@ pub fn waveform_columns(peaks: &[i8], frames: Range<u64>, width: usize) -> Vec<(
         .collect()
 }
 
-/// The Items of every Track in an `items` payload. Items name their Track by id, so that a reply older than the latest `status` never draws on a row that moved.
-pub fn item_blocks(items_payload: &Value) -> Vec<ItemBlock> {
-    let tracks = items_payload["tracks"].as_array().map(Vec::as_slice);
-    tracks
-        .unwrap_or_default()
+/// The Items of every Track in an `items` reply. Items name their Track by id, so that a reply older than the latest `status` never draws on a row that moved.
+pub fn item_blocks(items: &ItemsReply) -> Vec<ItemBlock> {
+    items
+        .tracks
         .iter()
-        .flat_map(|entry| {
-            let track_id = entry["id"].as_u64();
-            entry["items"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(move |item| item_block(track_id?, item))
+        .flat_map(|track| {
+            track
+                .items
+                .iter()
+                .filter_map(move |item| item_block(track.id, item))
         })
         .collect()
 }
 
-fn item_block(track_id: u64, item: &Value) -> Option<ItemBlock> {
-    let takes = item["takes"].as_array()?;
-    let take = usize::try_from(item["take"].as_u64()?).ok()?;
-    let path = takes.get(take)?.as_str()?;
+fn item_block(track_id: u64, item: &ItemStatus) -> Option<ItemBlock> {
+    let path = item.takes.get(item.take)?;
     Some(ItemBlock {
-        id: item["id"].as_u64()?,
+        id: item.id,
         track_id,
-        position: item["position"].as_u64()?,
-        offset: item["offset"].as_u64().unwrap_or_default(),
-        length: item["length"].as_u64()?,
-        file: path.to_string(),
-        take_frames: item["take_frames"].as_u64().unwrap_or_default(),
+        position: item.position,
+        offset: item.offset,
+        length: item.length,
+        file: path.clone(),
+        take_frames: item.take_frames.unwrap_or_default(),
         take_name: take_name(path),
-        take,
-        takes: takes.len(),
+        take: item.take,
+        takes: item.takes.len(),
     })
 }
 
-/// The names of the Item `id`'s Takes in an `items` payload, in order: each file name without folder and `.wav`.
-pub fn take_names(items_payload: &Value, id: u64) -> Vec<String> {
-    let tracks = items_payload["tracks"].as_array().map(Vec::as_slice);
-    let item = tracks
-        .unwrap_or_default()
+/// The names of the Item `id`'s Takes in an `items` reply, in order: each file name without folder and `.wav`.
+pub fn take_names(items: &ItemsReply, id: u64) -> Vec<String> {
+    items
+        .tracks
         .iter()
-        .filter_map(|track| track["items"].as_array())
-        .flatten()
-        .find(|item| item["id"].as_u64() == Some(id));
-    let takes = item.and_then(|item| item["takes"].as_array());
-    takes
+        .flat_map(|track| &track.items)
+        .find(|item| item.id == id)
         .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(take_name)
+        .flat_map(|item| &item.takes)
+        .map(|path| take_name(path))
         .collect()
 }
 

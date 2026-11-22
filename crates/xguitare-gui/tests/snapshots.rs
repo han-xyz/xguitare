@@ -23,7 +23,8 @@ use xguitare_gui::model::{Command, Link, Message, ModuleType, Restore, Snapshot,
 use xguitare_gui::project_model::AutosaveOffer;
 use xguitare_gui::theme::palette;
 use xguitare_protocol::{
-    BankKind, FRAMES_PER_PEAK, LoopRegion, RenderBits, RenderRange, TrackRef, TransportAction,
+    BankKind, FRAMES_PER_PEAK, ItemsReply, LoopRegion, RenderBits, RenderRange, TrackRef,
+    TransportAction, from_payload, to_payload,
 };
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
@@ -220,16 +221,27 @@ fn project_snapshot(transport: &str) -> Snapshot {
     for (key, value) in project.as_object().unwrap() {
         status[key] = value.clone();
     }
-    snapshot.items = Some(json!({"sample_rate": 48000, "tracks": [
+    snapshot.items = Some(items_reply(&json!({"sample_rate": 48000, "tracks": [
         {"id": 0, "name": "Guitar", "items": [{"id": 1, "position": 96_000, "bars_beats": "2.1",
          "offset": 0, "length": 288_000, "take": 1,
          "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000}]},
         {"id": 1, "name": "Bass", "items": [{"id": 2, "position": 0, "bars_beats": "1.1", "offset": 0,
          "length": 480_000, "take": 0, "takes": ["takes/bass-1.wav"], "take_frames": 480_000}]},
         {"id": 2, "name": "Keys", "items": []},
-    ]}));
+    ]})));
     snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
     snapshot
+}
+
+fn items_reply(payload: &Value) -> ItemsReply {
+    from_payload(payload).unwrap()
+}
+
+/// `edit` applied to `snapshot`'s `items` reply as JSON.
+fn edit_items(snapshot: &mut Snapshot, edit: impl FnOnce(&mut Value)) {
+    let mut payload = to_payload(snapshot.items.as_ref().unwrap());
+    edit(&mut payload);
+    snapshot.items = Some(items_reply(&payload));
 }
 
 /// Frames between two plucked notes in the waveform fixture: one beat at 120 bpm.
@@ -244,7 +256,8 @@ const SILENT_EVERY: usize = 6;
     clippy::cast_precision_loss,
     reason = "peaks within ±127"
 )]
-fn fixture_peaks(items: &Value) -> HashMap<String, Arc<[i8]>> {
+fn fixture_peaks(items: &ItemsReply) -> HashMap<String, Arc<[i8]>> {
+    let items = &to_payload(items);
     let mut peaks = HashMap::new();
     for item in items["tracks"]
         .as_array()
@@ -284,11 +297,15 @@ fn mixer_snapshot() -> Snapshot {
     let mut snapshot = project_snapshot("playing");
     for (track, name) in MIXER_TRACKS.into_iter().enumerate() {
         snapshot.status.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
-        snapshot.items.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
+        edit_items(&mut snapshot, |items| {
+            items["tracks"][track]["name"] = json!(name);
+        });
     }
-    let items = snapshot.items.as_mut().unwrap();
-    items["tracks"][0]["items"][0]["takes"] = json!(["takes/bass-di-1.wav", "takes/bass-di-2.wav"]);
-    items["tracks"][1]["items"][0]["takes"] = json!(["takes/bass-amp-1.wav"]);
+    edit_items(&mut snapshot, |items| {
+        items["tracks"][0]["items"][0]["takes"] =
+            json!(["takes/bass-di-1.wav", "takes/bass-di-2.wav"]);
+        items["tracks"][1]["items"][0]["takes"] = json!(["takes/bass-amp-1.wav"]);
+    });
     snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
     let status = snapshot.status.as_mut().unwrap();
     let mixer = [
@@ -1710,12 +1727,14 @@ fn both_halves_of_a_split_stay_selected_and_the_footer_shows_the_undo_label() {
     harness.run_steps(2);
     let mut split = snapshot;
     split.status.as_mut().unwrap()["undo"] = json!("split Item");
-    split.items.as_mut().unwrap()["tracks"][0]["items"] = json!([
-        {"id": 1, "position": 96_000, "bars_beats": "2.1", "offset": 0, "length": 134_400,
-         "take": 1, "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000},
-        {"id": 7, "position": 230_400, "bars_beats": "3.2", "offset": 134_400, "length": 153_600,
-         "take": 1, "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000},
-    ]);
+    edit_items(&mut split, |items| {
+        items["tracks"][0]["items"] = json!([
+            {"id": 1, "position": 96_000, "bars_beats": "2.1", "offset": 0, "length": 134_400,
+             "take": 1, "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000},
+            {"id": 7, "position": 230_400, "bars_beats": "3.2", "offset": 134_400, "length": 153_600,
+             "take": 1, "takes": ["takes/guitar-1.wav", "takes/guitar-2.wav"], "take_frames": 288_000},
+        ]);
+    });
     updates.send(split).unwrap();
     harness.run_steps(2);
     assert!(item_selected(&harness, GUITAR_ITEM));
@@ -2060,10 +2079,12 @@ fn t_and_ctrl_keys_take_duplicate_copy_and_paste() {
         ]
     );
     let mut pasted = snapshot;
-    pasted.items.as_mut().unwrap()["tracks"][2]["items"] = json!([
-        {"id": 9, "position": 230_400, "bars_beats": "3.2", "offset": 0, "length": 96_000,
-         "take": 0, "takes": ["takes/bass-1.wav"], "take_frames": 480_000},
-    ]);
+    edit_items(&mut pasted, |items| {
+        items["tracks"][2]["items"] = json!([
+            {"id": 9, "position": 230_400, "bars_beats": "3.2", "offset": 0, "length": 96_000,
+             "take": 0, "takes": ["takes/bass-1.wav"], "take_frames": 480_000},
+        ]);
+    });
     updates.send(pasted).unwrap();
     harness.run_steps(2);
     assert!(item_selected(&harness, "Item bass-1, Keys, bar 3"));
@@ -2079,17 +2100,18 @@ const EDITING_ZOOM_1024: f32 = 0.25;
 /// [`project_snapshot`] stopped with one Item on the clipboard, the Guitar Item holding three Takes and a two-beat punch-in Item over it from bar 2 beat 2.
 fn editing_snapshot() -> Snapshot {
     let mut snapshot = with_clipboard(project_snapshot("stopped"), 1);
-    let items = snapshot.items.as_mut().unwrap();
-    let guitar = &mut items["tracks"][0]["items"];
-    guitar[0]["takes"] = json!([
-        "takes/guitar-1.wav",
-        "takes/guitar-2.wav",
-        "takes/guitar-3.wav"
-    ]);
-    guitar.as_array_mut().unwrap().push(json!(
-        {"id": 3, "position": 120_000, "bars_beats": "2.2", "offset": 0, "length": 48_000,
-         "take": 0, "takes": ["takes/punch-1.wav"], "take_frames": 96_000}
-    ));
+    edit_items(&mut snapshot, |items| {
+        let guitar = &mut items["tracks"][0]["items"];
+        guitar[0]["takes"] = json!([
+            "takes/guitar-1.wav",
+            "takes/guitar-2.wav",
+            "takes/guitar-3.wav"
+        ]);
+        guitar.as_array_mut().unwrap().push(json!(
+            {"id": 3, "position": 120_000, "bars_beats": "2.2", "offset": 0, "length": 48_000,
+             "take": 0, "takes": ["takes/punch-1.wav"], "take_frames": 96_000}
+        ));
+    });
     snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
     snapshot
 }
@@ -2132,13 +2154,15 @@ fn trim_menu_overlap_and_paste_snapshots() {
         paste.event(Event::Paste("text".to_string()));
         paste.run_steps(1);
         let mut pasted = snapshot;
-        pasted.items.as_mut().unwrap()["tracks"][1]["items"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!(
-                {"id": 9, "position": 230_400, "bars_beats": "3.2", "offset": 0, "length": 96_000,
-                 "take": 0, "takes": ["takes/punch-1.wav"], "take_frames": 96_000}
-            ));
+        edit_items(&mut pasted, |items| {
+            items["tracks"][1]["items"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!(
+                    {"id": 9, "position": 230_400, "bars_beats": "3.2", "offset": 0, "length": 96_000,
+                     "take": 0, "takes": ["takes/punch-1.wav"], "take_frames": 96_000}
+                ));
+        });
         updates.send(pasted).unwrap();
         paste.run_steps(2);
         write_png(&mut paste, &format!("item-paste-{suffix}"));

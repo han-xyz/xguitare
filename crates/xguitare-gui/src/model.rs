@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_client::{ClientError, TakesCleanStopped};
 use xguitare_protocol::{
-    BankKind, BusRef, LoopRegion, Position, RenderBits, RenderRange, Request, Response, SILENCE_DB,
-    SendLevel, TrackRef, TransportAction, is_hidden_char, shown_file_name,
+    BankKind, BusRef, ItemsReply, LoopRegion, Position, RenderBits, RenderRange, Request, Response,
+    SILENCE_DB, SendLevel, TrackRef, TransportAction, is_hidden_char, shown_file_name,
 };
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
@@ -71,7 +71,7 @@ pub struct Snapshot {
     pub ports: Option<Value>,
     pub settings: Option<Value>,
     pub projects: Option<Value>,
-    pub items: Option<Value>,
+    pub items: Option<ItemsReply>,
     /// The peak table of each active Take of the open Project's Items fetched so far, keyed by Take file, as `take_peaks` pages it.
     pub peaks: HashMap<String, Arc<[i8]>>,
     pub module_types: Vec<ModuleType>,

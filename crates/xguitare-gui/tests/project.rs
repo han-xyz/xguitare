@@ -22,7 +22,8 @@ use xguitare_gui::project_model::{
     visible_stretches, waveform_columns,
 };
 use xguitare_protocol::{
-    BusRef, LoopRegion, Position, Request, Response, TrackRef, TransportAction,
+    BusRef, ItemsReply, LoopRegion, Position, Request, Response, TrackRef, TransportAction,
+    from_payload,
 };
 
 const RATE: f64 = 48_000.0;
@@ -50,8 +51,12 @@ fn project_status(transport: &str) -> Value {
     })
 }
 
-fn project_items() -> Value {
-    json!({
+fn items_reply(payload: &Value) -> ItemsReply {
+    from_payload(payload).unwrap()
+}
+
+fn project_items() -> ItemsReply {
+    items_reply(&json!({
         "sample_rate": 48000,
         "tracks": [
             {"id": 4, "name": "Guitar", "items": [{"id": 3, "position": 48_000, "bars_beats": "1.3",
@@ -60,7 +65,7 @@ fn project_items() -> Value {
             {"id": 7, "name": "Bass", "items": [{"id": 1, "position": 0, "bars_beats": "1.1",
              "offset": 0, "length": 240_000, "take": 0, "takes": ["takes/bass-1.wav"]}]},
         ],
-    })
+    }))
 }
 
 #[test]
@@ -312,7 +317,7 @@ fn items_show_their_active_take() {
 
 #[test]
 fn tracks_without_items_have_no_blocks() {
-    let items = json!({"tracks": [{"id": 0, "name": "Guitar", "items": []}]});
+    let items = items_reply(&json!({"tracks": [{"id": 0, "name": "Guitar", "items": []}]}));
     assert_eq!(item_blocks(&items), []);
 }
 
@@ -1796,10 +1801,10 @@ fn t_duplicate_copy_and_paste_keys() {
 
 #[test]
 fn take_names_lists_an_items_takes_by_file_name() {
-    let payload = json!({"tracks": [
+    let payload = items_reply(&json!({"tracks": [
         {"id": 0, "items": [{"id": 4, "position": 0, "offset": 0, "length": 10, "take": 1,
          "takes": ["takes/a-1.wav", "takes/a-2.wav", "b.wav"]}]},
-    ]});
+    ]}));
     assert_eq!(take_names(&payload, 4), ["a-1", "a-2", "b"]);
     assert_eq!(take_names(&payload, 5), Vec::<String>::new());
 }

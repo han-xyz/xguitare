@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use xguitare_client::ClientConfig;
 use xguitare_gui::client;
 use xguitare_gui::model::{Command, Link, Message, Restore};
+use xguitare_gui::project_model::item_blocks;
 
 const WAIT: Duration = Duration::from_secs(2);
 
@@ -538,6 +539,56 @@ fn a_refused_take_is_not_asked_again_and_a_reused_file_name_is_fetched_again() {
         .filter(|request| request["cmd"] == "take_peaks")
         .count();
     assert_eq!(asked, 3, "once refused, once per new recording");
+}
+
+#[test]
+fn a_reply_with_a_wrong_typed_key_is_reported() {
+    let dir = temp_dir("wrong-typed");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let mut statuses = 0;
+    let _received = serve_requests(listener, move |request| {
+        let stage = (statuses / 3).min(1);
+        match request["cmd"].as_str().unwrap() {
+            "status" => {
+                statuses += 1;
+                json!({"ok": true, "preset": "Clean", "program": 0, "revision": stage + 1, "project": "Song"})
+            }
+            "items" if stage == 0 => items_of(&[("takes/a.wav", 768)]),
+            "items" => {
+                let mut items = items_of(&[("takes/a.wav", 768), ("takes/b.wav", 768)]);
+                items["tracks"][0]["items"][1]["position"] = json!("late");
+                items
+            }
+            "take_peaks" => peak_page(request, 768),
+            cmd => serde_json::from_str(reply(cmd)).unwrap(),
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let (message, items) = loop {
+        let snapshot = snapshots
+            .recv_timeout(WAIT)
+            .expect("no error for the items reply");
+        if let Some((message, _)) = snapshot.last_message {
+            break (message, snapshot.items);
+        }
+    };
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    let Message::Error { title, detail } = message else {
+        panic!("not an error: {message:?}");
+    };
+    assert_eq!(title, "Could not read the Items");
+    assert!(detail.contains("invalid type"), "{detail}");
+    let files: Vec<String> = items
+        .as_ref()
+        .map(item_blocks)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| item.file)
+        .collect();
+    assert_eq!(files, ["takes/a.wav"]);
 }
 
 #[test]

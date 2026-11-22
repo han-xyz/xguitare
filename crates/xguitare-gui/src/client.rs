@@ -23,7 +23,7 @@ use tracing::{info, warn};
 use xguitare_client::{
     ClientConfig, ClientError, Connection, clean_takes_in_batches, newer_protocol_warning,
 };
-use xguitare_protocol::{Request, Response, STILL_CLOSING};
+use xguitare_protocol::{Request, Response, STILL_CLOSING, from_payload};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -573,7 +573,8 @@ impl Client {
         self.snapshot.params = self.payload(&self.rack_get());
         let project_open = project_name(self.snapshot.status.as_ref()).is_some();
         self.snapshot.items = if project_open {
-            self.payload(&Request::Items)
+            let previous = self.snapshot.items.take();
+            self.reply(&Request::Items, previous, from_payload)
         } else {
             None
         };
@@ -665,6 +666,30 @@ impl Client {
         match self.request(req) {
             Ok(Response::Ok(payload)) => Some(payload),
             Ok(Response::Err { .. }) | Err(_) => None,
+        }
+    }
+
+    /// The payload of `req` read as a typed reply; one that does not read is shown as an error and leaves `previous` in place.
+    fn reply<T>(
+        &mut self,
+        req: &Request,
+        previous: Option<T>,
+        read: fn(&Value) -> Result<T, serde_json::Error>,
+    ) -> Option<T> {
+        let payload = self.payload(req)?;
+        match read(&payload) {
+            Ok(reply) => Some(reply),
+            Err(err) => {
+                warn!("{req:?}: unreadable reply: {err}");
+                self.snapshot.last_message = Some((
+                    Message::Error {
+                        title: failure_title(req),
+                        detail: err.to_string(),
+                    },
+                    Instant::now(),
+                ));
+                previous
+            }
         }
     }
 
