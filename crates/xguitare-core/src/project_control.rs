@@ -161,7 +161,7 @@ pub(crate) fn autosave_on_stop(open: &mut OpenProject) -> Option<String> {
 
 /// Takes the open Project out as the Daemon stops; the Engine is not told.
 pub fn close_for_stop(state: &mut EngineState) -> Option<ClosedProject> {
-    state.projects.generation += 1;
+    state.projects.open_changes += 1;
     state.projects.open.take().map(|open| ClosedProject {
         dir: open.dir,
         project: open.project,
@@ -179,7 +179,7 @@ pub fn finish_closed(
     finished: &[FinishedTake],
     latency: impl FnMut(usize) -> Latency,
 ) -> LastTakes {
-    state.projects.generation += 1;
+    state.projects.open_changes += 1;
     if closed.takes_pending {
         state.projects.closing -= 1;
     }
@@ -463,7 +463,7 @@ fn read_ticket(state: &EngineState, name: &str, restore: bool) -> ReadTicket {
         projects_dir: state.config.projects_dir.clone(),
         name: name.to_string(),
         restore,
-        generation: state.projects.generation,
+        open_changes: state.projects.open_changes,
     }
 }
 
@@ -499,7 +499,7 @@ pub(crate) fn project_open(
     check_none_open(&state.projects)?;
     let read = match read {
         Some(read)
-            if read.ticket.generation == state.projects.generation
+            if read.ticket.open_changes == state.projects.open_changes
                 && read.ticket.projects_dir == state.config.projects_dir =>
         {
             read
@@ -557,7 +557,7 @@ pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
     let Some(open) = state.projects.open.take() else {
         return Err(NO_PROJECT.to_string());
     };
-    state.projects.generation += 1;
+    state.projects.open_changes += 1;
     cancel_render(state);
     let payload = json!({"name": open.project.name, "path": open.dir.display().to_string()});
     state
@@ -1220,7 +1220,7 @@ fn open(
     };
     sync_peaks(&mut open);
     state.projects.open = Some(open);
-    state.projects.generation += 1;
+    state.projects.open_changes += 1;
     state.revision += 1;
     Ok(())
 }
