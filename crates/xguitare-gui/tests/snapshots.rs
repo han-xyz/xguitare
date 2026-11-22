@@ -1184,6 +1184,114 @@ fn octave_range_focused_snapshot() {
     write_png(&mut open, "octave-range-focused");
 }
 
+const AMP_MODELS: [&str; 8] = [
+    "tweed",
+    "american",
+    "chime",
+    "crunch",
+    "lead",
+    "modern",
+    "bass-valve",
+    "bass-solid",
+];
+
+/// The Funk Rack with an amp before the preamp on its Lead model.
+fn amp_snapshot() -> Snapshot {
+    let percent =
+        |name: &str, value: f64| param("amp", name, value, (0.0, 100.0, 50.0, "%", false));
+    let amp = vec![
+        choice("amp", "model", 4.0, &AMP_MODELS),
+        percent("gain", 63.0),
+        percent("bass", 42.0),
+        percent("middle", 57.0),
+        percent("treble", 66.0),
+        percent("presence", 38.0),
+        percent("master", 47.0),
+        param("amp", "level", -9.5, (-40.0, 12.0, -12.0, "dB", false)),
+    ];
+    with_module(amp, "preamp")
+}
+
+const AMP_CLOSED_INDEX: usize = 1;
+const AMP_MODEL: &str = "Model, Lead";
+
+fn amp_fields_in_unit(harness: &Harness<App>) -> usize {
+    let unit = harness.get_by_label("amp unit").rect();
+    let next_unit = unit_top(harness, "preamp");
+    harness
+        .get_all_by_role(Role::TextInput)
+        .map(|field| field.rect())
+        .filter(|field| unit.x_range().contains(field.center().x))
+        .filter(|field| field.top() >= unit.top() && field.top() < next_unit)
+        .filter(|field| unit.contains_rect(*field))
+        .count()
+}
+
+#[test]
+fn amp_open_shows_its_model_row_and_seven_knobs_at_both_sizes() {
+    for (size, name) in [
+        (DEFAULT_WINDOW, "amp-open-1280x800"),
+        (MIN_WINDOW, "amp-open-1024x640"),
+    ] {
+        let (mut open, _, _dir) = harness_with(size, amp_snapshot());
+        open_unit(&mut open, AMP_CLOSED_INDEX);
+        let unit = open.get_by_label("amp unit").rect();
+        let combo = open.get_by_role_and_label(Role::ComboBox, AMP_MODEL).rect();
+        assert!(unit.contains_rect(combo), "{combo:?} outside {unit:?}");
+        assert_eq!(amp_fields_in_unit(&open), 7, "at {size:?}");
+        write_png(&mut open, name);
+    }
+}
+
+#[test]
+fn amp_closed_shows_the_model_chip_which_opens_the_unit() {
+    for (size, name) in [
+        (DEFAULT_WINDOW, "amp-closed-1280x800"),
+        (MIN_WINDOW, "amp-closed-1024x640"),
+    ] {
+        let (mut closed, _, _dir) = harness_with(size, amp_snapshot());
+        assert_eq!(amp_fields_in_unit(&closed), 7, "at {size:?}");
+        write_png(&mut closed, name);
+        closed
+            .get_by_role_and_label(Role::Button, "Model, Lead, selected")
+            .click();
+        closed.run_steps(2);
+        closed.get_by_role_and_label(Role::ComboBox, AMP_MODEL);
+    }
+}
+
+#[test]
+fn amp_model_list_holds_every_model_and_sends_the_choice() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, amp_snapshot());
+    open_unit(&mut harness, AMP_CLOSED_INDEX);
+    harness
+        .get_by_role_and_label(Role::ComboBox, AMP_MODEL)
+        .click();
+    harness.run_steps(2);
+    for model in [
+        "Tweed",
+        "American",
+        "Chime",
+        "Crunch",
+        "Lead",
+        "Modern",
+        "Bass-valve",
+        "Bass-solid",
+    ] {
+        harness.get_by_label(model);
+    }
+    write_png(&mut harness, "amp-model-list-open");
+    harness.get_by_label("Crunch").click();
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Set {
+            param: "amp.model".to_string(),
+            value: 3.0,
+        }]
+    );
+}
+
 const EQ_SPEC: [(&str, f64, f64, f64, &str); 13] = [
     ("low_cut", 10.0, 300.0, 10.0, "Hz"),
     ("low_freq", 20.0, 500.0, 100.0, "Hz"),

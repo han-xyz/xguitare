@@ -34,9 +34,9 @@ use xguitare_gui::model::{
     unit_style,
 };
 use xguitare_gui::model::{
-    ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click,
-    choice_buttons, choice_step, closed_knobs_width, open_knob_rows, open_knobs_width,
-    open_unit_height,
+    ChipClick, ChoiceButton, ChoiceKey, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, chip_click, chip_text,
+    chip_width, choice_buttons, choice_row_name, choice_rows_height, choice_step,
+    closed_knobs_width, open_knob_rows, open_knobs_width, open_unit_height, split_choice_rows,
 };
 use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for, palette};
 use xguitare_protocol::{
@@ -2785,6 +2785,73 @@ fn closed_units_fit_three_small_knobs_a_row_at_1024() {
         closed_unit_rows(5, closed_knobs_width(DEFAULT_WINDOW_UNIT_WIDTH, false)),
         1
     );
+}
+
+const AMP_MODELS: [&str; 8] = [
+    "tweed",
+    "american",
+    "chime",
+    "crunch",
+    "lead",
+    "modern",
+    "bass-valve",
+    "bass-solid",
+];
+const AMP_KNOBS: [&str; 7] = [
+    "gain", "bass", "middle", "treble", "presence", "master", "level",
+];
+
+fn amp_rows() -> Vec<ParamRow> {
+    let knob = |param: &str| ParamRow {
+        labels: Vec::new(),
+        integer: false,
+        ..choice_row(param, &[""], 50.0)
+    };
+    std::iter::once(choice_row("model", &AMP_MODELS, 4.0))
+        .chain(AMP_KNOBS.map(knob))
+        .collect()
+}
+
+#[test]
+fn a_choice_of_more_than_three_labels_is_a_row_and_three_stay_buttons() {
+    let mode = choice_row("mode", &["lp", "bp", "hp"], 1.0);
+    let shape = choice_row("shape", &["a", "b", "c", "d"], 0.0);
+    let mut rows = amp_rows();
+    rows.insert(2, mode.clone());
+    rows.push(shape.clone());
+    let (choice_rows, rest) = split_choice_rows(&rows);
+    assert_eq!(choice_rows, [rows[0].clone(), shape]);
+    assert_eq!(rest.len(), 8);
+    assert_eq!(rest[1], mode);
+    assert_eq!(choice_row_name(&rows[0]), "Model, Lead");
+}
+
+#[test]
+fn a_many_label_chip_shows_the_current_label_wider_and_opens_the_unit() {
+    let model = choice_row("model", &AMP_MODELS, 6.0);
+    assert_eq!(chip_text(&model), "Bass-valve");
+    assert_eq!(chip_click(&model), ChipClick::Open);
+    let three = choice_row("mode", &["lp", "bp", "hp"], 1.0);
+    let two = choice_row("direction", &["up", "down"], 0.0);
+    assert_eq!(chip_text(&three), "BP");
+    assert_eq!(chip_width(&three), chip_width(&two));
+    assert!(chip_width(&model) > chip_width(&three));
+    assert!(chip_width(&model) < CLOSED_KNOB_WIDTH);
+}
+
+#[test]
+fn amp_knobs_sit_in_one_row_below_its_model_row_at_both_sizes() {
+    let (choice_rows, rest) = split_choice_rows(&amp_rows());
+    for unit_width in [DEFAULT_WINDOW_UNIT_WIDTH, MIN_WINDOW_UNIT_WIDTH] {
+        let rows = open_knob_rows("amp", rest.len(), open_knobs_width(unit_width, false));
+        assert_eq!(rows, [7], "at {unit_width}");
+    }
+    assert_eq!(choice_rows_height(0), 0.0);
+    assert!(choice_rows_height(choice_rows.len()) >= 32.0);
+    assert_eq!(choice_rows_height(2), 2.0 * choice_rows_height(1));
+    let closed = |unit_width| closed_unit_rows(8, closed_knobs_width(unit_width, false));
+    assert_eq!(closed(DEFAULT_WINDOW_UNIT_WIDTH), 2);
+    assert_eq!(closed(MIN_WINDOW_UNIT_WIDTH), 3);
 }
 
 #[test]

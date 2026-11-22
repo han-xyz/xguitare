@@ -16,17 +16,19 @@ use crate::eq_model::{
 };
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
-    CHEVRON_WIDTH, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command, Direction, Dragged,
-    EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP, HiddenFixed, KnobKey, LayoutDrop, Link, LinkBanner,
-    METER_FLOOR_DB, MOVE_BUTTON_GAP, MOVE_BUTTON_SIDE, MOVE_BUTTONS_WIDTH, Message, NO_SIGNAL,
-    OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold, RULE_WIDTH, RackItem, RackLayout,
-    SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH,
-    autoscroll_delta, bypassed, cabinet_ir, cents_fraction, cents_text, chip_click, choice_buttons,
-    choice_step, choice_text, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
+    CHEVRON_WIDTH, CHOICE_ROW_HEIGHT, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command,
+    Direction, Dragged, EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP, HiddenFixed, KnobKey,
+    LayoutDrop, Link, LinkBanner, METER_FLOOR_DB, MOVE_BUTTON_GAP, MOVE_BUTTON_SIDE,
+    MOVE_BUTTONS_WIDTH, Message, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
+    RULE_WIDTH, RackItem, RackLayout, SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle,
+    TunerReading, UNIT_NAME_WIDTH, autoscroll_delta, bypassed, cabinet_ir, cents_fraction,
+    cents_text, chip_click, chip_text, chip_width, choice_buttons, choice_row_name,
+    choice_rows_height, choice_step, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
     elide_to_width, format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value,
     layout_drop, link_banner, module_title, move_target, mute_banner, open_knob_rows,
     open_knobs_width, open_unit_height, param_label, param_rows, paused, peak_db, peak_text,
-    rack_ear_labels, tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
+    rack_ear_labels, split_choice_rows, tuner_header_text, tuner_reading, typed_text, typed_value,
+    unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
@@ -83,7 +85,7 @@ const LARGE_KNOB_COLUMN_WIDTH: f32 = 72.0;
 const SMALL_KNOB_TOP: f32 = 4.0;
 const FOCUS_PENDING: &str = "focus pending";
 const KNOB_FIELD_GAP: f32 = 8.0;
-const CHIP_SIZE: Vec2 = Vec2::new(56.0, 24.0);
+const CHIP_HEIGHT: f32 = 24.0;
 const CHOICE_KEYS: [(Key, ChoiceKey); 4] = [
     (Key::ArrowLeft, ChoiceKey::Previous),
     (Key::ArrowUp, ChoiceKey::Previous),
@@ -938,12 +940,13 @@ fn module_unit(
         closed_unit_rows(unit.rows.len(), knobs_width) as f32
     };
     let open_width = open_knobs_width(ui.available_width(), unit.ir_choice.is_some());
-    let open_rows = open_knob_rows(type_name, unit.rows.len(), open_width);
+    let (choice_rows, knob_rows) = split_choice_rows(unit.rows);
+    let open_rows = open_knob_rows(type_name, knob_rows.len(), open_width);
     let eq = eq_layout(&eq_bands(unit.rows), open_width);
     let open_height = if is_eq {
         eq.height
     } else {
-        open_unit_height(open_rows.len())
+        open_unit_height(open_rows.len()) + choice_rows_height(choice_rows.len())
     };
     let (height, header_height) = if open {
         (open_height, HEADER_HEIGHT)
@@ -1025,7 +1028,12 @@ fn module_unit(
                     if is_eq {
                         commands.extend(eq_editor(ui, unit, &eq, arc, knobs));
                     } else {
-                        commands.extend(open_params(ui, unit.rows, &open_rows, arc, knobs));
+                        let rows = OpenRows {
+                            choice_rows: &choice_rows,
+                            knob_rows: &knob_rows,
+                            per_row: &open_rows,
+                        };
+                        commands.extend(open_params(ui, &rows, arc, knobs));
                     }
                 });
                 if let Some(ir_choice) = &unit.ir_choice {
@@ -1166,19 +1174,23 @@ fn closed_params(
     (commands, open_asked)
 }
 
-/// Large knobs and choice columns in rows of `per_row` counts.
-fn open_params(
-    ui: &mut Ui,
-    rows: &[ParamRow],
-    per_row: &[usize],
-    accent: Color32,
-    knobs: &mut Knobs,
-) -> Vec<Command> {
+/// An open unit's Parameters as [`split_choice_rows`] parts them, the knob rows in rows of `per_row` counts.
+struct OpenRows<'a> {
+    choice_rows: &'a [ParamRow],
+    knob_rows: &'a [ParamRow],
+    per_row: &'a [usize],
+}
+
+/// A row per choice of many labels, then large knobs and choice columns in rows.
+fn open_params(ui: &mut Ui, rows: &OpenRows, accent: Color32, knobs: &mut Knobs) -> Vec<Command> {
     let mut commands = Vec::new();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = f32::from(UNIT_MARGIN);
-        let mut rest = rows;
-        for &count in per_row {
+        for row in rows.choice_rows {
+            commands.extend(choice_row(ui, row, knobs));
+        }
+        let mut rest = rows.knob_rows;
+        for &count in rows.per_row {
             let (row_params, after) = rest.split_at(count.min(rest.len()));
             rest = after;
             ui.horizontal_top(|ui| {
@@ -1414,6 +1426,31 @@ fn choice_column(
     .inner
 }
 
+/// A choice Parameter of many labels in an open unit: its label and a list of its labels, as the Cabinet IR row.
+fn choice_row(ui: &mut Ui, row: &ParamRow, knobs: &mut Knobs) -> Option<Command> {
+    let shown = shown_row(row, knobs);
+    let mut chosen = None;
+    let size = vec2(ui.available_width(), CHOICE_ROW_HEIGHT);
+    ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), |ui| {
+        ui.label(param_label(&row.param));
+        let combo = ComboBox::from_id_salt(("choice row", &row.address))
+            .selected_text(chip_text(&shown))
+            .show_ui(ui, |ui| {
+                for button in choice_buttons(&shown, 0.0) {
+                    if ui.selectable_label(button.lit, button.text).clicked() {
+                        chosen = Some(button.value);
+                    }
+                }
+            });
+        combo
+            .response
+            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, choice_row_name(&shown)));
+    });
+    chosen
+        .filter(|&value| keys_moved(value, shown.value))
+        .map(|value| send_choice(row, value, knobs))
+}
+
 fn keys_moved(value: f64, shown: f64) -> bool {
     (value - shown).abs() > f64::EPSILON
 }
@@ -1440,12 +1477,7 @@ fn choice_chip(
     knobs: &mut Knobs,
 ) -> (Option<Command>, bool) {
     let shown = shown_row(row, knobs);
-    let lit = shown.value.round().max(0.0) as usize;
-    let text = shown
-        .labels
-        .get(lit)
-        .map(|label| choice_text(label))
-        .unwrap_or_default();
+    let text = chip_text(&shown);
     let name = format!("{}, {text}, selected", param_label(&row.param));
     let group = Layout::top_down(Align::Min);
     let clicked = ui
@@ -1453,7 +1485,8 @@ fn choice_chip(
             ui.set_min_size(vec2(CLOSED_KNOB_WIDTH, HEADER_HEIGHT));
             ui.spacing_mut().item_spacing.y = UNIT_GAP;
             ui.label(legend_text(param_label(&row.param)));
-            let (rect, _) = ui.allocate_exact_size(CHIP_SIZE, Sense::hover());
+            let chip_size = vec2(chip_width(row), CHIP_HEIGHT);
+            let (rect, _) = ui.allocate_exact_size(chip_size, Sense::hover());
             let id = Id::unique(("chip", &row.address));
             let chip = widgets::choice_button(ui, rect, id, (&text, true), accent);
             chip.widget_info(|| WidgetInfo::labeled(Role::Button, true, &name));

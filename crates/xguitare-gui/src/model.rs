@@ -2161,6 +2161,49 @@ pub fn chip_click(row: &ParamRow) -> ChipClick {
     ChipClick::Open
 }
 
+/// A closed unit's chip shows the chosen label.
+pub fn chip_text(row: &ParamRow) -> String {
+    row.labels
+        .get(chosen_index(row))
+        .map(|label| choice_text(label))
+        .unwrap_or_default()
+}
+
+/// Up to this many choices are buttons in a knob column; more are a row with a list.
+const BUTTON_CHOICES: usize = 3;
+const CHIP_WIDTH: f32 = 56.0;
+/// Fits `Bass-valve` in the chip's monospace text.
+const WIDE_CHIP_WIDTH: f32 = 88.0;
+pub const CHOICE_ROW_HEIGHT: f32 = theme::CONTROL_HEIGHT;
+const CHOICE_ROW_GAP: f32 = theme::SPACE_S;
+
+fn is_choice_row(row: &ParamRow) -> bool {
+    row.labels.len() > BUTTON_CHOICES
+}
+
+/// An open unit's choice Parameters of more than three labels, each a row above the knobs, and the Parameters left for the knob rows; both in spec order.
+pub fn split_choice_rows(rows: &[ParamRow]) -> (Vec<ParamRow>, Vec<ParamRow>) {
+    rows.iter().cloned().partition(is_choice_row)
+}
+
+/// The accessible name of a choice row's list: `Model, Lead`.
+pub fn choice_row_name(row: &ParamRow) -> String {
+    format!("{}, {}", param_label(&row.param), chip_text(row))
+}
+
+pub fn chip_width(row: &ParamRow) -> f32 {
+    if is_choice_row(row) {
+        WIDE_CHIP_WIDTH
+    } else {
+        CHIP_WIDTH
+    }
+}
+
+/// What `count` choice rows, each with the gap below it, add to an open unit's height.
+pub fn choice_rows_height(count: usize) -> f32 {
+    count as f32 * (CHOICE_ROW_HEIGHT + CHOICE_ROW_GAP)
+}
+
 const KILO: f64 = 1000.0;
 const RATIO_PARAM: &str = "ratio";
 const Q_PARAM: &str = "q";
