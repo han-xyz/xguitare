@@ -50,6 +50,12 @@ fn guitar_ir_unchanged() {
 }
 
 #[test]
+fn existing_cabinets_keep_their_samples() {
+    assert_eq!(fnv1a(&default_cabinet(RATE)), 0x4a99_5182_abae_f009);
+    assert_eq!(fnv1a(&bass_cabinet(RATE)), 0xe6af_857d_5620_e6cd);
+}
+
+#[test]
 fn bass_length_is_120ms() {
     assert_eq!(bass_cabinet(RATE).len(), 5_760);
     assert_eq!(bass_cabinet(44_100).len(), 5_292);
