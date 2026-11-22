@@ -26,6 +26,7 @@ mod registry;
 pub mod render;
 pub mod render_control;
 mod settings_control;
+mod starters;
 mod state;
 pub mod take_capture;
 pub mod take_peaks;

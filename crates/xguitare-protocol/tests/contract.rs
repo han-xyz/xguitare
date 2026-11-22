@@ -40,6 +40,7 @@ fn every_documented_request_parses_to_its_variant() {
         (r#"{"cmd":"metronome_tap"}"#, Request::MetronomeTap),
         (r#"{"cmd":"render_cancel"}"#, Request::RenderCancel),
         (r#"{"cmd":"takes_unused"}"#, Request::TakesUnused),
+        (r#"{"cmd":"bank_starters"}"#, Request::BankStarters),
         (
             r#"{"cmd":"load","preset":"Crunch"}"#,
             Request::Load {

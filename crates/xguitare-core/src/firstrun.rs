@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io;
+use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
@@ -11,6 +11,8 @@ use xguitare_dsp::synth_ir::{
 
 use xguitare_protocol::BankKind;
 
+/// The sample rate the starter Cabinet IRs are synthesized at.
+pub const STARTER_IR_RATE: u32 = 48_000;
 pub(crate) const DEFAULT_IR: &str = "default-cab.wav";
 pub(crate) const BASS_IR: &str = "bass-cab.wav";
 pub(crate) const CAB_4X10_IR: &str = "cab-4x10.wav";
@@ -184,8 +186,10 @@ pub fn ensure_bank(
         fs::write(staging.join(file), text)?;
     }
     for (file, synthesize) in starter_irs(kind) {
-        write_ir(&staging.join(file), &synthesize(sample_rate), sample_rate)
-            .map_err(io::Error::other)?;
+        fs::write(
+            staging.join(file),
+            wav_bytes(&synthesize(sample_rate), sample_rate)?,
+        )?;
     }
     fs::rename(&staging, bank_dir)?;
     Ok(Created {
@@ -207,16 +211,19 @@ fn staging_dir(bank_dir: &Path) -> Result<PathBuf, io::Error> {
     Ok(bank_dir.with_file_name(staging))
 }
 
-fn write_ir(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), hound::Error> {
+/// `samples` as a mono 32-bit float WAV file at `sample_rate`.
+pub(crate) fn wav_bytes(samples: &[f32], sample_rate: u32) -> Result<Vec<u8>, io::Error> {
     let spec = WavSpec {
         channels: 1,
         sample_rate,
         bits_per_sample: 32,
         sample_format: SampleFormat::Float,
     };
-    let mut writer = WavWriter::create(path, spec)?;
+    let mut bytes = Cursor::new(Vec::new());
+    let mut writer = WavWriter::new(&mut bytes, spec).map_err(io::Error::other)?;
     for &sample in samples {
-        writer.write_sample(sample)?;
+        writer.write_sample(sample).map_err(io::Error::other)?;
     }
-    writer.finalize()
+    writer.finalize().map_err(io::Error::other)?;
+    Ok(bytes.into_inner())
 }

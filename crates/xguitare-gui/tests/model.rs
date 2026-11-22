@@ -409,7 +409,7 @@ fn esc_dismisses_the_toast_unless_a_focused_widget_a_popup_or_a_dialog_takes_it(
 }
 
 /// A request of each kind the Control API takes, as JSON, and the toast's title when it fails.
-const FAILURE_TITLES: [(&str, &str); 46] = [
+const FAILURE_TITLES: [(&str, &str); 47] = [
     (r#"{"cmd": "status"}"#, "Could not read the status"),
     (r#"{"cmd": "list"}"#, "Could not list the Bank"),
     (r#"{"cmd": "load", "preset": "1"}"#, "Could not load Preset"),
@@ -423,6 +423,10 @@ const FAILURE_TITLES: [(&str, &str); 46] = [
     ),
     (r#"{"cmd": "save", "as": null}"#, "Could not save Preset"),
     (r#"{"cmd": "modules"}"#, "Could not list the Modules"),
+    (
+        r#"{"cmd": "bank_starters"}"#,
+        "Could not add the starter Presets",
+    ),
     (
         r#"{"cmd": "rack_add", "type": "gain", "after": null, "at": null}"#,
         "Could not add the Module",

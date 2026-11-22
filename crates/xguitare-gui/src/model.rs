@@ -2735,6 +2735,7 @@ pub fn failure_title(req: &Request) -> &'static str {
         Request::Set { .. } => SET_FAILED,
         Request::Get { .. } => "Could not read the Parameters",
         Request::Save { .. } => "Could not save Preset",
+        Request::BankStarters => "Could not add the starter Presets",
         Request::Modules => "Could not list the Modules",
         Request::RackAdd { .. } => "Could not add the Module",
         Request::RackRemove { .. } => "Could not remove the Module",

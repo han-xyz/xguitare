@@ -6,16 +6,17 @@ use serde_json::{Value, json};
 use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
 use xguitare_protocol::{GetReply, ParamStatus, to_payload};
 
-use crate::atomic_file::{slug, write_new, write_through};
+use crate::atomic_file::{slug, write_new, write_new_bytes, write_through};
 use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
 use crate::control::EngineState;
 use crate::engine::Command;
-use crate::firstrun::{BASS_IR, DEFAULT_IR};
+use crate::firstrun::{BASS_IR, DEFAULT_IR, STARTER_IR_RATE, wav_bytes};
 use crate::preset::{CABINET_TYPE, ir_path, is_relative_name, shortest_f64};
 use crate::project::ProjectError;
 use crate::project_control::{
     ProjectRack, bypass_command, change_rack_module, param_command, rack_preset, set_rack_modules,
 };
+use crate::starters::{Missing, missing_starters};
 use crate::{
     Bank, BankEntry, BuildWarning, ModuleRegistry, ParamAddress, Preset, PresetModule, list_irs,
 };
@@ -230,7 +231,8 @@ pub(crate) fn save_as(state: &mut EngineState, name: &str) -> Result<Value, Stri
         modules: live.modules.clone(),
     }
     .to_toml();
-    let file = write_next_free(&dir, next_prefix(&bank), &slug, &text)?;
+    let file = write_next_free(&dir, next_prefix(&bank), &slug, &text)
+        .map_err(|(file, err)| format!("cannot save {}: {err}", file.display()))?;
     state.bank = Bank::load_dir(&dir).map_err(cannot_read)?;
     let saved = Preset::parse(&text).expect("a saved Preset parses back");
     state.saved.insert(file.clone(), saved.clone());
@@ -240,35 +242,96 @@ pub(crate) fn save_as(state: &mut EngineState, name: &str) -> Result<Value, Stri
     Ok(json!({"path": file.display().to_string(), "program": active_program(state)}))
 }
 
-/// Writes `text` to the first of `SAVE_AS_TRIES` names `<NN>-<slug>.toml` from `first` on that no file takes, since one may appear after the Bank was read.
-fn write_next_free(dir: &Path, first: u64, slug: &str, text: &str) -> Result<PathBuf, String> {
+/// Writes the starter Presets and Cabinet IRs of the configured `bank_kind` that the Bank lacks into the Bank dir, Presets numbered after the Bank's highest number in starter order, and reloads the Bank; no existing file is replaced. On a write error the files written before it stay.
+pub(crate) fn bank_starters(state: &mut EngineState) -> Result<Value, String> {
+    let dir = state.bank.dir.clone();
+    let cannot_read = |err: io::Error| format!("cannot read {}: {err}", dir.display());
+    let bank = Bank::load_dir(&dir).map_err(cannot_read)?;
+    let ir_dir = &state.config.ir_dir;
+    let missing = missing_starters(&bank.entries, state.config.bank_kind, |ir| {
+        ir_path(ir_dir, &dir, ir).is_file()
+    });
+    let mut presets = Vec::new();
+    let mut irs = Vec::new();
+    let written = write_starters(&dir, next_prefix(&bank), &missing, &mut presets, &mut irs);
+    if !presets.is_empty() || !irs.is_empty() {
+        state.bank = Bank::load_dir(&dir).map_err(cannot_read)?;
+        state.revision += 1;
+    }
+    written.map_err(|(file, err)| format!("cannot write {}: {err}", file.display()))?;
+    Ok(json!({"presets": presets, "irs": irs}))
+}
+
+/// Writes `missing` into `dir`, pushing each file name written onto `presets` or `irs`; stops at the first error, with the path it failed on.
+fn write_starters(
+    dir: &Path,
+    first: u64,
+    missing: &Missing,
+    presets: &mut Vec<String>,
+    irs: &mut Vec<String>,
+) -> Result<(), (PathBuf, io::Error)> {
+    let mut prefix = first;
+    for (name, text) in &missing.presets {
+        let file = write_next_free(dir, prefix, &slug(name), text)?;
+        prefix = file_prefix(&file).map_or(prefix, |taken| taken.saturating_add(1));
+        presets.push(file_name(&file));
+    }
+    for (name, synthesize) in &missing.irs {
+        let file = dir.join(name);
+        let bytes = wav_bytes(&synthesize(STARTER_IR_RATE), STARTER_IR_RATE)
+            .map_err(|err| (file.clone(), err))?;
+        write_new_bytes(&file, &bytes, |tmp, path| fs::hard_link(tmp, path))
+            .map_err(|err| (file.clone(), err))?;
+        irs.push((*name).to_string());
+    }
+    Ok(())
+}
+
+/// Writes `text` to the first of `SAVE_AS_TRIES` names `<NN>-<slug>.toml` from `first` on that no file takes, since one may appear after the Bank was read; an error carries the path it failed on.
+fn write_next_free(
+    dir: &Path,
+    first: u64,
+    slug: &str,
+    text: &str,
+) -> Result<PathBuf, (PathBuf, io::Error)> {
     let mut file = PathBuf::new();
     for prefix in first..=first.saturating_add(SAVE_AS_TRIES - 1) {
         file = dir.join(format!("{prefix:02}-{slug}.toml"));
         match write_new(&file, text, |tmp, path| fs::hard_link(tmp, path)) {
             Ok(()) => return Ok(file),
             Err(err) if err.kind() == ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(format!("cannot save {}: {err}", file.display())),
+            Err(err) => return Err((file, err)),
         }
     }
-    Err(format!("cannot save {}: file exists", file.display()))
+    Err((
+        file,
+        io::Error::new(ErrorKind::AlreadyExists, "file exists"),
+    ))
 }
 
 /// One more than the highest number before the first `-` among the Bank's file names, at most `u64::MAX`.
 fn next_prefix(bank: &Bank) -> u64 {
     bank.entries
         .iter()
-        .filter_map(|entry| {
-            let name = entry.file().file_name()?.to_str()?;
-            let (prefix, _) = name.split_once('-')?;
-            if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
-                return None;
-            }
-            prefix.parse::<u64>().ok()
-        })
+        .filter_map(|entry| file_prefix(entry.file()))
         .max()
         .unwrap_or(0)
         .saturating_add(1)
+}
+
+/// The number before the first `-` of the file's name, when that part is all digits.
+fn file_prefix(file: &Path) -> Option<u64> {
+    let name = file.file_name()?.to_str()?;
+    let (prefix, _) = name.split_once('-')?;
+    if prefix.is_empty() || !prefix.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    prefix.parse::<u64>().ok()
+}
+
+fn file_name(file: &Path) -> String {
+    file.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
 }
 
 pub(crate) fn modules() -> Value {

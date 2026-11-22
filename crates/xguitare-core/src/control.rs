@@ -28,8 +28,8 @@ use crate::project_state::{Projects, ReadProject};
 use crate::project_sync::{rebuild_arrangement, rebuild_arrangement_slots};
 pub use crate::rack_control::passthrough_rack;
 use crate::rack_control::{
-    active_program, bypass, get, ir_list, list, load, modules, rack_add, rack_ir, rack_move,
-    rack_remove, save, save_as, set,
+    active_program, bank_starters, bypass, get, ir_list, list, load, modules, rack_add, rack_ir,
+    rack_move, rack_remove, save, save_as, set,
 };
 use crate::render_control::{render, render_cancel};
 use crate::settings_control::{connected, port_names, set_ports, set_settings, settings};
@@ -263,6 +263,7 @@ fn handle_from(
             .and_then(|rack| get(state, param.as_deref(), rack)),
         Request::Save { name: None } => save(state),
         Request::Save { name: Some(name) } => save_as(state, &name),
+        Request::BankStarters => bank_starters(state),
         Request::Modules => Ok(modules()),
         Request::RackAdd {
             r#type,

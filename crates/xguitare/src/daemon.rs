@@ -20,7 +20,7 @@ use xguitare_core::control::{
     reprepare,
 };
 use xguitare_core::engine::{EngineShared, SWITCHER_MAX_FRAMES, engine_queues};
-use xguitare_core::firstrun::ensure_bank;
+use xguitare_core::firstrun::{STARTER_IR_RATE, ensure_bank};
 use xguitare_core::ports::{AudioPorts, capture_track_inputs};
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
@@ -46,7 +46,6 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const POLLS_PER_REPORT: u32 = 10;
 const QUEUE_CAPACITY: usize = 64;
 const DEBOUNCE: Duration = Duration::from_millis(150);
-const STARTER_IR_RATE: u32 = 48_000;
 
 #[derive(Debug)]
 pub enum DaemonError {

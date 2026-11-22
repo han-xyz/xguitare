@@ -93,14 +93,21 @@ pub fn write_new(
     text: &str,
     link: impl Fn(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<()> {
+    write_new_bytes(path, text.as_bytes(), link)
+}
+
+/// [`write_new`] for `bytes`.
+pub(crate) fn write_new_bytes(
+    path: &Path,
+    bytes: &[u8],
+    link: impl Fn(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     let tmp = temp_path(path);
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    let written = file
-        .write_all(text.as_bytes())
-        .and_then(|()| link(&tmp, path));
+    let written = file.write_all(bytes).and_then(|()| link(&tmp, path));
     let _ = fs::remove_file(&tmp);
     match written {
-        Err(err) if has_no_hard_links(&err) => create_and_write(path, text),
+        Err(err) if has_no_hard_links(&err) => create_and_write(path, bytes),
         written => written,
     }
 }
@@ -112,9 +119,9 @@ pub(crate) fn has_no_hard_links(err: &io::Error) -> bool {
     ) || err.raw_os_error() == Some(EPERM)
 }
 
-fn create_and_write(path: &Path, text: &str) -> io::Result<()> {
+fn create_and_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    let written = file.write_all(text.as_bytes());
+    let written = file.write_all(bytes);
     if written.is_err() {
         let _ = fs::remove_file(path);
     }

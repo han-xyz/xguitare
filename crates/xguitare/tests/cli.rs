@@ -342,6 +342,48 @@ fn cli_save_as() {
 }
 
 #[test]
+fn starters_lists_what_it_added() {
+    let out = cli(
+        &["starters"],
+        reply(
+            r#"{"ok":true,"presets":["16-amp-tweed.toml","17-amp-american.toml","18-amp-chime.toml","19-amp-crunch.toml","20-amp-lead.toml","21-amp-modern.toml"],"irs":["cab-4x10.wav","cab-2x12-open.wav","cab-2x12-alnico.wav","cab-4x12.wav"]}"#,
+        ),
+    );
+    assert_eq!(out.requests, [Request::BankStarters]);
+    assert_eq!(out.requests[0].to_line(), r#"{"cmd":"bank_starters"}"#);
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "added 6 presets, 4 cabinet IRs\n16-amp-tweed.toml\n17-amp-american.toml\n18-amp-chime.toml\n19-amp-crunch.toml\n20-amp-lead.toml\n21-amp-modern.toml\ncab-4x10.wav\ncab-2x12-open.wav\ncab-2x12-alnico.wav\ncab-4x12.wav\n"
+    );
+}
+
+#[test]
+fn starters_with_only_irs_lists_them() {
+    let out = cli(
+        &["starters"],
+        reply(r#"{"ok":true,"presets":[],"irs":["cab-4x12.wav"]}"#),
+    );
+    assert_eq!(out.stdout, "added 0 presets, 1 cabinet IRs\ncab-4x12.wav\n");
+}
+
+#[test]
+fn starters_with_nothing_missing() {
+    let out = cli(&["starters"], reply(r#"{"ok":true,"presets":[],"irs":[]}"#));
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "nothing to add\n");
+}
+
+#[test]
+fn starters_takes_no_argument() {
+    let out = cli(&["starters", "extra"], reply(r#"{"ok":true}"#));
+    assert_eq!(out.code, 1);
+    assert_eq!(out.requests, []);
+    assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
+    assert!(out.stderr.starts_with("error:"), "{}", out.stderr);
+}
+
+#[test]
 fn control_chars_in_names_are_replaced() {
     let out = cli(
         &["list"],

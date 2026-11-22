@@ -60,6 +60,8 @@ enum Cmd {
         #[arg(long = "as", value_name = "NAME")]
         name: Option<String>,
     },
+    /// Add the starter Presets and Cabinet IRs the Bank lacks; no file is replaced
+    Starters,
     /// List the Module types, their channels and Parameters
     Modules,
     /// Edit the live Rack's layout

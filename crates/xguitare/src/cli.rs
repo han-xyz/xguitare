@@ -392,6 +392,7 @@ fn request_for(cmd: Cmd, client: &mut dyn Transport) -> Result<Request, String> 
             master: rack.master,
         },
         Cmd::Save { name } => Request::Save { name },
+        Cmd::Starters => Request::BankStarters,
         Cmd::Modules => Request::Modules,
         Cmd::Rack(cmd) => rack_request(cmd),
         Cmd::Ir(IrCmd::List) => Request::IrList,
@@ -686,6 +687,7 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::Save { .. } | Request::ProjectSave => {
             format!("saved {}\n", text(&payload["path"]))
         }
+        Request::BankStarters => render_starters(payload),
         Request::Modules => render_modules(payload),
         Request::RackAdd { .. } => format!("added {}\n", text(&payload["id"])),
         Request::RackRemove { .. } => format!("removed {}\n", text(&payload["id"])),
@@ -800,6 +802,23 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         | Request::TakePeaks { .. } => format!("{payload}\n"),
     };
     Ok(rendered)
+}
+
+fn render_starters(payload: &Value) -> String {
+    let presets: Vec<&Value> = items(&payload["presets"]).collect();
+    let irs: Vec<&Value> = items(&payload["irs"]).collect();
+    if presets.is_empty() && irs.is_empty() {
+        return "nothing to add\n".to_string();
+    }
+    let mut lines = format!(
+        "added {} presets, {} cabinet IRs\n",
+        presets.len(),
+        irs.len()
+    );
+    for file in presets.into_iter().chain(irs) {
+        let _ = writeln!(lines, "{}", text(file));
+    }
+    lines
 }
 
 fn render_open(payload: &Value) -> String {

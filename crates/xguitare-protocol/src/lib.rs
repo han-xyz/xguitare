@@ -73,6 +73,8 @@ pub enum Request {
         #[serde(rename = "as")]
         name: Option<String>,
     },
+    /// Adds the starter Presets and Cabinet IRs of the configured `bank_kind` that the Bank lacks, never replacing a file.
+    BankStarters,
     Modules,
     RackAdd {
         r#type: String,
