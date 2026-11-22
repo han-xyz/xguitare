@@ -1,9 +1,9 @@
 use xguitare_dsp::modules::{
-    autowah, blend, cabinet, chorus, compressor, delay, drive, eq, flanger, fuzz, gain, gate,
+    amp, autowah, blend, cabinet, chorus, compressor, delay, drive, eq, flanger, fuzz, gain, gate,
     limiter, octave, preamp, reverb, shaper, tonestack,
 };
 use xguitare_dsp::{
-    Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Limiter,
+    Amp, Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Limiter,
     Module, ModuleSpec, Octave, Preamp, Reverb, Shaper, Tonestack,
 };
 
@@ -48,6 +48,10 @@ static ENTRIES: &[Entry] = &[
     Entry {
         spec: &blend::SPEC,
         construct: Some(|| Box::new(Blend::new())),
+    },
+    Entry {
+        spec: &amp::SPEC,
+        construct: Some(|| Box::new(Amp::new())),
     },
     Entry {
         spec: &preamp::SPEC,

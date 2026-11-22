@@ -2566,7 +2566,7 @@ fn the_metronome_shows_whole_at_1280x800_above_add_module() {
             + harness
                 .query_all_by_label_contains("(mono_to_stereo)")
                 .count(),
-        18
+        19
     );
     let tap = harness.get_by_role_and_label(Role::Button, "Tap").rect();
     assert!(

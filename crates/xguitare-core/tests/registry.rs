@@ -27,6 +27,7 @@ fn specs_equal_constructed_module_specs() {
             "drive",
             "fuzz",
             "blend",
+            "amp",
             "preamp",
             "tonestack",
             "eq",

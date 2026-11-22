@@ -1157,6 +1157,19 @@ fn modules_lists_registry() {
         .unwrap()
         .clone();
     assert_eq!(stages["integer"], true);
+    let amp_params = by_type("amp")["params"].as_array().unwrap().clone();
+    let names: Vec<&str> = amp_params
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "model", "gain", "bass", "middle", "treble", "presence", "master", "level"
+        ]
+    );
+    assert_eq!(amp_params[0]["labels"], json!(["tweed", "american"]));
+    assert_eq!(amp_params[0]["integer"], true);
     assert_eq!(
         by_type("gain")["params"],
         json!([{"name": "level", "min": -60.0, "max": 20.0, "default": 0.0, "unit": "dB", "integer": false, "labels": []}])

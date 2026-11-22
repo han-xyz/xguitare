@@ -108,6 +108,29 @@ fn to_toml_round_trips() {
 }
 
 #[test]
+fn amp_preset_parses_builds_and_round_trips() {
+    let preset = Preset::parse(
+        "name = \"Amp\"\n[[module]]\ntype = \"amp\"\n[module.params]\nmodel = 1\ngain = 37.5\n\
+         bass = 62.25\nmiddle = 41.75\ntreble = 58.5\npresence = 33.25\nmaster = 27.75\nlevel = -9.5\n",
+    )
+    .unwrap();
+    assert_eq!(preset.modules[0].params[0], ("model".to_string(), 1.0));
+    assert_eq!(preset.modules[0].params[1], ("gain".to_string(), 37.5));
+    let (mut rack, warnings) = preset
+        .build(48_000.0, 128, Path::new("."), Path::new("."), 100.0)
+        .unwrap();
+    assert_eq!(warnings, []);
+    assert_eq!(rack.modules()[0].1.param(0), 1.0);
+    let input = [0.25; 128];
+    let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
+    rack.process(&input, &mut left, &mut right);
+    assert!(left.iter().all(|s| s.is_finite()));
+    let text = preset.to_toml();
+    assert!(text.contains("gain = 37.5\n"), "{text}");
+    assert_eq!(Preset::parse(&text).unwrap(), preset);
+}
+
+#[test]
 fn build_gain_preset_runs() {
     let preset =
         Preset::parse("name = \"X\"\n[[module]]\ntype = \"gain\"\n[module.params]\nlevel = -6\n")
