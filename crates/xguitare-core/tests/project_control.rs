@@ -7,16 +7,18 @@ use std::time::{Duration, Instant};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::{Value, json};
 use xguitare_core::control::{
-    EngineState, follow_sample_rate, handle, handle_with_ports, reprepare,
+    EngineState, follow_sample_rate, handle, handle_line, handle_request, handle_with_ports,
+    open_connection, reprepare,
 };
 use xguitare_core::engine::{AudioQueues, Command, EngineShared, engine_queues, raise_peak};
 use xguitare_core::metronome::MetronomeSettings;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{AUTOSAVE_FILE, Item, PROJECT_FILE, Project, Take};
 use xguitare_core::project_control::{
-    add_finished_takes, autosave_if_due, finish_closed, finish_stopped, take_project_events,
+    add_finished_takes, autosave_if_due, begin_project_read, finish_closed, finish_stopped,
+    read_project, take_project_events,
 };
-use xguitare_core::project_state::ProjectEvent;
+use xguitare_core::project_state::{ProjectEvent, ReadProject};
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Ports};
@@ -1840,4 +1842,193 @@ fn locate_is_bounded_by_the_end_each_item_plays() {
         .map(|item| json!([item["id"], item["length"]]))
         .collect();
     assert_eq!(lengths, [json!([1, 800]), json!([2, 100])]);
+}
+
+fn open_song() -> Request {
+    Request::ProjectOpen {
+        name: "Song".to_string(),
+        restore: false,
+    }
+}
+
+/// Reads Song as the socket's first phase and the read between the locks do.
+fn read_song(state: &EngineState) -> ReadProject {
+    match begin_project_read(state, &open_song()) {
+        Some(Ok(ticket)) => read_project(&ticket),
+        Some(Err(response)) => panic!("expected a ticket, got {response:?}"),
+        None => panic!("project_open should start a read"),
+    }
+}
+
+fn install(state: &mut EngineState, read: ReadProject) -> Response {
+    let connection = open_connection(state);
+    handle_request(state, None, connection, open_song(), Some(read)).0
+}
+
+/// Song with Track Guitar holding a loaded Take and an Item its load drops with a warning.
+fn song_with_take_and_warning(state: &mut EngineState) {
+    new_project(state, "Song");
+    add_track(state, "Guitar");
+    close(state);
+    let folder = state.config.projects_dir.join("song");
+    write_take(&folder.join("takes/a.wav"), &[0.25; 4]);
+    let mut project = Project::load(&folder).unwrap().0;
+    let item = |id, file: &str, frames| Item {
+        id,
+        position: 0,
+        offset: 0,
+        length: None,
+        take: 0,
+        takes: vec![Take {
+            file: file.to_string(),
+            frames,
+        }],
+    };
+    project.tracks[0].items = vec![item(1, "takes/a.wav", 4), item(2, "takes/gone.wav", 10)];
+    project.next_item_id = 3;
+    project.save(&folder).unwrap();
+    let path = folder.join(PROJECT_FILE);
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(&path, text.replace("frames = 10", "frames = 0")).unwrap();
+}
+
+#[test]
+fn a_read_project_installs_like_a_plain_open() {
+    let (mut state, _audio, _dir) = state("two-phase");
+    song_with_take_and_warning(&mut state);
+    let file = state.config.projects_dir.join("song").join(PROJECT_FILE);
+    let saved_text = fs::read_to_string(&file).unwrap();
+    let read = read_song(&state);
+    let two_phase = serde_json::to_string(&install(&mut state, read)).unwrap();
+    let two_phase_status = status(&mut state);
+    close(&mut state);
+    fs::write(&file, saved_text).unwrap();
+    let connection = open_connection(&mut state);
+    let (one_phase, _) = handle_line(
+        &mut state,
+        None,
+        connection,
+        r#"{"cmd":"project_open","name":"Song"}"#,
+    );
+    let mut one_phase_status = status(&mut state);
+    one_phase_status["revision"] = two_phase_status["revision"].clone();
+    assert_eq!(two_phase, one_phase);
+    assert!(two_phase.contains("dropped item 2"), "{two_phase}");
+    assert_eq!(two_phase_status, one_phase_status);
+    assert_eq!(two_phase_status["loaded_audio_bytes"], 16);
+}
+
+#[test]
+fn an_open_project_refuses_before_any_file_is_read() {
+    let (mut state, _audio, _dir) = state("refuse-first");
+    assert!(begin_project_read(&state, &Request::Status).is_none());
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    assert_eq!(
+        begin_project_read(&state, &open_song())
+            .unwrap()
+            .unwrap_err(),
+        Response::err("a project is open; close it first")
+    );
+    arm(&mut state, 0);
+    ok(handle(&mut state, transport(TransportAction::Record, None)));
+    ok(handle(&mut state, transport(TransportAction::Stop, None)));
+    ok(handle(&mut state, Request::ProjectClose));
+    assert_eq!(
+        begin_project_read(&state, &open_song())
+            .unwrap()
+            .unwrap_err(),
+        Response::err_code("a project is still closing; try again", "still_closing")
+    );
+}
+
+#[test]
+fn a_project_opened_between_read_and_install_refuses_the_second() {
+    let (mut state, _audio, _dir) = state("open-between");
+    new_project(&mut state, "Song");
+    close(&mut state);
+    let read = read_song(&state);
+    ok(handle(&mut state, open_song()));
+    assert_eq!(
+        install(&mut state, read),
+        Response::err("a project is open; close it first")
+    );
+}
+
+#[test]
+fn a_project_opened_and_closed_between_read_and_install_is_read_again() {
+    let (mut state, _audio, _dir) = state("close-between");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let read = read_song(&state);
+    ok(handle(&mut state, open_song()));
+    add_track(&mut state, "Bass");
+    ok(handle(&mut state, Request::ProjectSave));
+    close(&mut state);
+    let Response::Ok(_) = install(&mut state, read) else {
+        panic!("the second read should open Song");
+    };
+    let names: Vec<Value> = status(&mut state)["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["name"].clone())
+        .collect();
+    assert_eq!(names, [json!("Guitar"), json!("Bass")]);
+}
+
+#[test]
+fn a_projects_dir_changed_between_read_and_install_is_read_again() {
+    let (mut state, _audio, dir) = state("dir-between");
+    new_project(&mut state, "Song");
+    close(&mut state);
+    let read = read_song(&state);
+    let other = dir.0.join("other-projects");
+    ok(handle(
+        &mut state,
+        Request::SetSettings {
+            bank_kind: None,
+            ir_dir: None,
+            projects_dir: Some(other),
+        },
+    ));
+    assert_eq!(
+        install(&mut state, read),
+        Response::err("no project 'Song'")
+    );
+    assert_eq!(status(&mut state)["project"], Value::Null);
+}
+
+#[test]
+fn read_project_reports_a_take_that_cannot_be_loaded() {
+    let (mut state, _audio, _dir) = state("bad-take");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let folder = state.config.projects_dir.join("song");
+    let mut project = Project::load(&folder).unwrap().0;
+    project.tracks[0].items = vec![Item {
+        id: 1,
+        position: 0,
+        offset: 0,
+        length: None,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/gone.wav".to_string(),
+            frames: 10,
+        }],
+    }];
+    project.next_item_id = 2;
+    project.save(&folder).unwrap();
+    let read = read_song(&state);
+    let Response::Err { error: message, .. } = install(&mut state, read) else {
+        panic!("a missing Take should refuse the open");
+    };
+    assert!(
+        message.starts_with("cannot load take takes/gone.wav: "),
+        "{message}"
+    );
+    assert_eq!(error(handle(&mut state, open_song())), message);
+    assert_eq!(status(&mut state)["project"], Value::Null);
 }

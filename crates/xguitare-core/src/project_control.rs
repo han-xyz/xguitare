@@ -12,7 +12,7 @@ use crate::arrangement::ArrangementCommand;
 use crate::arrangement::Transport;
 use crate::atomic_file::slug;
 use crate::build::ENGINE_BUSY;
-use crate::control::{EngineState, MixPeaks, peak_db};
+use crate::control::{EngineState, MixPeaks, error_response, peak_db};
 use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
@@ -23,8 +23,9 @@ use crate::project::{
     autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
 use crate::project_state::{
-    ClosedProject, CopiedItem, LoadedTakes, NO_PROJECT, OpenProject, ProjectEvent, check_none_open,
-    current_project, open_project, open_project_mut, resolve_bus, resolve_track,
+    ClosedProject, CopiedItem, LoadedTakes, NO_PROJECT, OpenProject, ProjectEvent, ProjectFiles,
+    ReadProject, ReadTicket, check_none_open, current_project, open_project, open_project_mut,
+    resolve_bus, resolve_track,
 };
 pub use crate::project_sync::project_rate_warning;
 use crate::project_sync::{
@@ -35,7 +36,7 @@ use crate::render_control::{cancel_render, render_status};
 use crate::take_capture::{FinishedTake, Latency, WritingTakes, add_finished_take, load_take};
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Preset, PresetModule};
-use xguitare_protocol::{BusRef, LoopRegion, TrackRef};
+use xguitare_protocol::{BusRef, LoopRegion, Request, Response, TrackRef};
 
 const NO_TRACKS: &str = "the project has no tracks";
 const DEFAULT_TRACK_NAME: &str = "Track";
@@ -160,6 +161,7 @@ pub(crate) fn autosave_on_stop(open: &mut OpenProject) -> Option<String> {
 
 /// Takes the open Project out as the Daemon stops; the Engine is not told.
 pub fn close_for_stop(state: &mut EngineState) -> Option<ClosedProject> {
+    state.projects.generation += 1;
     state.projects.open.take().map(|open| ClosedProject {
         dir: open.dir,
         project: open.project,
@@ -177,6 +179,7 @@ pub fn finish_closed(
     finished: &[FinishedTake],
     latency: impl FnMut(usize) -> Latency,
 ) -> LastTakes {
+    state.projects.generation += 1;
     if closed.takes_pending {
         state.projects.closing -= 1;
     }
@@ -432,32 +435,93 @@ pub(crate) fn project_new(state: &mut EngineState, name: &str) -> Result<Value, 
     Ok(payload)
 }
 
-pub(crate) fn project_open(
-    state: &mut EngineState,
-    name: &str,
-    restore: bool,
-) -> Result<Value, String> {
-    check_none_open(&state.projects)?;
-    let folder = slug(name);
-    let dir = state.config.projects_dir.join(&folder);
-    if folder.is_empty() || !dir.join(PROJECT_FILE).is_file() {
-        return Err(format!("no project '{name}'"));
+/// The first phase of a `project_open` read outside the state lock: `None` for any other request, else the refusal `project_open` would answer now or the ticket for [`read_project`].
+pub fn begin_project_read(
+    state: &EngineState,
+    request: &Request,
+) -> Option<Result<ReadTicket, Response>> {
+    let Request::ProjectOpen { name, restore } = request else {
+        return None;
+    };
+    Some(
+        check_none_open(&state.projects)
+            .map(|()| read_ticket(state, name, *restore))
+            .map_err(error_response),
+    )
+}
+
+/// Reads the ticket's `project.toml`, or its autosave, and decodes each Item's active Take; touches no state, so it runs outside the state lock.
+pub fn read_project(ticket: &ReadTicket) -> ReadProject {
+    ReadProject {
+        ticket: ticket.clone(),
+        files: read_files(ticket),
     }
-    let newer = autosave_newer(&dir);
-    let loaded = if restore {
+}
+
+fn read_ticket(state: &EngineState, name: &str, restore: bool) -> ReadTicket {
+    ReadTicket {
+        projects_dir: state.config.projects_dir.clone(),
+        name: name.to_string(),
+        restore,
+        generation: state.projects.generation,
+    }
+}
+
+fn read_files(ticket: &ReadTicket) -> Result<ProjectFiles, String> {
+    let folder = slug(&ticket.name);
+    let dir = ticket.projects_dir.join(&folder);
+    if folder.is_empty() || !dir.join(PROJECT_FILE).is_file() {
+        return Err(format!("no project '{}'", ticket.name));
+    }
+    let autosave_newer = autosave_newer(&dir);
+    let loaded = if ticket.restore {
         Project::load_autosave(&dir)
     } else {
         Project::load(&dir)
     };
     let (project, warnings) = loaded.map_err(|err| err.to_string())?;
+    let takes = missing_takes(&dir, &LoadedTakes::new(), &project);
+    Ok(ProjectFiles {
+        dir,
+        project,
+        warnings,
+        autosave_newer,
+        takes,
+    })
+}
+
+pub(crate) fn project_open(
+    state: &mut EngineState,
+    name: &str,
+    restore: bool,
+    read: Option<ReadProject>,
+) -> Result<Value, String> {
+    check_none_open(&state.projects)?;
+    let read = match read {
+        Some(read)
+            if read.ticket.generation == state.projects.generation
+                && read.ticket.projects_dir == state.config.projects_dir =>
+        {
+            read
+        }
+        _ => read_project(&read_ticket(state, name, restore)),
+    };
+    let restore = read.ticket.restore;
+    let ProjectFiles {
+        dir,
+        project,
+        warnings,
+        autosave_newer,
+        takes,
+    } = read.files?;
     if let Some(mismatch) = rate_mismatch(project.sample_rate, state.sample_rate) {
         return Err(mismatch);
     }
-    let takes = missing_takes(&dir, &LoadedTakes::new(), &project)?;
+    let takes = takes?;
     let payload = json!({
         "name": project.name,
         "path": dir.display().to_string(),
-        "autosave_newer": newer,
+        "autosave_newer": autosave_newer,
         "restored": restore,
         "warnings": warnings.iter().map(ToString::to_string).collect::<Vec<_>>(),
     });
@@ -493,6 +557,7 @@ pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
     let Some(open) = state.projects.open.take() else {
         return Err(NO_PROJECT.to_string());
     };
+    state.projects.generation += 1;
     cancel_render(state);
     let payload = json!({"name": open.project.name, "path": open.dir.display().to_string()});
     state
@@ -1155,6 +1220,7 @@ fn open(
     };
     sync_peaks(&mut open);
     state.projects.open = Some(open);
+    state.projects.generation += 1;
     state.revision += 1;
     Ok(())
 }

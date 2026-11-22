@@ -214,7 +214,7 @@ fn take_peaks(state: &mut EngineState, connection: ConnectionId) -> Peaks {
 
 /// Handles one request; the build warnings of a `load` or a Rack edit come back beside the Response for the caller to log. `ports` and `set_ports` fail here with `audio ports are not available`; `handle_with_ports` serves them.
 pub fn handle(state: &mut EngineState, req: Request) -> (Response, Vec<BuildWarning>) {
-    handle_from(state, None, IN_PROCESS, req)
+    handle_from(state, None, IN_PROCESS, req, None)
 }
 
 /// Handles one request as `handle` does, with `ports` serving `ports` and `set_ports`.
@@ -223,7 +223,7 @@ pub fn handle_with_ports(
     ports: &dyn AudioPorts,
     req: Request,
 ) -> (Response, Vec<BuildWarning>) {
-    handle_from(state, Some(ports), IN_PROCESS, req)
+    handle_from(state, Some(ports), IN_PROCESS, req, None)
 }
 
 #[allow(clippy::too_many_lines, reason = "one match arm per request")]
@@ -232,6 +232,7 @@ fn handle_from(
     ports: Option<&dyn AudioPorts>,
     connection: ConnectionId,
     req: Request,
+    read: Option<ReadProject>,
 ) -> (Response, Vec<BuildWarning>) {
     let mut warnings = Vec::new();
     let result = match req {
@@ -328,7 +329,7 @@ fn handle_from(
             projects_dir,
         } => set_settings(state, bank_kind, ir_dir, projects_dir, &mut warnings),
         Request::ProjectNew { name } => project_new(state, &name),
-        Request::ProjectOpen { name, restore } => project_open(state, &name, restore),
+        Request::ProjectOpen { name, restore } => project_open(state, &name, restore, read),
         Request::ProjectSave => project_save(state),
         Request::ProjectClose => project_close(state),
         Request::ProjectList => project_list(state),
@@ -420,8 +421,7 @@ fn handle_from(
     };
     let response = match result {
         Ok(payload) => Response::Ok(payload),
-        Err(error) if error == STILL_CLOSING => Response::err_code(error, CODE_STILL_CLOSING),
-        Err(error) => Response::err(error),
+        Err(error) => error_response(error),
     };
     (response, warnings)
 }
@@ -454,15 +454,24 @@ pub fn parse_line(line: &str) -> Result<Request, Response> {
     serde_json::from_str(line).map_err(|err| Response::err(format!("invalid request: {err}")))
 }
 
-/// Handles one parsed request from `connection` as `handle_line` does, returning the Response itself; `read` is not used yet.
+/// Handles one parsed request from `connection` as `handle_line` does, returning the Response itself; a `project_open` given the `read` of its `project_control::begin_project_read` ticket installs that read unless a Project was opened or closed, or `projects_dir` changed, since the ticket, and then reads again.
 pub fn handle_request(
     state: &mut EngineState,
     ports: Option<&dyn AudioPorts>,
     connection: ConnectionId,
     request: Request,
-    _read: Option<ReadProject>,
+    read: Option<ReadProject>,
 ) -> (Response, Vec<BuildWarning>) {
-    handle_from(state, ports, connection, request)
+    handle_from(state, ports, connection, request, read)
+}
+
+/// The error Response for `error`, with its `code` when it has one.
+pub(crate) fn error_response(error: String) -> Response {
+    if error == STILL_CLOSING {
+        Response::err_code(error, CODE_STILL_CLOSING)
+    } else {
+        Response::err(error)
+    }
 }
 
 /// The frame count the first Rack is prepared for: the larger of the requested and the effective buffer size, since the quantum can settle on either.

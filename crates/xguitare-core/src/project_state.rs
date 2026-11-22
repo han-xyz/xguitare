@@ -12,9 +12,28 @@ use xguitare_protocol::{BusRef, IndexOrName, STILL_CLOSING, TrackRef};
 pub(crate) const NO_PROJECT: &str = "no project open";
 const PROJECT_IS_OPEN: &str = "a project is open; close it first";
 
-/// A Project read from disk outside the state lock for `control::handle_request`; a placeholder until the two-phase `project_open` fills it.
+/// What `project_control::read_project` reads: the request's Project in `projects_dir`, taken when [`Projects`]' `generation` was `generation`.
+#[derive(Clone, Debug)]
+pub struct ReadTicket {
+    pub(crate) projects_dir: PathBuf,
+    pub(crate) name: String,
+    pub(crate) restore: bool,
+    pub(crate) generation: u64,
+}
+
+/// A Project read from disk outside the state lock for `control::handle_request`, or the error the read gave.
 pub struct ReadProject {
-    _private: (),
+    pub(crate) ticket: ReadTicket,
+    pub(crate) files: Result<ProjectFiles, String>,
+}
+
+/// A Project's folder, its loaded state and warnings, whether its autosave is newer, and its active Takes' audio or the error decoding one gave.
+pub(crate) struct ProjectFiles {
+    pub(crate) dir: PathBuf,
+    pub(crate) project: Project,
+    pub(crate) warnings: Vec<LoadWarning>,
+    pub(crate) autosave_newer: bool,
+    pub(crate) takes: Result<LoadedTakes, String>,
 }
 
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
@@ -28,6 +47,8 @@ pub struct Projects {
     pub(crate) render: Option<Arc<RenderJob>>,
     /// Whether `render_control::finished_render` has reported the end of `render`.
     pub(crate) render_reported: bool,
+    /// Counts each Project open and close and each `project_control::finish_closed`, so a [`ReadTicket`] taken before one is not installed after it.
+    pub(crate) generation: u64,
 }
 
 pub(crate) struct OpenProject {
