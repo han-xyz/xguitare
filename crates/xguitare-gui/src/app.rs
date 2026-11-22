@@ -9,7 +9,7 @@ use std::time::Instant;
 use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
 use tracing::{error, info};
 use xguitare_client::ClientConfig;
-use xguitare_protocol::{BankKind, BusRef, GetReply, StatusReply, TrackRef, to_payload};
+use xguitare_protocol::{BankKind, BusRef, GetReply, StatusReply, TrackRef};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
@@ -276,7 +276,7 @@ impl App {
                         .snapshot
                         .status
                         .as_ref()
-                        .and_then(|status| shown.column(&to_payload(status)));
+                        .and_then(|status| shown.column(status));
                 }
                 Command::RackRemove { id } => {
                     let status = self.snapshot.status.as_ref();
@@ -310,8 +310,7 @@ impl App {
 impl App {
     /// Aims every Rack request at the Rack the window shows ([`aim_rack_commands`]) and takes the window's own commands out: the view switch, Ctrl+1, Ctrl+2, Ctrl+3 and Ctrl+M change the main view, Ctrl+Alt+R or `Render` opens the Render dialog.
     fn keep_window_commands(&mut self, commands: Vec<Command>) -> Vec<Command> {
-        let status = self.snapshot.status.as_ref().map(to_payload);
-        let focus = RackFocus::new(self.mixer.rack, status.as_ref());
+        let focus = RackFocus::new(self.mixer.rack, self.snapshot.status.as_ref());
         let (mut commands, focus) = aim_rack_commands(focus, commands);
         self.mixer.rack = focus.shown;
         for command in &commands {
@@ -383,7 +382,7 @@ impl eframe::App for App {
                     clip.observe(peak_db(key(status)));
                     hold.observe(peak_db(key(status)), now);
                 }
-                self.mixer.observe(&to_payload(status), now);
+                self.mixer.observe(status, now);
             }
             latest = Some(snapshot);
         }
@@ -817,7 +816,7 @@ fn central_view(
     if main_view == MainView::Mixer {
         return mixer_panel(ui, snapshot, mixer);
     }
-    let Some(target) = shown_rack_column(mixer.rack, &to_payload(status)) else {
+    let Some(target) = shown_rack_column(mixer.rack, status) else {
         return Vec::new();
     };
     rack_heading(ui, status, target);

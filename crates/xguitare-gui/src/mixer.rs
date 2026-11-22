@@ -7,8 +7,7 @@ use egui::{
     RichText, Role, ScrollArea, Sense, Shape as PaintShape, Stroke, StrokeKind, TextEdit, Ui,
     WidgetInfo, pos2, vec2,
 };
-use serde_json::Value;
-use xguitare_protocol::{RenderBits, RenderRange, SendLevel, to_payload};
+use xguitare_protocol::{RenderBits, RenderRange, SendLevel, StatusReply};
 
 use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
@@ -102,7 +101,7 @@ pub struct MixerView {
 }
 
 impl MixerView {
-    pub fn observe(&mut self, status: &Value, now: Instant) {
+    pub fn observe(&mut self, status: &StatusReply, now: Instant) {
         for column in mixer_columns(status) {
             self.holds
                 .entry(column.target)
@@ -128,9 +127,10 @@ pub struct RenderDraft {
 
 impl RenderDraft {
     pub fn new(snapshot: &Snapshot) -> RenderDraft {
-        let name = snapshot.status.as_ref().and_then(|status| {
-            default_render_name(snapshot.projects.as_ref(), &to_payload(status))
-        });
+        let name = snapshot
+            .status
+            .as_ref()
+            .and_then(|status| default_render_name(snapshot.projects.as_ref(), status));
         RenderDraft {
             range: RenderRange::Project,
             bits: RenderBits::Pcm24,
@@ -146,7 +146,6 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
     };
-    let status = &to_payload(status);
     let columns = mixer_columns(status);
     let Some((master, strips)) = columns.split_last() else {
         return commands;
@@ -156,9 +155,7 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
         .filter(|column| matches!(column.target, MixerTarget::Bus(_)))
         .map(|column| column.name.clone())
         .collect();
-    let selected = status["selected"]
-        .as_u64()
-        .and_then(|index| usize::try_from(index).ok());
+    let selected = status.selected;
     let open = shown_rack_column(view.rack, status);
     let strips_height = ui.available_height()
         - FACE_MARGIN.sum().y
@@ -907,7 +904,6 @@ pub fn render_dialog(
     };
     let has_loop = transport_view(status)
         .is_some_and(|transport| transport.loop_region.start < transport.loop_region.end);
-    let status = &to_payload(status);
     if !has_loop {
         draft.range = RenderRange::Project;
     }
@@ -959,7 +955,7 @@ pub fn render_dialog(
             if ui.add_enabled(!running, primary_button("Render")).clicked() {
                 draft.sent = Some(RenderSent {
                     at: Instant::now(),
-                    previous: status["render"].clone(),
+                    previous: status.render.clone(),
                 });
                 let name = draft.name.trim();
                 commands.push(Command::Render {
@@ -994,12 +990,7 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
         RenderView::Running(progress) => {
             let mut cancel = false;
             ui.horizontal(|ui| {
-                #[allow(
-                    clippy::cast_possible_truncation,
-                    reason = "a progress in 0..=1 fits an f32"
-                )]
-                let progress = *progress as f32;
-                widgets::progress_bar(ui, progress, DIALOG_WIDTH - PROGRESS_CANCEL_WIDTH);
+                widgets::progress_bar(ui, *progress, DIALOG_WIDTH - PROGRESS_CANCEL_WIDTH);
                 cancel = ui.add(outlined_button("Cancel")).clicked();
             });
             cancel.then_some(Command::RenderCancel)

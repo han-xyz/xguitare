@@ -1,10 +1,12 @@
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use xguitare_protocol::{BusRef, SILENCE_DB, SendLevel, TrackRef, from_payload};
+use xguitare_protocol::{
+    BusRef, RenderStatus, SILENCE_DB, SendLevel, StatusReply, TrackRef, TrackStatus,
+};
 
 use crate::model::{Band, Command, LADDER_RED_DB, LADDER_YELLOW_DB, Segment, acts_on_rack};
-use crate::project_model::{project_name_payload, track_rows};
+use crate::project_model::{project_name, track_rows};
 
 /// The fader position of 0 dB; the top is +6 dB.
 pub const FADER_UNITY: f32 = 0.75;
@@ -57,96 +59,95 @@ pub struct MixerColumn {
 }
 
 /// The Tracks, then the Buses, then Master, from a `status` payload; none while no Project is open.
-pub fn mixer_columns(status: &Value) -> Vec<MixerColumn> {
-    if project_name_payload(status).is_none() {
+pub fn mixer_columns(status: &StatusReply) -> Vec<MixerColumn> {
+    if project_name(Some(status)).is_none() {
         return Vec::new();
     }
-    let tracks = entries(&status["tracks"]);
-    let buses = entries(&status["buses"]);
+    let (tracks, buses) = (&status.tracks, &status.buses);
     let sends: Vec<Vec<SendView>> = tracks
         .iter()
         .map(|track| track_sends(track, buses.len()))
         .collect();
-    let any_solo = tracks.iter().chain(&buses).any(|entry| flag(entry, "solo"));
+    let any_solo = tracks.iter().any(|track| track.solo) || buses.iter().any(|bus| bus.solo);
     let mut columns = Vec::new();
     for (index, track) in tracks.iter().enumerate() {
         let sends_to_solo = sends[index]
             .iter()
-            .any(|send| send.level_db.is_some() && flag(&buses[send.bus], "solo"));
+            .any(|send| send.level_db.is_some() && buses[send.bus].solo);
         columns.push(MixerColumn {
-            to_master: Some(track["to_master"].as_bool().unwrap_or(true)),
+            target: MixerTarget::Track(index),
+            name: track.name.clone(),
+            volume_db: track.volume_db.map_or(0.0, f64::from),
+            pan: Some(f64::from(track.pan)),
+            mute: track.mute,
+            solo: track.solo,
+            peak_db: peaks(track.peak_db),
+            clip: track.clip,
+            to_master: Some(track.to_master),
             sends: sends[index].clone(),
-            audibility: audibility(track, any_solo, sends_to_solo),
-            ..column(MixerTarget::Track(index), track)
+            audibility: audibility((track.mute, track.solo), any_solo, sends_to_solo),
         });
     }
     for (index, bus) in buses.iter().enumerate() {
         let sent_to_by_solo = tracks
             .iter()
             .zip(&sends)
-            .any(|(track, sends)| flag(track, "solo") && sends[index].level_db.is_some());
+            .any(|(track, sends)| track.solo && sends[index].level_db.is_some());
         columns.push(MixerColumn {
-            audibility: audibility(bus, any_solo, sent_to_by_solo),
-            ..column(MixerTarget::Bus(index), bus)
+            target: MixerTarget::Bus(index),
+            name: bus.name.clone(),
+            volume_db: bus.volume_db.map_or(0.0, f64::from),
+            pan: Some(f64::from(bus.pan)),
+            mute: bus.mute,
+            solo: bus.solo,
+            peak_db: peaks(bus.peak_db),
+            clip: bus.clip,
+            to_master: None,
+            sends: Vec::new(),
+            audibility: audibility((bus.mute, bus.solo), any_solo, sent_to_by_solo),
         });
     }
-    let master = &status["master"];
+    let master = status.master.clone().unwrap_or_default();
     columns.push(MixerColumn {
+        target: MixerTarget::Master,
         name: MASTER.to_string(),
+        volume_db: master.volume_db.map_or(f64::NEG_INFINITY, f64::from),
         pan: None,
-        volume_db: master["volume_db"].as_f64().unwrap_or(f64::NEG_INFINITY),
-        ..column(MixerTarget::Master, master)
+        mute: false,
+        solo: false,
+        peak_db: peaks(master.peak_db),
+        clip: master.clip,
+        to_master: None,
+        sends: Vec::new(),
+        audibility: Audibility::Audible,
     });
     columns
 }
 
-fn entries(list: &Value) -> Vec<Value> {
-    list.as_array().cloned().unwrap_or_default()
+/// A peak that is `null` (not a finite number) reads as silence.
+fn peaks(peak_db: [Option<f64>; 2]) -> [f64; 2] {
+    peak_db.map(|peak| peak.unwrap_or(SILENCE_DB))
 }
 
-fn flag(entry: &Value, key: &str) -> bool {
-    entry[key].as_bool().unwrap_or_default()
-}
-
-fn audibility(entry: &Value, any_solo: bool, brought_in: bool) -> Audibility {
-    if flag(entry, "mute") || (any_solo && !flag(entry, "solo") && !brought_in) {
+fn audibility((mute, solo): (bool, bool), any_solo: bool, brought_in: bool) -> Audibility {
+    if mute || (any_solo && !solo && !brought_in) {
         Audibility::Silent
-    } else if any_solo && !flag(entry, "solo") {
+    } else if any_solo && !solo {
         Audibility::SoloInPlace
     } else {
         Audibility::Audible
     }
 }
 
-fn column(target: MixerTarget, entry: &Value) -> MixerColumn {
-    let peak = |side: usize| entry["peak_db"][side].as_f64().unwrap_or(SILENCE_DB);
-    MixerColumn {
-        target,
-        name: entry["name"].as_str().unwrap_or_default().to_string(),
-        volume_db: entry["volume_db"].as_f64().unwrap_or_default(),
-        pan: Some(entry["pan"].as_f64().unwrap_or_default()),
-        mute: flag(entry, "mute"),
-        solo: flag(entry, "solo"),
-        peak_db: [peak(0), peak(1)],
-        clip: flag(entry, "clip"),
-        to_master: None,
-        sends: Vec::new(),
-        audibility: Audibility::Audible,
-    }
-}
-
 /// One Send per Bus; status lists only the Sends that are not off.
-fn track_sends(track: &Value, bus_count: usize) -> Vec<SendView> {
-    let listed = entries(&track["sends"]);
+fn track_sends(track: &TrackStatus, bus_count: usize) -> Vec<SendView> {
     (0..bus_count)
         .map(|bus| {
-            let on = listed
-                .iter()
-                .find(|send| send["bus"].as_u64() == Some(bus as u64));
+            let on = track.sends.iter().find(|send| send.bus == bus);
             SendView {
                 bus,
-                level_db: on.and_then(|send| send["level_db"].as_f64()),
-                pre: on.is_some_and(|send| flag(send, "pre")),
+                level_db: on.map(|send| f64::from(send.level_db)),
+                pre: on.is_some_and(|send| send.pre),
             }
         })
         .collect()
@@ -346,36 +347,37 @@ pub enum ShownRack {
 
 impl ShownRack {
     /// The Rack of a mixer column of `status`.
-    pub fn of(status: &Value, target: MixerTarget) -> Option<ShownRack> {
+    pub fn of(status: &StatusReply, target: MixerTarget) -> Option<ShownRack> {
         match target {
             MixerTarget::Track(_) => Some(ShownRack::Track),
-            MixerTarget::Bus(index) => status["buses"][index]["id"].as_u64().map(ShownRack::Bus),
+            MixerTarget::Bus(index) => status.buses.get(index).map(|bus| ShownRack::Bus(bus.id)),
             MixerTarget::Master => Some(ShownRack::Master),
         }
     }
 
     /// Its column in `status` now; `None` once its Bus is gone, or with no Track selected.
-    pub fn column(self, status: &Value) -> Option<MixerTarget> {
+    pub fn column(self, status: &StatusReply) -> Option<MixerTarget> {
         match self {
             ShownRack::Track => selected_track(status).map(MixerTarget::Track),
-            ShownRack::Bus(id) => entries(&status["buses"])
+            ShownRack::Bus(id) => status
+                .buses
                 .iter()
-                .position(|bus| bus["id"].as_u64() == Some(id))
+                .position(|bus| bus.id == id)
                 .map(MixerTarget::Bus),
             ShownRack::Master => Some(MixerTarget::Master),
         }
     }
 }
 
-fn selected_track(status: &Value) -> Option<usize> {
-    track_rows(&from_payload(status).ok()?)
+fn selected_track(status: &StatusReply) -> Option<usize> {
+    track_rows(status)
         .into_iter()
         .find(|row| row.selected)
         .map(|row| row.index)
 }
 
 /// The column whose Rack the window shows: the one `shown` names while it is in `status`, else the selected Track's.
-pub fn shown_rack_column(shown: Option<ShownRack>, status: &Value) -> Option<MixerTarget> {
+pub fn shown_rack_column(shown: Option<ShownRack>, status: &StatusReply) -> Option<MixerTarget> {
     shown
         .and_then(|shown| shown.column(status))
         .or_else(|| ShownRack::Track.column(status))
@@ -391,17 +393,14 @@ pub struct RackFocus {
 
 impl RackFocus {
     /// The focus over `status`; a shown Rack whose Bus is gone from it is closed.
-    pub fn new(shown: Option<ShownRack>, status: Option<&Value>) -> RackFocus {
+    pub fn new(shown: Option<ShownRack>, status: Option<&StatusReply>) -> RackFocus {
         let Some(status) = status else {
             return RackFocus::default();
         };
         RackFocus {
             shown: shown.filter(|shown| shown.column(status).is_some()),
             selected: selected_track(status),
-            bus_ids: entries(&status["buses"])
-                .iter()
-                .filter_map(|bus| bus["id"].as_u64())
-                .collect(),
+            bus_ids: status.buses.iter().map(|bus| bus.id).collect(),
         }
     }
 
@@ -471,7 +470,7 @@ pub fn aim_rack_commands(
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderView {
     Idle,
-    Running(f64),
+    Running(f32),
     Done(String),
     Failed(String),
     Cancelled,
@@ -481,16 +480,16 @@ pub enum RenderView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderSent {
     pub at: Instant,
-    pub previous: Value,
+    pub previous: Option<RenderStatus>,
 }
 
 /// `refused` is the last `render` request the Daemon refused, which never reaches status; after `sent` it is shown, and the Render from before `sent` is not.
 pub fn render_view(
-    status: &Value,
+    status: &StatusReply,
     refused: Option<&(String, Instant)>,
     sent: Option<&RenderSent>,
 ) -> RenderView {
-    let render = &status["render"];
+    let render = &status.render;
     if let Some(sent) = sent {
         if let Some((error, at)) = refused
             && *at >= sent.at
@@ -501,20 +500,23 @@ pub fn render_view(
             return RenderView::Idle;
         }
     }
-    let text = |key: &str| render[key].as_str().unwrap_or_default().to_string();
-    match render["state"].as_str() {
-        Some("running") => RenderView::Running(render["progress"].as_f64().unwrap_or_default()),
-        Some("done") => RenderView::Done(text("file")),
-        Some("failed") => RenderView::Failed(text("error")),
-        Some("cancelled") => RenderView::Cancelled,
+    let Some(render) = render else {
+        return RenderView::Idle;
+    };
+    match render.state.as_str() {
+        "running" => RenderView::Running(render.progress),
+        "done" => RenderView::Done(render.file.clone()),
+        "failed" => RenderView::Failed(render.error.clone().unwrap_or_default()),
+        "cancelled" => RenderView::Cancelled,
         _ => RenderView::Idle,
     }
 }
 
 /// The open Project's folder name from a `project_list` payload, which a Render names its file after by default.
-pub fn default_render_name(projects: Option<&Value>, status: &Value) -> Option<String> {
-    let name = project_name_payload(status)?;
-    entries(&projects?["projects"])
+pub fn default_render_name(projects: Option<&Value>, status: &StatusReply) -> Option<String> {
+    let name = project_name(Some(status))?;
+    projects?["projects"]
+        .as_array()?
         .iter()
         .find(|project| project["name"].as_str() == Some(name))
         .and_then(|project| project["folder"].as_str())

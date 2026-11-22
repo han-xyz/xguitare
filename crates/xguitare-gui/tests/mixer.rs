@@ -48,7 +48,7 @@ fn status(tracks: &[Value], buses: &[Value]) -> Value {
 }
 
 fn audibility(status: &Value) -> Vec<(String, Audibility)> {
-    mixer_columns(status)
+    mixer_columns(&status_reply(status))
         .into_iter()
         .map(|column| (column.name, column.audibility))
         .collect()
@@ -75,7 +75,7 @@ fn columns_are_tracks_then_buses_then_master() {
     status["tracks"][0]["peak_db"] = json!([-3.5, 0.2]);
     status["tracks"][0]["clip"] = json!(true);
     status["master"]["volume_db"] = json!(null);
-    let columns = mixer_columns(&status);
+    let columns = mixer_columns(&status_reply(&status));
     let targets: Vec<MixerTarget> = columns.iter().map(|column| column.target).collect();
     assert_eq!(
         targets,
@@ -128,7 +128,7 @@ fn columns_are_tracks_then_buses_then_master() {
 fn no_project_has_no_columns() {
     let mut closed = status(&[], &[]);
     closed["project"] = json!(null);
-    assert_eq!(mixer_columns(&closed), []);
+    assert_eq!(mixer_columns(&status_reply(&closed)), []);
 }
 
 #[test]
@@ -321,25 +321,34 @@ fn ctrl_m_and_ctrl_alt_r_work_only_in_a_project() {
 #[test]
 fn render_dialog_follows_status_render() {
     let mut status = status(&[], &[]);
-    assert_eq!(render_view(&status, None, None), RenderView::Idle);
+    assert_eq!(
+        render_view(&status_reply(&status), None, None),
+        RenderView::Idle
+    );
     let file = "/home/you/Music/xguitare/demo-song/renders/demo-song.wav";
     let render = |state: &str| {
         json!({"name": "demo-song", "range": "project", "progress": 0.4, "state": state,
             "file": file})
     };
     status["render"] = render("running");
-    assert_eq!(render_view(&status, None, None), RenderView::Running(0.4));
+    assert_eq!(
+        render_view(&status_reply(&status), None, None),
+        RenderView::Running(0.4)
+    );
     status["render"] = render("done");
     assert_eq!(
-        render_view(&status, None, None),
+        render_view(&status_reply(&status), None, None),
         RenderView::Done(file.to_string())
     );
     status["render"] = render("cancelled");
-    assert_eq!(render_view(&status, None, None), RenderView::Cancelled);
+    assert_eq!(
+        render_view(&status_reply(&status), None, None),
+        RenderView::Cancelled
+    );
     status["render"] = render("failed");
     status["render"]["error"] = json!("No space left on device (os error 28)");
     assert_eq!(
-        render_view(&status, None, None),
+        render_view(&status_reply(&status), None, None),
         RenderView::Failed("No space left on device (os error 28)".to_string())
     );
 }
@@ -352,10 +361,10 @@ fn render_name_defaults_to_the_project_folder() {
         {"folder": "demo-song", "name": "Demo Song", "valid": true},
     ]});
     assert_eq!(
-        default_render_name(Some(&projects), &status),
+        default_render_name(Some(&projects), &status_reply(&status)),
         Some("demo-song".to_string())
     );
-    assert_eq!(default_render_name(None, &status), None);
+    assert_eq!(default_render_name(None, &status_reply(&status)), None);
 }
 
 fn rack_add() -> Command {
@@ -384,7 +393,10 @@ fn three_tracks_and_buses(selected: usize) -> Value {
 }
 
 fn mixer_showing(shown: ShownRack, selected: usize) -> RackFocus {
-    RackFocus::new(Some(shown), Some(&three_tracks_and_buses(selected)))
+    RackFocus::new(
+        Some(shown),
+        Some(&status_reply(&three_tracks_and_buses(selected))),
+    )
 }
 
 #[test]
@@ -458,7 +470,7 @@ fn switching_views_keeps_the_shown_rack() {
 
 #[test]
 fn the_shown_rack_is_the_selected_track_until_a_strip_names_another() {
-    let status = three_tracks_and_buses(1);
+    let status = status_reply(&three_tracks_and_buses(1));
     assert_eq!(
         shown_rack_column(None, &status),
         Some(MixerTarget::Track(1))
@@ -484,7 +496,7 @@ fn the_shown_rack_is_the_selected_track_until_a_strip_names_another() {
 
 #[test]
 fn a_bus_removed_elsewhere_closes_its_rack() {
-    let status = three_tracks_and_buses(0);
+    let status = status_reply(&three_tracks_and_buses(0));
     let gone = RackFocus::new(Some(ShownRack::Bus(9)), Some(&status));
     assert_eq!(gone.shown, None);
     let kept = RackFocus::new(Some(ShownRack::Bus(3)), Some(&status));
@@ -506,12 +518,15 @@ fn a_refused_render_shows_its_error_in_place_of_the_last_render() {
     let clicked = start + Duration::from_secs(1);
     let sent = RenderSent {
         at: clicked,
-        previous: status["render"].clone(),
+        previous: status_reply(&status).render,
     };
-    assert_eq!(render_view(&status, None, Some(&sent)), RenderView::Idle);
+    assert_eq!(
+        render_view(&status_reply(&status), None, Some(&sent)),
+        RenderView::Idle
+    );
     let earlier = ("no loop region".to_string(), start);
     assert_eq!(
-        render_view(&status, Some(&earlier), Some(&sent)),
+        render_view(&status_reply(&status), Some(&earlier), Some(&sent)),
         RenderView::Idle
     );
     let refused = (
@@ -519,13 +534,13 @@ fn a_refused_render_shows_its_error_in_place_of_the_last_render() {
         clicked + Duration::from_millis(5),
     );
     assert_eq!(
-        render_view(&status, Some(&refused), Some(&sent)),
+        render_view(&status_reply(&status), Some(&refused), Some(&sent)),
         RenderView::Failed("invalid render name '../x'".to_string())
     );
     status["render"]["state"] = json!("running");
     status["render"]["progress"] = json!(0.1);
     assert_eq!(
-        render_view(&status, None, Some(&sent)),
+        render_view(&status_reply(&status), None, Some(&sent)),
         RenderView::Running(0.1)
     );
 }

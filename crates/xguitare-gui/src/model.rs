@@ -8,7 +8,7 @@ use xguitare_client::{ClientError, TakesCleanStopped};
 use xguitare_protocol::{
     BankKind, BusRef, GetReply, ItemsReply, LoopRegion, Position, RenderBits, RenderRange, Request,
     Response, SILENCE_DB, SendLevel, StatusReply, TrackRef, TransportAction, is_hidden_char,
-    shown_file_name, to_payload,
+    shown_file_name,
 };
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
@@ -1584,7 +1584,7 @@ pub fn requests_until_quit(
             },
             Command::RenderCancel => Request::RenderCancel,
             Command::ShowRack(shown) => {
-                let column = status.and_then(|status| shown.column(&to_payload(status)));
+                let column = status.and_then(|status| shown.column(status));
                 shown_bus_gone = matches!(shown, ShownRack::Bus(_)) && column.is_none();
                 rack = column.filter(|target| !matches!(target, MixerTarget::Track(_)));
                 continue;

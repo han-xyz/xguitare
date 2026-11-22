@@ -23,7 +23,7 @@ use tracing::{info, warn};
 use xguitare_client::{
     ClientConfig, ClientError, Connection, clean_takes_in_batches, newer_protocol_warning,
 };
-use xguitare_protocol::{Request, Response, STILL_CLOSING, StatusReply, from_payload, to_payload};
+use xguitare_protocol::{Request, Response, STILL_CLOSING, StatusReply, from_payload};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -339,10 +339,7 @@ impl Client {
     fn rack_target(&self) -> Option<MixerTarget> {
         let status = self.snapshot.status.as_ref()?;
         project_name(Some(status))?;
-        match self
-            .shown_rack
-            .and_then(|shown| shown.column(&to_payload(status)))
-        {
+        match self.shown_rack.and_then(|shown| shown.column(status)) {
             Some(target @ (MixerTarget::Bus(_) | MixerTarget::Master)) => Some(target),
             _ => status.selected.map(MixerTarget::Track),
         }

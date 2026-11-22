@@ -46,10 +46,6 @@ pub fn project_name(status: Option<&StatusReply>) -> Option<&str> {
     status.and_then(|status| status.project.as_deref())
 }
 
-pub(crate) fn project_name_payload(status: &Value) -> Option<&str> {
-    status["project"].as_str()
-}
-
 pub fn project_tempo(status: &StatusReply) -> Option<Tempo> {
     let tempo = status.tempo.as_ref().filter(|tempo| tempo.bpm > 0.0)?;
     let (beats, note) = tempo.meter;
