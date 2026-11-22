@@ -541,10 +541,14 @@ fn amp_band_pots_glide_in_long_blocks() {
     const LONG_BLOCK: usize = 1024;
     const CHANGE: usize = 12 * LONG_BLOCK;
     for (number, model) in models() {
-        let Stack::Bands { mid, .. } = &model.stack else {
-            continue;
+        let (pot_idx, freq) = match &model.stack {
+            Stack::Bands { mid, .. } => (MIDDLE, mid.hz),
+            Stack::Fmv {
+                middle: Some(_), ..
+            } => (TREBLE, 4000.0),
+            Stack::Fmv { middle: None, .. } => (MIDDLE, 700.0),
         };
-        let input = sine(0.05, mid.hz, SAMPLE_RATE, 4 * CHANGE);
+        let input = sine(0.05, freq, SAMPLE_RATE, 4 * CHANGE);
         let rack_at = |pot: f32| {
             let mut rack = rack_with(Box::new(Amp::new()));
             rack.prepare(SAMPLE_RATE, LONG_BLOCK);
@@ -553,7 +557,7 @@ fn amp_band_pots_glide_in_long_blocks() {
                 (GAIN, 30.0),
                 (MASTER, 30.0),
                 (LEVEL, 0.0),
-                (MIDDLE, pot),
+                (pot_idx, pot),
             ] {
                 rack.module_mut(0).set_param(idx, value);
             }
@@ -562,7 +566,7 @@ fn amp_band_pots_glide_in_long_blocks() {
         };
         let mut gliding = rack_at(0.0);
         run_in_blocks(&mut gliding, &input[..CHANGE], LONG_BLOCK);
-        gliding.module_mut(0).set_param(MIDDLE, 100.0);
+        gliding.module_mut(0).set_param(pot_idx, 100.0);
         let after = run_in_blocks(&mut gliding, &input[CHANGE..], LONG_BLOCK);
         let low = run_in_blocks(&mut rack_at(0.0), &input, LONG_BLOCK);
         let high = run_in_blocks(&mut rack_at(100.0), &input, LONG_BLOCK);
@@ -582,10 +586,12 @@ fn amp_band_pots_glide_in_long_blocks() {
 // identities, so between `resonance_hz` and a decade above it only the bump differs.
 #[test]
 fn amp_resonance_bump_follows_feedback() {
+    let mut measured = 0;
     for (number, model) in models() {
         let (Stack::Bands { .. }, Some(hz)) = (&model.stack, model.power.resonance_hz) else {
             continue;
         };
+        measured += 1;
         let bump = quiet_level_at(number, (PRESENCE, 0.0), hz)
             - quiet_level_at(number, (PRESENCE, 0.0), 10.0 * hz);
         let expected = 4.0 * (1.0 - model.power.feedback);
@@ -595,6 +601,7 @@ fn amp_resonance_bump_follows_feedback() {
             model.name
         );
     }
+    assert!(measured >= 1, "no model with a Bands stack and a resonance");
 }
 
 #[test]

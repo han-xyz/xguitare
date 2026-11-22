@@ -166,7 +166,8 @@ impl Amp {
         self.master
             .set_target(master_gain(self.model, self.values[MASTER]));
         // The input fades in from silence below, so the new model's gains apply at once; a glide
-        // from the old model's `headroom_db` would overdrive the new one's stages.
+        // from the old model's `headroom_db` would overdrive the new one's power amp, and a glide
+        // of `pot` its stages.
         self.pot.snap();
         self.bright_boost.snap();
         self.master.snap();

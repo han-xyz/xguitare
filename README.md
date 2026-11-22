@@ -146,7 +146,7 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `reverb` | `size` 0..100 50 %, `damping` 0..100 50 %, `mix` 0..100 20 %, `width` 0..100 100 % |
 | `gain` | `level` −60..20 0 dB |
 
-`amp` is a whole amplifier in one Module: gain stages, the `gain` pot, a tone stack (passive for the guitar models, an active three-band one for the bass models) and the `master`, run at 4x oversampling. `model` chooses the Amp model; a Preset stores its number, and models are only ever added at the end, so a number keeps its amp. `master` is for now a plain output gain and `presence` does nothing yet; the power amp they drive is still to come.
+`amp` is a whole amplifier in one Module: gain stages, the `gain` pot, a tone stack (passive for the guitar models, an active three-band one for the bass models) and the `master`, run at 4x oversampling. `model` chooses the Amp model; a Preset stores its number, and models are only ever added at the end, so a number keeps its amp. `presence` raises the highs above the model's presence corner by up to 12 dB before the power amp. `master` drives the power amp, from −30 to +12 dB around the model's headroom, into a shaper whose knee hardens with the model's negative feedback and whose drive sags under a held loud note.
 
 | Amp model | Follows | Notes |
 | --- | --- | --- |
