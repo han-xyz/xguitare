@@ -603,3 +603,82 @@ fn starter_preset_values_lie_inside_param_specs() {
         }
     }
 }
+
+#[test]
+fn starter_presets_play_amp_on_their_amp_model() {
+    for (test, kind, models) in [
+        (
+            "models-guitar",
+            BankKind::Guitar,
+            &[
+                ("Clean", 1.0),
+                ("Crunch", 3.0),
+                ("Lead", 4.0),
+                ("High Gain", 5.0),
+                ("Bass", 6.0),
+                ("Rock", 3.0),
+                ("Blues", 0.0),
+                ("Funk", 2.0),
+                ("Thrash", 5.0),
+                ("Djent", 5.0),
+                ("Doom", 3.0),
+                ("Buzzsaw", 3.0),
+                ("Stoner", 0.0),
+                ("Sub Octave", 7.0),
+                ("Distortion", 1.0),
+            ][..],
+        ),
+        (
+            "models-bass",
+            BankKind::Bass,
+            &[
+                ("Blues", 6.0),
+                ("Funk", 7.0),
+                ("Primus Slap", 7.0),
+                ("Primus Fuzz", 6.0),
+                ("Primus Flange", 7.0),
+                ("Rock", 6.0),
+            ],
+        ),
+    ] {
+        let temp = temp_dir(test);
+        let dir = temp.0.join("bank");
+        ensure_bank(&dir, kind, 48_000).unwrap();
+        let presets: Vec<_> = Bank::load_dir(&dir)
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|entry| {
+                let BankEntry::Valid { preset, .. } = entry else {
+                    panic!("invalid starter preset: {entry:?}");
+                };
+                preset
+            })
+            .collect();
+        for preset in &presets {
+            let old = preset
+                .modules
+                .iter()
+                .find(|module| ["preamp", "tonestack"].contains(&module.type_name.as_str()));
+            assert!(old.is_none(), "{kind:?} {}: holds {old:?}", preset.name);
+        }
+        for &(name, model) in models {
+            let preset = presets
+                .iter()
+                .find(|preset| preset.name == name)
+                .unwrap_or_else(|| panic!("{kind:?}: no starter Preset {name}"));
+            let amps: Vec<_> = preset
+                .modules
+                .iter()
+                .filter(|module| module.type_name == "amp")
+                .collect();
+            assert_eq!(amps.len(), 1, "{kind:?} {name}: amp Modules");
+            let stored = amps[0]
+                .params
+                .iter()
+                .find(|(param, _)| param == "model")
+                .map(|&(_, value)| value);
+            assert_eq!(stored, Some(model), "{kind:?} {name}: amp.model");
+        }
+    }
+}
