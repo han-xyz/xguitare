@@ -4,13 +4,13 @@ name = "Amp Bass Valve"
 type = "amp"
 [module.params]
 model = 6
-gain = 40
+gain = 15
 bass = 60
 middle = 50
 treble = 45
 presence = 50
-master = 50
-level = -12
+master = 40
+level = -9
 
 [[module]]
 type = "cabinet"

@@ -15,14 +15,14 @@ middle = 40
 treble = 60
 presence = 55
 master = 50
-level = -12
+level = -17.8
 
 [[module]]
 type = "cabinet"
 ir = "cab-4x12.wav"
 
 [module.params]
-level = -4.9
+level = -0.4
 
 [[module]]
 type = "reverb"

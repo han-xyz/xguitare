@@ -10,7 +10,7 @@ middle = 50
 treble = 65
 presence = 50
 master = 55
-level = -12
+level = -12.7
 
 [[module]]
 type = "cabinet"

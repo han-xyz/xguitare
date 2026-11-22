@@ -10,14 +10,14 @@ middle = 45
 treble = 60
 presence = 50
 master = 50
-level = -12
+level = -6.3
 
 [[module]]
 type = "cabinet"
 ir = "cab-2x12-open.wav"
 
 [module.params]
-level = 7.8
+level = 2.1
 
 [[module]]
 type = "reverb"
