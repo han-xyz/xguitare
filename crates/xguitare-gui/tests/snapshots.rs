@@ -3090,7 +3090,7 @@ fn a_unit_chevron_is_a_full_pointer_target() {
 fn a_lost_daemon_shows_its_banner_and_pauses_the_rack() {
     let mut snapshot = funk_snapshot();
     snapshot.link = Link::Disconnected {
-        since: std::time::Instant::now(),
+        since: std::time::Instant::now() + std::time::Duration::from_secs(3600),
     };
     snapshot.status = None;
     snapshot.tuner = None;
