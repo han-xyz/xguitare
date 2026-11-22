@@ -755,15 +755,11 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
             "{}\n",
             click_text(payload["on"] == true, text(&payload["count_in"]))
         ),
-        Request::Metronome { .. } => format!(
-            "metronome {}\n",
-            metronome_text(
-                payload["on"] == true,
-                text(&payload["bpm"]),
-                &meter_text(text(&payload["meter"][0]), text(&payload["meter"][1])),
-                text(&payload["volume_db"])
-            )
-        ),
+        Request::Metronome { .. } => {
+            let metronome: MetronomeStatus =
+                from_payload(payload).map_err(|error| malformed("metronome", &error))?;
+            format!("metronome {}\n", status_metronome_text(&metronome))
+        }
         Request::MetronomeTap => match &payload["bpm"] {
             Value::Null => "tap\n".to_string(),
             bpm => format!("tap {} bpm\n", text(bpm)),

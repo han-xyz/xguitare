@@ -1604,6 +1604,25 @@ fn metronome_commands() {
 }
 
 #[test]
+fn metronome_reply_prints_non_round_values() {
+    let cases = [
+        (
+            r#"{"ok":true,"on":true,"bpm":92.3,"meter":[7,8],"volume_db":-12.5,"beat":0}"#,
+            "metronome on, 92.3 bpm 7/8, volume -12.5 dB\n",
+        ),
+        (
+            r#"{"ok":true,"on":false,"bpm":90.0,"meter":[4,4],"volume_db":-6.0,"beat":0}"#,
+            "metronome off, 90 bpm 4/4, volume -6 dB\n",
+        ),
+    ];
+    for (line, expected) in cases {
+        let out = cli(&["metronome", "on"], reply(line));
+        assert_eq!(out.stdout, expected, "{line}");
+        assert_eq!(out.code, 0);
+    }
+}
+
+#[test]
 fn metronome_errors_print_one_line() {
     let out = cli(
         &["metronome", "tempo", "500"],
