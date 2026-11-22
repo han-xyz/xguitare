@@ -290,3 +290,74 @@ fn amp_model_change_under_signal() {
         }
     }
 }
+
+#[test]
+fn amp_master_scales_the_output_over_its_range() {
+    for (number, model) in models() {
+        let at = |master: f32| {
+            let settings = [(MODEL, number as f32), (GAIN, 10.0), (MASTER, master)];
+            db(rms(&settled(&settings, linear(-70.0), FUNDAMENTAL)))
+        };
+        let range = at(100.0) - at(0.0);
+        assert!((range - 42.0).abs() <= 3.0, "{}: {range} dB", model.name);
+    }
+}
+
+#[test]
+fn amp_bright_cap_favours_the_highs_at_low_gain() {
+    for (number, model) in models() {
+        let tilt = |gain: f32| {
+            let level_at = |freq: f32| {
+                let settings = [(MODEL, number as f32), (GAIN, gain), (MASTER, 20.0)];
+                db(bin_mag(
+                    &settled(&settings, linear(-70.0), freq),
+                    freq,
+                    SAMPLE_RATE,
+                ))
+            };
+            level_at(4000.0) - level_at(FUNDAMENTAL)
+        };
+        let favoured = tilt(10.0) - tilt(100.0);
+        if model.bright_hz.is_some() {
+            assert!(favoured >= 3.0, "{}: {favoured} dB", model.name);
+        } else {
+            assert!(favoured.abs() <= 1.0, "{}: {favoured} dB", model.name);
+        }
+    }
+}
+
+#[test]
+fn amp_float_parameters_glide_to_their_value() {
+    for (number, model) in models() {
+        let input = sine(0.3, FUNDAMENTAL, SAMPLE_RATE, SETTLE + 2 * common::BLOCK);
+        let mut rack = rack_with(Box::new(Amp::new()));
+        for (idx, value) in [(MODEL, number as f32), (LEVEL, 0.0)] {
+            rack.module_mut(0).set_param(idx, value);
+        }
+        run(&mut rack, &input[..SETTLE]);
+        rack.module_mut(0).set_param(LEVEL, -60.0);
+        let after = run(&mut rack, &input[SETTLE..]);
+        let (first, last) = (peak(&after[..8]), peak(&after[after.len() - 8..]));
+        assert!(first > 3.0 * last, "{}: {first} then {last}", model.name);
+    }
+}
+
+#[test]
+fn amp_model_change_is_back_to_full_level_after_the_fade() {
+    const CHANGE: usize = 188 * common::BLOCK;
+    let window = (0.03 * SAMPLE_RATE) as usize..(0.06 * SAMPLE_RATE) as usize;
+    let input = sine(0.3, FUNDAMENTAL, SAMPLE_RATE, CHANGE + SETTLE);
+    for (from, _) in models() {
+        for (to, model) in models().filter(|&(to, _)| to != from) {
+            let mut rack = rack_with(Box::new(Amp::new()));
+            for (idx, value) in [(MODEL, from as f32), (LEVEL, 0.0)] {
+                rack.module_mut(0).set_param(idx, value);
+            }
+            run(&mut rack, &input[..CHANGE]);
+            rack.module_mut(0).set_param(MODEL, to as f32);
+            let after = run(&mut rack, &input[CHANGE..]);
+            let gap = db(rms(&after[window.clone()])) - db(rms(&after[SETTLE - 2400..]));
+            assert!(gap.abs() <= 1.5, "{} from {from}: {gap} dB", model.name);
+        }
+    }
+}

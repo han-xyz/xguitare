@@ -121,6 +121,7 @@ fn amp_preset_parses_builds_and_round_trips() {
         .unwrap();
     assert_eq!(warnings, []);
     assert_eq!(rack.modules()[0].1.param(0), 1.0);
+    assert_eq!(rack.modules()[0].1.param(1), 37.5);
     let input = [0.25; 128];
     let (mut left, mut right) = ([0.0; 128], [0.0; 128]);
     rack.process(&input, &mut left, &mut right);
