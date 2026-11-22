@@ -77,8 +77,8 @@ pub fn mixer_columns(status: &StatusReply) -> Vec<MixerColumn> {
         columns.push(MixerColumn {
             target: MixerTarget::Track(index),
             name: track.name.clone(),
-            volume_db: track.volume_db.map_or(0.0, f64::from),
-            pan: Some(f64::from(track.pan)),
+            volume_db: track.volume_db.unwrap_or(0.0),
+            pan: Some(track.pan),
             mute: track.mute,
             solo: track.solo,
             peak_db: peaks(track.peak_db),
@@ -96,8 +96,8 @@ pub fn mixer_columns(status: &StatusReply) -> Vec<MixerColumn> {
         columns.push(MixerColumn {
             target: MixerTarget::Bus(index),
             name: bus.name.clone(),
-            volume_db: bus.volume_db.map_or(0.0, f64::from),
-            pan: Some(f64::from(bus.pan)),
+            volume_db: bus.volume_db.unwrap_or(0.0),
+            pan: Some(bus.pan),
             mute: bus.mute,
             solo: bus.solo,
             peak_db: peaks(bus.peak_db),
@@ -111,7 +111,7 @@ pub fn mixer_columns(status: &StatusReply) -> Vec<MixerColumn> {
     columns.push(MixerColumn {
         target: MixerTarget::Master,
         name: MASTER.to_string(),
-        volume_db: master.volume_db.map_or(f64::NEG_INFINITY, f64::from),
+        volume_db: master.volume_db.unwrap_or(f64::NEG_INFINITY),
         pan: None,
         mute: false,
         solo: false,
@@ -146,7 +146,7 @@ fn track_sends(track: &TrackStatus, bus_count: usize) -> Vec<SendView> {
             let on = track.sends.iter().find(|send| send.bus == bus);
             SendView {
                 bus,
-                level_db: on.map(|send| f64::from(send.level_db)),
+                level_db: on.map(|send| send.level_db),
                 pre: on.is_some_and(|send| send.pre),
             }
         })
@@ -470,7 +470,7 @@ pub fn aim_rack_commands(
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderView {
     Idle,
-    Running(f32),
+    Running(f64),
     Done(String),
     Failed(String),
     Cancelled,

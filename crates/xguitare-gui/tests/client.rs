@@ -761,6 +761,13 @@ fn a_clean_up_in_batches_shows_an_error_with_the_files_of_every_batch_not_delete
 }
 
 fn notices_for_connections(test: &str, versions: &[&str]) -> Vec<Message> {
+    messages_for_connections(test, versions)
+        .into_iter()
+        .filter(|message| matches!(message, Message::Notice(_)))
+        .collect()
+}
+
+fn messages_for_connections(test: &str, versions: &[&str]) -> Vec<Message> {
     let versions: Vec<String> = versions.iter().map(ToString::to_string).collect();
     let dir = temp_dir(test);
     let config = config(&dir);
@@ -806,10 +813,7 @@ fn notices_for_connections(test: &str, versions: &[&str]) -> Vec<Message> {
             seen.push((message, at));
         }
     }
-    seen.into_iter()
-        .map(|(message, _)| message)
-        .filter(|message| matches!(message, Message::Notice(_)))
-        .collect()
+    seen.into_iter().map(|(message, _)| message).collect()
 }
 
 #[test]
@@ -823,6 +827,20 @@ fn a_reconnect_to_a_newer_daemon_shows_the_notice_again() {
             &[r#","protocol_version":2"#, r#","protocol_version":2"#]
         ),
         [notice.clone(), notice]
+    );
+}
+
+#[test]
+fn an_unreadable_status_from_a_newer_daemon_still_says_to_update() {
+    let messages = messages_for_connections(
+        "newer-unreadable",
+        &[r#","protocol_version":2,"xruns":"many""#],
+    );
+    assert!(
+        messages.iter().any(|message| matches!(message,
+            Message::Error { detail, .. }
+                if detail.ends_with("; the Daemon speaks protocol 2, this xguitare knows 1; update xguitare"))),
+        "{messages:?}"
     );
 }
 

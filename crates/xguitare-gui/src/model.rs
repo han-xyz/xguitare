@@ -985,7 +985,6 @@ pub fn shown_undo<'a>(
     removed.as_ref()
 }
 
-/// The `status` payload's Preset name and program; nulls without a status.
 fn selected_track(status: Option<&StatusReply>) -> Option<TrackRef> {
     let status = status.filter(|status| status.project.is_some())?;
     let name = &status.tracks.get(status.selected?)?.name;

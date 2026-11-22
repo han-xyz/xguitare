@@ -319,6 +319,29 @@ fn ctrl_m_and_ctrl_alt_r_work_only_in_a_project() {
 }
 
 #[test]
+fn volumes_pans_sends_and_progress_read_as_the_wire_wrote_them() {
+    let mut guitar = track("Guitar", false, false, &[0]);
+    guitar["volume_db"] = json!(-6.05);
+    guitar["pan"] = json!(0.1);
+    guitar["sends"][0]["level_db"] = json!(-6.05);
+    let mut verb = bus(0, "Verb", false, false);
+    verb["volume_db"] = json!(-3.3);
+    let mut status = status(&[guitar], &[verb]);
+    status["master"]["volume_db"] = json!(-3.3);
+    status["render"] = json!({"name": "song", "range": "project", "progress": 0.7,
+        "state": "running", "file": "song.wav"});
+    let status = status_reply(&status);
+    let columns = mixer_columns(&status);
+    let shown: Vec<(f64, Option<f64>)> = columns
+        .iter()
+        .map(|column| (column.volume_db, column.pan))
+        .collect();
+    assert_eq!(shown, [(-6.05, Some(0.1)), (-3.3, Some(0.0)), (-3.3, None)]);
+    assert_eq!(send_text(columns[0].sends[0].level_db), "-6.0 dB");
+    assert_eq!(render_view(&status, None, None), RenderView::Running(0.7));
+}
+
+#[test]
 fn render_dialog_follows_status_render() {
     let mut status = status(&[], &[]);
     assert_eq!(

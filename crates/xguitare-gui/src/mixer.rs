@@ -990,7 +990,12 @@ fn render_state(ui: &mut Ui, state: &RenderView) -> Option<Command> {
         RenderView::Running(progress) => {
             let mut cancel = false;
             ui.horizontal(|ui| {
-                widgets::progress_bar(ui, *progress, DIALOG_WIDTH - PROGRESS_CANCEL_WIDTH);
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "a progress in 0..=1 fits an f32"
+                )]
+                let progress = *progress as f32;
+                widgets::progress_bar(ui, progress, DIALOG_WIDTH - PROGRESS_CANCEL_WIDTH);
                 cancel = ui.add(outlined_button("Cancel")).clicked();
             });
             cancel.then_some(Command::RenderCancel)

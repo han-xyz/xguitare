@@ -478,10 +478,14 @@ impl Client {
             Ok(status) => status,
             Err(err) => {
                 warn!("status: unreadable reply: {err}");
+                let detail = match newer_protocol_warning(payload) {
+                    Some(warning) => format!("{err}; {warning}"),
+                    None => err.to_string(),
+                };
                 self.snapshot.last_message = Some((
                     Message::Error {
                         title: failure_title(&Request::Status),
-                        detail: err.to_string(),
+                        detail,
                     },
                     Instant::now(),
                 ));

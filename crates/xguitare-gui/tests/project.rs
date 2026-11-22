@@ -269,6 +269,15 @@ fn disk_overflows_show_a_warning() {
 }
 
 #[test]
+fn track_rows_read_volume_and_pan_as_the_wire_wrote_them() {
+    let mut status = project_status("stopped");
+    status["tracks"][0]["volume_db"] = json!(-3.3);
+    status["tracks"][0]["pan"] = json!(0.1);
+    let row = &track_rows(&status_reply(&status))[0];
+    assert_eq!((row.volume_db, row.pan), (-3.3, 0.1));
+}
+
+#[test]
 fn track_rows_from_status() {
     let rows = track_rows(&status_reply(&project_status("stopped")));
     assert_eq!(
