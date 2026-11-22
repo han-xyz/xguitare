@@ -1195,12 +1195,12 @@ const AMP_MODELS: [&str; 8] = [
     "bass-solid",
 ];
 
-/// The Funk Rack with an amp before the preamp on its Lead model.
-fn amp_snapshot() -> Snapshot {
+/// The Funk Rack with an amp before the preamp on the model at index `model`.
+fn amp_snapshot(model: f64) -> Snapshot {
     let percent =
         |name: &str, value: f64| param("amp", name, value, (0.0, 100.0, 50.0, "%", false));
     let amp = vec![
-        choice("amp", "model", 4.0, &AMP_MODELS),
+        choice("amp", "model", model, &AMP_MODELS),
         percent("gain", 63.0),
         percent("bass", 42.0),
         percent("middle", 57.0),
@@ -1213,6 +1213,8 @@ fn amp_snapshot() -> Snapshot {
 }
 
 const AMP_CLOSED_INDEX: usize = 1;
+const LEAD: f64 = 4.0;
+const BASS_VALVE: f64 = 6.0;
 const AMP_MODEL: &str = "Model, Lead";
 
 fn amp_fields_in_unit(harness: &Harness<App>) -> usize {
@@ -1233,7 +1235,7 @@ fn amp_open_shows_its_model_row_and_seven_knobs_at_both_sizes() {
         (DEFAULT_WINDOW, "amp-open-1280x800"),
         (MIN_WINDOW, "amp-open-1024x640"),
     ] {
-        let (mut open, _, _dir) = harness_with(size, amp_snapshot());
+        let (mut open, _, _dir) = harness_with(size, amp_snapshot(LEAD));
         open_unit(&mut open, AMP_CLOSED_INDEX);
         let unit = open.get_by_label("amp unit").rect();
         let combo = open.get_by_role_and_label(Role::ComboBox, AMP_MODEL).rect();
@@ -1249,7 +1251,7 @@ fn amp_closed_shows_the_model_chip_which_opens_the_unit() {
         (DEFAULT_WINDOW, "amp-closed-1280x800"),
         (MIN_WINDOW, "amp-closed-1024x640"),
     ] {
-        let (mut closed, _, _dir) = harness_with(size, amp_snapshot());
+        let (mut closed, _, _dir) = harness_with(size, amp_snapshot(LEAD));
         assert_eq!(amp_fields_in_unit(&closed), 7, "at {size:?}");
         write_png(&mut closed, name);
         closed
@@ -1258,11 +1260,53 @@ fn amp_closed_shows_the_model_chip_which_opens_the_unit() {
         closed.run_steps(2);
         closed.get_by_role_and_label(Role::ComboBox, AMP_MODEL);
     }
+    let (mut longest, _, _dir) = harness_with(MIN_WINDOW, amp_snapshot(BASS_VALVE));
+    longest.get_by_role_and_label(Role::Button, "Model, Bass-valve, selected");
+    write_png(&mut longest, "amp-closed-bass-valve-1024x640");
+}
+
+#[test]
+fn arrow_keys_step_the_focused_model_list_and_stop_at_the_first() {
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, amp_snapshot(LEAD));
+    open_unit(&mut harness, AMP_CLOSED_INDEX);
+    harness
+        .get_by_role_and_label(Role::ComboBox, AMP_MODEL)
+        .focus();
+    harness.run_steps(2);
+    harness.key_press(Key::ArrowDown);
+    harness.run_steps(2);
+    assert_eq!(
+        sent_now(&sent),
+        [Command::Set {
+            param: "amp.model".to_string(),
+            value: 5.0,
+        }]
+    );
+    assert!(
+        harness
+            .get_by_role_and_label(Role::ComboBox, "Model, Modern")
+            .is_focused()
+    );
+
+    let (mut first, sent, _dir) = harness_with(DEFAULT_WINDOW, amp_snapshot(0.0));
+    open_unit(&mut first, AMP_CLOSED_INDEX);
+    first
+        .get_by_role_and_label(Role::ComboBox, "Model, Tweed")
+        .focus();
+    first.run_steps(2);
+    first.key_press(Key::ArrowUp);
+    first.run_steps(2);
+    assert_eq!(sent_now(&sent), []);
+    assert!(
+        first
+            .get_by_role_and_label(Role::ComboBox, "Model, Tweed")
+            .is_focused()
+    );
 }
 
 #[test]
 fn amp_model_list_holds_every_model_and_sends_the_choice() {
-    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, amp_snapshot());
+    let (mut harness, sent, _dir) = harness_with(DEFAULT_WINDOW, amp_snapshot(LEAD));
     open_unit(&mut harness, AMP_CLOSED_INDEX);
     harness
         .get_by_role_and_label(Role::ComboBox, AMP_MODEL)

@@ -2,10 +2,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use egui::{
-    Align, Align2, Color32, ComboBox, CursorIcon, DragAndDrop, FontSelection, Frame, Id,
-    InnerResponse, Key, Label, Layout, Margin, Modifiers, Painter, Pos2, Rect, Response, RichText,
-    Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
-    WidgetInfo, WidgetText, pos2, vec2,
+    Align, Align2, Color32, ComboBox, CursorIcon, DragAndDrop, EventFilter, FontSelection, Frame,
+    Id, InnerResponse, Key, Label, Layout, Margin, Modifiers, Painter, Pos2, Rect, Response,
+    RichText, Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder,
+    Vec2, WidgetInfo, WidgetText, pos2, vec2,
 };
 use xguitare_protocol::{SILENCE_DB, StatusReply};
 
@@ -16,19 +16,19 @@ use crate::eq_model::{
 };
 use crate::eq_view::{EqPainters, PlotLines, paint_mini, paint_plot};
 use crate::model::{
-    CHEVRON_WIDTH, CHOICE_ROW_HEIGHT, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey, ClipLatch, Command,
-    Direction, Dragged, EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP, HiddenFixed, KnobKey,
-    LayoutDrop, Link, LinkBanner, METER_FLOOR_DB, MOVE_BUTTON_GAP, MOVE_BUTTON_SIDE,
-    MOVE_BUTTONS_WIDTH, Message, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT, ParamRow, PeakHold,
-    RULE_WIDTH, RackItem, RackLayout, SET_FAILED, ScreenRect, Snapshot, TAG_SLOT_WIDTH, Throttle,
-    TunerReading, UNIT_NAME_WIDTH, autoscroll_delta, bypassed, cabinet_ir, cents_fraction,
-    cents_text, chip_click, chip_text, chip_width, choice_buttons, choice_row_name,
-    choice_rows_height, choice_step, closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot,
-    elide_to_width, format_value, in_tune, key_step, knob_fraction, knob_origin, knob_param_value,
-    layout_drop, link_banner, module_title, move_target, mute_banner, open_knob_rows,
-    open_knobs_width, open_unit_height, param_label, param_rows, paused, peak_db, peak_text,
-    rack_ear_labels, split_choice_rows, tuner_header_text, tuner_reading, typed_text, typed_value,
-    unit_style,
+    CHEVRON_WIDTH, CHOICE_ROW_GAP, CHOICE_ROW_HEIGHT, CLOSED_KNOB_WIDTH, ChipClick, ChoiceKey,
+    ClipLatch, Command, Direction, Dragged, EAR_WIDTH, Feedback, FixedUnit, HEADER_GAP,
+    HiddenFixed, KnobKey, LayoutDrop, Link, LinkBanner, METER_FLOOR_DB, MOVE_BUTTON_GAP,
+    MOVE_BUTTON_SIDE, MOVE_BUTTONS_WIDTH, Message, NO_SIGNAL, OPEN_KNOB_PITCH, OPEN_UNIT_HEIGHT,
+    ParamRow, PeakHold, RULE_WIDTH, RackItem, RackLayout, SET_FAILED, ScreenRect, Snapshot,
+    TAG_SLOT_WIDTH, Throttle, TunerReading, UNIT_NAME_WIDTH, autoscroll_delta, bypassed,
+    cabinet_ir, cents_fraction, cents_text, chip_click, chip_text, chip_width, choice_buttons,
+    choice_row_name, choice_rows_height, choice_step, choice_text, chosen_index,
+    closed_knobs_width, closed_unit_rows, drag_outcome, drop_slot, elide_to_width, format_value,
+    in_tune, key_step, knob_fraction, knob_origin, knob_param_value, layout_drop, link_banner,
+    module_title, move_target, mute_banner, open_knob_rows, open_knobs_width, open_unit_height,
+    param_label, param_rows, paused, peak_db, peak_text, rack_ear_labels, split_choice_rows,
+    tuner_header_text, tuner_reading, typed_text, typed_value, unit_style,
 };
 use crate::project_model::sample_rate;
 use crate::sidebar::{Tuner, muted_now};
@@ -85,7 +85,7 @@ const LARGE_KNOB_COLUMN_WIDTH: f32 = 72.0;
 const SMALL_KNOB_TOP: f32 = 4.0;
 const FOCUS_PENDING: &str = "focus pending";
 const KNOB_FIELD_GAP: f32 = 8.0;
-const CHIP_HEIGHT: f32 = 24.0;
+const CHIP_HEIGHT: f32 = theme::CONTROL_HEIGHT;
 const CHOICE_KEYS: [(Key, ChoiceKey); 4] = [
     (Key::ArrowLeft, ChoiceKey::Previous),
     (Key::ArrowUp, ChoiceKey::Previous),
@@ -1186,9 +1186,11 @@ fn open_params(ui: &mut Ui, rows: &OpenRows, accent: Color32, knobs: &mut Knobs)
     let mut commands = Vec::new();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = f32::from(UNIT_MARGIN);
+        ui.spacing_mut().item_spacing.y = CHOICE_ROW_GAP;
         for row in rows.choice_rows {
             commands.extend(choice_row(ui, row, knobs));
         }
+        ui.spacing_mut().item_spacing.y = f32::from(UNIT_MARGIN);
         let mut rest = rows.knob_rows;
         for &count in rows.per_row {
             let (row_params, after) = rest.split_at(count.min(rest.len()));
@@ -1426,9 +1428,10 @@ fn choice_column(
     .inner
 }
 
-/// A choice Parameter of many labels in an open unit: its label and a list of its labels, as the Cabinet IR row.
+/// A choice Parameter of many labels in an open unit: its label and a list of its labels, as the Cabinet IR row; an arrow key on the focused, closed list steps the choice as on choice buttons.
 fn choice_row(ui: &mut Ui, row: &ParamRow, knobs: &mut Knobs) -> Option<Command> {
     let shown = shown_row(row, knobs);
+    let current = chosen_index(&shown);
     let mut chosen = None;
     let size = vec2(ui.available_width(), CHOICE_ROW_HEIGHT);
     ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), |ui| {
@@ -1436,15 +1439,33 @@ fn choice_row(ui: &mut Ui, row: &ParamRow, knobs: &mut Knobs) -> Option<Command>
         let combo = ComboBox::from_id_salt(("choice row", &row.address))
             .selected_text(chip_text(&shown))
             .show_ui(ui, |ui| {
-                for button in choice_buttons(&shown, 0.0) {
-                    if ui.selectable_label(button.lit, button.text).clicked() {
-                        chosen = Some(button.value);
+                for (index, label) in shown.labels.iter().enumerate() {
+                    if ui
+                        .selectable_label(index == current, choice_text(label))
+                        .clicked()
+                    {
+                        chosen = Some(index as f64);
                     }
                 }
             });
-        combo
-            .response
-            .widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, choice_row_name(&shown)));
+        let response = &combo.response;
+        response.widget_info(|| WidgetInfo::labeled(Role::ComboBox, true, choice_row_name(&shown)));
+        if response.has_focus() && !ComboBox::is_open(ui.ctx(), response.id) {
+            let arrows_stay = EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                ..EventFilter::default()
+            };
+            ui.memory_mut(|memory| memory.set_focus_lock_filter(response.id, arrows_stay));
+            let stepped = choice_keys(ui)
+                .into_iter()
+                .fold(shown.clone(), |row, key| ParamRow {
+                    value: choice_step(&row, key),
+                    ..row
+                })
+                .value;
+            chosen = chosen.or(Some(stepped));
+        }
     });
     chosen
         .filter(|&value| keys_moved(value, shown.value))

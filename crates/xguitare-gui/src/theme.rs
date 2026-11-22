@@ -404,6 +404,10 @@ pub const SPACE_XL: f32 = 24.0;
 
 /// A button, an Add Module chip or a Bank row: the smallest pointer target.
 pub const CONTROL_HEIGHT: f32 = 24.0;
+/// A closed unit's chip for a choice of two or three labels.
+pub const CHIP_WIDTH: f32 = 56.0;
+/// A closed unit's chip for a choice of more labels; fits `Bass-valve` in its monospace text.
+pub const WIDE_CHIP_WIDTH: f32 = 88.0;
 /// A left-panel section's header, which reaches the 24 px target through the panel padding above it.
 pub const SECTION_HEADER_HEIGHT: f32 = 20.0;
 

@@ -2127,7 +2127,8 @@ pub fn choice_text(label: &str) -> String {
     param_label(label)
 }
 
-fn chosen_index(row: &ParamRow) -> usize {
+/// The index of the label a choice Parameter's value names, within its labels.
+pub fn chosen_index(row: &ParamRow) -> usize {
     (row.value.round().max(0.0) as usize).min(row.labels.len().saturating_sub(1))
 }
 
@@ -2171,11 +2172,8 @@ pub fn chip_text(row: &ParamRow) -> String {
 
 /// Up to this many choices are buttons in a knob column; more are a row with a list.
 const BUTTON_CHOICES: usize = 3;
-const CHIP_WIDTH: f32 = 56.0;
-/// Fits `Bass-valve` in the chip's monospace text.
-const WIDE_CHIP_WIDTH: f32 = 88.0;
 pub const CHOICE_ROW_HEIGHT: f32 = theme::CONTROL_HEIGHT;
-const CHOICE_ROW_GAP: f32 = theme::SPACE_S;
+pub const CHOICE_ROW_GAP: f32 = theme::SPACE_S;
 
 fn is_choice_row(row: &ParamRow) -> bool {
     row.labels.len() > BUTTON_CHOICES
@@ -2193,9 +2191,9 @@ pub fn choice_row_name(row: &ParamRow) -> String {
 
 pub fn chip_width(row: &ParamRow) -> f32 {
     if is_choice_row(row) {
-        WIDE_CHIP_WIDTH
+        theme::WIDE_CHIP_WIDTH
     } else {
-        CHIP_WIDTH
+        theme::CHIP_WIDTH
     }
 }
 
