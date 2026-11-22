@@ -7,18 +7,16 @@ threshold = -24
 ratio = 4
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 7
 gain = 25
-master = -8
-stages = 2
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 60
 middle = 50
 treble = 50
+presence = 50
+master = 45
+level = -5.5
 
 [[module]]
 type = "cabinet"

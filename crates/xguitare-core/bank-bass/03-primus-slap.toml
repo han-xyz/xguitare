@@ -10,19 +10,16 @@ release = 60
 makeup = 3
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 7
 gain = 30
-bias = 0.3
-master = -10
-stages = 2
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 65
 middle = 40
 treble = 60
+presence = 50
+master = 45
+level = -9.0
 
 [[module]]
 type = "cabinet"

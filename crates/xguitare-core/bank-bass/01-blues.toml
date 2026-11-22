@@ -14,18 +14,16 @@ attack = 15
 release = 150
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 6
 gain = 20
-master = -8
-stages = 2
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 60
 middle = 45
 treble = 40
+presence = 50
+master = 45
+level = -17.4
 
 [[module]]
 type = "cabinet"
