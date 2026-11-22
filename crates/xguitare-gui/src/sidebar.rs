@@ -7,7 +7,7 @@ use egui::{
     Frame, Grid, Id, Key, LayerId, Layout, Margin, Order, Painter, Pos2, Rect, Response, RichText,
     Role, ScrollArea, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, Vec2, WidgetInfo, pos2, vec2,
 };
-use xguitare_protocol::{BankKind, to_payload};
+use xguitare_protocol::BankKind;
 
 use crate::metronome_model::{
     BPM_RANGE, BeatLight, DEFAULT_VOLUME_DB, METER_CHOICES, VOLUME_DB_RANGE, metronome_view,
@@ -234,12 +234,7 @@ fn project_section(ui: &mut Ui, snapshot: &Snapshot, new_name: &mut String) -> V
     let mut commands = Vec::new();
     if let Some(name) = project_name(snapshot.status.as_ref()) {
         ui.label(RichText::new(name).font(theme::heading()));
-        let transport = snapshot
-            .status
-            .as_ref()
-            .map(to_payload)
-            .as_ref()
-            .and_then(transport_view);
+        let transport = snapshot.status.as_ref().and_then(transport_view);
         if let Some(transport) = transport {
             ui.label(muted_text(transport.loaded_audio_text()));
         }
@@ -1052,13 +1047,7 @@ pub fn footer(
         if let Some(text) = feedback.notice(now) {
             ui.label(text);
         }
-        if let Some(text) = snapshot
-            .status
-            .as_ref()
-            .map(to_payload)
-            .as_ref()
-            .and_then(undo_text)
-        {
+        if let Some(text) = snapshot.status.as_ref().and_then(undo_text) {
             ui.label(text);
             ui.label(muted_text(UNDO_KEY));
         }

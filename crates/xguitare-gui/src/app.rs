@@ -7,10 +7,9 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, Theme, Ui};
-use serde_json::Value;
 use tracing::{error, info};
 use xguitare_client::ClientConfig;
-use xguitare_protocol::{BankKind, BusRef, GetReply, TrackRef, to_payload};
+use xguitare_protocol::{BankKind, BusRef, GetReply, StatusReply, TrackRef, to_payload};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
@@ -288,11 +287,7 @@ impl App {
                         .and_then(|params| RemovedUnit::new(params, status, id, now));
                     if let Some(mut removed) = removed {
                         if let Some(target) = aimed {
-                            aim_restore(
-                                &mut removed.restore,
-                                status.map(to_payload).as_ref(),
-                                target,
-                            );
+                            aim_restore(&mut removed.restore, status, target);
                         }
                         self.removed = Some(removed);
                         self.hidden = None;
@@ -344,18 +339,20 @@ impl App {
 }
 
 /// A Module goes back to the Rack its remove was aimed at; a Track and a Bus are named, so that Undo finds them after another is removed.
-fn aim_restore(restore: &mut Restore, status: Option<&Value>, target: MixerTarget) {
-    let name = |key: &str, index: usize| {
-        status.and_then(|status| status[key][index]["name"].as_str().map(str::to_string))
-    };
+fn aim_restore(restore: &mut Restore, status: Option<&StatusReply>, target: MixerTarget) {
     match target {
         MixerTarget::Track(index) => {
-            restore.track =
-                Some(name("tracks", index).map_or(TrackRef::Index(index), TrackRef::Name));
+            let name = status
+                .and_then(|status| status.tracks.get(index))
+                .map(|track| track.name.clone());
+            restore.track = Some(name.map_or(TrackRef::Index(index), TrackRef::Name));
         }
         MixerTarget::Bus(index) => {
+            let name = status
+                .and_then(|status| status.buses.get(index))
+                .map(|bus| bus.name.clone());
             restore.track = None;
-            restore.bus = Some(name("buses", index).map_or(BusRef::Index(index), BusRef::Name));
+            restore.bus = Some(name.map_or(BusRef::Index(index), BusRef::Name));
         }
         MixerTarget::Master => {
             restore.track = None;
@@ -648,7 +645,6 @@ fn key_command(
     if project_name(Some(status)).is_none() {
         return key_to_command(key, rows);
     }
-    let status = &to_payload(status);
     let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
     if let Some(view) = arrange
         && let Some(command) =
@@ -777,13 +773,7 @@ fn project_panels(
         .show(ui, |ui| {
             commands.extend(transport_bar(ui, snapshot, main_view, feedback));
         });
-    if let Some(transport) = snapshot
-        .status
-        .as_ref()
-        .map(to_payload)
-        .as_ref()
-        .and_then(transport_view)
-    {
+    if let Some(transport) = snapshot.status.as_ref().and_then(transport_view) {
         view.recording_from = recording_from(view.recording_from, &transport);
     }
     if main_view != MainView::Arrange {
@@ -827,8 +817,7 @@ fn central_view(
     if main_view == MainView::Mixer {
         return mixer_panel(ui, snapshot, mixer);
     }
-    let status = &to_payload(status);
-    let Some(target) = shown_rack_column(mixer.rack, status) else {
+    let Some(target) = shown_rack_column(mixer.rack, &to_payload(status)) else {
         return Vec::new();
     };
     rack_heading(ui, status, target);
@@ -851,10 +840,10 @@ fn open_render_dialog(
 }
 
 /// Names the Track, Bus or Master whose Rack is shown.
-fn rack_heading(ui: &mut Ui, status: &Value, target: MixerTarget) {
+fn rack_heading(ui: &mut Ui, status: &StatusReply, target: MixerTarget) {
     let name = match target {
-        MixerTarget::Track(index) => status["tracks"][index]["name"].as_str(),
-        MixerTarget::Bus(index) => status["buses"][index]["name"].as_str(),
+        MixerTarget::Track(index) => status.tracks.get(index).map(|track| track.name.as_str()),
+        MixerTarget::Bus(index) => status.buses.get(index).map(|bus| bus.name.as_str()),
         MixerTarget::Master => Some(MASTER),
     };
     let heading = format!("{} — Rack", name.unwrap_or_default());

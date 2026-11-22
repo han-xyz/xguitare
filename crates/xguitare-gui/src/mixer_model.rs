@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use xguitare_protocol::{BusRef, SILENCE_DB, SendLevel, TrackRef};
+use xguitare_protocol::{BusRef, SILENCE_DB, SendLevel, TrackRef, from_payload};
 
 use crate::model::{Band, Command, LADDER_RED_DB, LADDER_YELLOW_DB, Segment, acts_on_rack};
 use crate::project_model::{project_name_payload, track_rows};
@@ -368,7 +368,7 @@ impl ShownRack {
 }
 
 fn selected_track(status: &Value) -> Option<usize> {
-    track_rows(status)
+    track_rows(&from_payload(status).ok()?)
         .into_iter()
         .find(|row| row.selected)
         .map(|row| row.index)

@@ -7,7 +7,7 @@ use egui::{
     Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
     WidgetInfo, WidgetText, pos2, vec2,
 };
-use xguitare_protocol::{SILENCE_DB, StatusReply, to_payload};
+use xguitare_protocol::{SILENCE_DB, StatusReply};
 
 use crate::eq_model::{
     EQ, EQ_AXIS_LABEL_HEIGHT, EQ_BAND_TITLE_HEIGHT, EQ_CURVE_POINTS, EQ_MINI_HEIGHT,
@@ -803,7 +803,7 @@ fn module_unit_of<'a>(
         sample_rate: snapshot
             .status
             .as_ref()
-            .map(|status| sample_rate(&to_payload(status)) as f32),
+            .map(|status| sample_rate(status) as f32),
     }
 }
 

@@ -905,9 +905,9 @@ pub fn render_dialog(
     let Some(status) = snapshot.status.as_ref() else {
         return (commands, false);
     };
-    let status = &to_payload(status);
     let has_loop = transport_view(status)
         .is_some_and(|transport| transport.loop_region.start < transport.loop_region.end);
+    let status = &to_payload(status);
     if !has_loop {
         draft.range = RenderRange::Project;
     }

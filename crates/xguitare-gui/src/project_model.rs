@@ -50,20 +50,22 @@ pub(crate) fn project_name_payload(status: &Value) -> Option<&str> {
     status["project"].as_str()
 }
 
-pub fn project_tempo(status: &Value) -> Option<Tempo> {
-    let tempo = &status["tempo"];
-    let bpm = tempo["bpm"].as_f64().filter(|bpm| *bpm > 0.0)?;
-    let beats = u32::try_from(tempo["meter"][0].as_u64()?).ok()?;
-    let note = u32::try_from(tempo["meter"][1].as_u64()?).ok()?;
+pub fn project_tempo(status: &StatusReply) -> Option<Tempo> {
+    let tempo = status.tempo.as_ref().filter(|tempo| tempo.bpm > 0.0)?;
+    let (beats, note) = tempo.meter;
     Some(Tempo {
-        bpm,
+        bpm: tempo.bpm,
         beats_per_bar: beats.max(1),
         note,
     })
 }
 
-pub fn sample_rate(status: &Value) -> f64 {
-    status["sample_rate"].as_f64().unwrap_or(48_000.0)
+/// 48 kHz for a `status` without a sample rate, which reads 0.
+pub fn sample_rate(status: &StatusReply) -> f64 {
+    match status.sample_rate {
+        0 => 48_000.0,
+        rate => f64::from(rate),
+    }
 }
 
 /// `<bar>.<beat>.<hundredths of a beat>`, bars and beats counted from 1.
@@ -274,34 +276,35 @@ impl TransportView {
 }
 
 /// `None` while no Project is open.
-pub fn transport_view(status: &Value) -> Option<TransportView> {
-    project_name_payload(status)?;
-    let state = match status["transport"].as_str()? {
+pub fn transport_view(status: &StatusReply) -> Option<TransportView> {
+    project_name(Some(status))?;
+    let state = match status.transport.as_deref()? {
         "playing" => TransportState::Playing,
         "recording" => TransportState::Recording,
         _ => TransportState::Stopped,
     };
+    let click = status.click.clone().unwrap_or_default();
     Some(TransportView {
         state,
-        frames: status["position"]["frames"].as_u64().unwrap_or_default(),
+        frames: status
+            .position
+            .as_ref()
+            .map_or(0, |position| position.frames),
         loop_region: loop_region(status),
-        click: status["click"]["on"].as_bool().unwrap_or_default(),
-        count_in: status["click"]["count_in"]
-            .as_u64()
-            .and_then(|bars| u32::try_from(bars).ok())
-            .unwrap_or_default(),
-        count_in_remaining: status["count_in_remaining"].as_u64().unwrap_or_default(),
-        disk_overflows: status["disk_overflows"].as_u64().unwrap_or_default(),
-        loaded_audio_bytes: status["loaded_audio_bytes"].as_u64().unwrap_or_default(),
+        click: click.on,
+        count_in: click.count_in,
+        count_in_remaining: u64::from(status.count_in_remaining),
+        disk_overflows: status.disk_overflows,
+        loaded_audio_bytes: status.loaded_audio_bytes as u64,
     })
 }
 
-fn loop_region(status: &Value) -> LoopRegion {
-    let region = &status["loop"];
+fn loop_region(status: &StatusReply) -> LoopRegion {
+    let region = status.loop_region.clone().unwrap_or_default();
     LoopRegion {
-        start: region["start"].as_u64().unwrap_or_default(),
-        end: region["end"].as_u64().unwrap_or_default(),
-        on: region["on"].as_bool().unwrap_or_default(),
+        start: region.start,
+        end: region.end,
+        on: region.on,
     }
 }
 
@@ -325,25 +328,23 @@ pub struct TrackRow {
     pub selected: bool,
 }
 
-pub fn track_rows(status: &Value) -> Vec<TrackRow> {
-    let selected = status["selected"].as_u64();
-    status["tracks"]
-        .as_array()
-        .into_iter()
-        .flatten()
+pub fn track_rows(status: &StatusReply) -> Vec<TrackRow> {
+    status
+        .tracks
+        .iter()
         .enumerate()
         .map(|(index, track)| TrackRow {
             index,
-            id: track["id"].as_u64().unwrap_or_default(),
-            name: track["name"].as_str().unwrap_or_default().to_string(),
-            input: track["input"].as_str().map(str::to_string),
-            volume_db: track["volume_db"].as_f64().unwrap_or_default(),
-            pan: track["pan"].as_f64().unwrap_or_default(),
-            mute: track["mute"].as_bool().unwrap_or_default(),
-            solo: track["solo"].as_bool().unwrap_or_default(),
-            armed: track["armed"].as_bool().unwrap_or_default(),
-            input_peak_db: track["input_peak_db"].as_f64().unwrap_or(SILENCE_DB),
-            selected: selected == Some(index as u64),
+            id: track.id,
+            name: track.name.clone(),
+            input: track.input.clone(),
+            volume_db: track.volume_db.map_or(0.0, f64::from),
+            pan: f64::from(track.pan),
+            mute: track.mute,
+            solo: track.solo,
+            armed: track.armed,
+            input_peak_db: track.input_peak_db.unwrap_or(SILENCE_DB),
+            selected: status.selected == Some(index),
         })
         .collect()
 }
@@ -515,7 +516,7 @@ pub fn recording_span(from: u64, transport: &TransportView) -> (u64, u64) {
 }
 
 /// The end of the last Item or of the loop region, whichever is later.
-pub fn project_end(status: &Value, items: &[ItemBlock]) -> u64 {
+pub fn project_end(status: &StatusReply, items: &[ItemBlock]) -> u64 {
     items
         .iter()
         .map(ItemBlock::end)
@@ -690,7 +691,7 @@ pub fn item_node_action(press: ItemKeyPress) -> Option<ItemNodeAction> {
 /// Reaper's keys while a Project is open, Ctrl+1, Ctrl+2 and Ctrl+3 (the views), Ctrl+M (mixer) and Ctrl+Alt+R (Render dialog) among them; the digit keys load no Preset then.
 pub fn project_key_to_command(
     key: KeyEvent,
-    status: &Value,
+    status: &StatusReply,
     items: &[ItemBlock],
 ) -> Option<Command> {
     let transport = transport_view(status)?;
@@ -731,7 +732,7 @@ pub fn project_key_to_command(
 /// The Arrange view's Item keys: S splits at the playhead the selected Items (none: the selected Track's), Delete deletes the selected Items, T plays the next Take of the one selected Item (after the last, the first), Ctrl+D duplicates and Ctrl+C copies the selected Items, Ctrl+V pastes a filled clipboard at the playhead on the selected Track, ← and → move the selected Items by one step of the grid drawn for `timeline` (a beat without one), Alt+↑ and Alt+↓ to the Track above or below.
 pub fn item_key_to_command(
     key: KeyEvent,
-    status: &Value,
+    status: &StatusReply,
     items: &[ItemBlock],
     selection: &ItemSelection,
     timeline: Option<TimelineView>,
@@ -745,12 +746,10 @@ pub fn item_key_to_command(
         KeyEvent::Delete if !selection.is_empty() => Some(Command::ItemDelete(selection.ids())),
         KeyEvent::CtrlD if !selection.is_empty() => Some(Command::ItemDuplicate(selection.ids())),
         KeyEvent::CtrlC if !selection.is_empty() => Some(Command::ItemCopy(selection.ids())),
-        KeyEvent::CtrlV if status["clipboard"].as_u64().unwrap_or_default() > 0 => {
-            Some(Command::ItemPaste {
-                track: usize::try_from(status["selected"].as_u64()?).ok()?,
-                at: transport.frames,
-            })
-        }
+        KeyEvent::CtrlV if status.clipboard > 0 => Some(Command::ItemPaste {
+            track: status.selected?,
+            at: transport.frames,
+        }),
         KeyEvent::T => {
             let [id] = selection.ids()[..] else {
                 return None;
@@ -846,10 +845,8 @@ pub fn esc_clears_selection(
 }
 
 /// The footer's `Undo: <label>` for the edit `status` names next for `project_undo`.
-pub fn undo_text(status: &Value) -> Option<String> {
-    status["undo"]
-        .as_str()
-        .map(|label| format!("Undo: {label}"))
+pub fn undo_text(status: &StatusReply) -> Option<String> {
+    status.undo.as_ref().map(|label| format!("Undo: {label}"))
 }
 
 /// An Item's accessible name: `Item <take name>, <Track>, bar <n>`, with `Take <n> of <count>` after the name when it has several Takes, and `partly covered by` or `covered by` the Take names of the Items above it on its Track at the end.
@@ -1375,7 +1372,7 @@ pub fn trim_step_command(item: &ItemBlock, edge: ItemEdge, step: f64) -> Option<
     clippy::cast_sign_loss,
     reason = "a non-negative frame far below u64::MAX"
 )]
-fn toggled_loop(status: &Value, region: LoopRegion) -> LoopRegion {
+fn toggled_loop(status: &StatusReply, region: LoopRegion) -> LoopRegion {
     if region.start < region.end {
         return LoopRegion {
             on: !region.on,

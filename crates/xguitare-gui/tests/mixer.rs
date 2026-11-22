@@ -9,7 +9,11 @@ use xguitare_gui::mixer_model::{
 };
 use xguitare_gui::model::{Band, Command, KeyEvent, key_to_command, progress_text_place};
 use xguitare_gui::project_model::{MainView, project_key_to_command};
-use xguitare_protocol::{BusRef, SendLevel, TrackRef};
+use xguitare_protocol::{BusRef, SendLevel, StatusReply, TrackRef, from_payload};
+
+fn status_reply(payload: &Value) -> StatusReply {
+    from_payload(payload).unwrap()
+}
 
 fn track(name: &str, mute: bool, solo: bool, sends: &[usize]) -> Value {
     let sends: Vec<Value> = sends
@@ -25,7 +29,17 @@ fn bus(id: u64, name: &str, mute: bool, solo: bool) -> Value {
         "peak_db": [-120.0, -120.0], "clip": false})
 }
 
+/// The Tracks get their index as `id`, which every `status` Track carries.
 fn status(tracks: &[Value], buses: &[Value]) -> Value {
+    let tracks: Vec<Value> = tracks
+        .iter()
+        .enumerate()
+        .map(|(id, track)| {
+            let mut track = track.clone();
+            track["id"] = json!(id);
+            track
+        })
+        .collect();
     json!({"project": "Demo Song", "transport": "stopped", "selected": 0,
         "loop": {"start": 0, "end": 0, "on": false},
         "tracks": tracks, "buses": buses,
@@ -286,17 +300,20 @@ fn rack_selectors_name_the_track_bus_or_master() {
 fn ctrl_m_and_ctrl_alt_r_work_only_in_a_project() {
     let open = status(&[track("Guitar", false, false, &[])], &[]);
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlM, &open, &[]),
+        project_key_to_command(KeyEvent::CtrlM, &status_reply(&open), &[]),
         Some(Command::ToggleMixer)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlAltR, &open, &[]),
+        project_key_to_command(KeyEvent::CtrlAltR, &status_reply(&open), &[]),
         Some(Command::OpenRenderDialog)
     );
     let mut closed = open.clone();
     closed["project"] = json!(null);
     for key in [KeyEvent::CtrlM, KeyEvent::CtrlAltR] {
-        assert_eq!(project_key_to_command(key, &closed, &[]), None);
+        assert_eq!(
+            project_key_to_command(key, &status_reply(&closed), &[]),
+            None
+        );
         assert_eq!(key_to_command(key, &[]), None);
     }
 }

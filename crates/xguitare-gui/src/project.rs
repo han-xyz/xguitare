@@ -4,8 +4,7 @@ use egui::{
     Modifiers, Painter, Popup, Rect, Response, RichText, Role, ScrollArea, Sense, SetOpenCommand,
     Stroke, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
-use serde_json::Value;
-use xguitare_protocol::{ItemsReply, LoopRegion, TransportAction, to_payload};
+use xguitare_protocol::{ItemsReply, LoopRegion, StatusReply, TransportAction};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -176,7 +175,6 @@ pub fn transport_bar(
     let Some(status) = snapshot.status.as_ref() else {
         return Vec::new();
     };
-    let status = &to_payload(status);
     let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
         return Vec::new();
     };
@@ -203,7 +201,7 @@ pub fn transport_bar(
 /// The transport faceplate's controls, wrapping onto a second row where the window is too narrow for one.
 fn transport_row(
     ui: &mut Ui,
-    status: &Value,
+    status: &StatusReply,
     transport: &TransportView,
     (shown, tempo): (MainView, Tempo),
     (feedback, now): (&mut Feedback, Instant),
@@ -450,7 +448,6 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
     };
-    let status = &to_payload(status);
     let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
         return commands;
     };
@@ -525,7 +522,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
             }
             let menu = MenuContext {
                 items: snapshot.items.as_ref(),
-                clipboard: status["clipboard"].as_u64().unwrap_or_default() > 0,
+                clipboard: status.clipboard > 0,
             };
             commands.extend(item_nodes(
                 ui,

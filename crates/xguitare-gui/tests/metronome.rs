@@ -13,7 +13,7 @@ use xguitare_gui::metronome_model::{
 };
 use xguitare_gui::model::{Command, KeyEvent, Outgoing, requests_until_quit};
 use xguitare_gui::project_model::{KeyFocus, key_active, project_key_to_command};
-use xguitare_protocol::{Request, Response, StatusReply, from_payload, to_payload};
+use xguitare_protocol::{Request, Response, StatusReply, from_payload};
 
 fn status_reply(payload: &Value) -> StatusReply {
     from_payload(payload).unwrap()
@@ -181,7 +181,7 @@ fn m_and_t_do_nothing_with_a_project_open() {
             None
         );
         assert_eq!(
-            project_key_to_command(key, &to_payload(&project_status(true, 1)), &[]),
+            project_key_to_command(key, &project_status(true, 1), &[]),
             None
         );
     }

@@ -83,11 +83,11 @@ fn project_name_and_tempo_come_from_status() {
         project_name(Some(&status_reply(&status))),
         Some("Demo Song")
     );
-    assert_eq!(project_tempo(&status), Some(FOUR_FOUR));
+    assert_eq!(project_tempo(&status_reply(&status)), Some(FOUR_FOUR));
     let no_project = json!({"project": null, "tempo": null});
     assert_eq!(project_name(Some(&status_reply(&no_project))), None);
     assert_eq!(project_name(None), None);
-    assert_eq!(project_tempo(&no_project), None);
+    assert_eq!(project_tempo(&status_reply(&no_project)), None);
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn zoomed_out_grid_thins_to_bars() {
 
 #[test]
 fn transport_view_from_status() {
-    let recording = transport_view(&project_status("recording")).unwrap();
+    let recording = transport_view(&status_reply(&project_status("recording"))).unwrap();
     assert_eq!(
         recording,
         TransportView {
@@ -224,13 +224,16 @@ fn transport_view_from_status() {
     assert_eq!(recording.loaded_audio_text(), "audio 3.8 MB");
     assert!(recording.play_lit());
     assert!(recording.record_lit());
-    let stopped = transport_view(&project_status("stopped")).unwrap();
+    let stopped = transport_view(&status_reply(&project_status("stopped"))).unwrap();
     assert!(!stopped.play_lit());
     assert!(!stopped.record_lit());
-    let playing = transport_view(&project_status("playing")).unwrap();
+    let playing = transport_view(&status_reply(&project_status("playing"))).unwrap();
     assert!(playing.play_lit());
     assert!(!playing.record_lit());
-    assert_eq!(transport_view(&json!({"project": null})), None);
+    assert_eq!(
+        transport_view(&status_reply(&json!({"project": null}))),
+        None
+    );
 }
 
 #[test]
@@ -238,7 +241,10 @@ fn a_running_count_in_shows_the_beats_left() {
     let mut status = project_status("recording");
     status["count_in_remaining"] = json!(3);
     assert_eq!(
-        transport_view(&status).unwrap().count_in_text().as_deref(),
+        transport_view(&status_reply(&status))
+            .unwrap()
+            .count_in_text()
+            .as_deref(),
         Some("count-in: 3")
     );
 }
@@ -246,17 +252,25 @@ fn a_running_count_in_shows_the_beats_left() {
 #[test]
 fn disk_overflows_show_a_warning() {
     let mut status = project_status("recording");
-    assert_eq!(transport_view(&status).unwrap().disk_warning(), None);
+    assert_eq!(
+        transport_view(&status_reply(&status))
+            .unwrap()
+            .disk_warning(),
+        None
+    );
     status["disk_overflows"] = json!(3);
     assert_eq!(
-        transport_view(&status).unwrap().disk_warning().as_deref(),
+        transport_view(&status_reply(&status))
+            .unwrap()
+            .disk_warning()
+            .as_deref(),
         Some("disk too slow: frames dropped 3 times")
     );
 }
 
 #[test]
 fn track_rows_from_status() {
-    let rows = track_rows(&project_status("stopped"));
+    let rows = track_rows(&status_reply(&project_status("stopped")));
     assert_eq!(
         rows,
         [
@@ -335,10 +349,13 @@ fn tracks_without_items_have_no_blocks() {
 #[test]
 fn project_end_is_the_last_item_or_loop_end() {
     let items = item_blocks(&project_items());
-    assert_eq!(project_end(&project_status("stopped"), &items), 240_000);
+    assert_eq!(
+        project_end(&status_reply(&project_status("stopped")), &items),
+        240_000
+    );
     let mut status = project_status("stopped");
     status["loop"]["end"] = json!(480_000);
-    assert_eq!(project_end(&status, &items), 480_000);
+    assert_eq!(project_end(&status_reply(&status), &items), 480_000);
 }
 
 #[test]
@@ -350,23 +367,23 @@ fn project_keys_follow_reaper() {
     let recording = project_status("recording");
     let transport = |action| Some(Command::Transport(action));
     assert_eq!(
-        project_key_to_command(KeyEvent::Space, &stopped, &items),
+        project_key_to_command(KeyEvent::Space, &status_reply(&stopped), &items),
         transport(TransportAction::Play)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Space, &playing, &items),
+        project_key_to_command(KeyEvent::Space, &status_reply(&playing), &items),
         transport(TransportAction::Stop)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Space, &recording, &items),
+        project_key_to_command(KeyEvent::Space, &status_reply(&recording), &items),
         transport(TransportAction::Stop)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlR, &stopped, &items),
+        project_key_to_command(KeyEvent::CtrlR, &status_reply(&stopped), &items),
         transport(TransportAction::Record)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::R, &stopped, &items),
+        project_key_to_command(KeyEvent::R, &status_reply(&stopped), &items),
         Some(Command::Loop(LoopRegion {
             start: 0,
             end: 192_000,
@@ -374,19 +391,19 @@ fn project_keys_follow_reaper() {
         }))
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Home, &stopped, &items),
+        project_key_to_command(KeyEvent::Home, &status_reply(&stopped), &items),
         Some(Command::Locate(0))
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::End, &stopped, &items),
+        project_key_to_command(KeyEvent::End, &status_reply(&stopped), &items),
         Some(Command::Locate(240_000))
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlS, &stopped, &items),
+        project_key_to_command(KeyEvent::CtrlS, &status_reply(&stopped), &items),
         Some(Command::ProjectSave)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::Digit(1, none), &stopped, &items),
+        project_key_to_command(KeyEvent::Digit(1, none), &status_reply(&stopped), &items),
         None
     );
 }
@@ -397,7 +414,7 @@ fn loop_key_on_an_empty_region_loops_four_bars() {
     status["loop"] = json!({"start": 0, "end": 0, "on": false});
     let items = [];
     assert_eq!(
-        project_key_to_command(KeyEvent::R, &status, &items),
+        project_key_to_command(KeyEvent::R, &status_reply(&status), &items),
         Some(Command::Loop(LoopRegion {
             start: 0,
             end: 384_000,
@@ -418,7 +435,11 @@ fn project_keys_need_an_open_project() {
         KeyEvent::End,
         KeyEvent::CtrlS,
     ] {
-        assert_eq!(project_key_to_command(key, &closed, &[]), None, "{key:?}");
+        assert_eq!(
+            project_key_to_command(key, &status_reply(&closed), &[]),
+            None,
+            "{key:?}"
+        );
     }
 }
 
@@ -450,12 +471,12 @@ fn ctrl_digits_select_the_views_in_a_project() {
         (3, MainView::Mixer),
     ] {
         assert_eq!(
-            project_key_to_command(KeyEvent::Digit(digit, CTRL), &stopped, &[]),
+            project_key_to_command(KeyEvent::Digit(digit, CTRL), &status_reply(&stopped), &[]),
             Some(Command::ShowView(view))
         );
     }
     assert_eq!(
-        project_key_to_command(KeyEvent::Digit(4, CTRL), &stopped, &[]),
+        project_key_to_command(KeyEvent::Digit(4, CTRL), &status_reply(&stopped), &[]),
         None
     );
     let ctrl_alt = KeyModifiers {
@@ -463,13 +484,13 @@ fn ctrl_digits_select_the_views_in_a_project() {
         alt: true,
     };
     assert_eq!(
-        project_key_to_command(KeyEvent::Digit(1, ctrl_alt), &stopped, &[]),
+        project_key_to_command(KeyEvent::Digit(1, ctrl_alt), &status_reply(&stopped), &[]),
         None
     );
     let mut closed = stopped;
     closed["project"] = json!(null);
     assert_eq!(
-        project_key_to_command(KeyEvent::Digit(1, CTRL), &closed, &[]),
+        project_key_to_command(KeyEvent::Digit(1, CTRL), &status_reply(&closed), &[]),
         None
     );
 }
@@ -895,22 +916,22 @@ fn undo_goes_back_to_the_track_the_module_left() {
 
 #[test]
 fn a_recording_take_starts_where_recording_was_first_seen() {
-    let recording = transport_view(&project_status("recording")).unwrap();
+    let recording = transport_view(&status_reply(&project_status("recording"))).unwrap();
     assert_eq!(recording_from(None, &recording), Some(36_000));
     assert_eq!(recording_from(Some(12_000), &recording), Some(12_000));
-    let stopped = transport_view(&project_status("stopped")).unwrap();
+    let stopped = transport_view(&status_reply(&project_status("stopped"))).unwrap();
     assert_eq!(recording_from(Some(12_000), &stopped), None);
     let mut counting = project_status("recording");
     counting["count_in_remaining"] = json!(2);
     assert_eq!(
-        recording_from(None, &transport_view(&counting).unwrap()),
+        recording_from(None, &transport_view(&status_reply(&counting)).unwrap()),
         None
     );
 }
 
 #[test]
 fn a_recording_take_reaches_the_playhead_and_after_a_loop_wraps_starts_at_the_loop() {
-    let recording = transport_view(&project_status("recording")).unwrap();
+    let recording = transport_view(&status_reply(&project_status("recording"))).unwrap();
     assert_eq!(recording_span(12_000, &recording), (12_000, 36_000));
     assert_eq!(recording_span(100_000, &recording), (0, 36_000));
 }
@@ -1236,7 +1257,13 @@ fn item_keys_split_delete_undo_redo_and_nudge() {
     let items = edit_items();
     let status = project_status("stopped");
     let key = |key, ids: &[u64]| {
-        item_key_to_command(key, &status, &items, &selection(ids), Some(EDIT_VIEW))
+        item_key_to_command(
+            key,
+            &status_reply(&status),
+            &items,
+            &selection(ids),
+            Some(EDIT_VIEW),
+        )
     };
     assert_eq!(
         key(KeyEvent::S, &[3]),
@@ -1294,7 +1321,7 @@ fn item_keys_split_delete_undo_redo_and_nudge() {
     assert_eq!(
         item_key_to_command(
             KeyEvent::Right,
-            &status,
+            &status_reply(&status),
             &items,
             &selection(&[3]),
             Some(zoomed_out)
@@ -1305,7 +1332,13 @@ fn item_keys_split_delete_undo_redo_and_nudge() {
     let mut closed = project_status("stopped");
     closed["project"] = json!(null);
     assert_eq!(
-        item_key_to_command(KeyEvent::S, &closed, &items, &selection(&[]), None),
+        item_key_to_command(
+            KeyEvent::S,
+            &status_reply(&closed),
+            &items,
+            &selection(&[]),
+            None
+        ),
         None
     );
 }
@@ -1314,16 +1347,19 @@ fn item_keys_split_delete_undo_redo_and_nudge() {
 fn undo_and_redo_keys_are_project_keys() {
     let stopped = project_status("stopped");
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlZ, &stopped, &[]),
+        project_key_to_command(KeyEvent::CtrlZ, &status_reply(&stopped), &[]),
         Some(Command::ProjectUndo)
     );
     assert_eq!(
-        project_key_to_command(KeyEvent::CtrlShiftZ, &stopped, &[]),
+        project_key_to_command(KeyEvent::CtrlShiftZ, &status_reply(&stopped), &[]),
         Some(Command::ProjectRedo)
     );
     let mut closed = stopped;
     closed["project"] = json!(null);
-    assert_eq!(project_key_to_command(KeyEvent::CtrlZ, &closed, &[]), None);
+    assert_eq!(
+        project_key_to_command(KeyEvent::CtrlZ, &status_reply(&closed), &[]),
+        None
+    );
 }
 
 #[test]
@@ -1347,7 +1383,7 @@ fn item_keys_wait_only_for_a_text_field_and_arrows_for_no_focus() {
         assert!(!key_active(key, KeyFocus::Widget), "{key:?}");
     }
     assert_eq!(
-        project_key_to_command(KeyEvent::S, &project_status("stopped"), &[]),
+        project_key_to_command(KeyEvent::S, &status_reply(&project_status("stopped")), &[]),
         None
     );
 }
@@ -1365,9 +1401,12 @@ fn esc_clears_the_selection_before_the_toast() {
 fn the_undo_label_comes_from_status() {
     let mut status = project_status("stopped");
     status["undo"] = json!("move 2 Items");
-    assert_eq!(undo_text(&status).as_deref(), Some("Undo: move 2 Items"));
+    assert_eq!(
+        undo_text(&status_reply(&status)).as_deref(),
+        Some("Undo: move 2 Items")
+    );
     status["undo"] = json!(null);
-    assert_eq!(undo_text(&status), None);
+    assert_eq!(undo_text(&status_reply(&status)), None);
 }
 
 #[test]
@@ -1777,7 +1816,13 @@ fn t_duplicate_copy_and_paste_keys() {
     status["selected"] = json!(1);
     status["clipboard"] = json!(0);
     let key = |key, status: &Value, ids: &[u64]| {
-        item_key_to_command(key, status, &items, &selection(ids), Some(EDIT_VIEW))
+        item_key_to_command(
+            key,
+            &status_reply(status),
+            &items,
+            &selection(ids),
+            Some(EDIT_VIEW),
+        )
     };
     assert_eq!(
         key(KeyEvent::T, &status, &[3]),
@@ -1812,7 +1857,11 @@ fn t_duplicate_copy_and_paste_keys() {
     for edit in [KeyEvent::CtrlD, KeyEvent::CtrlC, KeyEvent::CtrlV] {
         assert!(key_active(edit, KeyFocus::Item), "{edit:?}");
         assert!(!key_active(edit, KeyFocus::TextField), "{edit:?}");
-        assert_eq!(project_key_to_command(edit, &status, &[]), None, "{edit:?}");
+        assert_eq!(
+            project_key_to_command(edit, &status_reply(&status), &[]),
+            None,
+            "{edit:?}"
+        );
     }
 }
 
