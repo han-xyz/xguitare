@@ -147,7 +147,7 @@ pub(crate) struct Layout<'a> {
     pub(crate) project: &'a Project,
     pub(crate) takes: &'a HashMap<String, Arc<[f32]>>,
     pub(crate) track_ids: &'a [u64],
-    /// The first Track and Bus index that moved or went since the running Arrangement, as [`Arrangement::clear_clips_from`] takes them.
+    /// The first Track and Bus index that moved or went since the running Arrangement, as [`crate::arrangement::Arrangement::clear_clips_from`] takes them.
     pub(crate) moved_from: (usize, usize),
 }
 
