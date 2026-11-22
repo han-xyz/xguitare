@@ -406,6 +406,34 @@ fn amp_float_parameters_glide_to_their_value() {
 }
 
 #[test]
+fn amp_model_change_leaves_nothing_of_the_old_model() {
+    const CHANGE: usize = 188 * common::BLOCK;
+    let first_10_ms = (0.01 * SAMPLE_RATE) as usize;
+    let input = sine(0.1, FUNDAMENTAL, SAMPLE_RATE, CHANGE + first_10_ms);
+    let after_change = |from: usize, to: usize| {
+        let mut rack = rack_with(Box::new(Amp::new()));
+        for (idx, value) in [(MODEL, from as f32), (GAIN, 20.0), (MASTER, 50.0)] {
+            rack.module_mut(0).set_param(idx, value);
+        }
+        run(&mut rack, &input[..CHANGE]);
+        rack.module_mut(0).set_param(MODEL, to as f32);
+        run(&mut rack, &input[CHANGE..])
+    };
+    for (to, model) in models() {
+        let mut froms = models().map(|(from, _)| from).filter(|&from| from != to);
+        let reference = after_change(froms.next().unwrap(), to);
+        for from in froms {
+            let gap = after_change(from, to)
+                .iter()
+                .zip(&reference)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f32, f32::max);
+            assert!(gap < 1e-4, "{} from {from}: {gap}", model.name);
+        }
+    }
+}
+
+#[test]
 fn amp_model_change_is_back_to_full_level_after_the_fade() {
     const CHANGE: usize = 188 * common::BLOCK;
     let window = (0.03 * SAMPLE_RATE) as usize..(0.06 * SAMPLE_RATE) as usize;
@@ -460,6 +488,93 @@ fn amp_bands_follow_their_pots() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn amp_bands_are_linear_in_db_between_their_pots() {
+    for (number, model) in models() {
+        let Stack::Bands { low, mid, high } = &model.stack else {
+            continue;
+        };
+        let points = [
+            (BASS, low, (low.hz / 4.0).max(20.0)),
+            (MIDDLE, mid, mid.hz),
+            (TREBLE, high, (high.hz * 4.0).min(16_000.0)),
+        ];
+        for &(idx, band, freq) in &points {
+            let flat = quiet_level_at(number, (idx, 50.0), freq);
+            let upper = quiet_level_at(number, (idx, 75.0), freq) - flat;
+            let lower = quiet_level_at(number, (idx, 25.0), freq) - flat;
+            let case = format!(
+                "{} {} at {freq} Hz: {upper} / {lower} dB",
+                model.name, SPEC.params[idx].name
+            );
+            assert!((upper - band.boost_db / 2.0).abs() <= 1.5, "{case}");
+            assert!((lower + band.cut_db / 2.0).abs() <= 1.5, "{case}");
+        }
+    }
+}
+
+#[test]
+fn amp_shelves_have_reached_their_gain_at_their_hz() {
+    for (number, model) in models() {
+        let Stack::Bands { low, high, .. } = &model.stack else {
+            continue;
+        };
+        for (idx, band) in [(BASS, low), (TREBLE, high)] {
+            let flat = quiet_level_at(number, (idx, 50.0), band.hz);
+            let boost = quiet_level_at(number, (idx, 100.0), band.hz) - flat;
+            let cut = quiet_level_at(number, (idx, 0.0), band.hz) - flat;
+            let case = format!(
+                "{} {}: {boost} / {cut} dB",
+                model.name, SPEC.params[idx].name
+            );
+            assert!(boost >= band.boost_db - 3.0, "{case}");
+            assert!(cut <= -band.cut_db + 3.0, "{case}");
+        }
+    }
+}
+
+#[test]
+fn amp_band_pots_glide_in_long_blocks() {
+    const LONG_BLOCK: usize = 1024;
+    const CHANGE: usize = 12 * LONG_BLOCK;
+    for (number, model) in models() {
+        let Stack::Bands { mid, .. } = &model.stack else {
+            continue;
+        };
+        let input = sine(0.05, mid.hz, SAMPLE_RATE, 4 * CHANGE);
+        let rack_at = |pot: f32| {
+            let mut rack = rack_with(Box::new(Amp::new()));
+            rack.prepare(SAMPLE_RATE, LONG_BLOCK);
+            for (idx, value) in [
+                (MODEL, number as f32),
+                (GAIN, 30.0),
+                (MASTER, 30.0),
+                (LEVEL, 0.0),
+                (MIDDLE, pot),
+            ] {
+                rack.module_mut(0).set_param(idx, value);
+            }
+            rack.module_mut(0).reset();
+            rack
+        };
+        let mut gliding = rack_at(0.0);
+        run_in_blocks(&mut gliding, &input[..CHANGE], LONG_BLOCK);
+        gliding.module_mut(0).set_param(MIDDLE, 100.0);
+        let after = run_in_blocks(&mut gliding, &input[CHANGE..], LONG_BLOCK);
+        let low = run_in_blocks(&mut rack_at(0.0), &input, LONG_BLOCK);
+        let high = run_in_blocks(&mut rack_at(100.0), &input, LONG_BLOCK);
+        let early = 16..16 + 48;
+        let level = |samples: &[f32]| db(rms(&samples[early.clone()]));
+        let travelled = level(&after) - level(&low[CHANGE..]);
+        let whole = level(&high[CHANGE..]) - level(&low[CHANGE..]);
+        assert!(
+            travelled.abs() < 0.5 * whole.abs(),
+            "{}: {travelled} dB of {whole} dB after 1 ms",
+            model.name
+        );
     }
 }
 
