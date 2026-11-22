@@ -762,9 +762,6 @@ fn a_status_from_an_older_daemon_without_render_and_clipboard_reads_the_defaults
             ..from_payload(&payload).unwrap()
         }
     );
-    let before_versioning: StatusReply = from_payload(&json!({})).unwrap();
-    assert_eq!(before_versioning.protocol_version, 1);
-    assert_eq!(StatusReply::default().protocol_version, 1);
 }
 
 #[test]
@@ -884,4 +881,37 @@ fn a_payload_that_is_not_an_object_is_an_error() {
         );
     }
     assert!(from_payload::<ItemsTrack>(&json!([2, "Guitar", []])).is_err());
+}
+
+fn protocol_version_of(raw: &Value) -> Option<u64> {
+    from_payload::<StatusReply>(&json!({ "protocol_version": raw }))
+        .unwrap()
+        .protocol_version
+}
+
+#[test]
+fn a_status_without_a_protocol_version_speaks_version_1() {
+    let reply: StatusReply = from_payload(&json!({})).unwrap();
+    assert_eq!(reply.protocol_version, Some(1));
+    assert_eq!(StatusReply::default().protocol_version, Some(1));
+}
+
+#[test]
+fn a_whole_protocol_version_reads_as_itself() {
+    for version in [0, 1, 2, u64::MAX] {
+        assert_eq!(protocol_version_of(&json!(version)), Some(version));
+    }
+}
+
+#[test]
+fn any_other_protocol_version_reads_as_unknown_and_is_written_as_null() {
+    let beyond_u64: Value = serde_json::from_str("100000000000000000000000").unwrap();
+    for raw in [json!("2"), json!(-1), json!(2.5), Value::Null, beyond_u64] {
+        assert_eq!(protocol_version_of(&raw), None, "{raw}");
+    }
+    let unknown = StatusReply {
+        protocol_version: None,
+        ..StatusReply::default()
+    };
+    assert_eq!(to_payload(&unknown)["protocol_version"], Value::Null);
 }

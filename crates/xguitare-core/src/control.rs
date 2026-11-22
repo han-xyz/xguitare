@@ -615,7 +615,7 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         callback_last_us: shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         connections,
         metronome: metronome_status(state),
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: Some(u64::from(PROTOCOL_VERSION)),
         ..status_fields(state, &peaks.tracks, &peaks.mix)
     })
 }

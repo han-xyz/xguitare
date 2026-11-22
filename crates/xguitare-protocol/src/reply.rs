@@ -90,8 +90,9 @@ pub struct StatusReply {
     pub callback_last_us: u64,
     pub connections: Vec<PortConnection>,
     pub metronome: MetronomeStatus,
-    /// 1 when the key is missing: a Daemon from before versioning speaks version 1.
-    pub protocol_version: u32,
+    /// `Some(1)` when the key is missing: a Daemon from before versioning speaks version 1. `None` when it holds anything but a non-negative whole number; the version must never make a `status` unreadable.
+    #[serde(deserialize_with = "version_or_unknown")]
+    pub protocol_version: Option<u64>,
     pub disk_overflows: u64,
     pub count_in_remaining: u32,
     pub loaded_audio_bytes: usize,
@@ -132,7 +133,7 @@ impl Default for StatusReply {
             callback_last_us: 0,
             connections: Vec::new(),
             metronome: MetronomeStatus::default(),
-            protocol_version: 1,
+            protocol_version: Some(1),
             disk_overflows: 0,
             count_in_remaining: 0,
             loaded_audio_bytes: 0,
@@ -314,6 +315,10 @@ pub fn from_payload<T: DeserializeOwned>(payload: &Value) -> Result<T, serde_jso
         return Err(serde::de::Error::custom(NOT_AN_OBJECT));
     }
     T::deserialize(payload)
+}
+
+fn version_or_unknown<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+    Value::deserialize(deserializer).map(|version| version.as_u64())
 }
 
 /// Reads a key that is there, also as `null`, as `Some`; a missing key stays `None` through `#[serde(default)]`.
