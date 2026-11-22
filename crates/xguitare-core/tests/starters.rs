@@ -261,7 +261,7 @@ fn a_failed_preset_write_leaves_no_file() {
     let bank_dir = state.config.bank_dir.clone();
     let before = files(&bank_dir);
     fs::set_permissions(&bank_dir, fs::Permissions::from_mode(0o555)).unwrap();
-    let _restore = ReadOnly(bank_dir.clone());
+    let restore = ReadOnly(bank_dir.clone());
     assert_eq!(
         error(starters(&mut state)),
         format!(
@@ -270,6 +270,45 @@ fn a_failed_preset_write_leaves_no_file() {
         )
     );
     assert_eq!(files(&bank_dir), before);
+    drop(restore);
+    assert_eq!(
+        ok(starters(&mut state)),
+        json!({"presets": AMP_PRESETS, "irs": AMP_IRS})
+    );
+}
+
+fn revision(state: &mut EngineState) -> u64 {
+    ok(handle(state, Request::Status).0)["revision"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn a_run_that_writes_only_irs_bumps_the_revision_once() {
+    let (mut state, _audio, _dir) = state("ir-revision", "");
+    fs::remove_file(state.config.bank_dir.join("cab-4x10.wav")).unwrap();
+    let before = revision(&mut state);
+    assert_eq!(
+        ok(starters(&mut state)),
+        json!({"presets": [], "irs": ["cab-4x10.wav"]})
+    );
+    assert_eq!(revision(&mut state), before + 1);
+}
+
+#[test]
+fn a_run_that_writes_presets_bumps_the_revision_once() {
+    let (mut state, _audio, _dir) = old_state("preset-revision");
+    let before = revision(&mut state);
+    ok(starters(&mut state));
+    assert_eq!(revision(&mut state), before + 1);
+}
+
+#[test]
+fn a_run_that_writes_nothing_keeps_the_revision() {
+    let (mut state, _audio, _dir) = state("no-revision", "");
+    let before = revision(&mut state);
+    assert_eq!(ok(starters(&mut state)), json!({"presets": [], "irs": []}));
+    assert_eq!(revision(&mut state), before);
 }
 
 #[test]
