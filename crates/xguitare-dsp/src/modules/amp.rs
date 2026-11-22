@@ -5,6 +5,7 @@ use crate::amp_model::{AmpModel, MAX_STAGES, MODEL_COUNT, MODEL_LABELS, MODELS, 
 use crate::fmv;
 use crate::oversample::Oversampler4x;
 use crate::smooth::{SMOOTHING_SECONDS, Smoother};
+use crate::svf::{Svf, SvfCoefficients};
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
 const MODEL: usize = 0;
@@ -21,6 +22,15 @@ const POT_RANGE_DB: f32 = 40.0;
 const MASTER_MIN_DB: f32 = -30.0;
 const MASTER_RANGE_DB: f32 = 42.0;
 const BRIGHT_MAX_BOOST: f32 = 3.0;
+const PRESENCE_MAX_DB: f32 = 12.0;
+const PRESENCE_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
+const RESONANCE_MAX_DB: f32 = 4.0;
+const RESONANCE_Q: f32 = 1.0;
+const SAG_MAX_DB: f32 = 6.0;
+const SAG_ATTACK_SECONDS: f32 = 0.010;
+const SAG_RELEASE_SECONDS: f32 = 0.150;
+// Below 1 because the downsampler overshoots a hard-clipped bright signal by about half.
+const OUTPUT_GAIN: f32 = 0.9;
 
 const fn percent(name: &'static str) -> ParamSpec {
     ParamSpec {
@@ -76,6 +86,14 @@ pub struct Amp {
     tone: [Smoother; 3],
     stack_state: [f64; 3],
     master: Smoother,
+    presence: Smoother,
+    presence_filter: Svf,
+    resonance: Option<SvfCoefficients>,
+    resonance_filter: Svf,
+    sag_depth: f32,
+    sag_attack: f32,
+    sag_release: f32,
+    sag_envelope: f32,
     level: Smoother,
     fade: f32,
     fade_step: f32,
@@ -97,6 +115,14 @@ impl Amp {
             tone: [BASS, MIDDLE, TREBLE].map(|idx| Smoother::new(values[idx] / 100.0)),
             stack_state: [0.0; 3],
             master: Smoother::new(master_gain(model, values[MASTER])),
+            presence: Smoother::new(values[PRESENCE] / 100.0),
+            presence_filter: Svf::new(),
+            resonance: None,
+            resonance_filter: Svf::new(),
+            sag_depth: 0.0,
+            sag_attack: 1.0,
+            sag_release: 1.0,
+            sag_envelope: 0.0,
             level: Smoother::new(db_to_linear(values[LEVEL])),
             fade: 1.0,
             fade_step: 1.0,
@@ -112,6 +138,17 @@ impl Amp {
         }
         self.bright = OnePole::new(self.model.bright_hz.unwrap_or(0.0), self.oversampled_rate);
         self.stack_state = [0.0; 3];
+        let power = &self.model.power;
+        self.presence_filter.reset();
+        self.resonance = power.resonance_hz.map(|hz| {
+            let gain_db = RESONANCE_MAX_DB * (1.0 - power.feedback);
+            SvfCoefficients::bell(hz, RESONANCE_Q, gain_db, self.oversampled_rate)
+        });
+        self.resonance_filter.reset();
+        self.sag_depth = 1.0 - db_to_linear(-SAG_MAX_DB * power.sag);
+        self.sag_attack = one_pole_coeff(SAG_ATTACK_SECONDS, self.oversampled_rate);
+        self.sag_release = one_pole_coeff(SAG_RELEASE_SECONDS, self.oversampled_rate);
+        self.sag_envelope = 0.0;
     }
 
     fn change_model(&mut self, number: usize) {
@@ -143,6 +180,7 @@ impl Module for Amp {
         self.pot.prepare(self.oversampled_rate);
         self.bright_boost.prepare(self.oversampled_rate);
         self.master.prepare(self.oversampled_rate);
+        self.presence.prepare(sample_rate);
         for position in &mut self.tone {
             position.prepare(sample_rate);
         }
@@ -156,6 +194,7 @@ impl Module for Amp {
         self.pot.snap();
         self.bright_boost.snap();
         self.master.snap();
+        self.presence.snap();
         for position in &mut self.tone {
             position.snap();
         }
@@ -184,7 +223,7 @@ impl Module for Amp {
             BASS => self.tone[0].set_target(value / 100.0),
             MIDDLE => self.tone[1].set_target(value / 100.0),
             TREBLE => self.tone[2].set_target(value / 100.0),
-            PRESENCE => {}
+            PRESENCE => self.presence.set_target(value / 100.0),
             MASTER => self.master.set_target(master_gain(self.model, value)),
             LEVEL => self.level.set_target(db_to_linear(value)),
             _ => unreachable!("amp has no parameter {idx}"),
@@ -212,6 +251,13 @@ impl Module for Amp {
             2.0 * f64::from(self.oversampled_rate),
         );
         let model = self.model;
+        let presence = SvfCoefficients::high_shelf(
+            model.power.presence_hz,
+            PRESENCE_Q,
+            PRESENCE_MAX_DB * self.presence.advance(frames),
+            self.oversampled_rate,
+        );
+        let feedback = model.power.feedback;
         let mono = &mut io.mono[..frames];
         for sample in mono.iter_mut() {
             *sample *= self.fade;
@@ -231,8 +277,19 @@ impl Module for Amp {
                     x = fmv::step(&coefficients, &mut self.stack_state, f64::from(x)) as f32;
                 }
             }
-            // The power amp goes here: presence, resonance, the shaper driven by `master`, sag.
-            *sample = master * x;
+            x = self.presence_filter.process(&presence, x);
+            if let Some(resonance) = &self.resonance {
+                x = self.resonance_filter.process(resonance, x);
+            }
+            let sag = 1.0 - self.sag_depth * self.sag_envelope.min(1.0);
+            let y = push_pull(sag * master * x, feedback);
+            let rate = if y.abs() > self.sag_envelope {
+                self.sag_attack
+            } else {
+                self.sag_release
+            };
+            self.sag_envelope += rate * (y.abs() - self.sag_envelope);
+            *sample = OUTPUT_GAIN * y;
         }
         self.oversampler.downsample(mono);
 
@@ -256,6 +313,19 @@ fn bright_boost(model: &AmpModel, gain: f32) -> f32 {
 
 fn master_gain(model: &AmpModel, master: f32) -> f32 {
     db_to_linear(MASTER_MIN_DB + MASTER_RANGE_DB * master / 100.0 - model.power.headroom_db)
+}
+
+/// Odd, bounded to ±1: `tanh` at `feedback` 0, blended towards `x / (1 + x^16)^(1/16)`, near a hard clip, at 1.
+fn push_pull(x: f32, feedback: f32) -> f32 {
+    let x2 = x * x;
+    let x4 = x2 * x2;
+    let x8 = x4 * x4;
+    let hard = x / (1.0 + x8 * x8).sqrt().sqrt().sqrt().sqrt();
+    (1.0 - feedback) * x.tanh() + feedback * hard
+}
+
+fn one_pole_coeff(seconds: f32, sample_rate: f32) -> f32 {
+    1.0 - (-1.0 / (seconds * sample_rate)).exp()
 }
 
 #[derive(Clone, Copy, Default)]

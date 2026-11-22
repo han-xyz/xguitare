@@ -19,8 +19,8 @@ const FUNDAMENTAL: f32 = 220.0;
 const PERIODS: usize = 2400;
 const SETTLE: usize = 9600;
 const WINDOW: usize = 4 * PERIODS;
-// `master` 100 is left out until the power amp (task 3) bounds the rest.
-const PEAK_BOUNDED_MASTERS: [f32; 2] = [0.0, 50.0];
+const PEAK_BOUNDED_MASTERS: [f32; 3] = [0.0, 50.0, 100.0];
+const BURST_FREQ: f32 = 1000.0;
 
 fn models() -> impl Iterator<Item = (usize, &'static AmpModel)> {
     MODELS.iter().enumerate()
@@ -380,6 +380,81 @@ fn amp_model_change_is_back_to_full_level_after_the_fade() {
             let after = run(&mut rack, &input[CHANGE..]);
             let gap = db(rms(&after[window.clone()])) - db(rms(&after[SETTLE - 2400..]));
             assert!(gap.abs() <= 1.5, "{} from {from}: {gap} dB", model.name);
+        }
+    }
+}
+
+fn quiet_level_at(number: usize, extra: (usize, f32), freq: f32) -> f32 {
+    let settings = [(MODEL, number as f32), (GAIN, 10.0), (MASTER, 20.0), extra];
+    db(bin_mag(
+        &settled(&settings, linear(-50.0), freq),
+        freq,
+        SAMPLE_RATE,
+    ))
+}
+
+#[test]
+fn amp_presence_raises_the_highs() {
+    for (number, model) in models() {
+        let rise = quiet_level_at(number, (PRESENCE, 100.0), 5000.0)
+            - quiet_level_at(number, (PRESENCE, 0.0), 5000.0);
+        assert!((3.0..=15.0).contains(&rise), "{}: {rise} dB", model.name);
+    }
+}
+
+#[test]
+fn amp_level_changes_the_output_by_its_value() {
+    for (number, model) in models() {
+        let reference = quiet_level_at(number, (LEVEL, 0.0), FUNDAMENTAL);
+        for level in [-60.0, -12.0, 12.0] {
+            let change = quiet_level_at(number, (LEVEL, level), FUNDAMENTAL) - reference;
+            assert!(
+                (change - level).abs() <= 0.1,
+                "{} at level {level}: {change} dB",
+                model.name
+            );
+        }
+    }
+}
+
+fn burst_output(number: usize, master: f32) -> Vec<f32> {
+    let input = sine(linear(-6.0), BURST_FREQ, SAMPLE_RATE, common::frames(300.0));
+    amp_output(
+        &[(MODEL, number as f32), (GAIN, 30.0), (MASTER, master)],
+        &input,
+    )
+}
+
+#[test]
+fn amp_master_lowers_the_crest_factor() {
+    for (number, model) in models() {
+        let crest = |master: f32| {
+            let output = burst_output(number, master);
+            db(peak(&output) / rms(&output))
+        };
+        let (low, high) = (crest(20.0), crest(100.0));
+        assert!(
+            high < low,
+            "{}: crest {low} dB at master 20, {high} dB at master 100",
+            model.name
+        );
+    }
+}
+
+#[test]
+fn amp_sag_lowers_a_held_note() {
+    for (number, model) in models() {
+        let output = burst_output(number, 40.0);
+        let start = output.iter().position(|s| s.abs() > 1e-3 * peak(&output));
+        let output = &output[start.unwrap()..];
+        let onset = db(rms(&output[..common::frames(5.0)]));
+        let held = db(rms(&output[common::frames(200.0)..common::frames(250.0)]));
+        let drop = onset - held;
+        let sag = model.power.sag;
+        if sag >= 0.3 {
+            assert!(drop >= 0.5, "{}: sag {sag}, drop {drop} dB", model.name);
+        } else if sag == 0.0 {
+            assert!(drop.abs() <= 0.3, "{}: no sag, drop {drop} dB", model.name);
         }
     }
 }
