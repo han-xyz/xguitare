@@ -502,3 +502,23 @@ fn amp_shaper_knee_hardens_with_feedback() {
         );
     }
 }
+
+#[test]
+fn amp_power_amp_holds_its_clip_for_a_hot_input() {
+    for (number, model) in models() {
+        let output_at = |master: f32| {
+            let settings = [(MODEL, number as f32), (GAIN, 100.0), (MASTER, master)];
+            settled(&settings, 1000.0, FUNDAMENTAL)
+        };
+        let (half, full) = (output_at(50.0), output_at(100.0));
+        let bound = 1.5 * linear(SPEC.params[LEVEL].default);
+        assert!(
+            db(rms(&full)) >= db(rms(&half)) - 1.0 && peak(&full) <= bound,
+            "{}: rms {} at master 50, {} at master 100, peak {}",
+            model.name,
+            rms(&half),
+            rms(&full),
+            peak(&full)
+        );
+    }
+}

@@ -29,6 +29,8 @@ const RESONANCE_Q: f32 = 1.0;
 const SAG_MAX_DB: f32 = 6.0;
 const SAG_ATTACK_SECONDS: f32 = 0.010;
 const SAG_RELEASE_SECONDS: f32 = 0.150;
+// The hard knee is 1 in f32 from here on; above it x^16 would overflow to infinity.
+const HARD_KNEE_LIMIT: f32 = 4.0;
 // Below 1 because the downsampler overshoots a hard-clipped bright signal by about half.
 const OUTPUT_GAIN: f32 = 0.9;
 
@@ -317,10 +319,11 @@ fn master_gain(model: &AmpModel, master: f32) -> f32 {
 
 /// Odd, bounded to ±1: `tanh` at `feedback` 0, blended towards `x / (1 + x^16)^(1/16)`, near a hard clip, at 1.
 fn push_pull(x: f32, feedback: f32) -> f32 {
-    let x2 = x * x;
+    let knee = x.clamp(-HARD_KNEE_LIMIT, HARD_KNEE_LIMIT);
+    let x2 = knee * knee;
     let x4 = x2 * x2;
     let x8 = x4 * x4;
-    let hard = x / (1.0 + x8 * x8).sqrt().sqrt().sqrt().sqrt();
+    let hard = knee / (1.0 + x8 * x8).sqrt().sqrt().sqrt().sqrt();
     (1.0 - feedback) * x.tanh() + feedback * hard
 }
 
