@@ -54,7 +54,7 @@ The Daemon logs to stderr and runs until Ctrl-C (SIGINT) or SIGTERM. The first s
 2026-11-03T12:52:12.040993Z  INFO xguitare::jack_adapter: connected xguitare-4242:out_r -> Scarlett Solo 4th Gen Headphones / Line 1-2:playback_FR
 ```
 
-- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with fifteen starter Presets (Clean, Crunch, Lead, High Gain, Bass, Rock, Blues, Funk, Thrash, Djent, Doom, Buzzsaw, Stoner, Sub Octave, Distortion) and the cabinet IR `default-cab.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
+- `created starter bank (guitar) in ...` appears on the first run only: the Bank directory did not exist, so the Daemon created it with twenty-one starter Presets (Clean, Crunch, Lead, High Gain, Bass, Rock, Blues, Funk, Thrash, Djent, Doom, Buzzsaw, Stoner, Sub Octave, Distortion, Amp Tweed, Amp American, Amp Chime, Amp Crunch, Amp Lead, Amp Modern) and one synthesized cabinet IR per speaker type: `default-cab.wav`, `cab-4x10.wav`, `cab-2x12-open.wav`, `cab-2x12-alnico.wav` and `cab-4x12.wav`; with `bank_kind = "bass"` it creates the bass Bank instead (see [Bass](#bass)). An existing Bank directory is never touched.
 - `loaded 0 Clean`: the Daemon starts on the Bank's first Preset (program 0).
 - `jack client active`: the sample rate and the buffer size the audio server actually granted.
 - `connected a -> b`: one line per port connection made from the `[ports]` config. Without a `[ports]` section and with more than one sound card, the Daemon connects nothing and warns with the candidate port names (`several capture devices; pick one in config ports.input: ...`).
@@ -175,6 +175,15 @@ The guitar starter Bank has five metal Presets (programs 8 to 12) and two more (
 - Sub Octave: a guitar played as a bass: `octave` with only the octave below, `compressor`, a clean two-stage `preamp`, a dark cabinet (`high_cut` 4000 Hz).
 - Distortion: a distortion pedal into a clean amp: `drive` into a two-stage `preamp` at low gain, `tonestack`, cabinet, a little `reverb`; Crunch, Lead and High Gain take their gain from the `preamp` instead.
 
+Six more (programs 15 to 20) play the `amp` Module, each Amp model into the cabinet IR of its speaker type, and end in a small `reverb`:
+
+- Amp Tweed: `tweed` at low `gain` into a 4x10 cabinet (`cab-4x10.wav`).
+- Amp American: `american`, clean, into an open-back 2x12 (`cab-2x12-open.wav`).
+- Amp Chime: `chime` into a 2x12 with alnico speakers (`cab-2x12-alnico.wav`).
+- Amp Crunch: `crunch` at medium `gain` into a closed-back 4x12 (`cab-4x12.wav`).
+- Amp Lead: `gate`, `lead` at high `gain`, 4x12.
+- Amp Modern: `gate`, `modern` at high `gain` with the mids lowered, 4x12.
+
 A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy the files `09-thrash.toml`, `10-djent.toml`, `11-doom.toml`, `12-buzzsaw.toml`, `13-stoner.toml`, `14-sub-octave.toml` (bass `14-synth-sub.toml`) and `15-distortion.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) directory into your Bank directory, renumbering them if those numbers are taken; the Daemon watches the Bank directory and picks up the new files without a restart.
 
 The starter Presets of each Bank are matched in loudness by meter (ITU-R BS.1770 short-term loudness: −13 LUFS for guitar, −14 LUFS for bass) with 1 dB of true-peak headroom (−1 dBTP) on a test signal of plucked notes at −18 dB RMS; a few spiky Presets (bass Primus Flange, Envelope Funk and Synth Sub) sit lower so as not to pass that ceiling. A meter is a starting point and the last word is your ear, and hot playing or a hot input can still go above full scale: lower the cabinet `level` or the interface gain.
@@ -189,7 +198,7 @@ bank_kind = "bass"
 
 Choosing the other kind in the GUI (the Control API's `set_settings`) keeps the Bank directory in use as that of the current kind and switches to `<config dir>/bank-<kind>` (`bank-bass` or `bank-guitar`), seeded when missing; both directories are recorded in `state.toml`, so switching back returns to your Presets. With a `bank_dir` in the config the GUI cannot switch.
 
-The first run creates fifteen Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock, Envelope Funk, Modern Grind, Thrash, Djent, Doom, Buzzsaw, Stoner, Synth Sub, Distortion) and the bass cabinet IR `bass-cab.wav`. Primus Fuzz uses the `fuzz` Module, Envelope Funk `autowah` and `eq`, Modern Grind `eq`, `blend` and `limiter`. In a Preset's Rack the `limiter` is a mono Module and sits before the cabinet, so the cabinet's `level` sets the final peak; a limiter that is truly the last Module belongs on a Bus or the Master, which are stereo.
+The first run creates seventeen Presets (Blues, Funk, Primus Slap, Primus Fuzz, Primus Flange, Rock, Envelope Funk, Modern Grind, Thrash, Djent, Doom, Buzzsaw, Stoner, Synth Sub, Distortion, Amp Bass Valve, Amp Bass Solid) and one synthesized bass cabinet IR per speaker type: `bass-cab.wav` and `bass-cab-8x10.wav`. Primus Fuzz uses the `fuzz` Module, Envelope Funk `autowah` and `eq`, Modern Grind `eq`, `blend` and `limiter`. In a Preset's Rack the `limiter` is a mono Module and sits before the cabinet, so the cabinet's `level` sets the final peak; a limiter that is truly the last Module belongs on a Bus or the Master, which are stereo.
 
 The five metal bass Presets each end in `limiter` and cabinet, and drive the bass through `blend`, whose `crossover` keeps the lows clean:
 
@@ -203,6 +212,11 @@ Two more bass Presets (programs 13 and 14) also end in `limiter` and cabinet:
 
 - Synth Sub: `compressor`, `octave` with the octave below louder than the bass and a dark `tone`, an `eq` between 30 and 3000 Hz.
 - Distortion: `compressor`, `blend` at `blend` 70 and `drive` 75 with the 80 Hz bass and the 1000 Hz mid lifted.
+
+Two more (programs 15 and 16) are the `amp` Module and a cabinet, nothing else:
+
+- Amp Bass Valve: `bass-valve` into an 8x10 cabinet (`bass-cab-8x10.wav`).
+- Amp Bass Solid: `bass-solid` into the bass cabinet `bass-cab.wav`.
 
 ## CLI
 
