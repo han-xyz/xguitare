@@ -6,8 +6,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use xguitare_protocol::{
     BankKind, CODE_STILL_CLOSING, GetReply, IndexOrName, ItemStatus, ItemsReply, LoopRegion,
-    PROTOCOL_VERSION, ParamStatus, Position, RenderBits, RenderRange, Request, Response, SendLevel,
-    TransportAction, from_payload, position_frame, shown_file_name, to_payload,
+    MasterStatus, PROTOCOL_VERSION, ParamStatus, Position, RenderBits, RenderRange, Request,
+    Response, SendLevel, StatusReply, TrackStatus, TransportAction, from_payload, position_frame,
+    shown_file_name, to_payload,
 };
 
 fn name(text: &str) -> IndexOrName {
@@ -718,4 +719,61 @@ fn a_reply_missing_keys_deserialises_to_the_defaults() {
     let items: ItemsReply = from_payload(&json!({"tracks": [{"items": [{}]}]})).unwrap();
     assert_eq!(items.sample_rate, 0);
     assert_eq!(items.tracks[0].items[0], ItemStatus::default());
+}
+
+fn status_with_a_project() -> Value {
+    fixtures("status-project-render-running").remove(0).1
+}
+
+#[test]
+fn every_status_fixture_round_trips_through_its_struct() {
+    assert_round_trips::<StatusReply>("status-", 3);
+}
+
+#[test]
+fn a_status_with_extra_keys_at_top_level_in_loop_a_track_and_master_deserialises() {
+    let payload = status_with_a_project();
+    let mut extended = payload.clone();
+    extended["from_a_newer_daemon"] = json!(1);
+    extended["loop"]["count"] = json!(2);
+    extended["tracks"][0]["colour"] = json!("red");
+    extended["master"]["limiter"] = json!(true);
+    let reply: StatusReply = from_payload(&extended).unwrap();
+    assert_eq!(reply, from_payload::<StatusReply>(&payload).unwrap());
+}
+
+#[test]
+fn a_status_from_an_older_daemon_without_render_and_clipboard_reads_the_defaults() {
+    let payload = status_with_a_project();
+    let mut older = payload.clone();
+    let fields = older.as_object_mut().unwrap();
+    fields.remove("render");
+    fields.remove("clipboard");
+    let reply: StatusReply = from_payload(&older).unwrap();
+    assert_eq!(
+        reply,
+        StatusReply {
+            render: None,
+            clipboard: 0,
+            ..from_payload(&payload).unwrap()
+        }
+    );
+    let before_versioning: StatusReply = from_payload(&json!({})).unwrap();
+    assert_eq!(before_versioning.protocol_version, 1);
+}
+
+#[test]
+fn null_peaks_and_volumes_read_as_none_and_are_written_as_null() {
+    let track = json!({"id": 0, "name": "Guitar", "input": null, "volume_db": null, "pan": 0.0,
+        "mute": false, "solo": false, "armed": false, "input_peak_db": null, "to_master": true,
+        "sends": [], "peak_db": [null, -3.5], "clip": true});
+    let reply: TrackStatus = from_payload(&track).unwrap();
+    assert_eq!(reply.volume_db, None);
+    assert_eq!(reply.input_peak_db, None);
+    assert_eq!(reply.peak_db, [None, Some(-3.5)]);
+    assert_eq!(to_payload(&reply), track);
+    let master = json!({"volume_db": -6.0, "peak_db": [null, null], "clip": false});
+    let reply: MasterStatus = from_payload(&master).unwrap();
+    assert_eq!(reply.volume_db, Some(-6.0));
+    assert_eq!(to_payload(&reply), master);
 }

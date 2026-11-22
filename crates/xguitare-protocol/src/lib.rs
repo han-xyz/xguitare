@@ -11,7 +11,9 @@ pub use serde_json::Value;
 mod reply;
 
 pub use reply::{
-    GetReply, ItemStatus, ItemsReply, ItemsTrack, ParamStatus, from_payload, to_payload,
+    BusStatus, ClickStatus, GetReply, ItemStatus, ItemsReply, ItemsTrack, LoopStatus, MasterStatus,
+    MetronomeStatus, ParamStatus, PortConnection, PositionStatus, RenderStatus, SendStatus,
+    StatusReply, TempoStatus, TrackStatus, from_payload, to_payload,
 };
 
 const BAD_BITS: &str = "bits must be 16, 24 or \"32f\"";
@@ -438,9 +440,10 @@ impl fmt::Display for BankKind {
 }
 
 /// What a Render plays: the Project from frame 0 to the end of its last Item plus the tail, or the loop region exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RenderRange {
+    #[default]
     Project,
     Loop,
 }
