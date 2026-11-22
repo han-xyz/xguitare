@@ -139,7 +139,7 @@ fn get_format() {
     let out = cli(
         &["get", "gain"],
         reply(
-            r#"{"ok":true,"params":[{"module":"gain","param":"level","value":-3.5,"unit":"dB","min":-60.0,"max":20.0},{"module":"delay","param":"mix","value":25.0,"unit":"%","min":0.0,"max":100.0},{"module":"preamp","param":"bright","value":1.0,"unit":"","min":0.0,"max":1.0}]}"#,
+            r#"{"ok":true,"params":[{"module":"gain","type":"gain","param":"level","value":-3.5,"unit":"dB","min":-60.0,"max":20.0,"default":0.0,"integer":false,"labels":[],"bypass":false},{"module":"delay","type":"delay","param":"mix","value":25.0,"unit":"%","min":0.0,"max":100.0,"default":25.0,"integer":false,"labels":[],"bypass":false},{"module":"preamp","type":"preamp","param":"bright","value":1.0,"unit":"","min":0.0,"max":1.0,"default":0.0,"integer":true,"labels":[],"bypass":false}]}"#,
         ),
     );
     assert_eq!(
@@ -153,7 +153,7 @@ fn get_format() {
     );
     assert_eq!(
         out.stdout,
-        "gain.level = -3.5 dB\ndelay.mix = 25 %\npreamp.bright = 1\n"
+        "gain.level = -3.5 dB\ngain.bypass = no\ndelay.mix = 25 %\ndelay.bypass = no\npreamp.bright = 1\npreamp.bypass = no\n"
     );
     let out = cli(&["get"], reply(r#"{"ok":true,"params":[]}"#));
     assert_eq!(
@@ -684,12 +684,12 @@ fn get_cabinet_prints_ir() {
     let out = cli(
         &["get", "cabinet"],
         reply(
-            r#"{"ok":true,"params":[{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","ir":"celestion/v30.wav"},{"module":"cabinet","type":"cabinet","param":"low_cut","value":80.0,"unit":"Hz","ir":"celestion/v30.wav"},{"module":"cab-2","type":"cabinet","param":"level","value":-1.0,"unit":"dB","ir":null}]}"#,
+            r#"{"ok":true,"params":[{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","min":-20.0,"max":20.0,"default":0.0,"integer":false,"labels":[],"bypass":false,"ir":"celestion/v30.wav"},{"module":"cabinet","type":"cabinet","param":"low_cut","value":80.0,"unit":"Hz","min":20.0,"max":500.0,"default":80.0,"integer":false,"labels":[],"bypass":false,"ir":"celestion/v30.wav"},{"module":"cab-2","type":"cabinet","param":"level","value":-1.0,"unit":"dB","min":-20.0,"max":20.0,"default":0.0,"integer":false,"labels":[],"bypass":false,"ir":null}]}"#,
         ),
     );
     assert_eq!(
         out.stdout,
-        "cabinet.level = 0 dB\ncabinet.low_cut = 80 Hz\ncabinet.ir = celestion/v30.wav\ncab-2.level = -1 dB\ncab-2.ir = none\n"
+        "cabinet.level = 0 dB\ncabinet.low_cut = 80 Hz\ncabinet.ir = celestion/v30.wav\ncabinet.bypass = no\ncab-2.level = -1 dB\ncab-2.ir = none\ncab-2.bypass = no\n"
     );
 }
 
@@ -1074,7 +1074,7 @@ fn project_items_without_sample_rate_is_an_error_line() {
     let out = cli(
         &["project", "items"],
         reply(
-            r#"{"ok":true,"tracks":[{"id":0,"name":"Guitar","items":[{"position":0,"bars_beats":"1.1","offset":0,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]}]}]}"#,
+            r#"{"ok":true,"tracks":[{"id":0,"name":"Guitar","items":[{"id":1,"position":0,"bars_beats":"1.1","offset":0,"length":96000,"take":0,"takes":["takes/guitar-1.wav"]}]}]}"#,
         ),
     );
     assert_eq!(out.stderr, "error: the items answer has no sample_rate\n");

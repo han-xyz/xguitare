@@ -1,4 +1,4 @@
-use std::fmt::Write as _;
+use std::fmt::{Display, Write as _};
 use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,8 +9,8 @@ use xguitare_client::{
     TakesCleanStopped, Transport, clean_takes_in_batches, newer_protocol_warning,
 };
 use xguitare_protocol::{
-    IndexOrName, Position, RenderBits, RenderRange, Request, Response, SILENCE_DB, SendLevel,
-    TransportAction, Value, position_frame, shown_file_name,
+    GetReply, IndexOrName, ItemsReply, Position, RenderBits, RenderRange, Request, Response,
+    SILENCE_DB, SendLevel, TransportAction, Value, from_payload, position_frame, shown_file_name,
 };
 
 use crate::{
@@ -21,6 +21,7 @@ use crate::{
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
 const BAD_DELTA: &str = "move needs <±seconds>s or <±bars>[.<beats>]";
+const NO_SAMPLE_RATE: &str = "the items answer has no sample_rate";
 
 /// What a client command needs from its surroundings besides the transport.
 pub struct CliEnv {
@@ -85,6 +86,14 @@ fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String
         Response::Ok(payload) => Ok(payload),
         Response::Err { error, .. } => Err(error),
     }
+}
+
+fn items_reply(payload: &Value) -> Result<ItemsReply, String> {
+    from_payload(payload).map_err(|error| malformed("items", &error))
+}
+
+fn malformed(answer: &str, error: &impl Display) -> String {
+    format!("the {answer} answer is malformed: {error}")
 }
 
 /// Lists the unused Take files; with `yes`, deletes them all instead and writes an `error:` line per file that could not be deleted. The exit code as [`run_cli`].
@@ -242,9 +251,7 @@ impl Timing {
         let tempo = &status["tempo"];
         let number = |value: &Value| value.as_f64().ok_or("the status answer has no tempo");
         Ok(Timing {
-            sample_rate: items["sample_rate"]
-                .as_u64()
-                .ok_or("the items answer has no sample_rate")? as u32,
+            sample_rate: items["sample_rate"].as_u64().ok_or(NO_SAMPLE_RATE)? as u32,
             tempo_bpm: number(&tempo["bpm"])?,
             beats_per_bar: number(&tempo["meter"][0])? as u32,
         })
@@ -654,7 +661,11 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
                 text(&payload["value"])
             )
         }
-        Request::Get { param, .. } => render_get(payload, param.as_deref()),
+        Request::Get { param, .. } => render_get(
+            &from_payload(payload).map_err(|error| malformed("get", &error))?,
+            param.as_deref(),
+        ),
+
         Request::Save { .. } | Request::ProjectSave => {
             format!("saved {}\n", text(&payload["path"]))
         }
@@ -698,7 +709,7 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::ProjectList => render_projects(payload),
         Request::ProjectUndo => format!("undid {}\n", text(&payload["label"])),
         Request::ProjectRedo => format!("redid {}\n", text(&payload["label"])),
-        Request::Items => render_items(payload)?,
+        Request::Items => render_items(&items_reply(payload)?)?,
         Request::TakesUnused => render_takes_unused(payload),
         Request::TakesClean { .. } => {
             let deleted = payload["deleted"].as_u64().unwrap_or(0);
@@ -795,22 +806,23 @@ fn render_projects(payload: &Value) -> String {
         .collect()
 }
 
-fn render_items(payload: &Value) -> Result<String, String> {
-    let sample_rate = payload["sample_rate"]
-        .as_f64()
-        .ok_or("the items answer has no sample_rate")?;
+fn render_items(reply: &ItemsReply) -> Result<String, String> {
+    if reply.sample_rate == 0 {
+        return Err(NO_SAMPLE_RATE.to_string());
+    }
+    let sample_rate = f64::from(reply.sample_rate);
     let mut lines = String::new();
-    for track in items(&payload["tracks"]) {
-        for item in items(&track["items"]) {
-            let seconds = item["length"].as_f64().unwrap_or(0.0) / sample_rate;
-            let take = item["take"].as_u64().unwrap_or(0) + 1;
+    for track in &reply.tracks {
+        for item in &track.items {
+            let seconds = item.length as f64 / sample_rate;
             let _ = writeln!(
                 lines,
-                "{} {} {} {seconds:.2}s take {take}/{}",
-                text(&item["id"]),
-                text(&track["name"]),
-                text(&item["bars_beats"]),
-                items(&item["takes"]).count()
+                "{} {} {} {seconds:.2}s take {}/{}",
+                item.id,
+                without_control_chars(&track.name),
+                without_control_chars(&item.bars_beats),
+                item.take + 1,
+                item.takes.len()
             );
         }
     }
@@ -955,40 +967,33 @@ fn click_text(click: &Value) -> String {
 }
 
 /// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR; then `<id>.bypass = yes|no`; a `key` naming one Parameter gets neither line.
-fn render_get(payload: &Value, key: Option<&str>) -> String {
+fn render_get(reply: &GetReply, key: Option<&str>) -> String {
     let names_one_param = key.is_some_and(|key| key.contains('.'));
-    let params: Vec<&Value> = items(&payload["params"]).collect();
     let mut lines = String::new();
-    for (index, param) in params.iter().enumerate() {
-        let module = text(&param["module"]);
+    for (index, param) in reply.params.iter().enumerate() {
+        let module = without_control_chars(&param.module);
         let line = format!(
             "{module}.{} = {} {}",
-            text(&param["param"]),
-            text(&param["value"]),
-            text(&param["unit"])
+            without_control_chars(&param.param),
+            param.value,
+            without_control_chars(&param.unit)
         );
         let _ = writeln!(lines, "{}", line.trim_end());
-        let is_last_of_module = params
+        let is_last_of_module = reply
+            .params
             .get(index + 1)
-            .is_none_or(|next| next["module"] != param["module"]);
-        if let Some(ir) = param
-            .get("ir")
-            .filter(|_| is_last_of_module && !names_one_param)
-        {
-            let name = if ir.is_null() {
-                "none".to_string()
-            } else {
-                text(ir)
-            };
+            .is_none_or(|next| next.module != param.module);
+        if !is_last_of_module || names_one_param {
+            continue;
+        }
+        if let Some(ir) = &param.ir {
+            let name = ir
+                .as_deref()
+                .map_or_else(|| "none".to_string(), without_control_chars);
             let _ = writeln!(lines, "{module}.ir = {name}");
         }
-        if let Some(bypass) = param
-            .get("bypass")
-            .filter(|_| is_last_of_module && !names_one_param)
-        {
-            let answer = if bypass == true { "yes" } else { "no" };
-            let _ = writeln!(lines, "{module}.bypass = {answer}");
-        }
+        let answer = if param.bypass { "yes" } else { "no" };
+        let _ = writeln!(lines, "{module}.bypass = {answer}");
     }
     lines
 }
