@@ -328,17 +328,39 @@ fn amp_bright_cap_favours_the_highs_at_low_gain() {
 
 #[test]
 fn amp_float_parameters_glide_to_their_value() {
+    // One period of 220 Hz past the oversampler's delay. A quiet input keeps `gain` out of
+    // saturation, and `bass` 0 shortens the tone stack's memory: a snapped `gain` leaves
+    // under 20 times the settled level there, a 5 ms glide more than 50 times.
+    let start = 16;
+    let window = start..start + 218;
     for (number, model) in models() {
-        let input = sine(0.3, FUNDAMENTAL, SAMPLE_RATE, SETTLE + 2 * common::BLOCK);
-        let mut rack = rack_with(Box::new(Amp::new()));
-        for (idx, value) in [(MODEL, number as f32), (LEVEL, 0.0)] {
-            rack.module_mut(0).set_param(idx, value);
+        for (idx, from, to) in [
+            (LEVEL, 0.0, -60.0),
+            (GAIN, 100.0, 0.0),
+            (MASTER, 100.0, 0.0),
+        ] {
+            let input = sine(0.01, FUNDAMENTAL, SAMPLE_RATE, 2 * SETTLE);
+            let mut rack = rack_with(Box::new(Amp::new()));
+            for (idx, value) in [
+                (MODEL, number as f32),
+                (LEVEL, 0.0),
+                (BASS, 0.0),
+                (idx, from),
+            ] {
+                rack.module_mut(0).set_param(idx, value);
+            }
+            run(&mut rack, &input[..SETTLE]);
+            rack.module_mut(0).set_param(idx, to);
+            let after = run(&mut rack, &input[SETTLE..]);
+            let first = rms(&after[window.clone()]);
+            let last = rms(&after[SETTLE - window.len()..]);
+            assert!(
+                first > 30.0 * last,
+                "{} {}: {first} then {last}",
+                model.name,
+                SPEC.params[idx].name
+            );
         }
-        run(&mut rack, &input[..SETTLE]);
-        rack.module_mut(0).set_param(LEVEL, -60.0);
-        let after = run(&mut rack, &input[SETTLE..]);
-        let (first, last) = (peak(&after[..8]), peak(&after[after.len() - 8..]));
-        assert!(first > 3.0 * last, "{}: {first} then {last}", model.name);
     }
 }
 
