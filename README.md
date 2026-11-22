@@ -184,7 +184,24 @@ Six more (programs 15 to 20) play the `amp` Module, each Amp model into the cabi
 - Amp Lead: `gate`, `lead` at high `gain`, 4x12.
 - Amp Modern: `gate`, `modern` at high `gain` with the mids lowered, 4x12.
 
-A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. To add them, copy the files `09-thrash.toml`, `10-djent.toml`, `11-doom.toml`, `12-buzzsaw.toml`, `13-stoner.toml`, `14-sub-octave.toml` (bass `14-synth-sub.toml`) and `15-distortion.toml` from the repository's `crates/xguitare-core/bank/` (guitar) or `crates/xguitare-core/bank-bass/` (bass) directory into your Bank directory, renumbering them if those numbers are taken; the Daemon watches the Bank directory and picks up the new files without a restart.
+A Bank created before these Presets existed does not get them: the first run only creates a missing Bank. `xguitare starters` (the Control API's `bank_starters`) adds every starter Preset whose name no Preset in the Bank has (compared case-insensitively) and every Cabinet IR they name that is found neither in the IR directory nor in the Bank directory. It never replaces a file: new Presets are numbered after the Bank's highest number, in starter order, and a Bank file that does not parse is left as it is. A starter Preset you deleted comes back on the next run. The set is that of `bank_kind` (guitar or bass), also when the config sets its own `bank_dir`. The Daemon must be running:
+
+```console
+$ xguitare starters
+added 6 presets, 4 cabinet IRs
+16-amp-tweed.toml
+17-amp-american.toml
+18-amp-chime.toml
+19-amp-crunch.toml
+20-amp-lead.toml
+21-amp-modern.toml
+cab-4x10.wav
+cab-2x12-open.wav
+cab-2x12-alnico.wav
+cab-4x12.wav
+$ xguitare starters
+nothing to add
+```
 
 The starter Presets of each Bank are matched in loudness by meter (ITU-R BS.1770 short-term loudness: −13 LUFS for guitar, −14 LUFS for bass) with 1 dB of true-peak headroom (−1 dBTP) on a test signal of plucked notes at −18 dB RMS; a few spiky Presets (bass Primus Flange, Envelope Funk and Synth Sub) sit lower so as not to pass that ceiling. A meter is a starting point and the last word is your ear, and hot playing or a hot input can still go above full scale: lower the cabinet `level` or the interface gain.
 
@@ -306,6 +323,8 @@ saved /home/you/.config/xguitare/bank/03-lead.toml
 $ xguitare save --as "My Lead Tone"
 saved /home/you/.config/xguitare/bank/04-my-lead-tone.toml
 ```
+
+`starters` adds the starter Presets and Cabinet IRs the Bank lacks, without replacing a file, and prints `added <n> presets, <m> cabinet IRs` and one line per file, or `nothing to add`; see [Presets](#presets).
 
 `modules` lists the Module types with their channels and Parameters, a choice Parameter with its choices (`mode (lp|bp|hp)`); `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, preamp, tonestack, cabinet, reverb):
 
@@ -800,7 +819,7 @@ When the audio server changes the sample rate while the Daemon runs, the Daemon 
 
 **Silent output after a tuner client died.** Mute stays on when the client that turned it on is killed before it can turn it off; `xguitare status` shows `muted: true`. Run `xguitare mute off`.
 
-**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` name, which is looked up under the IR directory (`ir_dir`) and then the Bank directory. To get the starter files back, move the Bank directory away and restart the Daemon.
+**Cabinet sounds dry, or a warning like `cabinet 'cabinet': /home/you/.config/xguitare/bank/default-cab.wav: No such file or directory (os error 2)`.** The Cabinet IR named by `ir` is missing or unreadable. The Preset still loads; that cabinet passes the signal through unchanged (mono to both outputs). Fix the `ir` name, which is looked up under the IR directory (`ir_dir`) and then the Bank directory. To get missing starter files back, run `xguitare starters`.
 
 **`ir set` answers `error: <path>: Failed to read enough bytes` or another read error.** The IR must be a 16/24/32-bit PCM or float wav with one or two channels.
 

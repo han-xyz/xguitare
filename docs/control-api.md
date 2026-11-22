@@ -295,6 +295,36 @@ Errors:
 | `cannot save <path>: file exists` | With `as`: files appeared at the new file's name and the seven numbers after it while saving. |
 | `cannot save <path>: <reason>` | Writing or renaming the file, or with `as` reading the Bank directory again, failed. |
 
+## bank_starters
+
+Adds the starter Presets and Cabinet IRs of the configured `bank_kind` that the Bank lacks, and reads the Bank again. A starter Preset is missing when no valid Preset in the Bank has its `name`, compared case-insensitively as `save` with `as` compares; a Bank file that does not parse has no name, does not count and is left as it is. Each missing Preset is written as a new file the way `save` with `as` writes one, `<NN>-<slug>.toml` with `NN` counted on from the Bank's highest number, in starter order. A Cabinet IR that a starter Preset of that kind names is missing when it is found neither under the IR directory (`ir_dir`) nor in the Bank directory; it is synthesized at 48 kHz and written into the Bank directory as a temp file linked into place. An existing file is never replaced.
+
+Two consequences: a starter Preset the user deleted comes back on the next `bank_starters`; and `bank_kind` decides which starters are added, also when the config sets its own `bank_dir`.
+
+Request:
+
+```json
+{"cmd":"bank_starters"}
+```
+
+Response:
+
+```json
+{"ok":true,"presets":["16-amp-tweed.toml","17-amp-american.toml"],"irs":["cab-4x10.wav"]}
+```
+
+| Key | Value |
+| --- | --- |
+| `presets` | The file names of the Presets written, in starter order; `[]` when none was missing. |
+| `irs` | The file names of the Cabinet IRs written; `[]` when none was missing. |
+
+Errors:
+
+| `error` | When |
+| --- | --- |
+| `cannot write <path>: <reason>` | Writing the Preset or Cabinet IR at `<path>` failed. The files written before it stay and no partial file is left; the next `bank_starters` adds the rest. |
+| `cannot read <dir>: <reason>` | The Bank directory cannot be read. |
+
 ## modules
 
 Lists the Module types a Preset can use, in registry order.
