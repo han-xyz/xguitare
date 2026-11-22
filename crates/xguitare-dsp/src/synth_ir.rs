@@ -22,6 +22,46 @@ const BASS: Shape = Shape {
     resonances_hz: [60.0, 1_200.0],
 };
 
+const CAB_4X10: Shape = Shape {
+    length_s: 0.1,
+    decay_to_minus_60_db_s: 0.08,
+    low_cut_hz: 95.0,
+    high_cut_hz: 5_500.0,
+    resonances_hz: [100.0, 3_000.0],
+};
+
+const CAB_2X12_OPEN: Shape = Shape {
+    length_s: 0.1,
+    decay_to_minus_60_db_s: 0.08,
+    low_cut_hz: 100.0,
+    high_cut_hz: 6_000.0,
+    resonances_hz: [110.0, 3_500.0],
+};
+
+const CAB_2X12_ALNICO: Shape = Shape {
+    length_s: 0.1,
+    decay_to_minus_60_db_s: 0.08,
+    low_cut_hz: 85.0,
+    high_cut_hz: 5_500.0,
+    resonances_hz: [90.0, 2_800.0],
+};
+
+const CAB_4X12: Shape = Shape {
+    length_s: 0.1,
+    decay_to_minus_60_db_s: 0.08,
+    low_cut_hz: 75.0,
+    high_cut_hz: 5_000.0,
+    resonances_hz: [100.0, 2_200.0],
+};
+
+const BASS_CAB_8X10: Shape = Shape {
+    length_s: 0.12,
+    decay_to_minus_60_db_s: 0.1,
+    low_cut_hz: 55.0,
+    high_cut_hz: 4_000.0,
+    resonances_hz: [70.0, 1_500.0],
+};
+
 /// Returns the synthesized default cabinet IR at `sample_rate`: 100 ms mono, peak at −3 dBFS, the same samples on every call.
 pub fn default_cabinet(sample_rate: u32) -> Vec<f32> {
     synthesize(&GUITAR, sample_rate)
@@ -30,6 +70,31 @@ pub fn default_cabinet(sample_rate: u32) -> Vec<f32> {
 /// Returns the synthesized bass cabinet IR at `sample_rate`: 120 ms mono, band-passed 40 Hz..3 kHz, peak at −3 dBFS, the same samples on every call.
 pub fn bass_cabinet(sample_rate: u32) -> Vec<f32> {
     synthesize(&BASS, sample_rate)
+}
+
+/// Returns the synthesized 4x10 cabinet IR at `sample_rate`: 100 ms mono, band-passed 95 Hz..5.5 kHz, peak at −3 dBFS, the same samples on every call.
+pub fn cabinet_4x10(sample_rate: u32) -> Vec<f32> {
+    synthesize(&CAB_4X10, sample_rate)
+}
+
+/// Returns the synthesized open-back 2x12 cabinet IR at `sample_rate`: 100 ms mono, band-passed 100 Hz..6 kHz, peak at −3 dBFS, the same samples on every call.
+pub fn cabinet_2x12_open(sample_rate: u32) -> Vec<f32> {
+    synthesize(&CAB_2X12_OPEN, sample_rate)
+}
+
+/// Returns the synthesized alnico 2x12 cabinet IR at `sample_rate`: 100 ms mono, band-passed 85 Hz..5.5 kHz, peak at −3 dBFS, the same samples on every call.
+pub fn cabinet_2x12_alnico(sample_rate: u32) -> Vec<f32> {
+    synthesize(&CAB_2X12_ALNICO, sample_rate)
+}
+
+/// Returns the synthesized closed-back 4x12 cabinet IR at `sample_rate`: 100 ms mono, band-passed 75 Hz..5 kHz, peak at −3 dBFS, the same samples on every call.
+pub fn cabinet_4x12(sample_rate: u32) -> Vec<f32> {
+    synthesize(&CAB_4X12, sample_rate)
+}
+
+/// Returns the synthesized 8x10 bass cabinet IR at `sample_rate`: 120 ms mono, band-passed 55 Hz..4 kHz, peak at −3 dBFS, the same samples on every call.
+pub fn bass_cabinet_8x10(sample_rate: u32) -> Vec<f32> {
+    synthesize(&BASS_CAB_8X10, sample_rate)
 }
 
 struct Shape {

@@ -1,5 +1,8 @@
 use realfft::RealFftPlanner;
-use xguitare_dsp::synth_ir::{bass_cabinet, default_cabinet};
+use xguitare_dsp::synth_ir::{
+    bass_cabinet, bass_cabinet_8x10, cabinet_2x12_alnico, cabinet_2x12_open, cabinet_4x10,
+    cabinet_4x12, default_cabinet,
+};
 
 const RATE: u32 = 48_000;
 
@@ -95,6 +98,55 @@ fn bass_energy_below_3khz() {
 #[test]
 fn bass_deterministic() {
     assert_eq!(bass_cabinet(RATE), bass_cabinet(RATE));
+}
+
+type Synthesize = fn(u32) -> Vec<f32>;
+
+const NEW_SHAPES: [(&str, Synthesize, usize); 5] = [
+    ("cabinet_4x10", cabinet_4x10, 4_800),
+    ("cabinet_2x12_open", cabinet_2x12_open, 4_800),
+    ("cabinet_2x12_alnico", cabinet_2x12_alnico, 4_800),
+    ("cabinet_4x12", cabinet_4x12, 4_800),
+    ("bass_cabinet_8x10", bass_cabinet_8x10, 5_760),
+];
+
+#[test]
+fn new_shapes_are_deterministic() {
+    for (name, shape, _) in NEW_SHAPES {
+        assert_eq!(shape(RATE), shape(RATE), "{name}");
+    }
+}
+
+#[test]
+fn new_shapes_peak_at_minus_3dbfs() {
+    for (name, shape, _) in NEW_SHAPES {
+        let peak = shape(RATE).iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let peak_db = 20.0 * peak.log10();
+        assert!((peak_db + 3.0).abs() <= 0.1, "{name}: peak {peak_db} dBFS");
+    }
+}
+
+#[test]
+fn new_shapes_have_their_length() {
+    for (name, shape, frames) in NEW_SHAPES {
+        assert_eq!(shape(RATE).len(), frames, "{name}");
+    }
+}
+
+#[test]
+fn every_shape_differs_from_the_others() {
+    let shapes: Vec<(&str, Vec<f32>)> = [
+        ("default_cabinet", default_cabinet(RATE)),
+        ("bass_cabinet", bass_cabinet(RATE)),
+    ]
+    .into_iter()
+    .chain(NEW_SHAPES.map(|(name, shape, _)| (name, shape(RATE))))
+    .collect();
+    for (idx, (name, ir)) in shapes.iter().enumerate() {
+        for (other_name, other) in &shapes[idx + 1..] {
+            assert_ne!(ir, other, "{name} equals {other_name}");
+        }
+    }
 }
 
 fn fnv1a(samples: &[f32]) -> u64 {
