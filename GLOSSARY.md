@@ -9,7 +9,7 @@ The ordered list of Modules a signal passes through, from guitar input to stereo
 _Avoid_: chain, pipeline, graph, signal path
 
 **Module**:
-One sound-shaping unit in a Rack with a fixed set of Parameters: gate, compressor, gain, drive, fuzz, preamp, tonestack, cabinet, delay, chorus, flanger, reverb.
+One sound-shaping unit in a Rack with a fixed set of Parameters: gate, compressor, gain, drive, fuzz, amp, preamp, tonestack, cabinet, delay, chorus, flanger, reverb.
 _Avoid_: effect, plugin, node, block, stomp
 
 **Parameter**:
@@ -27,6 +27,10 @@ _Avoid_: set list, library, collection
 **Cabinet IR**:
 An impulse response audio file that the cabinet Module convolves the signal with, named in a Preset by its path under the IR directory (or the Bank directory).
 _Avoid_: cab sim, speaker model, IR file
+
+**Amp model**:
+One entry of the `amp` Module's table: the circuit facts of one amplifier family (gain stages, tone stack, power amp), chosen by the `model` Parameter.
+_Avoid_: amp sim, profile, capture, voice
 
 **IR directory**:
 The directory a Preset's Cabinet IR names are looked up in; the Bank directory unless the config names another.

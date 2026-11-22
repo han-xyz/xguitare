@@ -134,6 +134,7 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `drive` | `drive` 0..100 50 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `blend` | `blend` 0..100 100 %, `drive` 0..100 40 %, `level` −24..12 0 dB, `bass` −12..12 0 dB, `bass_freq` 40 Hz\|80 Hz 1, `mid` −12..12 0 dB, `mid_freq` 500 Hz\|1000 Hz 0, `treble` −12..12 0 dB, `presence` 0..100 50 %, `crossover` 20..400 20 Hz |
+| `amp` | `model` tweed\|american 0, `gain` 0..100 50 %, `bass`, `middle`, `treble` 0..100 50 %, `presence` 0..100 50 %, `master` 0..100 50 %, `level` −60..12 −12 dB |
 | `preamp` | `gain` 0..100 40 %, `bias` −1..1 0, `master` −60..0 −12 dB, `stages` 1..4 3 |
 | `tonestack` | `bass`, `middle`, `treble` 0..100 50 % |
 | `eq` | `low_cut` 10..300 10 Hz, `low_freq` 20..500 100 Hz, `low_gain` −15..15 0 dB, `mid1_freq` 40..5000 400 Hz, `mid1_gain` −15..15 0 dB, `mid1_q` 0.3..10 0.707, `mid2_freq` 200..10000 2500 Hz, `mid2_gain` −15..15 0 dB, `mid2_q` 0.3..10 0.707, `high_freq` 1000..20000 8000 Hz, `high_gain` −15..15 0 dB, `high_cut` 1000..20000 20000 Hz, `output` −12..12 0 dB |
@@ -144,6 +145,13 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `flanger` | `rate` 0.05..5 0.3 Hz, `depth` 0..100 60 %, `feedback` −95..95 50 %, `mix` 0..100 50 % |
 | `reverb` | `size` 0..100 50 %, `damping` 0..100 50 %, `mix` 0..100 20 %, `width` 0..100 100 % |
 | `gain` | `level` −60..20 0 dB |
+
+`amp` is a whole amplifier in one Module: gain stages, the `gain` pot, a passive tone stack and the `master`, run at 4x oversampling. `model` chooses the Amp model; a Preset stores its number, and models are only ever added at the end, so a number keeps its amp. `master` is for now a plain output gain and `presence` does nothing yet; the power amp they drive is still to come.
+
+| Amp model | Follows | Notes |
+| --- | --- | --- |
+| `tweed` (0) | Fender Bassman 5F6-A | Tone stack values from the schematic; bright cap on `gain`, so low `gain` settings are brighter. Stage gains and low-pass corners are voiced, not measured. |
+| `american` (1) | Fender blackface AB763 | Tone stack values from the schematic; clean at default settings. The real amp has no presence pot. Stage gains and low-pass corners are voiced, not measured. |
 
 Bank numbering: every `*.toml` file in the Bank directory, sorted by file name, numbered from 0. That number is the program number for `load` and for MIDI; prefix file names with `01-`, `02-`, ... to fix the order. A file that does not parse keeps its number and shows in `list` with `!` and the error.
 
