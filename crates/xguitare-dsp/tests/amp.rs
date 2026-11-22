@@ -458,3 +458,47 @@ fn amp_sag_lowers_a_held_note() {
         }
     }
 }
+
+fn onset_peak(output: &[f32]) -> f32 {
+    let start = output.iter().position(|s| s.abs() > 1e-3 * peak(output));
+    let start = start.unwrap();
+    peak(&output[start..start + common::frames(1.5)])
+}
+
+// Over the first 1.5 ms the sag has not yet built up, and the earlier stages are linear at
+// -20 dBFS and `gain` 10, so the ratio to the linear prediction is the shaper's alone: a
+// `tanh` shaper gives about 0.83 at this drive, a hard clip about 1.
+#[test]
+fn amp_shaper_knee_hardens_with_feedback() {
+    const TARGET_DB: f32 = -3.0;
+    const TANH_RATIO: f32 = 0.83;
+    const MASTER_DB_PER_PERCENT: f32 = 0.42;
+    let input = sine(
+        linear(-20.0),
+        BURST_FREQ,
+        SAMPLE_RATE,
+        common::frames(300.0),
+    );
+    for (number, model) in models() {
+        let at = |master: f32| {
+            let settings = [
+                (MODEL, number as f32),
+                (GAIN, 10.0),
+                (MASTER, master),
+                (LEVEL, 0.0),
+            ];
+            onset_peak(&amp_output(&settings, &input))
+        };
+        let master = (TARGET_DB - db(at(0.0))) / MASTER_DB_PER_PERCENT;
+        assert!(master <= 100.0, "{}: master {master}", model.name);
+        let ratio = at(master) / linear(TARGET_DB);
+        let feedback = model.power.feedback;
+        let lower = TANH_RATIO + 0.75 * feedback * (1.0 - TANH_RATIO);
+        let upper = TANH_RATIO + (feedback + 0.3) * (1.0 - TANH_RATIO);
+        assert!(
+            (lower..=upper).contains(&ratio),
+            "{}: feedback {feedback}, ratio {ratio} outside {lower}..{upper}",
+            model.name
+        );
+    }
+}
