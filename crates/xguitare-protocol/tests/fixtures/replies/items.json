@@ -1,0 +1,1 @@
+{"ok":true,"sample_rate":48000,"tracks":[{"id":0,"items":[{"bars_beats":"2.1","id":1,"length":2000,"offset":100,"position":96000,"take":0,"take_frames":4800,"takes":["takes/guitar-1.wav"]}],"name":"Guitar"},{"id":1,"items":[],"name":"Bass"}]}

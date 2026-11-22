@@ -1,0 +1,1 @@
+{"ok":true,"params":[{"bypass":false,"default":0.0,"integer":true,"labels":["lp","bp","hp"],"max":2.0,"min":0.0,"module":"autowah","param":"mode","type":"autowah","unit":"","value":0.0}]}

@@ -1,0 +1,1 @@
+{"ok":true,"params":[{"bypass":false,"default":0.0,"integer":false,"labels":[],"max":20.0,"min":-60.0,"module":"gain","param":"level","type":"gain","unit":"dB","value":-3.0}]}

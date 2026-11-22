@@ -1,0 +1,1 @@
+{"ok":true,"params":[{"bypass":false,"default":0.0,"integer":false,"ir":"ir.wav","labels":[],"max":20.0,"min":-20.0,"module":"cabinet","param":"level","type":"cabinet","unit":"dB","value":0.0}]}
