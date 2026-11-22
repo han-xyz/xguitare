@@ -839,35 +839,40 @@ pub(crate) fn track_select(state: &mut EngineState, track: &TrackRef) -> Result<
 pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
     let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
     let project = &open.project;
-    let tracks: Vec<Value> = project
+    let tracks = project
         .tracks
         .iter()
         .zip(&open.track_ids)
-        .map(|(track, id)| {
-            let items: Vec<Value> = track
+        .map(|(track, id)| xguitare_protocol::ItemsTrack {
+            id: *id,
+            name: track.name.clone(),
+            items: track
                 .items
                 .iter()
                 .map(|item| item_json(project, item))
-                .collect();
-            json!({"id": id, "name": track.name, "items": items})
+                .collect(),
         })
         .collect();
-    Ok(json!({"sample_rate": project.sample_rate, "tracks": tracks}))
+    Ok(xguitare_protocol::to_payload(
+        &xguitare_protocol::ItemsReply {
+            sample_rate: project.sample_rate,
+            tracks,
+        },
+    ))
 }
 
 /// An Item as `items` lists it.
-pub(crate) fn item_json(project: &Project, item: &Item) -> Value {
-    let files: Vec<&str> = item.takes.iter().map(|take| take.file.as_str()).collect();
-    json!({
-        "id": item.id,
-        "position": item.position,
-        "bars_beats": bars_beats(project, item.position),
-        "offset": item.offset,
-        "length": item.played_frames(),
-        "take": item.take,
-        "takes": files,
-        "take_frames": item.takes.get(item.take).map(|take| take.frames),
-    })
+pub(crate) fn item_json(project: &Project, item: &Item) -> xguitare_protocol::ItemStatus {
+    xguitare_protocol::ItemStatus {
+        id: item.id,
+        position: item.position,
+        bars_beats: bars_beats(project, item.position),
+        offset: item.offset,
+        length: item.played_frames(),
+        take: item.take,
+        takes: item.takes.iter().map(|take| take.file.clone()).collect(),
+        take_frames: item.takes.get(item.take).map(|take| take.frames),
+    }
 }
 
 /// The open Project and its selected Track, for an Item edit; refused while recording.

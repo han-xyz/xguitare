@@ -6,7 +6,7 @@ use crate::project_control::{
     clipboard, edit_items, editable_project, fill_clipboard, gone_take_file, item_json,
 };
 use crate::project_state::{CopiedItem, current_project, resolve_track};
-use xguitare_protocol::TrackRef;
+use xguitare_protocol::{TrackRef, to_payload};
 
 const NO_ITEMS: &str = "give at least one item";
 const CLIPBOARD_EMPTY: &str = "clipboard is empty";
@@ -342,7 +342,7 @@ fn changed(project: &Project, ids: &[u64]) -> Value {
         .iter()
         .filter_map(|&id| find(project, id).ok())
         .map(|(track, index)| {
-            let mut item = item_json(project, &project.tracks[track].items[index]);
+            let mut item = to_payload(&item_json(project, &project.tracks[track].items[index]));
             item["track"] = json!(track);
             item
         })

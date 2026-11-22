@@ -1,7 +1,13 @@
-use serde_json::json;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 use xguitare_protocol::{
-    BankKind, CODE_STILL_CLOSING, IndexOrName, LoopRegion, PROTOCOL_VERSION, Position, RenderBits,
-    RenderRange, Request, Response, SendLevel, TransportAction, position_frame, shown_file_name,
+    BankKind, CODE_STILL_CLOSING, GetReply, IndexOrName, ItemStatus, ItemsReply, LoopRegion,
+    PROTOCOL_VERSION, ParamStatus, Position, RenderBits, RenderRange, Request, Response, SendLevel,
+    TransportAction, from_payload, position_frame, shown_file_name, to_payload,
 };
 
 fn name(text: &str) -> IndexOrName {
@@ -614,4 +620,102 @@ fn an_error_with_a_code_of_another_shape_parses_as_an_error_with_its_text() {
         serde_json::to_string(&Response::err("boom")).unwrap(),
         r#"{"ok":false,"error":"boom"}"#
     );
+}
+
+fn fixture_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/replies")
+}
+
+/// The payload of every fixture whose name starts with `prefix`, by file name.
+fn fixtures(prefix: &str) -> Vec<(String, Value)> {
+    let mut found: Vec<(String, Value)> = fs::read_dir(fixture_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with(prefix)
+        })
+        .map(|path| {
+            let line = fs::read_to_string(&path).unwrap();
+            let Response::Ok(payload) = Response::from_line(line.trim_end()).unwrap() else {
+                panic!("{} holds an error reply", path.display());
+            };
+            (path.display().to_string(), payload)
+        })
+        .collect();
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found
+}
+
+fn assert_round_trips<T: Serialize + DeserializeOwned>(prefix: &str, count: usize) {
+    let found = fixtures(prefix);
+    assert_eq!(found.len(), count, "fixtures named {prefix}*");
+    for (file, payload) in found {
+        let reply: T = from_payload(&payload).unwrap();
+        assert_eq!(to_payload(&reply), payload, "{file}");
+    }
+}
+
+#[test]
+fn every_get_and_items_fixture_round_trips_through_its_struct() {
+    assert_round_trips::<GetReply>("get-", 4);
+    assert_round_trips::<ItemsReply>("items", 1);
+}
+
+#[test]
+fn a_cabinet_without_an_ir_keeps_ir_null_and_other_modules_leave_it_out() {
+    let payload = json!({"params": [
+        {"module": "cabinet", "type": "cabinet", "param": "level", "value": 0.0, "unit": "dB",
+         "min": -20.0, "max": 20.0, "default": 0.0, "integer": false, "labels": [], "bypass": false, "ir": null},
+        {"module": "gain", "type": "gain", "param": "level", "value": 0.0, "unit": "dB",
+         "min": -60.0, "max": 20.0, "default": 0.0, "integer": false, "labels": [], "bypass": false},
+    ]});
+    let reply: GetReply = from_payload(&payload).unwrap();
+    assert_eq!(reply.params[0].ir, Some(None));
+    assert_eq!(reply.params[1].ir, None);
+    assert_eq!(to_payload(&reply), payload);
+}
+
+#[test]
+fn an_item_without_a_take_keeps_take_frames_null() {
+    let payload = json!({"id": 4, "position": 0, "bars_beats": "1.1", "offset": 0, "length": 0,
+        "take": 0, "takes": [], "take_frames": null});
+    let item: ItemStatus = from_payload(&payload).unwrap();
+    assert_eq!(item.take_frames, None);
+    assert_eq!(to_payload(&item), payload);
+}
+
+#[test]
+fn replies_with_extra_keys_at_top_level_and_nested_deserialise() {
+    let get = json!({"params": [{"module": "gain", "param": "level", "value": 1.5, "hint": "red"}],
+        "from_a_newer_daemon": 1});
+    let reply: GetReply = from_payload(&get).unwrap();
+    assert_eq!(reply.params[0].value, 1.5);
+    let items = json!({"sample_rate": 48000, "extra": true,
+        "tracks": [{"id": 0, "name": "Guitar", "colour": "red",
+            "items": [{"id": 1, "take_frames": 10, "fade": 3}]}]});
+    let reply: ItemsReply = from_payload(&items).unwrap();
+    assert_eq!(reply.tracks[0].items[0].take_frames, Some(10));
+}
+
+#[test]
+fn a_reply_missing_keys_deserialises_to_the_defaults() {
+    assert_eq!(
+        from_payload::<GetReply>(&json!({})).unwrap(),
+        GetReply::default()
+    );
+    let param: ParamStatus = from_payload(&json!({"module": "gain"})).unwrap();
+    assert_eq!(
+        param,
+        ParamStatus {
+            module: "gain".to_string(),
+            ..ParamStatus::default()
+        }
+    );
+    let items: ItemsReply = from_payload(&json!({"tracks": [{"items": [{}]}]})).unwrap();
+    assert_eq!(items.sample_rate, 0);
+    assert_eq!(items.tracks[0].items[0], ItemStatus::default());
 }

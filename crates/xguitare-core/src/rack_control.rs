@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use xguitare_dsp::{Channels, ParamSpec, Rack, Unit};
+use xguitare_protocol::{GetReply, ParamStatus, to_payload};
 
 use crate::atomic_file::{slug, write_new, write_through};
 use crate::build::{ENGINE_BUSY, build_rack, swap_rack};
@@ -514,33 +515,30 @@ pub(crate) fn get(
                 .collect()
         }
     };
-    let params: Vec<Value> = selected
+    let params = selected
         .into_iter()
-        .map(|(module, param)| param_json(&preset.modules[module], param))
+        .map(|(module, param)| param_status(&preset.modules[module], param))
         .collect();
-    Ok(json!({ "params": params }))
+    Ok(to_payload(&GetReply { params }))
 }
 
-fn param_json(module: &PresetModule, param: usize) -> Value {
+fn param_status(module: &PresetModule, param: usize) -> ParamStatus {
     let spec = param_spec(module, param);
     let (name, value) = &module.params[param];
-    let mut entry = json!({
-        "module": module.id,
-        "type": module.type_name,
-        "param": name,
-        "value": shortest_f64(*value),
-        "unit": unit_text(spec.unit),
-        "min": shortest_f64(spec.min),
-        "max": shortest_f64(spec.max),
-        "default": shortest_f64(spec.default),
-        "integer": spec.integer,
-        "labels": spec.labels,
-        "bypass": module.bypass,
-    });
-    if module.type_name == CABINET_TYPE {
-        entry["ir"] = json!(module.ir);
+    ParamStatus {
+        module: module.id.clone(),
+        type_name: module.type_name.clone(),
+        param: name.clone(),
+        value: shortest_f64(*value),
+        unit: unit_text(spec.unit).to_string(),
+        min: shortest_f64(spec.min),
+        max: shortest_f64(spec.max),
+        default: shortest_f64(spec.default),
+        integer: spec.integer,
+        labels: spec.labels.iter().map(ToString::to_string).collect(),
+        bypass: module.bypass,
+        ir: (module.type_name == CABINET_TYPE).then(|| module.ir.clone()),
     }
-    entry
 }
 
 fn param_spec(module: &PresetModule, param: usize) -> &'static ParamSpec {

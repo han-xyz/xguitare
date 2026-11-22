@@ -8,6 +8,12 @@ use serde_json::Map;
 
 pub use serde_json::Value;
 
+mod reply;
+
+pub use reply::{
+    GetReply, ItemStatus, ItemsReply, ItemsTrack, ParamStatus, from_payload, to_payload,
+};
+
 const BAD_BITS: &str = "bits must be 16, 24 or \"32f\"";
 const FLOAT_BITS: &str = "32f";
 const BAD_POSITION: &str = "position must be <bar>.<beat> or <seconds>s";

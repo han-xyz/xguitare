@@ -217,6 +217,8 @@ Response:
 {"ok":true,"params":[{"bypass":false,"default":40.0,"integer":false,"labels":[],"max":100.0,"min":0.0,"module":"preamp","param":"gain","type":"preamp","unit":"%","value":100.0}]}
 ```
 
+The reply is `GetReply` in `xguitare-protocol`, each `params` entry a `ParamStatus`.
+
 | Key | Value |
 | --- | --- |
 | `params` | The selected Parameters in Rack order, then Parameter order. |
@@ -832,6 +834,8 @@ Response:
 ```json
 {"ok":true,"sample_rate":48000,"tracks":[{"id":0,"name":"Guitar","items":[{"id":3,"position":96000,"bars_beats":"2.1","offset":0,"length":192000,"take":1,"takes":["takes/guitar-1.wav","takes/guitar-2.wav"],"take_frames":192000}]},{"id":1,"name":"Bass","items":[]}]}
 ```
+
+The reply is `ItemsReply` in `xguitare-protocol`, each `tracks` entry an `ItemsTrack` and each Item an `ItemStatus`.
 
 | Key | Value |
 | --- | --- |
