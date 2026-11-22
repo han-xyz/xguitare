@@ -23,6 +23,7 @@ const MASTER_MIN_DB: f32 = -30.0;
 const MASTER_RANGE_DB: f32 = 42.0;
 const BRIGHT_MAX_BOOST: f32 = 3.0;
 const PRESENCE_MAX_DB: f32 = 12.0;
+const PRESENCE_STEP_FRAMES: usize = 32;
 const PRESENCE_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
 const RESONANCE_MAX_DB: f32 = 4.0;
 const RESONANCE_Q: f32 = 1.0;
@@ -253,45 +254,48 @@ impl Module for Amp {
             2.0 * f64::from(self.oversampled_rate),
         );
         let model = self.model;
-        let presence = SvfCoefficients::high_shelf(
-            model.power.presence_hz,
-            PRESENCE_Q,
-            PRESENCE_MAX_DB * self.presence.advance(frames),
-            self.oversampled_rate,
-        );
         let feedback = model.power.feedback;
         let mono = &mut io.mono[..frames];
         for sample in mono.iter_mut() {
             *sample *= self.fade;
             self.fade = (self.fade + self.fade_step).min(1.0);
         }
-        for sample in self.oversampler.upsample(mono) {
-            let pot = self.pot.next_value();
-            let bright_boost = self.bright_boost.next_value();
-            let master = self.master.next_value();
-            let mut x = *sample;
-            for (idx, filters) in self.stages[..model.stages.len()].iter_mut().enumerate() {
-                x = filters.process(x);
-                if idx == 0 {
-                    x = pot * (x + bright_boost * self.bright.high_pass(x));
+        let upsampled = self.oversampler.upsample(mono);
+        for chunk in upsampled.chunks_mut(PRESENCE_STEP_FRAMES * OVERSAMPLING as usize) {
+            let presence = SvfCoefficients::high_shelf(
+                model.power.presence_hz,
+                PRESENCE_Q,
+                PRESENCE_MAX_DB * self.presence.advance(chunk.len() / OVERSAMPLING as usize),
+                self.oversampled_rate,
+            );
+            for sample in chunk {
+                let pot = self.pot.next_value();
+                let bright_boost = self.bright_boost.next_value();
+                let master = self.master.next_value();
+                let mut x = *sample;
+                for (idx, filters) in self.stages[..model.stages.len()].iter_mut().enumerate() {
+                    x = filters.process(x);
+                    if idx == 0 {
+                        x = pot * (x + bright_boost * self.bright.high_pass(x));
+                    }
+                    if idx == model.stack_after {
+                        x = fmv::step(&coefficients, &mut self.stack_state, f64::from(x)) as f32;
+                    }
                 }
-                if idx == model.stack_after {
-                    x = fmv::step(&coefficients, &mut self.stack_state, f64::from(x)) as f32;
+                x = self.presence_filter.process(&presence, x);
+                if let Some(resonance) = &self.resonance {
+                    x = self.resonance_filter.process(resonance, x);
                 }
+                let sag = 1.0 - self.sag_depth * self.sag_envelope.min(1.0);
+                let y = push_pull(sag * master * x, feedback);
+                let rate = if y.abs() > self.sag_envelope {
+                    self.sag_attack
+                } else {
+                    self.sag_release
+                };
+                self.sag_envelope += rate * (y.abs() - self.sag_envelope);
+                *sample = OUTPUT_GAIN * y;
             }
-            x = self.presence_filter.process(&presence, x);
-            if let Some(resonance) = &self.resonance {
-                x = self.resonance_filter.process(resonance, x);
-            }
-            let sag = 1.0 - self.sag_depth * self.sag_envelope.min(1.0);
-            let y = push_pull(sag * master * x, feedback);
-            let rate = if y.abs() > self.sag_envelope {
-                self.sag_attack
-            } else {
-                self.sag_release
-            };
-            self.sag_envelope += rate * (y.abs() - self.sag_envelope);
-            *sample = OUTPUT_GAIN * y;
         }
         self.oversampler.downsample(mono);
 

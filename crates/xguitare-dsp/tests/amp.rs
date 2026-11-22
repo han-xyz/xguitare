@@ -522,3 +522,47 @@ fn amp_power_amp_holds_its_clip_for_a_hot_input() {
         );
     }
 }
+
+fn run_in_blocks(rack: &mut xguitare_dsp::Rack, input: &[f32], block: usize) -> Vec<f32> {
+    let mut left = vec![0.0; input.len()];
+    let mut right = vec![0.0; block];
+    for (chunk, out) in input.chunks(block).zip(left.chunks_mut(block)) {
+        rack.process(chunk, out, &mut right[..chunk.len()]);
+    }
+    left
+}
+
+#[test]
+fn amp_presence_glides_in_long_blocks() {
+    const LONG_BLOCK: usize = 1024;
+    const CHANGE: usize = 12 * LONG_BLOCK;
+    let input = sine(0.05, 2000.0, SAMPLE_RATE, 4 * CHANGE);
+    for (number, model) in models() {
+        let rack_at = |presence: f32| {
+            let mut rack = rack_with(Box::new(Amp::new()));
+            rack.prepare(SAMPLE_RATE, LONG_BLOCK);
+            for (idx, value) in [
+                (MODEL, number as f32),
+                (GAIN, 30.0),
+                (MASTER, 30.0),
+                (LEVEL, 0.0),
+                (PRESENCE, presence),
+            ] {
+                rack.module_mut(0).set_param(idx, value);
+            }
+            rack.module_mut(0).reset();
+            rack
+        };
+        let mut gliding = rack_at(0.0);
+        run_in_blocks(&mut gliding, &input[..CHANGE], LONG_BLOCK);
+        gliding.module_mut(0).set_param(PRESENCE, 100.0);
+        let after = run_in_blocks(&mut gliding, &input[CHANGE..], LONG_BLOCK);
+        let steady = run_in_blocks(&mut rack_at(100.0), &input, LONG_BLOCK);
+        let (step, steady_step) = (largest_step(&after), largest_step(&steady[CHANGE..]));
+        assert!(
+            step <= 1.2 * steady_step,
+            "{}: step {step}, steady {steady_step}",
+            model.name
+        );
+    }
+}
