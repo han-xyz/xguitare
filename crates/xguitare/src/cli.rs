@@ -11,7 +11,7 @@ use xguitare_client::{
 use xguitare_protocol::{
     GetReply, IndexOrName, ItemsReply, MetronomeStatus, Position, RenderBits, RenderRange, Request,
     Response, SILENCE_DB, SendLevel, StatusReply, TransportAction, Value, from_payload,
-    position_frame, shown_file_name, to_payload,
+    position_frame, shown_file_name,
 };
 
 use crate::{
@@ -216,7 +216,7 @@ fn render_and_wait(
         let job = status_reply(&request(transport, &Request::Status)?)?.render;
         match job.as_ref().map(|job| job.state.as_str()) {
             Some("running") => {
-                let progress = job.as_ref().map_or(0.0, |job| f64::from(job.progress));
+                let progress = job.as_ref().map_or(0.0, |job| job.progress);
                 let now = (progress * 10.0).floor() as u32;
                 if now > tenths {
                     tenths = now;
@@ -1057,12 +1057,12 @@ fn render_status(status: &StatusReply) -> String {
     );
     let _ = writeln!(lines, "project: {}", shown(status.project.as_deref()));
     if let Some(job) = &status.render {
-        let percent = (f64::from(job.progress) * 100.0).round();
+        let percent = (job.progress * 100.0).round();
         let _ = write!(
             lines,
             "render: {} ({}) {} {percent}% {}",
             without_control_chars(&job.name),
-            text(&to_payload(&job.range)),
+            render_range_text(job.range),
             without_control_chars(&job.state),
             without_control_chars(&job.file)
         );
@@ -1136,7 +1136,7 @@ fn render_project_status(lines: &mut String, status: &StatusReply) {
     let _ = writeln!(
         lines,
         "master: {} dB; {}",
-        or_dash(master.and_then(|master| master.volume_db).map(f64::from)),
+        or_dash(master.and_then(|master| master.volume_db)),
         out_text(
             master.map_or([None, None], |master| master.peak_db),
             master.is_some_and(|master| master.clip)
@@ -1175,8 +1175,8 @@ fn render_tracks(lines: &mut String, status: &StatusReply) {
             "  {index}{selected} {}: {flags}; input {}; {} dB, pan {}; peak {peak:.1} dB; {}",
             without_control_chars(&track.name),
             shown(track.input.as_deref()),
-            or_dash(track.volume_db.map(f64::from)),
-            f64::from(track.pan),
+            or_dash(track.volume_db),
+            track.pan,
             out_text(track.peak_db, track.clip),
         );
         for send in &track.sends {
@@ -1185,7 +1185,7 @@ fn render_tracks(lines: &mut String, status: &StatusReply) {
                 lines,
                 "      send {}: {} dB, {}",
                 shown(bus),
-                f64::from(send.level_db),
+                send.level_db,
                 pre_text(send.pre)
             );
         }
@@ -1209,8 +1209,8 @@ fn render_buses(lines: &mut String, status: &StatusReply) {
             lines,
             "  {index} {}: {flags}; {} dB, pan {}; {}",
             without_control_chars(&bus.name),
-            or_dash(bus.volume_db.map(f64::from)),
-            f64::from(bus.pan),
+            or_dash(bus.volume_db),
+            bus.pan,
             out_text(bus.peak_db, bus.clip),
         );
     }
@@ -1223,9 +1223,15 @@ fn out_text(peak_db: [Option<f64>; 2], clip: bool) -> String {
     format!("out {left:.1}/{right:.1} dB{clip}")
 }
 
-/// Text from the Daemon with its control characters replaced; `-` when there is none.
 fn shown(text: Option<&str>) -> String {
     text.map_or_else(|| "-".to_string(), without_control_chars)
+}
+
+fn render_range_text(range: RenderRange) -> &'static str {
+    match range {
+        RenderRange::Project => "project",
+        RenderRange::Loop => "loop",
+    }
 }
 
 fn or_dash(value: Option<impl Display>) -> String {

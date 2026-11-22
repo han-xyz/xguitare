@@ -1428,6 +1428,7 @@ fn render_waits_prints_each_ten_percent_and_the_file() {
             render_reply("running", 0.05, ""),
             render_reply("running", 0.25, ""),
             render_reply("running", 0.29, ""),
+            render_reply("running", 0.7, ""),
             render_reply("done", 1.0, ""),
         ],
         &quiet_env(),
@@ -1444,7 +1445,7 @@ fn render_waits_prints_each_ten_percent_and_the_file() {
     assert!(out.requests[1..].iter().all(|req| *req == Request::Status));
     assert_eq!(
         out.stdout,
-        "rendering /p/song/renders/song.wav\n20%\nrendered /p/song/renders/song.wav\n"
+        "rendering /p/song/renders/song.wav\n20%\n70%\nrendered /p/song/renders/song.wav\n"
     );
     assert_eq!(out.code, 0);
 }
@@ -2166,6 +2167,35 @@ fn real_daemon_replies_print_their_pinned_text() {
             "{argv:?}"
         );
     }
+}
+
+#[test]
+fn status_prints_volumes_pans_and_progress_as_the_wire_wrote_them() {
+    let fixture = reply_fixture!("status-project-render-running")
+        .replacen(r#""volume_db":0.0"#, r#""volume_db":-3.3"#, 1)
+        .replacen(
+            r#""pan":0.0,"peak_db":[-120.0,-120.0],"sends""#,
+            r#""pan":0.1,"peak_db":[-120.0,-120.0],"sends""#,
+            1,
+        )
+        .replace(r#""level_db":-6.0"#, r#""level_db":-6.05"#)
+        .replace(r#""progress":0.0"#, r#""progress":0.7"#);
+    let expected = project_status(
+        "10",
+        "render: song (project) running 70% <temp>/projects/song/renders/song.wav\n",
+        "-3",
+    )
+    .replace(
+        "0* Guitar: -; input -; 0 dB, pan 0;",
+        "0* Guitar: -; input -; 0 dB, pan 0.1;",
+    )
+    .replace("send Verb: -6 dB", "send Verb: -6.05 dB")
+    .replace("0 Verb: -; 0 dB", "0 Verb: -; -3.3 dB");
+    let out = cli(&["status"], reply(fixture.trim_end()));
+    assert_eq!(
+        (out.code, out.stderr.as_str(), out.stdout.as_str()),
+        (0, "", expected.as_str())
+    );
 }
 
 #[test]
