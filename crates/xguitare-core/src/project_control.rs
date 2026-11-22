@@ -480,7 +480,7 @@ fn read_files(ticket: &ReadTicket) -> Result<ProjectFiles, String> {
     }
     let autosave_newer = autosave_newer(&dir);
     let loaded = if ticket.restore {
-        Project::load_autosave(&dir)
+        Project::check_saved_format(&dir).and_then(|()| Project::load_autosave(&dir))
     } else {
         Project::load(&dir)
     };

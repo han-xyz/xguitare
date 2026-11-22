@@ -2203,3 +2203,32 @@ fn save_removes_the_stale_autosave() {
     assert_eq!(saved(&state, "song").tracks.len(), 1);
     ok(handle(&mut state, Request::ProjectSave));
 }
+
+#[test]
+fn restore_refuses_a_newer_project_toml_and_survives_a_broken_one() {
+    let (mut state, _audio, _dir) = state("restore-format");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let later = Instant::now() + Duration::from_secs(61);
+    assert!(autosave_if_due(&mut state, later).unwrap().is_ok());
+    let folder = state.config.projects_dir.join("song");
+    let autosave_text = fs::read_to_string(folder.join(AUTOSAVE_FILE)).unwrap();
+    close(&mut state);
+    fs::write(folder.join(AUTOSAVE_FILE), autosave_text).unwrap();
+    let file = folder.join(PROJECT_FILE);
+    let newer = fs::read_to_string(&file)
+        .unwrap()
+        .replace("format = 1", "format = 2");
+    fs::write(&file, &newer).unwrap();
+    let restore = Request::ProjectOpen {
+        name: "Song".to_string(),
+        restore: true,
+    };
+    assert_eq!(
+        error(handle(&mut state, restore.clone())),
+        "project format 2 is newer than this xguitare (reads up to 1)"
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), newer);
+    fs::write(&file, "name = [").unwrap();
+    assert_eq!(ok(handle(&mut state, restore))["restored"], true);
+}

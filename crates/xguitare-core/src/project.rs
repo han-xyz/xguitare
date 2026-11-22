@@ -497,6 +497,21 @@ impl Project {
         read(&dir.join(AUTOSAVE_FILE))
     }
 
+    /// Refuses a `<dir>/project.toml` whose `format` is newer than this build reads; a file that is missing or unreadable passes, so the autosave beside it can still be restored.
+    ///
+    /// # Errors
+    ///
+    /// [`ProjectError::NewerFormat`].
+    pub fn check_saved_format(dir: &Path) -> Result<(), ProjectError> {
+        let Ok(text) = fs::read_to_string(dir.join(PROJECT_FILE)) else {
+            return Ok(());
+        };
+        match toml::from_str::<FormatFile>(&text) {
+            Ok(file) => check_format(file.format.as_ref()),
+            Err(_) => Ok(()),
+        }
+    }
+
     /// Replaces `<dir>/project.toml` by a file written beside it and renamed into place.
     ///
     /// # Errors

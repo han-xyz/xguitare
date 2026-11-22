@@ -75,6 +75,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Fixed
 
+- `project open --restore` refuses a Project whose `project.toml` is from a newer format (`project format <n> is newer than this xguitare (reads up to 1)`) instead of letting the next save overwrite it; a broken `project.toml` still does not block the restore.
 - `project save` and `project close` remove `project.autosave.toml`, so a later `project open --restore` no longer loads state older than the saved file.
 - Preset, Project and state saves are written durably: the file is synced before the rename and the directory after; on a filesystem that refuses fsync the save still succeeds, without that guarantee.
 - A Project file holding an Item whose active Take does not play past its `offset` (which a stop just after a loop wrap could record) opens with that Item playing the newest of its Takes that does, keeping all its Takes, and warns `track '<name>': item <id> now plays <take file>: <old take file> ends before the item starts`; an Item none of whose Takes plays is left out with `track '<name>': dropped item <id> (<take files>): starts past the end of its take`, its Take files staying on disk. The warnings are in the `project_open` reply, the Daemon log, the CLI's stderr and the GUI's footer. Saving such an Item is refused with `track '<name>' item <id> starts past the end of its take`.
