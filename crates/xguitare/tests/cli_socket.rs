@@ -138,11 +138,11 @@ fn a_newer_daemon_protocol_gets_one_warning_line() {
 }
 
 #[test]
-fn a_status_without_a_version_prints_no_version_line() {
+fn a_status_without_a_version_prints_version_1() {
     let dir = TempDir::new("unversioned");
     let output = status_through(&dir, &dir.derived_socket(), &[]);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout.contains("protocol_version"), "{stdout}");
+    assert!(stdout.contains("\nprotocol_version: 1\n"), "{stdout}");
     assert_eq!(String::from_utf8_lossy(&output.stderr), "");
 }
 

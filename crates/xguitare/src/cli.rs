@@ -9,8 +9,9 @@ use xguitare_client::{
     TakesCleanStopped, Transport, clean_takes_in_batches, newer_protocol_warning,
 };
 use xguitare_protocol::{
-    GetReply, IndexOrName, ItemsReply, Position, RenderBits, RenderRange, Request, Response,
-    SILENCE_DB, SendLevel, TransportAction, Value, from_payload, position_frame, shown_file_name,
+    GetReply, IndexOrName, ItemsReply, MetronomeStatus, Position, RenderBits, RenderRange, Request,
+    Response, SILENCE_DB, SendLevel, StatusReply, TransportAction, Value, from_payload,
+    position_frame, shown_file_name, to_payload,
 };
 
 use crate::{
@@ -62,7 +63,9 @@ pub fn run_cli(
         Ok(text) => write!(err, "{warnings}")
             .and_then(|()| write!(out, "{text}"))
             .map(|()| 0),
-        Err(message) => writeln!(err, "error: {}", without_control_chars(&message)).map(|()| 1),
+        Err(message) => write!(err, "{warnings}")
+            .and_then(|()| writeln!(err, "error: {}", without_control_chars(&message)))
+            .map(|()| 1),
     };
     written.unwrap_or(1)
 }
@@ -86,6 +89,10 @@ fn request(transport: &mut dyn Transport, req: &Request) -> Result<Value, String
         Response::Ok(payload) => Ok(payload),
         Response::Err { error, .. } => Err(error),
     }
+}
+
+fn status_reply(payload: &Value) -> Result<StatusReply, String> {
+    from_payload(payload).map_err(|error| malformed("status", &error))
 }
 
 fn items_reply(payload: &Value) -> Result<ItemsReply, String> {
@@ -206,10 +213,11 @@ fn render_and_wait(
     let mut tenths = 0;
     loop {
         thread::sleep(WATCH_INTERVAL);
-        let job = request(transport, &Request::Status)?["render"].clone();
-        match job["state"].as_str() {
+        let job = status_reply(&request(transport, &Request::Status)?)?.render;
+        match job.as_ref().map(|job| job.state.as_str()) {
             Some("running") => {
-                let now = (job["progress"].as_f64().unwrap_or_default() * 10.0).floor() as u32;
+                let progress = job.as_ref().map_or(0.0, |job| f64::from(job.progress));
+                let now = (progress * 10.0).floor() as u32;
                 if now > tenths {
                     tenths = now;
                     writeln!(out, "{}%", now * 10)
@@ -217,9 +225,15 @@ fn render_and_wait(
                         .map_err(|e| e.to_string())?;
                 }
             }
-            Some("done") => return Ok(format!("rendered {}\n", text(&job["file"]))),
+            Some("done") => {
+                let file = job.as_ref().map(|job| job.file.as_str());
+                return Ok(format!("rendered {}\n", shown(file)));
+            }
             Some("cancelled") => return Err("render cancelled".to_string()),
-            _ => return Err(format!("render failed: {}", text(&job["error"]))),
+            _ => {
+                let error = job.as_ref().and_then(|job| job.error.as_deref());
+                return Err(format!("render failed: {}", shown(error)));
+            }
         }
     }
 }
@@ -246,14 +260,16 @@ struct Timing {
 impl Timing {
     /// Reads the sample rate from `items` and the tempo from `status`.
     fn read(transport: &mut dyn Transport) -> Result<Timing, String> {
-        let items = request(transport, &Request::Items)?;
-        let status = request(transport, &Request::Status)?;
-        let tempo = &status["tempo"];
-        let number = |value: &Value| value.as_f64().ok_or("the status answer has no tempo");
+        let items = items_reply(&request(transport, &Request::Items)?)?;
+        let status = status_reply(&request(transport, &Request::Status)?)?;
+        let tempo = status.tempo.ok_or("the status answer has no tempo")?;
+        if items.sample_rate == 0 {
+            return Err(NO_SAMPLE_RATE.to_string());
+        }
         Ok(Timing {
-            sample_rate: items["sample_rate"].as_u64().ok_or(NO_SAMPLE_RATE)? as u32,
-            tempo_bpm: number(&tempo["bpm"])?,
-            beats_per_bar: number(&tempo["meter"][0])? as u32,
+            sample_rate: items.sample_rate,
+            tempo_bpm: tempo.bpm,
+            beats_per_bar: tempo.meter.0,
         })
     }
 
@@ -642,7 +658,7 @@ fn parse_meter(meter: &str) -> Result<(u32, u32), String> {
 #[allow(clippy::too_many_lines, reason = "one match arm per request")]
 fn render(req: &Request, payload: &Value) -> Result<String, String> {
     let rendered = match req {
-        Request::Status => render_status(payload),
+        Request::Status => render_status(&status_reply(payload)?),
         Request::List => render_list(payload),
         Request::Load { .. } => format!(
             "loaded {} {}\n",
@@ -665,7 +681,6 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
             &from_payload(payload).map_err(|error| malformed("get", &error))?,
             param.as_deref(),
         ),
-
         Request::Save { .. } | Request::ProjectSave => {
             format!("saved {}\n", text(&payload["path"]))
         }
@@ -732,10 +747,21 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
         Request::Tempo { .. } => format!(
             "tempo {} bpm {}\n",
             text(&payload["bpm"]),
-            meter_text(&payload["meter"])
+            meter_text(text(&payload["meter"][0]), text(&payload["meter"][1]))
         ),
-        Request::Click { .. } => format!("{}\n", click_text(payload)),
-        Request::Metronome { .. } => format!("metronome {}\n", metronome_text(payload)),
+        Request::Click { .. } => format!(
+            "{}\n",
+            click_text(payload["on"] == true, text(&payload["count_in"]))
+        ),
+        Request::Metronome { .. } => format!(
+            "metronome {}\n",
+            metronome_text(
+                payload["on"] == true,
+                text(&payload["bpm"]),
+                &meter_text(text(&payload["meter"][0]), text(&payload["meter"][1])),
+                text(&payload["volume_db"])
+            )
+        ),
         Request::MetronomeTap => match &payload["bpm"] {
             Value::Null => "tap\n".to_string(),
             bpm => format!("tap {} bpm\n", text(bpm)),
@@ -748,7 +774,7 @@ fn render(req: &Request, payload: &Value) -> Result<String, String> {
             text(&payload["track"]),
             text(&payload["bus"]),
             level_text(&payload["level"]),
-            pre_text(&payload["pre"])
+            pre_text(payload["pre"] == true)
         ),
         Request::MasterSet { .. } => master_line(&payload["volume_db"]),
         Request::ClipReset { .. } => "clip reset\n".to_string(),
@@ -943,27 +969,22 @@ fn level_text(level: &Value) -> String {
     }
 }
 
-fn pre_text(pre: &Value) -> &'static str {
-    if pre == true { "pre" } else { "post" }
+fn pre_text(pre: bool) -> &'static str {
+    if pre { "pre" } else { "post" }
 }
 
-fn meter_text(meter: &Value) -> String {
-    format!("{}/{}", text(&meter[0]), text(&meter[1]))
+fn meter_text(beats: impl Display, note: impl Display) -> String {
+    format!("{beats}/{note}")
 }
 
-fn metronome_text(metronome: &Value) -> String {
-    let on = if metronome["on"] == true { "on" } else { "off" };
-    format!(
-        "{on}, {} bpm {}, volume {} dB",
-        text(&metronome["bpm"]),
-        meter_text(&metronome["meter"]),
-        text(&metronome["volume_db"])
-    )
+fn metronome_text(on: bool, bpm: impl Display, meter: &str, volume_db: impl Display) -> String {
+    let on = if on { "on" } else { "off" };
+    format!("{on}, {bpm} bpm {meter}, volume {volume_db} dB")
 }
 
-fn click_text(click: &Value) -> String {
-    let on = if click["on"] == true { "on" } else { "off" };
-    format!("click {on}, count-in {} bars", text(&click["count_in"]))
+fn click_text(on: bool, count_in: impl Display) -> String {
+    let on = if on { "on" } else { "off" };
+    format!("click {on}, count-in {count_in} bars")
 }
 
 /// After a cabinet Module's last Parameter line comes `<id>.ir = <name>`, or `none` when it has no Cabinet IR; then `<id>.bypass = yes|no`; a `key` naming one Parameter gets neither line.
@@ -998,115 +1019,149 @@ fn render_get(reply: &GetReply, key: Option<&str>) -> String {
     lines
 }
 
-fn render_status(payload: &Value) -> String {
+fn render_status(status: &StatusReply) -> String {
     let mut lines = String::new();
-    for key in [
-        "preset",
-        "program",
-        "modified",
-        "sample_rate",
-        "buffer_size",
-        "prepared_frames",
-        "revision",
-        "muted",
-        "input_peak_db",
-        "output_peak_db",
-        "xruns",
-        "callback_max_us",
-        "callback_last_us",
-    ] {
-        let _ = writeln!(lines, "{key}: {}", status_text(key, &payload[key]));
-    }
-    if let Some(version) = payload["protocol_version"].as_u64() {
+    let peak = |db: Option<f64>| db.map_or_else(|| "-".to_string(), |db| format!("{db:.1}"));
+    let modified = if status.modified { "yes" } else { "no" };
+    let _ = writeln!(lines, "preset: {}", shown(status.preset.as_deref()));
+    let _ = writeln!(lines, "program: {}", or_dash(status.program));
+    let _ = writeln!(lines, "modified: {modified}");
+    let _ = writeln!(lines, "sample_rate: {}", status.sample_rate);
+    let _ = writeln!(lines, "buffer_size: {}", status.buffer_size);
+    let _ = writeln!(lines, "prepared_frames: {}", status.prepared_frames);
+    let _ = writeln!(lines, "revision: {}", status.revision);
+    let _ = writeln!(lines, "muted: {}", status.muted);
+    let _ = writeln!(lines, "input_peak_db: {}", peak(status.input_peak_db));
+    let _ = writeln!(lines, "output_peak_db: {}", peak(status.output_peak_db));
+    let _ = writeln!(lines, "xruns: {}", status.xruns);
+    let _ = writeln!(lines, "callback_max_us: {}", status.callback_max_us);
+    let _ = writeln!(lines, "callback_last_us: {}", status.callback_last_us);
+    if let Some(version) = status.protocol_version {
         let _ = writeln!(lines, "protocol_version: {version}");
     }
     lines.push_str("connections:\n");
-    for connection in items(&payload["connections"]) {
+    for connection in &status.connections {
         let _ = writeln!(
             lines,
             "  {} -> {}",
-            text(&connection["from"]),
-            text(&connection["to"])
+            without_control_chars(&connection.from),
+            without_control_chars(&connection.to)
         );
     }
+    let _ = writeln!(lines, "disk_overflows: {}", status.disk_overflows);
     let _ = writeln!(
         lines,
-        "disk_overflows: {}",
-        text(&payload["disk_overflows"])
+        "metronome: {}, beat {}",
+        status_metronome_text(&status.metronome),
+        status.metronome.beat
     );
-    if payload["metronome"].is_object() {
-        let metronome = &payload["metronome"];
-        let _ = writeln!(
-            lines,
-            "metronome: {}, beat {}",
-            metronome_text(metronome),
-            text(&metronome["beat"])
-        );
-    }
-    let _ = writeln!(lines, "project: {}", text(&payload["project"]));
-    let job = &payload["render"];
-    if job.is_object() {
-        let percent = (job["progress"].as_f64().unwrap_or_default() * 100.0).round();
+    let _ = writeln!(lines, "project: {}", shown(status.project.as_deref()));
+    if let Some(job) = &status.render {
+        let percent = (f64::from(job.progress) * 100.0).round();
         let _ = write!(
             lines,
             "render: {} ({}) {} {percent}% {}",
-            text(&job["name"]),
-            text(&job["range"]),
-            text(&job["state"]),
-            text(&job["file"])
+            without_control_chars(&job.name),
+            text(&to_payload(&job.range)),
+            without_control_chars(&job.state),
+            without_control_chars(&job.file)
         );
-        if job["error"].is_string() {
-            let _ = write!(lines, ": {}", text(&job["error"]));
+        if let Some(error) = &job.error {
+            let _ = write!(lines, ": {}", without_control_chars(error));
         }
         lines.push('\n');
     }
-    if !payload["project"].is_string() {
+    if status.project.is_none() {
         return lines;
     }
-    render_project_status(&mut lines, payload);
+    render_project_status(&mut lines, status);
     lines
 }
 
-fn render_project_status(lines: &mut String, payload: &Value) {
-    let position = &payload["position"];
-    let tempo = &payload["tempo"];
-    let looped = &payload["loop"];
-    let _ = writeln!(lines, "transport: {}", text(&payload["transport"]));
+fn status_metronome_text(metronome: &MetronomeStatus) -> String {
+    let (beats, note) = metronome.meter;
+    metronome_text(
+        metronome.on,
+        metronome.bpm,
+        &meter_text(beats, note),
+        metronome.volume_db,
+    )
+}
+
+fn render_project_status(lines: &mut String, status: &StatusReply) {
+    let position = status.position.as_ref();
+    let tempo = status.tempo.as_ref();
+    let looped = status.loop_region.as_ref();
+    let click = status.click.as_ref();
+    let _ = writeln!(lines, "transport: {}", shown(status.transport.as_deref()));
     let _ = writeln!(
         lines,
         "position: {} (frame {})",
-        text(&position["bars_beats"]),
-        text(&position["frames"])
+        shown(position.map(|position| position.bars_beats.as_str())),
+        or_dash(position.map(|position| position.frames))
     );
     let _ = writeln!(
         lines,
         "tempo: {} bpm {}",
-        text(&tempo["bpm"]),
-        meter_text(&tempo["meter"])
+        or_dash(tempo.map(|tempo| tempo.bpm)),
+        meter_text(
+            or_dash(tempo.map(|tempo| tempo.meter.0)),
+            or_dash(tempo.map(|tempo| tempo.meter.1))
+        )
     );
     let _ = writeln!(
         lines,
         "loop: {} {}..{}",
-        if looped["on"] == true { "on" } else { "off" },
-        text(&looped["start"]),
-        text(&looped["end"])
+        if looped.is_some_and(|looped| looped.on) {
+            "on"
+        } else {
+            "off"
+        },
+        or_dash(looped.map(|looped| looped.start)),
+        or_dash(looped.map(|looped| looped.end))
     );
-    let _ = writeln!(lines, "{}", click_text(&payload["click"]));
-    let (undo, redo) = (text(&payload["undo"]), text(&payload["redo"]));
+    let _ = writeln!(
+        lines,
+        "{}",
+        click_text(
+            click.is_some_and(|click| click.on),
+            or_dash(click.map(|click| click.count_in))
+        )
+    );
+    let (undo, redo) = (shown(status.undo.as_deref()), shown(status.redo.as_deref()));
     let _ = writeln!(lines, "undo: {undo}, redo: {redo}");
+    render_tracks(lines, status);
+    render_buses(lines, status);
+    let master = status.master.as_ref();
+    let _ = writeln!(
+        lines,
+        "master: {} dB; {}",
+        or_dash(master.and_then(|master| master.volume_db).map(f64::from)),
+        out_text(
+            master.map_or([None, None], |master| master.peak_db),
+            master.is_some_and(|master| master.clip)
+        )
+    );
+}
+
+fn render_tracks(lines: &mut String, status: &StatusReply) {
     lines.push_str("tracks:\n");
-    for (index, track) in items(&payload["tracks"]).enumerate() {
-        let selected = if payload["selected"] == index {
+    for (index, track) in status.tracks.iter().enumerate() {
+        let selected = if status.selected == Some(index) {
             "*"
         } else {
             " "
         };
-        let mut flags: Vec<&str> = [("armed", "armed"), ("mute", "muted"), ("solo", "solo")]
-            .into_iter()
-            .filter(|(key, _)| track[*key] == true)
-            .map(|(_, flag)| flag)
-            .collect();
-        if track["to_master"] == false {
+        let mut flags: Vec<&str> = [
+            (track.armed, "armed"),
+            (track.mute, "muted"),
+            (track.solo, "solo"),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, flag)| flag)
+        .collect();
+        if !track.to_master {
             flags.push("not to master");
         }
         let flags = if flags.is_empty() {
@@ -1114,34 +1169,35 @@ fn render_project_status(lines: &mut String, payload: &Value) {
         } else {
             flags.join(", ")
         };
-        let peak = track["input_peak_db"].as_f64().unwrap_or(SILENCE_DB);
+        let peak = track.input_peak_db.unwrap_or(SILENCE_DB);
         let _ = writeln!(
             lines,
             "  {index}{selected} {}: {flags}; input {}; {} dB, pan {}; peak {peak:.1} dB; {}",
-            text(&track["name"]),
-            text(&track["input"]),
-            text(&track["volume_db"]),
-            text(&track["pan"]),
-            out_text(track),
+            without_control_chars(&track.name),
+            shown(track.input.as_deref()),
+            or_dash(track.volume_db.map(f64::from)),
+            f64::from(track.pan),
+            out_text(track.peak_db, track.clip),
         );
-        for send in items(&track["sends"]) {
-            let bus = send["bus"]
-                .as_u64()
-                .map(|bus| &payload["buses"][bus as usize]["name"]);
+        for send in &track.sends {
+            let bus = status.buses.get(send.bus).map(|bus| bus.name.as_str());
             let _ = writeln!(
                 lines,
                 "      send {}: {} dB, {}",
-                text(bus.unwrap_or(&Value::Null)),
-                text(&send["level_db"]),
-                pre_text(&send["pre"])
+                shown(bus),
+                f64::from(send.level_db),
+                pre_text(send.pre)
             );
         }
     }
+}
+
+fn render_buses(lines: &mut String, status: &StatusReply) {
     lines.push_str("buses:\n");
-    for (index, bus) in items(&payload["buses"]).enumerate() {
-        let flags: Vec<&str> = [("mute", "muted"), ("solo", "solo")]
+    for (index, bus) in status.buses.iter().enumerate() {
+        let flags: Vec<&str> = [(bus.mute, "muted"), (bus.solo, "solo")]
             .into_iter()
-            .filter(|(key, _)| bus[*key] == true)
+            .filter(|(on, _)| *on)
             .map(|(_, flag)| flag)
             .collect();
         let flags = if flags.is_empty() {
@@ -1152,34 +1208,28 @@ fn render_project_status(lines: &mut String, payload: &Value) {
         let _ = writeln!(
             lines,
             "  {index} {}: {flags}; {} dB, pan {}; {}",
-            text(&bus["name"]),
-            text(&bus["volume_db"]),
-            text(&bus["pan"]),
-            out_text(bus),
+            without_control_chars(&bus.name),
+            or_dash(bus.volume_db.map(f64::from)),
+            f64::from(bus.pan),
+            out_text(bus.peak_db, bus.clip),
         );
     }
-    let master = &payload["master"];
-    let _ = writeln!(
-        lines,
-        "master: {} dB; {}",
-        text(&master["volume_db"]),
-        out_text(master)
-    );
 }
 
 /// `out <left>/<right> dB`, then `, clip` when the clip flag is set.
-fn out_text(meter: &Value) -> String {
-    let side = |side: usize| meter["peak_db"][side].as_f64().unwrap_or(SILENCE_DB);
-    let clip = if meter["clip"] == true { ", clip" } else { "" };
-    format!("out {:.1}/{:.1} dB{clip}", side(0), side(1))
+fn out_text(peak_db: [Option<f64>; 2], clip: bool) -> String {
+    let [left, right] = peak_db.map(|side| side.unwrap_or(SILENCE_DB));
+    let clip = if clip { ", clip" } else { "" };
+    format!("out {left:.1}/{right:.1} dB{clip}")
 }
 
-fn status_text(key: &str, value: &Value) -> String {
-    match (key, value.as_bool(), value.as_f64()) {
-        ("modified", Some(modified), _) => if modified { "yes" } else { "no" }.to_string(),
-        (_, _, Some(db)) if key.ends_with("_db") => format!("{db:.1}"),
-        _ => text(value),
-    }
+/// Text from the Daemon with its control characters replaced; `-` when there is none.
+fn shown(text: Option<&str>) -> String {
+    text.map_or_else(|| "-".to_string(), without_control_chars)
+}
+
+fn or_dash(value: Option<impl Display>) -> String {
+    value.map_or_else(|| "-".to_string(), |value| value.to_string())
 }
 
 fn render_list(payload: &Value) -> String {
