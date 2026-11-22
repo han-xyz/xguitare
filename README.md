@@ -21,6 +21,8 @@ cargo install --path crates/xguitare
 
 This builds a release binary into `~/.cargo/bin/xguitare`; that directory must be on your `PATH`.
 
+For development, the `rt-check` feature aborts the Daemon on any allocation in the JACK process callback. Run it alone, as `cargo run -p xguitare --features rt-check -- …`: a cargo invocation that also builds the dev targets of `xguitare-core` or `xguitare-dsp` turns the check back off in release builds through feature unification.
+
 ### Install from a release
 
 Each tagged release on GitHub carries `xguitare-<version>-x86_64-linux.tar.gz` and a `.sha256` file. It holds the Daemon and CLI `xguitare`, the window `xguitare-gui`, `README.md`, `CHANGELOG.md`, `LICENSE` and `OFL.txt` (the licence of the IBM Plex fonts built into `xguitare-gui`); the starter Banks are built in.

@@ -4895,6 +4895,7 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 name = "xguitare"
 version = "0.1.0"
 dependencies = [
+ "assert_no_alloc",
  "clap",
  "hound",
  "jack",

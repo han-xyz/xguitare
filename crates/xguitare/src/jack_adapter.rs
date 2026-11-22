@@ -299,45 +299,57 @@ struct Process {
 
 impl ProcessHandler for Process {
     fn process(&mut self, _: &Client, ps: &ProcessScope) -> Control {
-        let start = Instant::now();
-        flush_denormals();
-        for event in self.midi_in.iter(ps) {
-            if let Some(program) = midi::program_change(event.bytes) {
-                self.switcher.push_program_change(program);
+        no_alloc(|| {
+            let start = Instant::now();
+            flush_denormals();
+            for event in self.midi_in.iter(ps) {
+                if let Some(program) = midi::program_change(event.bytes) {
+                    self.switcher.push_program_change(program);
+                }
             }
-        }
-        self.switcher.apply_commands();
-        let input = self.input.as_slice(ps);
-        let track_inputs: [&[f32]; MAX_TRACKS] =
-            std::array::from_fn(|idx| self.track_inputs[idx].as_slice(ps));
-        let out_l = self.out_l.as_mut_slice(ps);
-        let out_r = self.out_r.as_mut_slice(ps);
-        // PipeWire can raise the quantum past the size the Rack was prepared for, and resizing here would allocate: the switcher writes silence until the control thread swaps in a Rack re-prepared for the quantum.
-        if !self
-            .switcher
-            .process_tracks(input, &track_inputs, out_l, out_r)
-        {
-            self.shared.oversize_blocks.fetch_add(1, Ordering::Relaxed);
-        }
-        raise_peak(&self.shared.input_peak_bits, block_peak(input));
-        raise_peak(
-            &self.shared.output_peak_bits,
-            block_peak(out_l).max(block_peak(out_r)),
-        );
-        let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
-        self.shared
-            .callback_ns_last
-            .store(elapsed, Ordering::Relaxed);
-        self.shared
-            .callback_ns_max
-            .fetch_max(elapsed, Ordering::Relaxed);
-        Control::Continue
+            self.switcher.apply_commands();
+            let input = self.input.as_slice(ps);
+            let track_inputs: [&[f32]; MAX_TRACKS] =
+                std::array::from_fn(|idx| self.track_inputs[idx].as_slice(ps));
+            let out_l = self.out_l.as_mut_slice(ps);
+            let out_r = self.out_r.as_mut_slice(ps);
+            // PipeWire can raise the quantum past the size the Rack was prepared for, and resizing here would allocate: the switcher writes silence until the control thread swaps in a Rack re-prepared for the quantum.
+            if !self
+                .switcher
+                .process_tracks(input, &track_inputs, out_l, out_r)
+            {
+                self.shared.oversize_blocks.fetch_add(1, Ordering::Relaxed);
+            }
+            raise_peak(&self.shared.input_peak_bits, block_peak(input));
+            raise_peak(
+                &self.shared.output_peak_bits,
+                block_peak(out_l).max(block_peak(out_r)),
+            );
+            let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            self.shared
+                .callback_ns_last
+                .store(elapsed, Ordering::Relaxed);
+            self.shared
+                .callback_ns_max
+                .fetch_max(elapsed, Ordering::Relaxed);
+            Control::Continue
+        })
     }
 
     fn buffer_size(&mut self, _: &Client, size: Frames) -> Control {
         self.shared.buffer_size.store(size, Ordering::Relaxed);
         Control::Continue
     }
+}
+
+#[cfg(feature = "rt-check")]
+fn no_alloc<T>(block: impl FnOnce() -> T) -> T {
+    assert_no_alloc::assert_no_alloc(block)
+}
+
+#[cfg(not(feature = "rt-check"))]
+fn no_alloc<T>(block: impl FnOnce() -> T) -> T {
+    block()
 }
 
 fn flush_denormals() {
