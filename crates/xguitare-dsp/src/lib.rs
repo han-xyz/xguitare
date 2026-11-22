@@ -1,4 +1,5 @@
 pub mod crossfade;
+pub mod fmv;
 pub mod midi;
 pub(crate) mod modulated_delay;
 pub mod modules;
