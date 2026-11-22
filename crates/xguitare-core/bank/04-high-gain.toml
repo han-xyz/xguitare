@@ -14,19 +14,16 @@ tone = 45
 level = 0
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 5
 gain = 90
-bias = 0.1
-master = -16
-stages = 4
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 60
 middle = 35
 treble = 60
+presence = 50
+master = 55
+level = -25
 
 [[module]]
 type = "cabinet"

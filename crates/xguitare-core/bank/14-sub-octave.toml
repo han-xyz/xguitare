@@ -15,10 +15,16 @@ tone = 400
 type = "compressor"
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 7
 gain = 25
-stages = 2
+bass = 50
+middle = 50
+treble = 50
+presence = 50
+master = 45
+level = -6.1
 
 [[module]]
 type = "cabinet"

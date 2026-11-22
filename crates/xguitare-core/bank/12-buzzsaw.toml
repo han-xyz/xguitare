@@ -23,11 +23,16 @@ mid1_q = 0.7
 high_gain = 6
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 3
 gain = 60
-master = -16
-stages = 3
+bass = 50
+middle = 50
+treble = 50
+presence = 50
+master = 55
+level = -13.4
 
 [[module]]
 type = "cabinet"

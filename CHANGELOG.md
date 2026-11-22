@@ -48,6 +48,7 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Changed
 
+- The guitar starter Presets Clean to Distortion now play the `amp` Module in place of `preamp` and `tonestack`, each on an Amp model chosen for it, at the same loudness; `preamp` and `tonestack` stay for your own Presets. An existing Bank is not changed.
 - Opening a Project no longer blocks other clients: the Daemon reads `project.toml` and decodes the Takes without holding its state lock, so `status` and other requests are answered meanwhile; one `project open` is read at a time (`docs/adr/0009-thread-model.md`, Control API `project_open`).
 - The `status`, `items` and `get` replies of the Control API are typed in `xguitare-protocol` (`StatusReply`, `ItemsReply`, `GetReply`); the wire format is unchanged and `protocol_version` stays 1. `xguitare status` shows a reply that carries no `protocol_version` as `protocol_version: 1`.
 - For development, the opt-in `rt-check` cargo feature aborts the Daemon on any allocation in the JACK process callback (`README.md`).

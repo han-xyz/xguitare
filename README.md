@@ -81,18 +81,16 @@ tone = 55
 level = 0
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 3
 gain = 45
-master = -12
-stages = 3
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 50
 middle = 45
 treble = 55
+presence = 50
+master = 55
+level = -23.6
 
 [[module]]
 type = "cabinet"
@@ -167,13 +165,13 @@ Hot reload: the Daemon watches the Bank directory. Saving the active Preset's fi
 
 The guitar starter Bank has five metal Presets (programs 8 to 12) and two more (programs 13 and 14):
 
-- Thrash: `gate`, `drive` into a four-stage `preamp`, an `eq` that scoops the mids at 750 Hz, cabinet.
-- Djent: a fast `gate`, a light `drive` into a four-stage `preamp`, an `eq` with a tight low cut and a push at 1400 Hz, `limiter`, cabinet.
-- Doom: `fuzz` into `preamp`, a bass-heavy `tonestack`, a dark cabinet (`high_cut` 5000 Hz) and a large `reverb`.
-- Buzzsaw: `drive` at full into an `eq` that lifts lows, mids and highs, then `preamp`, cabinet.
-- Stoner: a fuzz-into-amp sound in the manner of stoner rock: an `octave` that adds the octave below, `drive` and `fuzz` into `preamp`, a mid-forward `tonestack`, cabinet, a short `delay` and `reverb`.
-- Sub Octave: a guitar played as a bass: `octave` with only the octave below, `compressor`, a clean two-stage `preamp`, a dark cabinet (`high_cut` 4000 Hz).
-- Distortion: a distortion pedal into a clean amp: `drive` into a two-stage `preamp` at low gain, `tonestack`, cabinet, a little `reverb`; Crunch, Lead and High Gain take their gain from the `preamp` instead.
+- Thrash: `gate`, `drive` into `amp` on `modern`, an `eq` that scoops the mids at 750 Hz, cabinet.
+- Djent: a fast `gate`, a light `drive` into `amp` on `modern`, an `eq` with a tight low cut and a push at 1400 Hz, `limiter`, cabinet.
+- Doom: `fuzz` into `amp` on `crunch` with `bass` raised, a dark cabinet (`high_cut` 5000 Hz) and a large `reverb`.
+- Buzzsaw: `drive` at full into an `eq` that lifts lows, mids and highs, then `amp` on `crunch`, cabinet.
+- Stoner: a fuzz-into-amp sound in the manner of stoner rock: an `octave` that adds the octave below, `drive` and `fuzz` into `amp` on `tweed` with `middle` raised, cabinet, a short `delay` and `reverb`.
+- Sub Octave: a guitar played as a bass: `octave` with only the octave below, `compressor`, a clean `amp` on `bass-solid`, a dark cabinet (`high_cut` 4000 Hz).
+- Distortion: a distortion pedal into a clean amp: `drive` into a clean `amp` on `american` at low `gain`, cabinet, a little `reverb`; Crunch, Lead and High Gain take their gain from the `amp` instead.
 
 Six more (programs 15 to 20) play the `amp` Module, each Amp model into the cabinet IR of its speaker type, and end in a small `reverb`:
 
@@ -291,23 +289,27 @@ loaded 2 Lead
 `set` changes one Parameter of the running Preset and prints the value applied:
 
 ```console
-$ xguitare set preamp.gain 60
-preamp.gain = 60
-$ xguitare set preamp.gain 150
-preamp.gain = 100 (clamped)
+$ xguitare set amp.gain 60
+amp.gain = 60
+$ xguitare set amp.gain 150
+amp.gain = 100 (clamped)
 ```
 
-`get` shows Parameters: all of them, one Module's, or one. With `get` and `get <cabinet>` a cabinet's lines end with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none); then every Module's lines end with `<id>.bypass = yes|no`. `get preamp.gain` prints only that Parameter:
+`get` shows Parameters: all of them, one Module's, or one. With `get` and `get <cabinet>` a cabinet's lines end with its Cabinet IR, `cabinet.ir = default-cab.wav` (`none` when it has none); then every Module's lines end with `<id>.bypass = yes|no`. `get amp.gain` prints only that Parameter:
 
 ```console
-$ xguitare get preamp
-preamp.gain = 100 %
-preamp.bias = 0.2
-preamp.master = -14 dB
-preamp.stages = 3
-preamp.bypass = no
-$ xguitare get preamp.gain
-preamp.gain = 100 %
+$ xguitare get amp
+amp.model = 4
+amp.gain = 100 %
+amp.bass = 45 %
+amp.middle = 60 %
+amp.treble = 55 %
+amp.presence = 50 %
+amp.master = 55 %
+amp.level = -21.3 dB
+amp.bypass = no
+$ xguitare get amp.gain
+amp.gain = 100 %
 ```
 
 `set` changes only the running sound. `save` writes the live Parameter values back to the active Preset's file:
@@ -326,7 +328,7 @@ saved /home/you/.config/xguitare/bank/04-my-lead-tone.toml
 
 `starters` adds the starter Presets and Cabinet IRs the Bank lacks, without replacing a file, and prints `added <n> presets, <m> cabinet IRs` and one line per file, or `nothing to add`; see [Presets](#presets).
 
-`modules` lists the Module types with their channels and Parameters, a choice Parameter with its choices (`mode (lp|bp|hp)`); `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, preamp, tonestack, cabinet, reverb):
+`modules` lists the Module types with their channels and Parameters, a choice Parameter with its choices (`mode (lp|bp|hp)`); `rack add <type> [--after <id> | --at <position>]`, `rack remove <id>` and `rack move <id> <position>` change the running Rack's layout (without `--after` or `--at` the Module goes to the end; positions count from 0). Stereo Modules go after the cabinet, mono ones before it; a layout that breaks this is refused and nothing changes. `save` writes the new layout to the Preset file. On the starter Clean Preset (gate, amp, cabinet, reverb):
 
 ```console
 $ xguitare modules
@@ -340,7 +342,7 @@ added delay
 $ xguitare rack move delay 1
 error: stereo module 'delay' before the cabinet
 $ xguitare rack move delay 6
-moved delay to 5
+moved delay to 4
 $ xguitare rack remove delay
 removed delay
 ```
@@ -385,10 +387,10 @@ unmuted
 `bypass <id> on|off` bypasses one Module, which then passes its input through unchanged and keeps its Parameters, or switches it back in; the switch fades over 10 ms, and a Module switched back in starts from silence (delay and reverb tails restart). Like `set`, it changes the running sound until `save` writes it to the Preset:
 
 ```console
-$ xguitare bypass preamp on
-preamp: bypassed
-$ xguitare bypass preamp off
-preamp: on
+$ xguitare bypass amp on
+amp: bypassed
+$ xguitare bypass amp off
+amp: on
 ```
 
 ## Metronome

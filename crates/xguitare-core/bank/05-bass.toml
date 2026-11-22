@@ -6,18 +6,16 @@ type = "gate"
 threshold = -65
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 6
 gain = 25
-master = -8
-stages = 2
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 70
 middle = 40
 treble = 35
+presence = 50
+master = 45
+level = -16.9
 
 [[module]]
 type = "cabinet"

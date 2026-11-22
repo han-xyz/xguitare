@@ -17,18 +17,16 @@ tone = 50
 level = -3
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 0
 gain = 35
-master = -10
-stages = 2
-
-[[module]]
-type = "tonestack"
-[module.params]
 bass = 50
 middle = 60
 treble = 50
+presence = 50
+master = 50
+level = -14.7
 
 [[module]]
 type = "cabinet"

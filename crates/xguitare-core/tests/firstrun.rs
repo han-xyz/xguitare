@@ -101,23 +101,15 @@ fn guitar_bank_seeds_its_presets_and_irs() {
     assert_eq!(
         types,
         [
-            &["gate", "drive", "preamp", "eq", "cabinet"][..],
-            &["gate", "drive", "preamp", "eq", "limiter", "cabinet"],
-            &["gate", "fuzz", "preamp", "tonestack", "cabinet", "reverb"],
-            &["gate", "drive", "eq", "preamp", "cabinet"],
+            &["gate", "drive", "amp", "eq", "cabinet"][..],
+            &["gate", "drive", "amp", "eq", "limiter", "cabinet"],
+            &["gate", "fuzz", "amp", "cabinet", "reverb"],
+            &["gate", "drive", "eq", "amp", "cabinet"],
             &[
-                "gate",
-                "octave",
-                "drive",
-                "fuzz",
-                "preamp",
-                "tonestack",
-                "cabinet",
-                "delay",
-                "reverb"
+                "gate", "octave", "drive", "fuzz", "amp", "cabinet", "delay", "reverb"
             ],
-            &["gate", "octave", "compressor", "preamp", "cabinet"],
-            &["gate", "drive", "preamp", "tonestack", "cabinet", "reverb"],
+            &["gate", "octave", "compressor", "amp", "cabinet"],
+            &["gate", "drive", "amp", "cabinet", "reverb"],
             &["amp", "cabinet", "reverb"],
             &["amp", "cabinet", "reverb"],
             &["amp", "cabinet", "reverb"],

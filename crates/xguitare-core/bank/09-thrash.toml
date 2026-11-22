@@ -14,11 +14,16 @@ tone = 60
 level = 6
 
 [[module]]
-type = "preamp"
+type = "amp"
 [module.params]
+model = 5
 gain = 85
-master = -16
-stages = 4
+bass = 50
+middle = 50
+treble = 50
+presence = 50
+master = 55
+level = -18.6
 
 [[module]]
 type = "eq"
