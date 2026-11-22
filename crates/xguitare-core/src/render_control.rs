@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::control::EngineState;
+use crate::mixer_control::on_wire;
 use crate::project_state::{NO_PROJECT, ProjectEvent, open_project_state};
 use crate::render::{RENDERS_DIR, Render, RenderJob, RenderState, RenderTask};
 use xguitare_protocol::{RenderBits, RenderRange, RenderStatus};
@@ -104,7 +105,7 @@ pub(crate) fn render_status(state: &EngineState) -> Option<RenderStatus> {
     Some(RenderStatus {
         name: job.name.clone(),
         range: job.range,
-        progress: job.progress(),
+        progress: on_wire(job.progress()),
         state: render_state.to_string(),
         file: job.file().display().to_string(),
         error: job.error(),

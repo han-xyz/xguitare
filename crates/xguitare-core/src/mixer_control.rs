@@ -221,7 +221,7 @@ pub(crate) fn sends_status(project: &Project, track: &Track) -> Vec<SendStatus> 
             let bus = project.buses.iter().position(|bus| bus.id == send.bus)?;
             Some(SendStatus {
                 bus,
-                level_db: send.level_db,
+                level_db: on_wire(send.level_db),
                 pre: send.pre,
             })
         })
@@ -241,7 +241,7 @@ pub(crate) fn buses_status(
             id: bus.id,
             name: bus.name.clone(),
             volume_db: volume_status(bus.volume_db),
-            pan: bus.pan,
+            pan: on_wire(bus.pan),
             mute: bus.mute,
             solo: bus.solo,
             peak_db: peaks_db(mix.buses[index]),
@@ -264,8 +264,13 @@ pub(crate) fn peaks_db([left, right]: [f32; 2]) -> [Option<f64>; 2] {
 }
 
 /// A volume in dB as `status` shows it: `None` when off or not a finite number.
-pub(crate) fn volume_status(volume_db: f32) -> Option<f32> {
-    volume_db.is_finite().then_some(volume_db)
+pub(crate) fn volume_status(volume_db: f32) -> Option<f64> {
+    volume_db.is_finite().then(|| on_wire(volume_db))
+}
+
+/// An `f32` as a reply carries it: widened exactly, which is what `serde_json` wrote for an `f32` before the replies were typed, so that the wire text stays as it was.
+pub(crate) fn on_wire(value: f32) -> f64 {
+    f64::from(value)
 }
 
 fn level_on_wire(level_db: f32) -> SendLevel {

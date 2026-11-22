@@ -12,7 +12,7 @@ use xguitare_core::project_state::ProjectEvent;
 use xguitare_core::render::RenderTask;
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, Config};
-use xguitare_protocol::{IndexOrName, Request, Response, SendLevel};
+use xguitare_protocol::{IndexOrName, Request, Response, SendLevel, TrackRef};
 
 const UPDATE_SWITCH: &str = "UPDATE_FIXTURES";
 const TEMP_TOKEN: &str = "<temp>";
@@ -284,4 +284,59 @@ fn status_replies_match_their_fixtures() {
     );
     let text = reply_text(&mut s, Request::Status);
     check_fixture("status-project-render-failed", &text);
+}
+
+#[test]
+fn status_writes_volumes_pans_and_sends_as_before_the_typed_reply() {
+    let mut s = session("widened");
+    open_song(&mut s);
+    ok(
+        &mut s,
+        Request::BusAdd {
+            name: Some("Verb".to_string()),
+        },
+    );
+    ok(
+        &mut s,
+        Request::BusSet {
+            bus: name("Verb"),
+            name: None,
+            volume: Some(-3.3),
+            pan: None,
+            mute: None,
+            solo: None,
+        },
+    );
+    ok(
+        &mut s,
+        Request::TrackSet {
+            track: TrackRef::Index(0),
+            input: None,
+            volume: Some(-6.05),
+            pan: Some(0.1),
+            mute: None,
+            solo: None,
+            arm: None,
+            name: None,
+            to_master: None,
+        },
+    );
+    ok(
+        &mut s,
+        Request::SendSet {
+            track: name("Guitar"),
+            bus: name("Verb"),
+            level: Some(SendLevel::Db(-6.05)),
+            pre: None,
+        },
+    );
+    let text = reply_text(&mut s, Request::Status);
+    for wire in [
+        r#""name":"Verb","pan":0.0,"peak_db":[-120.0,-120.0],"solo":false,"volume_db":-3.299999952316284}"#,
+        r#""level_db":-6.050000190734863"#,
+        r#""name":"Guitar","pan":0.10000000149011612,"#,
+        r#""volume_db":-6.050000190734863},{"armed""#,
+    ] {
+        assert!(text.contains(wire), "{wire} not in {text}");
+    }
 }

@@ -781,6 +781,12 @@ fn null_peaks_and_volumes_read_as_none_and_are_written_as_null() {
 }
 
 #[test]
+fn a_track_from_a_daemon_before_buses_goes_to_master() {
+    let track: TrackStatus = from_payload(&json!({"id": 0})).unwrap();
+    assert!(track.to_master);
+}
+
+#[test]
 fn a_status_with_empty_parts_reads_each_part_as_its_defaults() {
     let payload = json!({
         "connections": [{}],

@@ -182,7 +182,7 @@ pub struct PortConnection {
 pub struct RenderStatus {
     pub name: String,
     pub range: RenderRange,
-    pub progress: f32,
+    pub progress: f64,
     /// `running`, `done`, `cancelled` or `failed`.
     pub state: String,
     pub file: String,
@@ -223,7 +223,7 @@ pub struct ClickStatus {
 }
 
 /// A Track as `status` lists it; `volume_db` and each peak are `null` when off or not a finite number.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "mute, solo, armed, to_master and clip are independent Track switches"
@@ -235,9 +235,9 @@ pub struct TrackStatus {
     #[serde(default)]
     pub input: Option<String>,
     #[serde(default)]
-    pub volume_db: Option<f32>,
+    pub volume_db: Option<f64>,
     #[serde(default)]
-    pub pan: f32,
+    pub pan: f64,
     #[serde(default)]
     pub mute: bool,
     #[serde(default)]
@@ -246,7 +246,8 @@ pub struct TrackStatus {
     pub armed: bool,
     #[serde(default)]
     pub input_peak_db: Option<f64>,
-    #[serde(default)]
+    /// `true` when the key is missing: a Daemon from before Buses sends every Track to Master.
+    #[serde(default = "to_master_when_missing")]
     pub to_master: bool,
     #[serde(default)]
     pub sends: Vec<SendStatus>,
@@ -257,12 +258,32 @@ pub struct TrackStatus {
     pub clip: bool,
 }
 
+impl Default for TrackStatus {
+    fn default() -> Self {
+        TrackStatus {
+            id: 0,
+            name: String::new(),
+            input: None,
+            volume_db: None,
+            pan: 0.0,
+            mute: false,
+            solo: false,
+            armed: false,
+            input_peak_db: None,
+            to_master: to_master_when_missing(),
+            sends: Vec::new(),
+            peak_db: [None, None],
+            clip: false,
+        }
+    }
+}
+
 /// A Send that is not off, with its Bus's index.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SendStatus {
     pub bus: usize,
     #[serde(default)]
-    pub level_db: f32,
+    pub level_db: f64,
     #[serde(default)]
     pub pre: bool,
 }
@@ -274,9 +295,9 @@ pub struct BusStatus {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub volume_db: Option<f32>,
+    pub volume_db: Option<f64>,
     #[serde(default)]
-    pub pan: f32,
+    pub pan: f64,
     #[serde(default)]
     pub mute: bool,
     #[serde(default)]
@@ -291,7 +312,7 @@ pub struct BusStatus {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MasterStatus {
-    pub volume_db: Option<f32>,
+    pub volume_db: Option<f64>,
     pub peak_db: [Option<f64>; 2],
     pub clip: bool,
 }
@@ -315,6 +336,10 @@ pub fn from_payload<T: DeserializeOwned>(payload: &Value) -> Result<T, serde_jso
         return Err(serde::de::Error::custom(NOT_AN_OBJECT));
     }
     T::deserialize(payload)
+}
+
+fn to_master_when_missing() -> bool {
+    true
 }
 
 fn version_or_unknown<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {

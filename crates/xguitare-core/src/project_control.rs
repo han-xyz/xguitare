@@ -16,7 +16,9 @@ use crate::control::{EngineState, MixPeaks, error_response, peak_db};
 use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
-use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status, volume_status};
+use crate::mixer_control::{
+    buses_status, master_status, on_wire, peaks_db, sends_status, volume_status,
+};
 use crate::ports::AudioPorts;
 use crate::project::{
     AUTOSAVE_FILE, Item, LoadWarning, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track,
@@ -1129,7 +1131,7 @@ fn tracks_status(
             name: track.name.clone(),
             input: track.input.clone(),
             volume_db: volume_status(track.volume_db),
-            pan: track.pan,
+            pan: on_wire(track.pan),
             mute: track.mute,
             solo: track.solo,
             armed: track.arm,
