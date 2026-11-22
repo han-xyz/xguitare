@@ -2167,3 +2167,22 @@ fn a_project_closed_but_not_yet_finished_by_the_daemon_is_read_again() {
     };
     assert_eq!(track_names(&mut state), [json!("Guitar"), json!("Bass")]);
 }
+
+#[test]
+fn a_read_made_for_another_project_is_read_again() {
+    let (mut state, _audio, _dir) = state("read-mismatch");
+    new_project(&mut state, "Song");
+    close(&mut state);
+    new_project(&mut state, "Other");
+    close(&mut state);
+    let read_song = read_song(&state);
+    let connection = open_connection(&mut state);
+    let request = Request::ProjectOpen {
+        name: "Other".to_string(),
+        restore: false,
+    };
+    let response = handle_request(&mut state, None, connection, request, Some(read_song)).0;
+    let reply = ok((response, Vec::new()));
+    assert_eq!(reply["name"], "Other");
+    assert_eq!(status(&mut state)["project"], "Other");
+}

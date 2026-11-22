@@ -504,7 +504,9 @@ pub(crate) fn project_open(
     check_none_open(&state.projects)?;
     let read = match read {
         Some(read)
-            if read.ticket.open_changes == state.projects.open_changes
+            if read.ticket.name == name
+                && read.ticket.restore == restore
+                && read.ticket.open_changes == state.projects.open_changes
                 && read.ticket.projects_dir == state.config.projects_dir =>
         {
             read

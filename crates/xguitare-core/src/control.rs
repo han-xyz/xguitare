@@ -455,7 +455,7 @@ pub fn parse_line(line: &str) -> Result<Request, Response> {
     serde_json::from_str(line).map_err(|err| Response::err(format!("invalid request: {err}")))
 }
 
-/// Handles one parsed request from `connection` as `handle_line` does, returning the Response itself; a `project_open` given the `read` of its `project_control::begin_project_read` ticket installs that read unless a Project was opened or closed, or `projects_dir` changed, since the ticket, and then reads again.
+/// Handles one parsed request from `connection` as `handle_line` does, returning the Response itself; a `project_open` given the `read` of its `project_control::begin_project_read` ticket installs that read unless it was made for another name or `restore`, a Project was opened or closed, or `projects_dir` changed, since the ticket, and then reads again.
 pub fn handle_request(
     state: &mut EngineState,
     ports: Option<&dyn AudioPorts>,
