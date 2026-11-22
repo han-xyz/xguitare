@@ -73,10 +73,11 @@ fn state(test: &str, config_toml: &str) -> (EngineState, AudioQueues, TempDir) {
 
 /// The guitar Bank as first run wrote it before the amp Presets existed: 15 Presets and `default-cab.wav`.
 fn old_state(test: &str) -> (EngineState, AudioQueues, TempDir) {
-    let (state, audio, dir) = state(test, "");
+    let (mut state, audio, dir) = state(test, "");
     for file in AMP_PRESETS.iter().chain(&AMP_IRS) {
         fs::remove_file(state.config.bank_dir.join(file)).unwrap();
     }
+    state.bank = Bank::load_dir(&state.config.bank_dir).unwrap();
     (state, audio, dir)
 }
 
@@ -117,6 +118,7 @@ fn old_starter_bank_gets_the_amp_presets_and_their_irs() {
     let fresh = TempDir(state.config.bank_dir.with_file_name("fresh"));
     ensure_bank(&fresh.0, BankKind::Guitar, 48_000).unwrap();
     let revision = state.revision;
+    assert_eq!(state.bank.entries.len(), 15);
     assert_eq!(
         ok(starters(&mut state)),
         json!({"presets": AMP_PRESETS, "irs": AMP_IRS})
@@ -175,6 +177,18 @@ fn a_user_preset_keeps_its_file_and_number() {
         ])
     );
     assert_eq!(fs::read_to_string(&mine).unwrap(), gain_preset("Mine"));
+}
+
+#[test]
+fn numbering_starts_after_the_highest_file_even_one_that_does_not_parse() {
+    let (mut state, _audio, _dir) = old_state("highest");
+    let broken = state.config.bank_dir.join("30-broken.toml");
+    fs::write(&broken, "not a preset").unwrap();
+    assert_eq!(
+        ok(starters(&mut state))["presets"][0],
+        json!("31-amp-tweed.toml")
+    );
+    assert_eq!(fs::read_to_string(&broken).unwrap(), "not a preset");
 }
 
 #[test]
