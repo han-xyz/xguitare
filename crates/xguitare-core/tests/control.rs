@@ -1170,7 +1170,16 @@ fn modules_lists_registry() {
     );
     assert_eq!(
         amp_params[0]["labels"],
-        json!(["tweed", "american", "chime", "crunch", "lead", "modern"])
+        json!([
+            "tweed",
+            "american",
+            "chime",
+            "crunch",
+            "lead",
+            "modern",
+            "bass-valve",
+            "bass-solid"
+        ])
     );
     assert_eq!(amp_params[0]["integer"], true);
     assert_eq!(

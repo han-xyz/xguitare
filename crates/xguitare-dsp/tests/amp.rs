@@ -16,6 +16,7 @@ const PRESENCE: usize = 5;
 const MASTER: usize = 6;
 const LEVEL: usize = 7;
 const FUNDAMENTAL: f32 = 220.0;
+const BASS_FUNDAMENTAL: f32 = 82.4;
 const PERIODS: usize = 2400;
 const SETTLE: usize = 9600;
 const WINDOW: usize = 4 * PERIODS;
@@ -35,16 +36,31 @@ fn amp_output(settings: &[(usize, f32)], input: &[f32]) -> Vec<f32> {
     run(&mut rack, input)
 }
 
+// The window nearest WINDOW that holds a whole number of periods, so the bins do not leak.
 fn settled(settings: &[(usize, f32)], amplitude: f32, freq: f32) -> Vec<f32> {
-    let input = sine(amplitude, freq, SAMPLE_RATE, SETTLE + WINDOW);
+    let periods = (WINDOW as f32 * freq / SAMPLE_RATE).round();
+    let window = (periods * SAMPLE_RATE / freq).round() as usize;
+    let input = sine(amplitude, freq, SAMPLE_RATE, SETTLE + window);
     amp_output(settings, &input)[SETTLE..].to_vec()
 }
 
-fn thd_ratio(output: &[f32]) -> f32 {
+fn thd_ratio(output: &[f32], fundamental: f32) -> f32 {
     let harmonic_energy: f32 = (2..=10)
-        .map(|h| bin_mag(output, h as f32 * FUNDAMENTAL, SAMPLE_RATE).powi(2))
+        .map(|h| bin_mag(output, h as f32 * fundamental, SAMPLE_RATE).powi(2))
         .sum();
-    harmonic_energy.sqrt() / bin_mag(output, FUNDAMENTAL, SAMPLE_RATE)
+    harmonic_energy.sqrt() / bin_mag(output, fundamental, SAMPLE_RATE)
+}
+
+fn is_bass(model: &AmpModel) -> bool {
+    model.name.starts_with("bass-")
+}
+
+fn test_tone(model: &AmpModel) -> f32 {
+    if is_bass(model) {
+        BASS_FUNDAMENTAL
+    } else {
+        FUNDAMENTAL
+    }
 }
 
 fn linear(dbfs: f32) -> f32 {
@@ -73,6 +89,8 @@ fn amp_models_keep_their_numbers() {
         (3, "crunch"),
         (4, "lead"),
         (5, "modern"),
+        (6, "bass-valve"),
+        (7, "bass-solid"),
     ];
     for (number, name) in pinned {
         assert_eq!(MODELS[number].name, name, "model {number}");
@@ -186,7 +204,7 @@ fn amp_output_is_bounded_at_every_corner() {
 #[test]
 fn amp_defaults_are_in_the_loudness_band() {
     for (number, model) in models() {
-        let output = settled(&[(MODEL, number as f32)], linear(-20.0), FUNDAMENTAL);
+        let output = settled(&[(MODEL, number as f32)], linear(-20.0), test_tone(model));
         let loudness = db(rms(&output));
         assert!(
             (-26.0..=-14.0).contains(&loudness),
@@ -198,10 +216,11 @@ fn amp_defaults_are_in_the_loudness_band() {
 
 #[test]
 fn amp_gain_raises_distortion() {
-    for (number, model) in models() {
+    for (number, model) in models().filter(|(_, model)| model.name != "bass-solid") {
+        let tone = test_tone(model);
         let at = |gain: f32| {
             let settings = [(MODEL, number as f32), (GAIN, gain), (MASTER, 20.0)];
-            db(thd_ratio(&settled(&settings, linear(-12.0), FUNDAMENTAL)))
+            db(thd_ratio(&settled(&settings, linear(-12.0), tone), tone))
         };
         let (low, high) = (at(10.0), at(100.0));
         assert!(
@@ -215,7 +234,7 @@ fn amp_gain_raises_distortion() {
 #[test]
 fn american_is_clean_at_defaults() {
     let settings = [(MODEL, model_number("american"))];
-    let thd = thd_ratio(&settled(&settings, linear(-20.0), FUNDAMENTAL));
+    let thd = thd_ratio(&settled(&settings, linear(-20.0), FUNDAMENTAL), FUNDAMENTAL);
     assert!(thd < 0.05, "thd {:.2} %", 100.0 * thd);
 }
 
@@ -223,7 +242,10 @@ fn american_is_clean_at_defaults() {
 fn modern_distorts_more_than_american_at_full_gain() {
     let thd_at_full_gain = |name: &str| {
         let settings = [(MODEL, model_number(name)), (GAIN, 100.0), (MASTER, 20.0)];
-        db(thd_ratio(&settled(&settings, linear(-12.0), FUNDAMENTAL)))
+        db(thd_ratio(
+            &settled(&settings, linear(-12.0), FUNDAMENTAL),
+            FUNDAMENTAL,
+        ))
     };
     let (modern, american) = (thd_at_full_gain("modern"), thd_at_full_gain("american"));
     assert!(
@@ -251,7 +273,8 @@ fn amp_tone_controls_shape_the_response() {
         let rise = |idx: usize, freq: f32| {
             level_at(number, idx, 100.0, freq) - level_at(number, idx, 0.0, freq)
         };
-        let bass = rise(BASS, 100.0);
+        let low = if is_bass(model) { 60.0 } else { 100.0 };
+        let bass = rise(BASS, low);
         assert!(bass >= 6.0, "{}: bass {bass} dB", model.name);
         let treble = rise(TREBLE, 4000.0);
         assert!(treble >= 6.0, "{}: treble {treble} dB", model.name);
@@ -266,9 +289,7 @@ fn amp_tone_controls_shape_the_response() {
                     model.name
                 );
             }
-            Stack::Fmv { middle: None, .. } => {
-                assert!(middle >= 3.0, "{}: middle {middle} dB", model.name);
-            }
+            _ => assert!(middle >= 3.0, "{}: middle {middle} dB", model.name),
         }
     }
 }
@@ -414,6 +435,54 @@ fn quiet_level_at(number: usize, extra: (usize, f32), freq: f32) -> f32 {
 }
 
 #[test]
+fn amp_bands_follow_their_pots() {
+    for (number, model) in models() {
+        let Stack::Bands { low, mid, high } = &model.stack else {
+            continue;
+        };
+        let points = [
+            (BASS, low, (low.hz / 4.0).max(20.0)),
+            (MIDDLE, mid, mid.hz),
+            (TREBLE, high, (high.hz * 4.0).min(16_000.0)),
+        ];
+        for &(idx, band, _) in &points {
+            let pot = SPEC.params[idx].name;
+            for &(other, _, freq) in &points {
+                let flat = quiet_level_at(number, (idx, 50.0), freq);
+                let boost = quiet_level_at(number, (idx, 100.0), freq) - flat;
+                let cut = quiet_level_at(number, (idx, 0.0), freq) - flat;
+                let case = format!("{} {pot} at {freq} Hz: {boost} / {cut} dB", model.name);
+                if other == idx {
+                    assert!((boost - band.boost_db).abs() <= 1.5, "{case}");
+                    assert!((cut + band.cut_db).abs() <= 1.5, "{case}");
+                } else {
+                    assert!(boost.abs() < 1.5 && cut.abs() < 1.5, "{case}");
+                }
+            }
+        }
+    }
+}
+
+// With every band at 50 and `presence` at 0 the `Bands` stack and the presence shelf are exact
+// identities, so between `resonance_hz` and a decade above it only the bump differs.
+#[test]
+fn amp_resonance_bump_follows_feedback() {
+    for (number, model) in models() {
+        let (Stack::Bands { .. }, Some(hz)) = (&model.stack, model.power.resonance_hz) else {
+            continue;
+        };
+        let bump = quiet_level_at(number, (PRESENCE, 0.0), hz)
+            - quiet_level_at(number, (PRESENCE, 0.0), 10.0 * hz);
+        let expected = 4.0 * (1.0 - model.power.feedback);
+        assert!(
+            (bump - expected).abs() <= 0.3,
+            "{}: bump {bump} dB, expected {expected}",
+            model.name
+        );
+    }
+}
+
+#[test]
 fn amp_presence_raises_the_highs() {
     for (number, model) in models() {
         let rise = quiet_level_at(number, (PRESENCE, 100.0), 5000.0)
@@ -463,6 +532,11 @@ fn amp_master_lowers_the_crest_factor() {
 
 #[test]
 fn amp_sag_lowers_a_held_note() {
+    let sags: Vec<f32> = models().map(|(_, model)| model.power.sag).collect();
+    assert!(
+        sags.contains(&0.0) && sags.iter().any(|&sag| sag >= 0.3),
+        "{sags:?}"
+    );
     for (number, model) in models() {
         let output = burst_output(number, 40.0);
         let start = output.iter().position(|s| s.abs() > 1e-3 * peak(&output));

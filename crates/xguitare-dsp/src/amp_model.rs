@@ -41,6 +41,19 @@ pub enum Stack {
         values: FmvStack,
         middle: Option<f32>,
     },
+    /// An active three-band circuit: low shelf, mid peak, high shelf; each pot at 50 leaves its band flat.
+    Bands { low: Band, mid: Band, high: Band },
+}
+
+/// One band of an active tone circuit: its pot at 100 gives `boost_db`, at 0 `cut_db` less (a positive number).
+/// A shelf's `hz` is where it has reached its gain, as an amp manual quotes it, so the filter's midpoint
+/// sits one octave inward; a peak's `hz` is its centre.
+#[derive(Debug)]
+pub struct Band {
+    pub hz: f32,
+    pub boost_db: f32,
+    pub cut_db: f32,
+    pub q: f32,
 }
 
 #[derive(Debug)]
@@ -325,7 +338,101 @@ pub static MODELS: &[AmpModel] = &[
             sag: 0.0,
         },
     },
+    // Ampeg SVT: 12DW7 input stage on an unbypassed 3.3k cathode, 0.1 uF couplers, 47k feedback.
+    // The tone circuit's corner frequencies are not on the schematic; these are voiced.
+    AmpModel {
+        name: "bass-valve",
+        stages: &[
+            Stage {
+                low_cut_hz: 2.0,
+                shelf: None,
+                gain_db: 6.0,
+                bias: 0.0,
+                high_cut_hz: 10_000.0,
+            },
+            Stage {
+                low_cut_hz: 2.0,
+                shelf: None,
+                gain_db: 40.0,
+                bias: 0.05,
+                high_cut_hz: 8_000.0,
+            },
+        ],
+        pot_loss_db: 0.0,
+        bright_hz: None,
+        stack_after: 1,
+        stack: Stack::Bands {
+            low: Band {
+                hz: 80.0,
+                boost_db: 12.0,
+                cut_db: 12.0,
+                q: SHELF_Q,
+            },
+            mid: Band {
+                hz: 800.0,
+                boost_db: 10.0,
+                cut_db: 10.0,
+                q: 0.7,
+            },
+            high: Band {
+                hz: 3_000.0,
+                boost_db: 12.0,
+                cut_db: 12.0,
+                q: SHELF_Q,
+            },
+        },
+        power: PowerAmp {
+            headroom_db: -9.0,
+            feedback: 0.6,
+            presence_hz: 2_000.0,
+            resonance_hz: Some(60.0),
+            sag: 0.1,
+        },
+    },
+    // Gallien-Krueger: the three bands of the MB 108 manual (the 800RB's own were not found).
+    AmpModel {
+        name: "bass-solid",
+        stages: &[Stage {
+            low_cut_hz: 20.0,
+            shelf: None,
+            gain_db: 6.0,
+            bias: 0.0,
+            high_cut_hz: 10_000.0,
+        }],
+        pot_loss_db: 0.0,
+        bright_hz: None,
+        stack_after: 0,
+        stack: Stack::Bands {
+            low: Band {
+                hz: 50.0,
+                boost_db: 10.0,
+                cut_db: 10.0,
+                q: SHELF_Q,
+            },
+            mid: Band {
+                hz: 500.0,
+                boost_db: 6.0,
+                cut_db: 10.0,
+                q: 0.7,
+            },
+            high: Band {
+                hz: 8_000.0,
+                boost_db: 14.0,
+                cut_db: 14.0,
+                q: SHELF_Q,
+            },
+        },
+        power: PowerAmp {
+            headroom_db: -38.0,
+            feedback: 1.0,
+            presence_hz: 4_000.0,
+            resonance_hz: None,
+            sag: 0.0,
+        },
+    },
 ];
+
+const SHELF_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
 // Marshall JCM800 2203 tone stack, also used by `crunch`.
 const LEAD_STACK: FmvStack = FmvStack {

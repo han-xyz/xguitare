@@ -1,7 +1,9 @@
 use std::f32::consts::TAU;
 
 use super::db_to_linear;
-use crate::amp_model::{AmpModel, MAX_STAGES, MODEL_COUNT, MODEL_LABELS, MODELS, Stack, Stage};
+use crate::amp_model::{
+    AmpModel, Band, MAX_STAGES, MODEL_COUNT, MODEL_LABELS, MODELS, Stack, Stage,
+};
 use crate::fmv;
 use crate::oversample::Oversampler4x;
 use crate::smooth::{SMOOTHING_SECONDS, Smoother};
@@ -23,8 +25,9 @@ const MASTER_MIN_DB: f32 = -30.0;
 const MASTER_RANGE_DB: f32 = 42.0;
 const BRIGHT_MAX_BOOST: f32 = 3.0;
 const PRESENCE_MAX_DB: f32 = 12.0;
-const PRESENCE_STEP_FRAMES: usize = 32;
+const CONTROL_STEP_FRAMES: usize = 32;
 const PRESENCE_Q: f32 = std::f32::consts::FRAC_1_SQRT_2;
+const SHELF_OCTAVE: f32 = 2.0;
 const RESONANCE_MAX_DB: f32 = 4.0;
 const RESONANCE_Q: f32 = 1.0;
 const SAG_MAX_DB: f32 = 6.0;
@@ -87,7 +90,7 @@ pub struct Amp {
     pot: Smoother,
     bright_boost: Smoother,
     tone: [Smoother; 3],
-    stack_state: [f64; 3],
+    tone_stack: ToneStack,
     master: Smoother,
     presence: Smoother,
     presence_filter: Svf,
@@ -116,7 +119,7 @@ impl Amp {
             pot: Smoother::new(pot_gain(model, values[GAIN])),
             bright_boost: Smoother::new(bright_boost(model, values[GAIN])),
             tone: [BASS, MIDDLE, TREBLE].map(|idx| Smoother::new(values[idx] / 100.0)),
-            stack_state: [0.0; 3],
+            tone_stack: ToneStack::default(),
             master: Smoother::new(master_gain(model, values[MASTER])),
             presence: Smoother::new(values[PRESENCE] / 100.0),
             presence_filter: Svf::new(),
@@ -140,7 +143,7 @@ impl Amp {
             *filters = StageFilters::new(stage, self.oversampled_rate);
         }
         self.bright = OnePole::new(self.model.bright_hz.unwrap_or(0.0), self.oversampled_rate);
-        self.stack_state = [0.0; 3];
+        self.tone_stack = ToneStack::default();
         let power = &self.model.power;
         self.presence_filter.reset();
         self.resonance = power.resonance_hz.map(|hz| {
@@ -162,6 +165,11 @@ impl Amp {
             .set_target(bright_boost(self.model, self.values[GAIN]));
         self.master
             .set_target(master_gain(self.model, self.values[MASTER]));
+        // The input fades in from silence below, so the new model's gains apply at once; a glide
+        // from the old model's `headroom_db` would overdrive the new one's stages.
+        self.pot.snap();
+        self.bright_boost.snap();
+        self.master.snap();
         self.oversampler.reset();
         self.fade = 0.0;
     }
@@ -240,19 +248,6 @@ impl Module for Amp {
 
     fn process(&mut self, io: &mut AudioBuffers) {
         let frames = io.frames;
-        let [bass, middle, treble] = self
-            .tone
-            .each_mut()
-            .map(|position| f64::from(position.advance(frames)));
-        let Stack::Fmv {
-            values,
-            middle: fixed_middle,
-        } = &self.model.stack;
-        let middle = fixed_middle.map_or(middle, f64::from);
-        let coefficients = fmv::bilinear(
-            fmv::analog_coefficients(values, treble, middle, bass),
-            2.0 * f64::from(self.oversampled_rate),
-        );
         let model = self.model;
         let feedback = model.power.feedback;
         let mono = &mut io.mono[..frames];
@@ -261,13 +256,19 @@ impl Module for Amp {
             self.fade = (self.fade + self.fade_step).min(1.0);
         }
         let upsampled = self.oversampler.upsample(mono);
-        for chunk in upsampled.chunks_mut(PRESENCE_STEP_FRAMES * OVERSAMPLING as usize) {
+        for chunk in upsampled.chunks_mut(CONTROL_STEP_FRAMES * OVERSAMPLING as usize) {
+            let chunk_frames = chunk.len() / OVERSAMPLING as usize;
             let presence = SvfCoefficients::high_shelf(
                 model.power.presence_hz,
                 PRESENCE_Q,
-                PRESENCE_MAX_DB * self.presence.advance(chunk.len() / OVERSAMPLING as usize),
+                PRESENCE_MAX_DB * self.presence.advance(chunk_frames),
                 self.oversampled_rate,
             );
+            let positions = self
+                .tone
+                .each_mut()
+                .map(|position| position.advance(chunk_frames));
+            let stack = StackCoefficients::new(&model.stack, positions, self.oversampled_rate);
             for sample in chunk {
                 let pot = self.pot.next_value();
                 let bright_boost = self.bright_boost.next_value();
@@ -279,7 +280,7 @@ impl Module for Amp {
                         x = pot * (x + bright_boost * self.bright.high_pass(x));
                     }
                     if idx == model.stack_after {
-                        x = fmv::step(&coefficients, &mut self.stack_state, f64::from(x)) as f32;
+                        x = self.tone_stack.process(&stack, x);
                     }
                 }
                 x = self.presence_filter.process(&presence, x);
@@ -301,6 +302,77 @@ impl Module for Amp {
 
         for sample in mono.iter_mut() {
             *sample *= self.level.next_value();
+        }
+    }
+}
+
+enum StackCoefficients {
+    Fmv(fmv::Coefficients),
+    Bands([SvfCoefficients; 3]),
+}
+
+impl StackCoefficients {
+    fn new(stack: &Stack, [bass, middle, treble]: [f32; 3], sample_rate: f32) -> StackCoefficients {
+        match stack {
+            Stack::Fmv {
+                values,
+                middle: fixed_middle,
+            } => {
+                let middle = fixed_middle.unwrap_or(middle);
+                StackCoefficients::Fmv(fmv::bilinear(
+                    fmv::analog_coefficients(
+                        values,
+                        f64::from(treble),
+                        f64::from(middle),
+                        f64::from(bass),
+                    ),
+                    2.0 * f64::from(sample_rate),
+                ))
+            }
+            Stack::Bands { low, mid, high } => StackCoefficients::Bands([
+                SvfCoefficients::low_shelf(
+                    low.hz * SHELF_OCTAVE,
+                    low.q,
+                    band_gain_db(low, bass),
+                    sample_rate,
+                ),
+                SvfCoefficients::bell(mid.hz, mid.q, band_gain_db(mid, middle), sample_rate),
+                SvfCoefficients::high_shelf(
+                    high.hz / SHELF_OCTAVE,
+                    high.q,
+                    band_gain_db(high, treble),
+                    sample_rate,
+                ),
+            ]),
+        }
+    }
+}
+
+/// Exactly 0 dB at the pot's middle, linear in dB out to `boost_db` and −`cut_db`.
+fn band_gain_db(band: &Band, position: f32) -> f32 {
+    let offset = 2.0 * position - 1.0;
+    if offset >= 0.0 {
+        band.boost_db * offset
+    } else {
+        band.cut_db * offset
+    }
+}
+
+#[derive(Default)]
+struct ToneStack {
+    fmv_state: [f64; 3],
+    bands: [Svf; 3],
+}
+
+impl ToneStack {
+    fn process(&mut self, coefficients: &StackCoefficients, x: f32) -> f32 {
+        match coefficients {
+            StackCoefficients::Fmv(fmv) => fmv::step(fmv, &mut self.fmv_state, f64::from(x)) as f32,
+            StackCoefficients::Bands(bands) => self
+                .bands
+                .iter_mut()
+                .zip(bands)
+                .fold(x, |x, (filter, band)| filter.process(band, x)),
         }
     }
 }

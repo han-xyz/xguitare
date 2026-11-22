@@ -134,7 +134,7 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `drive` | `drive` 0..100 50 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `fuzz` | `sustain` 0..100 60 %, `tone` 0..100 50 %, `level` −30..10 0 dB |
 | `blend` | `blend` 0..100 100 %, `drive` 0..100 40 %, `level` −24..12 0 dB, `bass` −12..12 0 dB, `bass_freq` 40 Hz\|80 Hz 1, `mid` −12..12 0 dB, `mid_freq` 500 Hz\|1000 Hz 0, `treble` −12..12 0 dB, `presence` 0..100 50 %, `crossover` 20..400 20 Hz |
-| `amp` | `model` tweed\|american\|chime\|crunch\|lead\|modern 0, `gain` 0..100 50 %, `bass`, `middle`, `treble` 0..100 50 %, `presence` 0..100 50 %, `master` 0..100 50 %, `level` −60..12 −12 dB |
+| `amp` | `model` tweed\|american\|chime\|crunch\|lead\|modern\|bass-valve\|bass-solid 0, `gain` 0..100 50 %, `bass`, `middle`, `treble` 0..100 50 %, `presence` 0..100 50 %, `master` 0..100 50 %, `level` −60..12 −12 dB |
 | `preamp` | `gain` 0..100 40 %, `bias` −1..1 0, `master` −60..0 −12 dB, `stages` 1..4 3 |
 | `tonestack` | `bass`, `middle`, `treble` 0..100 50 % |
 | `eq` | `low_cut` 10..300 10 Hz, `low_freq` 20..500 100 Hz, `low_gain` −15..15 0 dB, `mid1_freq` 40..5000 400 Hz, `mid1_gain` −15..15 0 dB, `mid1_q` 0.3..10 0.707, `mid2_freq` 200..10000 2500 Hz, `mid2_gain` −15..15 0 dB, `mid2_q` 0.3..10 0.707, `high_freq` 1000..20000 8000 Hz, `high_gain` −15..15 0 dB, `high_cut` 1000..20000 20000 Hz, `output` −12..12 0 dB |
@@ -146,7 +146,7 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `reverb` | `size` 0..100 50 %, `damping` 0..100 50 %, `mix` 0..100 20 %, `width` 0..100 100 % |
 | `gain` | `level` −60..20 0 dB |
 
-`amp` is a whole amplifier in one Module: gain stages, the `gain` pot, a passive tone stack and the `master`, run at 4x oversampling. `model` chooses the Amp model; a Preset stores its number, and models are only ever added at the end, so a number keeps its amp. `master` is for now a plain output gain and `presence` does nothing yet; the power amp they drive is still to come.
+`amp` is a whole amplifier in one Module: gain stages, the `gain` pot, a tone stack (passive for the guitar models, an active three-band one for the bass models) and the `master`, run at 4x oversampling. `model` chooses the Amp model; a Preset stores its number, and models are only ever added at the end, so a number keeps its amp. `master` is for now a plain output gain and `presence` does nothing yet; the power amp they drive is still to come.
 
 | Amp model | Follows | Notes |
 | --- | --- | --- |
@@ -156,6 +156,10 @@ Modules and Parameters (`min..max default unit`). In `autowah` the bp mode peaks
 | `crunch` (3) | Marshall 1959 Super Lead | Coupling and cathode values from the schematic; bright cap on `gain`. The tone stack uses the JCM800 2203's values, because the 1959's own were not found (unverified). Stage gains, low-pass corners and sag are voiced. |
 | `lead` (4) | Marshall JCM800 2203 | Three stages with a cold clipper; tone stack and presence values from the schematic. Stage gains, low-pass corners and sag are voiced. |
 | `modern` (5) | Soldano SLO-100 / Mesa Dual Rectifier | Four stages with a cold clipper; no sag. The tone stack values come from the CAPS audio suite and are not checked against a schematic (unverified). Stage gains, low cuts after the first stage, low-pass corners, `presence` corner and resonance are voiced. |
+| `bass-valve` (6) | Ampeg SVT | Coupling values and feedback from the schematic; an active three-band tone circuit: `bass` a shelf reaching ±12 dB at 80 Hz, `middle` a peak of ±10 dB at 800 Hz, `treble` a shelf reaching ±12 dB at 3 kHz. These corner frequencies are voiced, not from the amp's documents, which were not found (unverified). The real amp has no presence control. Resonance and sag are voiced. |
+| `bass-solid` (7) | Gallien-Krueger | A solid-state amp with one stage, no resonance and no sag; its three bands are the MB 108 manual's (the 800RB's own were not found): `bass` a shelf reaching ±10 dB at 50 Hz, `middle` +6/−10 dB at 500 Hz, `treble` a shelf reaching ±14 dB at 8 kHz. The real amp has no presence control; the `presence` corner is voiced. |
+
+For every model the stage gains, the low-pass corners (high cuts), `headroom_db` (how hard `master` drives the power amp) and the bright-cap corner are voiced, not measured. A shelf band's frequency is where it has reached its full boost or cut, as an amp manual quotes it; at 50 a band is flat.
 
 Bank numbering: every `*.toml` file in the Bank directory, sorted by file name, numbered from 0. That number is the program number for `load` and for MIDI; prefix file names with `01-`, `02-`, ... to fix the order. A file that does not parse keeps its number and shows in `list` with `!` and the error.
 
