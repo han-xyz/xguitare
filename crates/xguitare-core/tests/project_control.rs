@@ -2032,3 +2032,120 @@ fn read_project_reports_a_take_that_cannot_be_loaded() {
     assert_eq!(error(handle(&mut state, open_song())), message);
     assert_eq!(status(&mut state)["project"], Value::Null);
 }
+
+fn install_request(state: &mut EngineState, request: Request, read: ReadProject) -> Response {
+    let connection = open_connection(state);
+    handle_request(state, None, connection, request, Some(read)).0
+}
+
+fn read_request(state: &EngineState, request: &Request) -> ReadProject {
+    match begin_project_read(state, request) {
+        Some(Ok(ticket)) => read_project(&ticket),
+        _ => panic!("expected a ticket"),
+    }
+}
+
+fn track_names(state: &mut EngineState) -> Vec<Value> {
+    status(state)["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|track| track["name"].clone())
+        .collect()
+}
+
+#[test]
+fn a_read_is_installed_as_read_when_no_project_was_opened_since() {
+    let (mut state, _audio, _dir) = state("read-kept");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let read = read_song(&state);
+    let folder = state.config.projects_dir.join("song");
+    let mut project = Project::load(&folder).unwrap().0;
+    let mut bass = project.tracks[0].clone();
+    bass.name = "Bass".to_string();
+    project.tracks.push(bass);
+    project.save(&folder).unwrap();
+    let Response::Ok(opened) = install(&mut state, read) else {
+        panic!("the read should install");
+    };
+    assert_eq!(opened["autosave_newer"], false);
+    assert_eq!(opened["restored"], false);
+    assert_eq!(track_names(&mut state), [json!("Guitar")]);
+}
+
+#[test]
+fn a_read_of_the_autosave_installs_the_autosave() {
+    let (mut state, _audio, _dir) = state("read-restore");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let folder = state.config.projects_dir.join("song");
+    let mut autosave = Project::load(&folder).unwrap().0;
+    let mut bass = autosave.tracks[0].clone();
+    bass.name = "Bass".to_string();
+    autosave.tracks.push(bass);
+    std::thread::sleep(Duration::from_millis(20));
+    autosave.save_autosave(&folder).unwrap();
+    let request = Request::ProjectOpen {
+        name: "Song".to_string(),
+        restore: true,
+    };
+    let read = read_request(&state, &request);
+    let Response::Ok(opened) = install_request(&mut state, request, read) else {
+        panic!("the read should install");
+    };
+    assert_eq!(opened["restored"], true);
+    assert_eq!(opened["autosave_newer"], true);
+    assert_eq!(track_names(&mut state), [json!("Guitar"), json!("Bass")]);
+}
+
+#[test]
+fn a_rate_mismatch_is_reported_before_a_take_that_cannot_be_loaded() {
+    let (mut state, _audio, _dir) = state("rate-before-take");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let folder = state.config.projects_dir.join("song");
+    let mut project = Project::load(&folder).unwrap().0;
+    project.tracks[0].items = vec![Item {
+        id: 1,
+        position: 0,
+        offset: 0,
+        length: None,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/gone.wav".to_string(),
+            frames: 10,
+        }],
+    }];
+    project.next_item_id = 2;
+    project.save(&folder).unwrap();
+    state.sample_rate = 96_000.0;
+    let read = read_song(&state);
+    let Response::Err { error: message, .. } = install(&mut state, read) else {
+        panic!("the open should be refused");
+    };
+    assert_eq!(
+        message,
+        "project rate 48000 Hz differs from the engine rate 96000 Hz"
+    );
+}
+
+#[test]
+fn a_project_closed_but_not_yet_finished_by_the_daemon_is_read_again() {
+    let (mut state, _audio, _dir) = state("closed-unfinished");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let read = read_song(&state);
+    ok(handle(&mut state, open_song()));
+    add_track(&mut state, "Bass");
+    ok(handle(&mut state, Request::ProjectSave));
+    ok(handle(&mut state, Request::ProjectClose));
+    let Response::Ok(_) = install(&mut state, read) else {
+        panic!("the second read should open Song");
+    };
+    assert_eq!(track_names(&mut state), [json!("Guitar"), json!("Bass")]);
+}
