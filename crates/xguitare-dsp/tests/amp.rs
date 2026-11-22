@@ -66,7 +66,14 @@ fn amp_labels_are_the_table_names() {
 
 #[test]
 fn amp_models_keep_their_numbers() {
-    let pinned = [(0, "tweed"), (1, "american")];
+    let pinned = [
+        (0, "tweed"),
+        (1, "american"),
+        (2, "chime"),
+        (3, "crunch"),
+        (4, "lead"),
+        (5, "modern"),
+    ];
     for (number, name) in pinned {
         assert_eq!(MODELS[number].name, name, "model {number}");
     }
@@ -210,6 +217,19 @@ fn american_is_clean_at_defaults() {
     let settings = [(MODEL, model_number("american"))];
     let thd = thd_ratio(&settled(&settings, linear(-20.0), FUNDAMENTAL));
     assert!(thd < 0.05, "thd {:.2} %", 100.0 * thd);
+}
+
+#[test]
+fn modern_distorts_more_than_american_at_full_gain() {
+    let thd_at_full_gain = |name: &str| {
+        let settings = [(MODEL, model_number(name)), (GAIN, 100.0), (MASTER, 20.0)];
+        db(thd_ratio(&settled(&settings, linear(-12.0), FUNDAMENTAL)))
+    };
+    let (modern, american) = (thd_at_full_gain("modern"), thd_at_full_gain("american"));
+    assert!(
+        modern > american,
+        "thd modern {modern} dB, american {american} dB"
+    );
 }
 
 #[test]
@@ -456,6 +476,34 @@ fn amp_sag_lowers_a_held_note() {
         } else if sag == 0.0 {
             assert!(drop.abs() <= 0.3, "{}: no sag, drop {drop} dB", model.name);
         }
+    }
+}
+
+// The quiet tone keeps the power amp linear, so any sag left from the loud note shows at full
+// size; the 1 kHz bin ignores the low-frequency settling of the stages' high-passes.
+#[test]
+fn amp_without_sag_recovers_at_once_after_a_loud_note() {
+    let loud = common::frames(300.0);
+    let mut input = sine(
+        linear(-6.0),
+        BURST_FREQ,
+        SAMPLE_RATE,
+        loud + common::frames(600.0),
+    );
+    for sample in &mut input[loud..] {
+        *sample *= linear(-24.0);
+    }
+    for (number, model) in models().filter(|(_, model)| model.power.sag == 0.0) {
+        let output = amp_output(
+            &[(MODEL, number as f32), (GAIN, 30.0), (MASTER, 40.0)],
+            &input,
+        );
+        let level_at = |ms: f32| {
+            let window = &output[loud + common::frames(ms)..loud + common::frames(ms + 20.0)];
+            db(bin_mag(window, BURST_FREQ, SAMPLE_RATE))
+        };
+        let change = level_at(30.0) - level_at(500.0);
+        assert!(change.abs() <= 0.06, "{}: {change} dB", model.name);
     }
 }
 

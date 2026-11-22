@@ -1168,7 +1168,10 @@ fn modules_lists_registry() {
             "model", "gain", "bass", "middle", "treble", "presence", "master", "level"
         ]
     );
-    assert_eq!(amp_params[0]["labels"], json!(["tweed", "american"]));
+    assert_eq!(
+        amp_params[0]["labels"],
+        json!(["tweed", "american", "chime", "crunch", "lead", "modern"])
+    );
     assert_eq!(amp_params[0]["integer"], true);
     assert_eq!(
         by_type("gain")["params"],

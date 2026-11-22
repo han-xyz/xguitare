@@ -140,7 +140,203 @@ pub static MODELS: &[AmpModel] = &[
             sag: 0.3,
         },
     },
+    // Vox AC30 Top Boost: 25 uF cathode bypass, 47 nF coupling, 100 pF bright cap; no mid pot, no feedback.
+    AmpModel {
+        name: "chime",
+        stages: &[
+            Stage {
+                low_cut_hz: 4.0,
+                shelf: None,
+                gain_db: 6.0,
+                bias: 0.05,
+                high_cut_hz: 12_000.0,
+            },
+            Stage {
+                low_cut_hz: 15.0,
+                shelf: None,
+                gain_db: 44.0,
+                bias: 0.1,
+                high_cut_hz: 9_000.0,
+            },
+        ],
+        pot_loss_db: 0.0,
+        bright_hz: Some(2_500.0),
+        stack_after: 1,
+        stack: Stack::Fmv {
+            values: FmvStack {
+                r1: 1e6,
+                r2: 1e6,
+                r3: 10e3,
+                r4: 100e3,
+                c1: 50e-12,
+                c2: 22e-9,
+                c3: 22e-9,
+            },
+            middle: Some(1.0),
+        },
+        power: PowerAmp {
+            headroom_db: -11.0,
+            feedback: 0.0,
+            presence_hz: 2_000.0,
+            resonance_hz: Some(90.0),
+            sag: 0.5,
+        },
+    },
+    // Marshall 1959 Super Lead: 2.2 nF coupling, 2.7k with 0.68 uF cathode, 470 pF bright cap.
+    // Tone stack values are the 2203's; the 1959's own were not found.
+    AmpModel {
+        name: "crunch",
+        stages: &[
+            Stage {
+                low_cut_hz: 72.0,
+                shelf: Some(LowShelf {
+                    hz: 87.0,
+                    cut_db: 6.0,
+                }),
+                gain_db: 6.0,
+                bias: 0.1,
+                high_cut_hz: 10_000.0,
+            },
+            Stage {
+                low_cut_hz: 7.0,
+                shelf: None,
+                gain_db: 45.0,
+                bias: 0.15,
+                high_cut_hz: 7_000.0,
+            },
+        ],
+        pot_loss_db: 0.0,
+        bright_hz: Some(1_500.0),
+        stack_after: 1,
+        stack: Stack::Fmv {
+            values: LEAD_STACK,
+            middle: None,
+        },
+        // Presence: 22k in parallel with 4.7k, with 0.1 uF in the feedback loop.
+        power: PowerAmp {
+            headroom_db: -9.0,
+            feedback: 0.5,
+            presence_hz: 400.0,
+            resonance_hz: Some(100.0),
+            sag: 0.3,
+        },
+    },
+    // Marshall JCM800 2203: 470k/500k attenuator before the gain pot; a cold clipper on a 10k cathode.
+    AmpModel {
+        name: "lead",
+        stages: &[
+            Stage {
+                low_cut_hz: 7.0,
+                shelf: Some(LowShelf {
+                    hz: 87.0,
+                    cut_db: 6.0,
+                }),
+                gain_db: 6.0,
+                bias: 0.1,
+                high_cut_hz: 10_000.0,
+            },
+            Stage {
+                low_cut_hz: 10.0,
+                shelf: None,
+                gain_db: 24.0,
+                bias: -0.6,
+                high_cut_hz: 8_000.0,
+            },
+            Stage {
+                low_cut_hz: 7.0,
+                shelf: None,
+                gain_db: 18.0,
+                bias: 0.1,
+                high_cut_hz: 6_000.0,
+            },
+        ],
+        pot_loss_db: 6.0,
+        bright_hz: Some(1_500.0),
+        stack_after: 2,
+        stack: Stack::Fmv {
+            values: LEAD_STACK,
+            middle: None,
+        },
+        power: PowerAmp {
+            headroom_db: -9.0,
+            feedback: 0.5,
+            presence_hz: 400.0,
+            resonance_hz: Some(100.0),
+            sag: 0.1,
+        },
+    },
+    // Soldano SLO-100 and Mesa Dual Rectifier: 1.8k with 1 uF on the first cathode, a cold clipper
+    // on 39k, 2 nF bright cap. Tone stack values from CAPS, not checked against a schematic.
+    AmpModel {
+        name: "modern",
+        stages: &[
+            Stage {
+                low_cut_hz: 7.0,
+                shelf: Some(LowShelf {
+                    hz: 88.0,
+                    cut_db: 6.0,
+                }),
+                gain_db: 6.0,
+                bias: 0.1,
+                high_cut_hz: 10_000.0,
+            },
+            Stage {
+                low_cut_hz: 20.0,
+                shelf: None,
+                gain_db: 14.0,
+                bias: 0.1,
+                high_cut_hz: 8_000.0,
+            },
+            Stage {
+                low_cut_hz: 20.0,
+                shelf: None,
+                gain_db: 12.0,
+                bias: -0.8,
+                high_cut_hz: 6_000.0,
+            },
+            Stage {
+                low_cut_hz: 20.0,
+                shelf: None,
+                gain_db: 20.0,
+                bias: 0.1,
+                high_cut_hz: 5_000.0,
+            },
+        ],
+        pot_loss_db: 6.0,
+        bright_hz: Some(1_300.0),
+        stack_after: 3,
+        stack: Stack::Fmv {
+            values: FmvStack {
+                r1: 250e3,
+                r2: 1e6,
+                r3: 25e3,
+                r4: 47e3,
+                c1: 600e-12,
+                c2: 20e-9,
+                c3: 20e-9,
+            },
+            middle: None,
+        },
+        power: PowerAmp {
+            headroom_db: -16.0,
+            feedback: 0.9,
+            presence_hz: 600.0,
+            resonance_hz: Some(80.0),
+            sag: 0.0,
+        },
+    },
 ];
+
+// Marshall JCM800 2203 tone stack, also used by `crunch`.
+const LEAD_STACK: FmvStack = FmvStack {
+    r1: 220e3,
+    r2: 1e6,
+    r3: 22e3,
+    r4: 33e3,
+    c1: 470e-12,
+    c2: 22e-9,
+    c3: 22e-9,
+};
 
 pub const MODEL_COUNT: usize = MODELS.len();
 
