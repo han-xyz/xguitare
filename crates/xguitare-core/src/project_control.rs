@@ -504,7 +504,10 @@ pub(crate) fn project_open(
         {
             read
         }
-        _ => read_project(&read_ticket(state, name, restore)),
+        outdated => {
+            drop(outdated);
+            read_project(&read_ticket(state, name, restore))
+        }
     };
     let restore = read.ticket.restore;
     let ProjectFiles {

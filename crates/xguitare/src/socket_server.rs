@@ -180,6 +180,7 @@ impl ControlSocket {
     ) {
         let mut accepted: u64 = 0;
         let open = Arc::new(AtomicUsize::new(0));
+        let one_project_read = Arc::new(Mutex::new(()));
         while !stop.load(Ordering::Relaxed) {
             match self.listener.accept() {
                 Ok((stream, _)) => {
@@ -192,13 +193,21 @@ impl ControlSocket {
                     let state = Arc::clone(state);
                     let ports = Weak::clone(ports);
                     let stop = Arc::clone(stop);
+                    let one_project_read = Arc::clone(&one_project_read);
                     let idle_timeout = self.idle_timeout;
                     // Connection threads are never joined: each sees `stop` within READ_TICK, and process exit ends any still writing.
                     let spawned = thread::Builder::new()
                         .name(format!("control-{accepted}"))
                         .spawn(move || {
                             let _slot = slot;
-                            serve_connection(&stream, &state, &ports, &stop, idle_timeout);
+                            serve_connection(
+                                &stream,
+                                &state,
+                                &one_project_read,
+                                &ports,
+                                &stop,
+                                idle_timeout,
+                            );
                         });
                     if let Err(err) = spawned {
                         warn!("cannot start control connection thread: {err}");
@@ -256,12 +265,21 @@ fn create_socket_dir(dir: &Path) -> io::Result<()> {
 fn serve_connection(
     stream: &UnixStream,
     state: &Mutex<EngineState>,
+    one_project_read: &Mutex<()>,
     ports: &SharedPorts,
     stop: &AtomicBool,
     idle_timeout: Duration,
 ) {
     let connection = OpenConnection::open(state);
-    match answer_lines(stream, state, ports, connection.id, stop, idle_timeout) {
+    match answer_lines(
+        stream,
+        state,
+        one_project_read,
+        ports,
+        connection.id,
+        stop,
+        idle_timeout,
+    ) {
         Err(err) if !matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
             warn!("control connection: {err}");
         }
@@ -288,13 +306,14 @@ impl Drop for OpenConnection<'_> {
     }
 }
 
-fn lock(state: &Mutex<EngineState>) -> MutexGuard<'_, EngineState> {
-    state.lock().unwrap_or_else(PoisonError::into_inner)
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn answer_lines(
     stream: &UnixStream,
     state: &Mutex<EngineState>,
+    one_project_read: &Mutex<()>,
     ports: &SharedPorts,
     connection: ConnectionId,
     stop: &AtomicBool,
@@ -330,7 +349,7 @@ fn answer_lines(
         if !line.is_empty() {
             let request = String::from_utf8_lossy(&line);
             let (response, warnings) = match parse_line(request.trim_end()) {
-                Ok(request) => answer(state, ports, connection, request),
+                Ok(request) => answer(state, one_project_read, ports, connection, request),
                 Err(response) => (response, Vec::new()),
             };
             for warning in warnings {
@@ -346,13 +365,15 @@ fn answer_lines(
     Ok(())
 }
 
-/// Answers `request` under the state lock; a `project_open` reads its files between two locks.
+/// Answers `request` under the state lock; a `project_open` reads its files between two locks, holding `one_project_read` from before the first until the install, so only one copy of a Project's Takes is decoded at a time.
 fn answer(
     state: &Mutex<EngineState>,
+    one_project_read: &Mutex<()>,
     ports: &SharedPorts,
     connection: ConnectionId,
     request: Request,
 ) -> (Response, Vec<BuildWarning>) {
+    let _reading = matches!(request, Request::ProjectOpen { .. }).then(|| lock(one_project_read));
     let mut guard = lock(state);
     let read = match begin_project_read(&guard, &request) {
         None => None,

@@ -1956,6 +1956,24 @@ fn a_project_opened_between_read_and_install_refuses_the_second() {
 }
 
 #[test]
+fn a_project_still_closing_at_install_refuses_with_its_code() {
+    let (mut state, _audio, _dir) = state("closing-between");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    close(&mut state);
+    let read = read_song(&state);
+    ok(handle(&mut state, open_song()));
+    arm(&mut state, 0);
+    ok(handle(&mut state, transport(TransportAction::Record, None)));
+    ok(handle(&mut state, transport(TransportAction::Stop, None)));
+    ok(handle(&mut state, Request::ProjectClose));
+    assert_eq!(
+        install(&mut state, read),
+        Response::err_code("a project is still closing; try again", "still_closing")
+    );
+}
+
+#[test]
 fn a_project_opened_and_closed_between_read_and_install_is_read_again() {
     let (mut state, _audio, _dir) = state("close-between");
     new_project(&mut state, "Song");

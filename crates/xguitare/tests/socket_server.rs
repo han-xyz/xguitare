@@ -390,9 +390,8 @@ fn a_full_take_peaks_reply_crosses_the_socket() {
     }
 }
 
-#[test]
-fn status_is_answered_while_a_project_is_being_read() {
-    let server = server("read-outside-lock");
+/// Song on `server`, whose one Item's active Take is a FIFO, so a read of it waits until the test writes; returns the FIFO's path.
+fn song_with_fifo_take(server: &Server) -> PathBuf {
     let dir = server.path.parent().unwrap();
     let opener = UnixStream::connect(&server.path).unwrap();
     assert!(
@@ -425,6 +424,23 @@ fn status_is_answered_while_a_project_is_being_read() {
     }];
     project.next_item_id = 2;
     project.save(&folder).unwrap();
+    fifo
+}
+
+/// The open file descriptors of this process on `path`.
+fn open_fds(path: &Path) -> usize {
+    fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|fd| fs::read_link(fd.path()).is_ok_and(|target| target == path))
+        .count()
+}
+
+#[test]
+fn status_is_answered_while_a_project_is_being_read() {
+    let server = server("read-outside-lock");
+    let fifo = song_with_fifo_take(&server);
+    let opener = UnixStream::connect(&server.path).unwrap();
     let mut writer = &opener;
     writer
         .write_all(b"{\"cmd\":\"project_open\",\"name\":\"Song\"}\n")
@@ -460,4 +476,49 @@ fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     }
     writer.finalize().unwrap();
     bytes.into_inner()
+}
+
+#[test]
+fn a_second_project_open_waits_for_the_first_read() {
+    let server = server("one-read");
+    let fifo = song_with_fifo_take(&server);
+    let first = UnixStream::connect(&server.path).unwrap();
+    let mut writer = &first;
+    writer
+        .write_all(b"{\"cmd\":\"project_open\",\"name\":\"Song\"}\n")
+        .unwrap();
+    // Opening the FIFO for writing returns once the first read has opened it for reading.
+    let mut take = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+    let second = UnixStream::connect(&server.path).unwrap();
+    second
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let mut writer = &second;
+    writer
+        .write_all(b"{\"cmd\":\"project_open\",\"name\":\"Song\"}\n")
+        .unwrap();
+    let mut waiting = String::new();
+    let err = BufReader::new(&second).read_line(&mut waiting).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::WouldBlock, "{waiting}");
+    assert_eq!(open_fds(&fifo), 2, "only the first open reads the Take");
+    let watcher = UnixStream::connect(&server.path).unwrap();
+    watcher
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let status: Value = request(&watcher, r#"{"cmd":"status"}"#).parse().unwrap();
+    assert_eq!(status["project"], Value::Null);
+    take.write_all(&wav_bytes(&[0.5; 4])).unwrap();
+    drop(take);
+    let mut reply = String::new();
+    BufReader::new(&first).read_line(&mut reply).unwrap();
+    assert!(reply.starts_with(r#"{"ok":true"#), "{reply}");
+    second
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut refusal = String::new();
+    BufReader::new(&second).read_line(&mut refusal).unwrap();
+    assert_eq!(
+        refusal.trim_end(),
+        r#"{"ok":false,"error":"a project is open; close it first"}"#
+    );
 }
