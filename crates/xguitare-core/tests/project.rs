@@ -445,6 +445,30 @@ fn a_format_of_zero_is_refused() {
 }
 
 #[test]
+fn a_format_above_the_integer_range_is_refused_as_newer() {
+    let dir = temp_dir("format-huge");
+    assert_eq!(
+        load_error(
+            &dir.0,
+            &format!("format = 9223372036854775808\n{TWO_TRACKS}")
+        ),
+        "project format 9223372036854775808 is newer than this xguitare (reads up to 1)"
+    );
+}
+
+#[test]
+fn a_format_below_the_integer_range_is_refused() {
+    let dir = temp_dir("format-tiny");
+    assert_eq!(
+        load_error(
+            &dir.0,
+            &format!("format = -9223372036854775809\n{TWO_TRACKS}")
+        ),
+        "project format must be a whole number of 1 or more"
+    );
+}
+
+#[test]
 fn autosave_due_after_sixty_seconds_while_dirty() {
     let last_save = Instant::now();
     let later = |secs| last_save + Duration::from_secs(secs);

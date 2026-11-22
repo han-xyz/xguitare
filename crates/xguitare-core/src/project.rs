@@ -22,7 +22,7 @@ pub const MAX_TRACKS: usize = 16;
 pub const MAX_BUSES: usize = 8;
 pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(60);
 /// The `format` this build writes and the highest it reads; it goes up whenever a build that knows only the old number could not read the file (a key added, removed or changed in meaning), because the reader refuses unknown keys (ADR-0008).
-const PROJECT_FORMAT: i64 = 1;
+const PROJECT_FORMAT: u32 = 1;
 
 const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 const DEFAULT_TEMPO_BPM: f64 = 120.0;
@@ -236,7 +236,7 @@ pub enum ProjectError {
         bus: u64,
     },
     SendLevel(String),
-    NewerFormat(i64),
+    NewerFormat(u128),
     Format,
 }
 
@@ -262,14 +262,82 @@ pub enum LoadWarning {
 #[derive(Deserialize)]
 struct FormatFile {
     #[serde(default)]
-    format: Option<toml::Value>,
+    format: Option<WrittenFormat>,
+}
+
+/// A `format` as written: `Positive` for a whole number of 1 or more, whatever its size; `Other` for any other value.
+enum WrittenFormat {
+    Positive(u128),
+    Other,
+}
+
+impl<'de> Deserialize<'de> for WrittenFormat {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(WrittenFormatVisitor)
+    }
+}
+
+struct WrittenFormatVisitor;
+
+impl<'de> serde::de::Visitor<'de> for WrittenFormatVisitor {
+    type Value = WrittenFormat;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("any TOML value")
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<WrittenFormat, E> {
+        self.visit_i128(i128::from(value))
+    }
+
+    fn visit_i128<E: serde::de::Error>(self, value: i128) -> Result<WrittenFormat, E> {
+        Ok(u128::try_from(value).map_or(WrittenFormat::Other, positive))
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<WrittenFormat, E> {
+        self.visit_u128(u128::from(value))
+    }
+
+    fn visit_u128<E: serde::de::Error>(self, value: u128) -> Result<WrittenFormat, E> {
+        Ok(positive(value))
+    }
+
+    fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<WrittenFormat, E> {
+        Ok(WrittenFormat::Other)
+    }
+
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<WrittenFormat, E> {
+        Ok(WrittenFormat::Other)
+    }
+
+    fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<WrittenFormat, E> {
+        Ok(WrittenFormat::Other)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, seq: A) -> Result<WrittenFormat, A::Error> {
+        serde::de::IgnoredAny.visit_seq(seq)?;
+        Ok(WrittenFormat::Other)
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<WrittenFormat, A::Error> {
+        serde::de::IgnoredAny.visit_map(map)?;
+        Ok(WrittenFormat::Other)
+    }
+}
+
+fn positive(value: u128) -> WrittenFormat {
+    if value == 0 {
+        WrittenFormat::Other
+    } else {
+        WrittenFormat::Positive(value)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProjectFile {
     #[serde(default)]
-    format: Option<i64>,
+    format: Option<u32>,
     name: String,
     sample_rate: u32,
     tempo_bpm: f64,
@@ -630,14 +698,13 @@ fn read(path: &Path) -> Result<(Project, Vec<LoadWarning>), ProjectError> {
 }
 
 /// A missing `format` is 1, the format of files written before the key.
-fn check_format(format: Option<&toml::Value>) -> Result<(), ProjectError> {
+fn check_format(format: Option<&WrittenFormat>) -> Result<(), ProjectError> {
     match format {
-        None => Ok(()),
-        Some(&toml::Value::Integer(format)) if format > PROJECT_FORMAT => {
+        Some(&WrittenFormat::Positive(format)) if format > u128::from(PROJECT_FORMAT) => {
             Err(ProjectError::NewerFormat(format))
         }
-        Some(&toml::Value::Integer(format)) if format >= 1 => Ok(()),
-        Some(_) => Err(ProjectError::Format),
+        None | Some(WrittenFormat::Positive(_)) => Ok(()),
+        Some(WrittenFormat::Other) => Err(ProjectError::Format),
     }
 }
 
