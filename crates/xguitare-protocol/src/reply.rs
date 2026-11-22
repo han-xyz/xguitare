@@ -77,8 +77,8 @@ pub struct StatusReply {
     pub muted: bool,
     pub modified: bool,
     /// `null` when the peak is not a finite number.
-    pub input_peak_db: Option<f32>,
-    pub output_peak_db: Option<f32>,
+    pub input_peak_db: Option<f64>,
+    pub output_peak_db: Option<f64>,
     pub xruns: u64,
     pub callback_max_us: u64,
     pub callback_last_us: u64,
@@ -191,11 +191,11 @@ pub struct TrackStatus {
     pub mute: bool,
     pub solo: bool,
     pub armed: bool,
-    pub input_peak_db: Option<f32>,
+    pub input_peak_db: Option<f64>,
     pub to_master: bool,
     pub sends: Vec<SendStatus>,
     /// Left and right.
-    pub peak_db: [Option<f32>; 2],
+    pub peak_db: [Option<f64>; 2],
     pub clip: bool,
 }
 
@@ -218,7 +218,7 @@ pub struct BusStatus {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
-    pub peak_db: [Option<f32>; 2],
+    pub peak_db: [Option<f64>; 2],
     pub clip: bool,
 }
 
@@ -227,7 +227,7 @@ pub struct BusStatus {
 #[serde(default)]
 pub struct MasterStatus {
     pub volume_db: Option<f32>,
-    pub peak_db: [Option<f32>; 2],
+    pub peak_db: [Option<f64>; 2],
     pub clip: bool,
 }
 
