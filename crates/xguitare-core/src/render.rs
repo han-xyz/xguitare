@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use serde::Serialize;
 
 use crate::Config;
 use crate::arrangement::{Arrangement, ArrangementCommand};
@@ -210,8 +209,7 @@ fn last_item_end(project: &Project) -> u64 {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderState {
     Running,
     Done,
