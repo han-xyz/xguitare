@@ -5,11 +5,13 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use xguitare_core::arrangement::Transport;
 use xguitare_core::control::{
     ConnectionId, EngineState, handle_line, open_connection, passthrough_rack,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, MeterPoint, RackSwitcher, engine_queues,
+    transport_code,
 };
 use xguitare_core::project::{PROJECT_FILE, Project};
 use xguitare_core::project_control::autosave_if_due;
@@ -665,4 +667,56 @@ fn mixer_changes_mark_the_project_for_autosave() {
     assert!(autosave_if_due(&mut s.state, later).is_some_and(|saved| saved.is_ok()));
     let folder = s.state.config.projects_dir.join("song");
     assert!(folder.join(PROJECT_FILE).is_file());
+}
+
+#[test]
+fn status_reports_each_track_and_bus_as_it_was_set() {
+    let mut s = mixer("status-set");
+    ok(&mut s, r#"{"cmd":"bus_add","name":"Echo"}"#);
+    ok(
+        &mut s,
+        r#"{"cmd":"track_set","track":"Guitar","mute":true,"pan":0.25}"#,
+    );
+    ok(
+        &mut s,
+        r#"{"cmd":"track_set","track":"Keys","solo":true,"arm":true}"#,
+    );
+    ok(
+        &mut s,
+        r#"{"cmd":"bus_set","bus":"Verb","volume":-3,"pan":-0.5,"mute":true,"solo":true}"#,
+    );
+    ok(
+        &mut s,
+        r#"{"cmd":"send_set","track":"Keys","bus":"Echo","level":-9,"pre":false}"#,
+    );
+    s.state
+        .shared
+        .transport
+        .store(transport_code(Transport::Recording), Ordering::Relaxed);
+    s.state
+        .shared
+        .metronome_beats_played
+        .store(7, Ordering::Relaxed);
+    let status = ok(&mut s, r#"{"cmd":"status"}"#);
+    assert_eq!(status["metronome"]["beats_played"], 7);
+    assert_eq!(status["transport"], "recording");
+    let tracks = &status["tracks"];
+    assert_eq!(
+        (&tracks[0]["mute"], &tracks[0]["solo"], &tracks[0]["armed"]),
+        (&json!(true), &json!(false), &json!(false))
+    );
+    assert_eq!(tracks[0]["pan"], 0.25);
+    assert_eq!(
+        (&tracks[1]["mute"], &tracks[1]["solo"], &tracks[1]["armed"]),
+        (&json!(false), &json!(true), &json!(true))
+    );
+    assert_eq!(
+        tracks[1]["sends"],
+        json!([{"bus": 1, "level_db": -9.0, "pre": false}])
+    );
+    let bus = &status["buses"][0];
+    assert_eq!(
+        (&bus["volume_db"], &bus["pan"], &bus["mute"], &bus["solo"]),
+        (&json!(-3.0), &json!(-0.5), &json!(true), &json!(true))
+    );
 }

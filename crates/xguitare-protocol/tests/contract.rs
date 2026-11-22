@@ -5,10 +5,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use xguitare_protocol::{
-    BankKind, CODE_STILL_CLOSING, GetReply, IndexOrName, ItemStatus, ItemsReply, LoopRegion,
-    MasterStatus, PROTOCOL_VERSION, ParamStatus, Position, RenderBits, RenderRange, Request,
-    Response, SendLevel, StatusReply, TrackStatus, TransportAction, from_payload, position_frame,
-    shown_file_name, to_payload,
+    BankKind, BusStatus, CODE_STILL_CLOSING, ClickStatus, GetReply, IndexOrName, ItemStatus,
+    ItemsReply, LoopRegion, LoopStatus, MasterStatus, MetronomeStatus, PROTOCOL_VERSION,
+    ParamStatus, PortConnection, Position, PositionStatus, RenderBits, RenderRange, RenderStatus,
+    Request, Response, SendLevel, SendStatus, StatusReply, TempoStatus, TrackStatus,
+    TransportAction, from_payload, position_frame, shown_file_name, to_payload,
 };
 
 fn name(text: &str) -> IndexOrName {
@@ -776,4 +777,57 @@ fn null_peaks_and_volumes_read_as_none_and_are_written_as_null() {
     let reply: MasterStatus = from_payload(&master).unwrap();
     assert_eq!(reply.volume_db, Some(-6.0));
     assert_eq!(to_payload(&reply), master);
+}
+
+#[test]
+fn a_status_with_empty_parts_reads_each_part_as_its_defaults() {
+    let payload = json!({
+        "connections": [{}],
+        "metronome": {},
+        "render": {},
+        "position": {},
+        "tempo": {},
+        "loop": {},
+        "click": {},
+        "tracks": [{"sends": [{}]}],
+        "buses": [{}],
+        "master": {},
+    });
+    let reply: StatusReply = from_payload(&payload).unwrap();
+    assert_eq!(reply.connections, [PortConnection::default()]);
+    assert_eq!(reply.metronome, MetronomeStatus::default());
+    assert_eq!(reply.render, Some(RenderStatus::default()));
+    assert_eq!(reply.position, Some(PositionStatus::default()));
+    assert_eq!(reply.tempo, Some(TempoStatus::default()));
+    assert_eq!(reply.loop_region, Some(LoopStatus::default()));
+    assert_eq!(reply.click, Some(ClickStatus::default()));
+    let track = TrackStatus {
+        sends: vec![SendStatus::default()],
+        ..TrackStatus::default()
+    };
+    assert_eq!(reply.tracks, [track]);
+    assert_eq!(reply.buses, [BusStatus::default()]);
+    assert_eq!(reply.master, Some(MasterStatus::default()));
+}
+
+#[test]
+fn a_status_without_a_project_writes_every_optional_key_as_null() {
+    let payload = to_payload(&StatusReply::default());
+    for key in [
+        "input_peak_db",
+        "output_peak_db",
+        "project",
+        "transport",
+        "position",
+        "tempo",
+        "loop",
+        "click",
+        "selected",
+        "undo",
+        "redo",
+        "master",
+        "render",
+    ] {
+        assert_eq!(payload.get(key), Some(&Value::Null), "key {key}");
+    }
 }
