@@ -22,7 +22,7 @@ use xguitare_gui::project_model::{
     visible_stretches, waveform_columns,
 };
 use xguitare_protocol::{
-    BusRef, GetReply, ItemsReply, LoopRegion, Position, Request, Response, TrackRef,
+    BusRef, GetReply, ItemsReply, LoopRegion, Position, Request, Response, StatusReply, TrackRef,
     TransportAction, from_payload,
 };
 
@@ -59,6 +59,10 @@ fn items_reply(payload: &Value) -> ItemsReply {
     from_payload(payload).unwrap()
 }
 
+fn status_reply(payload: &Value) -> StatusReply {
+    from_payload(payload).unwrap()
+}
+
 fn project_items() -> ItemsReply {
     items_reply(&json!({
         "sample_rate": 48000,
@@ -75,10 +79,13 @@ fn project_items() -> ItemsReply {
 #[test]
 fn project_name_and_tempo_come_from_status() {
     let status = project_status("stopped");
-    assert_eq!(project_name(Some(&status)), Some("Demo Song"));
+    assert_eq!(
+        project_name(Some(&status_reply(&status))),
+        Some("Demo Song")
+    );
     assert_eq!(project_tempo(&status), Some(FOUR_FOUR));
     let no_project = json!({"project": null, "tempo": null});
-    assert_eq!(project_name(Some(&no_project)), None);
+    assert_eq!(project_name(Some(&status_reply(&no_project))), None);
     assert_eq!(project_name(None), None);
     assert_eq!(project_tempo(&no_project), None);
 }
@@ -605,7 +612,8 @@ fn rack_requests_find_the_shown_bus_by_id_and_master() {
             id: "compressor".to_string(),
         },
     ];
-    let status = json!({"buses": [{"id": 0, "name": "Verb"}, {"id": 3, "name": "Delay"}]});
+    let status =
+        status_reply(&json!({"buses": [{"id": 0, "name": "Verb"}, {"id": 3, "name": "Delay"}]}));
     let (outgoing, quit) = requests_until_quit(queued, Some(MixerTarget::Track(0)), Some(&status));
     assert!(!quit);
     assert_eq!(
@@ -651,7 +659,7 @@ fn rack_requests_for_a_shown_bus_that_is_gone_are_dropped() {
             id: "compressor".to_string(),
         },
     ];
-    let status = json!({"buses": [{"id": 0, "name": "Verb"}]});
+    let status = status_reply(&json!({"buses": [{"id": 0, "name": "Verb"}]}));
     let (outgoing, _) = requests_until_quit(queued, Some(MixerTarget::Track(0)), Some(&status));
     assert_eq!(
         outgoing,
@@ -853,7 +861,7 @@ fn undo_goes_back_to_the_track_the_module_left() {
     let status = project_status("stopped");
     let removed = RemovedUnit::new(
         &get_reply(&rack),
-        Some(&status),
+        Some(&status_reply(&status)),
         "cabinet",
         std::time::Instant::now(),
     )

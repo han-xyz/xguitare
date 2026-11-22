@@ -23,7 +23,7 @@ use tracing::{info, warn};
 use xguitare_client::{
     ClientConfig, ClientError, Connection, clean_takes_in_batches, newer_protocol_warning,
 };
-use xguitare_protocol::{Request, Response, STILL_CLOSING, from_payload};
+use xguitare_protocol::{Request, Response, STILL_CLOSING, StatusReply, from_payload, to_payload};
 
 pub const TICK: Duration = Duration::from_millis(50);
 const DAEMON_STOP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -339,11 +339,12 @@ impl Client {
     fn rack_target(&self) -> Option<MixerTarget> {
         let status = self.snapshot.status.as_ref()?;
         project_name(Some(status))?;
-        match self.shown_rack.and_then(|shown| shown.column(status)) {
+        match self
+            .shown_rack
+            .and_then(|shown| shown.column(&to_payload(status)))
+        {
             Some(target @ (MixerTarget::Bus(_) | MixerTarget::Master)) => Some(target),
-            _ => usize::try_from(status["selected"].as_u64()?)
-                .ok()
-                .map(MixerTarget::Track),
+            _ => status.selected.map(MixerTarget::Track),
         }
     }
 
@@ -412,7 +413,7 @@ impl Client {
             return;
         }
         match self.request(&Request::Status) {
-            Ok(Response::Ok(status)) => self.on_status(status),
+            Ok(Response::Ok(status)) => self.on_status(&status),
             Ok(Response::Err { error, .. }) => warn!("status: {error}"),
             Err(_) => {}
         }
@@ -465,17 +466,31 @@ impl Client {
         }
     }
 
-    fn on_status(&mut self, status: Value) {
+    fn on_status(&mut self, payload: &Value) {
         self.daemon_answered = true;
         self.early_exits = 0;
         if self.snapshot.link != Link::Connected {
             info!("connected to {}", self.config.socket.display());
             self.snapshot.link = Link::Connected;
-            if let Some(warning) = newer_protocol_warning(&status) {
+            if let Some(warning) = newer_protocol_warning(payload) {
                 warn!("{warning}");
                 self.snapshot.last_message = Some((Message::Notice(warning), Instant::now()));
             }
         }
+        let status: StatusReply = match from_payload(payload) {
+            Ok(status) => status,
+            Err(err) => {
+                warn!("status: unreadable reply: {err}");
+                self.snapshot.last_message = Some((
+                    Message::Error {
+                        title: failure_title(&Request::Status),
+                        detail: err.to_string(),
+                    },
+                    Instant::now(),
+                ));
+                return;
+            }
+        };
         if !self.modules_fetched {
             self.fetch_modules();
             if self.connection.is_none() {
@@ -488,7 +503,7 @@ impl Client {
                 return;
             }
         }
-        let revision = status["revision"].as_u64().unwrap_or(0);
+        let revision = status.revision;
         let changed = refresh_decision(self.revision, revision);
         if changed {
             self.ports_fetched = false;

@@ -7,7 +7,7 @@ use egui::{
     Role, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextWrapMode, Ui, UiBuilder, Vec2,
     WidgetInfo, WidgetText, pos2, vec2,
 };
-use xguitare_protocol::SILENCE_DB;
+use xguitare_protocol::{SILENCE_DB, StatusReply, to_payload};
 
 use crate::eq_model::{
     EQ, EQ_AXIS_LABEL_HEIGHT, EQ_BAND_TITLE_HEIGHT, EQ_CURVE_POINTS, EQ_MINI_HEIGHT,
@@ -54,7 +54,12 @@ const METER_ROW_GAP: f32 = theme::SPACE_XS;
 const METER_ITEM_GAP: f32 = 12.0;
 /// Between the meter bridge's grip, centred on its two ladder rows, and the `Input` and `Output` labels.
 const GRIP_CLEARANCE: f32 = theme::SPACE_S;
-pub const METERS: [(&str, &str); 2] = [("Input", "input_peak_db"), ("Output", "output_peak_db")];
+/// A meter's peak in the `status` reply.
+pub type MeterPeak = fn(&StatusReply) -> Option<f64>;
+pub const METERS: [(&str, MeterPeak); 2] = [
+    ("Input", |status| status.input_peak_db),
+    ("Output", |status| status.output_peak_db),
+];
 const CLEAR_CLIP_HINT: &str = "Click to clear the clip lamp";
 const MOVE_BUTTON_SIZE: Vec2 = Vec2::splat(MOVE_BUTTON_SIDE);
 const OPEN_CHEVRON: &str = "▼";
@@ -609,7 +614,7 @@ fn meter_bridge(
                 let db = snapshot
                     .status
                     .as_ref()
-                    .map_or(SILENCE_DB, |status| peak_db(status, key));
+                    .map_or(SILENCE_DB, |status| peak_db(key(status)));
                 let ladder = widgets::led_ladder(ui, ladder_width, db, clip.is_clipped())
                     .interact(Sense::click())
                     .on_hover_text(CLEAR_CLIP_HINT);
@@ -798,7 +803,7 @@ fn module_unit_of<'a>(
         sample_rate: snapshot
             .status
             .as_ref()
-            .map(|status| sample_rate(status) as f32),
+            .map(|status| sample_rate(&to_payload(status)) as f32),
     }
 }
 

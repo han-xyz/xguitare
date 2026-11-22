@@ -10,7 +10,7 @@ use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, 
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_client::ClientConfig;
-use xguitare_protocol::{BankKind, BusRef, GetReply, TrackRef};
+use xguitare_protocol::{BankKind, BusRef, GetReply, TrackRef, to_payload};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
@@ -277,7 +277,7 @@ impl App {
                         .snapshot
                         .status
                         .as_ref()
-                        .and_then(|status| shown.column(status));
+                        .and_then(|status| shown.column(&to_payload(status)));
                 }
                 Command::RackRemove { id } => {
                     let status = self.snapshot.status.as_ref();
@@ -288,7 +288,11 @@ impl App {
                         .and_then(|params| RemovedUnit::new(params, status, id, now));
                     if let Some(mut removed) = removed {
                         if let Some(target) = aimed {
-                            aim_restore(&mut removed.restore, status, target);
+                            aim_restore(
+                                &mut removed.restore,
+                                status.map(to_payload).as_ref(),
+                                target,
+                            );
                         }
                         self.removed = Some(removed);
                         self.hidden = None;
@@ -311,7 +315,8 @@ impl App {
 impl App {
     /// Aims every Rack request at the Rack the window shows ([`aim_rack_commands`]) and takes the window's own commands out: the view switch, Ctrl+1, Ctrl+2, Ctrl+3 and Ctrl+M change the main view, Ctrl+Alt+R or `Render` opens the Render dialog.
     fn keep_window_commands(&mut self, commands: Vec<Command>) -> Vec<Command> {
-        let focus = RackFocus::new(self.mixer.rack, self.snapshot.status.as_ref());
+        let status = self.snapshot.status.as_ref().map(to_payload);
+        let focus = RackFocus::new(self.mixer.rack, status.as_ref());
         let (mut commands, focus) = aim_rack_commands(focus, commands);
         self.mixer.rack = focus.shown;
         for command in &commands {
@@ -359,12 +364,11 @@ fn aim_restore(restore: &mut Restore, status: Option<&Value>, target: MixerTarge
     }
 }
 
-fn active_preset(snapshot: &Snapshot) -> (Option<&Value>, Option<&Value>) {
-    let status = snapshot.status.as_ref();
-    (
-        status.map(|status| &status["preset"]),
-        status.map(|status| &status["program"]),
-    )
+fn active_preset(snapshot: &Snapshot) -> Option<(Option<&str>, Option<usize>)> {
+    snapshot
+        .status
+        .as_ref()
+        .map(|status| (status.preset.as_deref(), status.program))
 }
 
 impl eframe::App for App {
@@ -379,10 +383,10 @@ impl eframe::App for App {
                 for (((_, key), clip), hold) in
                     METERS.iter().zip(&mut self.clips).zip(&mut self.holds)
                 {
-                    clip.observe(peak_db(status, key));
-                    hold.observe(peak_db(status, key), now);
+                    clip.observe(peak_db(key(status)));
+                    hold.observe(peak_db(key(status)), now);
                 }
-                self.mixer.observe(status, now);
+                self.mixer.observe(&to_payload(status), now);
             }
             latest = Some(snapshot);
         }
@@ -644,6 +648,7 @@ fn key_command(
     if project_name(Some(status)).is_none() {
         return key_to_command(key, rows);
     }
+    let status = &to_payload(status);
     let items = snapshot.items.as_ref().map(item_blocks).unwrap_or_default();
     if let Some(view) = arrange
         && let Some(command) =
@@ -772,7 +777,13 @@ fn project_panels(
         .show(ui, |ui| {
             commands.extend(transport_bar(ui, snapshot, main_view, feedback));
         });
-    if let Some(transport) = snapshot.status.as_ref().and_then(transport_view) {
+    if let Some(transport) = snapshot
+        .status
+        .as_ref()
+        .map(to_payload)
+        .as_ref()
+        .and_then(transport_view)
+    {
         view.recording_from = recording_from(view.recording_from, &transport);
     }
     if main_view != MainView::Arrange {
@@ -816,6 +827,7 @@ fn central_view(
     if main_view == MainView::Mixer {
         return mixer_panel(ui, snapshot, mixer);
     }
+    let status = &to_payload(status);
     let Some(target) = shown_rack_column(mixer.rack, status) else {
         return Vec::new();
     };
@@ -850,11 +862,7 @@ fn rack_heading(ui: &mut Ui, status: &Value, target: MixerTarget) {
 }
 
 fn revision(snapshot: &Snapshot) -> u64 {
-    snapshot
-        .status
-        .as_ref()
-        .and_then(|status| status["revision"].as_u64())
-        .unwrap_or_default()
+    snapshot.status.as_ref().map_or(0, |status| status.revision)
 }
 
 /// Whether a focused widget or an open menu takes this frame's Esc, read before the frame's widgets act on it.

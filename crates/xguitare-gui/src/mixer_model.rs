@@ -4,7 +4,7 @@ use serde_json::Value;
 use xguitare_protocol::{BusRef, SILENCE_DB, SendLevel, TrackRef};
 
 use crate::model::{Band, Command, LADDER_RED_DB, LADDER_YELLOW_DB, Segment, acts_on_rack};
-use crate::project_model::{project_name, track_rows};
+use crate::project_model::{project_name_payload, track_rows};
 
 /// The fader position of 0 dB; the top is +6 dB.
 pub const FADER_UNITY: f32 = 0.75;
@@ -58,7 +58,7 @@ pub struct MixerColumn {
 
 /// The Tracks, then the Buses, then Master, from a `status` payload; none while no Project is open.
 pub fn mixer_columns(status: &Value) -> Vec<MixerColumn> {
-    if project_name(Some(status)).is_none() {
+    if project_name_payload(status).is_none() {
         return Vec::new();
     }
     let tracks = entries(&status["tracks"]);
@@ -513,7 +513,7 @@ pub fn render_view(
 
 /// The open Project's folder name from a `project_list` payload, which a Render names its file after by default.
 pub fn default_render_name(projects: Option<&Value>, status: &Value) -> Option<String> {
-    let name = project_name(Some(status))?;
+    let name = project_name_payload(status)?;
     entries(&projects?["projects"])
         .iter()
         .find(|project| project["name"].as_str() == Some(name))

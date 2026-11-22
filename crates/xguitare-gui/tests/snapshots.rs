@@ -23,8 +23,8 @@ use xguitare_gui::model::{Command, Link, Message, ModuleType, Restore, Snapshot,
 use xguitare_gui::project_model::AutosaveOffer;
 use xguitare_gui::theme::palette;
 use xguitare_protocol::{
-    BankKind, FRAMES_PER_PEAK, GetReply, ItemsReply, LoopRegion, RenderBits, RenderRange, TrackRef,
-    TransportAction, from_payload, to_payload,
+    BankKind, FRAMES_PER_PEAK, GetReply, ItemsReply, LoopRegion, RenderBits, RenderRange,
+    StatusReply, TrackRef, TransportAction, from_payload, to_payload,
 };
 
 const WINDOW: Vec2 = Vec2::new(1440.0, 900.0);
@@ -143,11 +143,11 @@ fn funk_snapshot() -> Snapshot {
         .collect();
     Snapshot {
         link: Link::Connected,
-        status: Some(json!({
+        status: Some(status_reply(&json!({
             "preset": "Funk", "program": 2, "sample_rate": 48000, "buffer_size": 128,
             "revision": 1, "muted": false, "modified": false,
             "input_peak_db": -14.0, "output_peak_db": -6.0, "xruns": 0,
-        })),
+        }))),
         bank: Some(json!({"active": 2, "entries": entries})),
         params: Some(get_reply(&funk_params())),
         tuner: Some(json!({"confident": true, "note": "A1", "hz": 55.1, "cents": 4})),
@@ -192,14 +192,13 @@ fn bypassed_snapshot(modules: &[&str]) -> Snapshot {
 
 fn muted_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
-    snapshot.status.as_mut().unwrap()["muted"] = json!(true);
+    edit_status(&mut snapshot, |status| status["muted"] = json!(true));
     snapshot
 }
 
 /// Three Tracks at 120 bpm in 4/4: Guitar armed with two Takes on one Item, Bass muted with one Item, Keys empty; the playhead in bar 3, the loop on over bars 2 to 4.
 fn project_snapshot(transport: &str) -> Snapshot {
     let mut snapshot = funk_snapshot();
-    let status = snapshot.status.as_mut().unwrap();
     let count_in_remaining = if transport == "recording" { 3 } else { 0 };
     let project = json!({
         "project": "Demo Song", "transport": transport, "selected": 0, "disk_overflows": 0,
@@ -217,9 +216,11 @@ fn project_snapshot(transport: &str) -> Snapshot {
              "mute": false, "solo": false, "armed": false, "input_peak_db": -120.0},
         ],
     });
-    for (key, value) in project.as_object().unwrap() {
-        status[key] = value.clone();
-    }
+    edit_status(&mut snapshot, |status| {
+        for (key, value) in project.as_object().unwrap() {
+            status[key] = value.clone();
+        }
+    });
     snapshot.items = Some(items_reply(&json!({"sample_rate": 48000, "tracks": [
         {"id": 0, "name": "Guitar", "items": [{"id": 1, "position": 96_000, "bars_beats": "2.1",
          "offset": 0, "length": 288_000, "take": 1,
@@ -245,6 +246,17 @@ fn edit_params(snapshot: &mut Snapshot, edit: impl FnOnce(&mut Vec<Value>)) {
 
 fn items_reply(payload: &Value) -> ItemsReply {
     from_payload(payload).unwrap()
+}
+
+fn status_reply(payload: &Value) -> StatusReply {
+    from_payload(payload).unwrap()
+}
+
+/// `edit` applied to `snapshot`'s `status` reply as JSON.
+fn edit_status(snapshot: &mut Snapshot, edit: impl FnOnce(&mut Value)) {
+    let mut payload = to_payload(snapshot.status.as_ref().unwrap());
+    edit(&mut payload);
+    snapshot.status = Some(status_reply(&payload));
 }
 
 /// `edit` applied to `snapshot`'s `items` reply as JSON.
@@ -306,7 +318,9 @@ const MIXER_TRACKS: [&str; 3] = ["Bass DI", "Bass Amp", "Click"];
 fn mixer_snapshot() -> Snapshot {
     let mut snapshot = project_snapshot("playing");
     for (track, name) in MIXER_TRACKS.into_iter().enumerate() {
-        snapshot.status.as_mut().unwrap()["tracks"][track]["name"] = json!(name);
+        edit_status(&mut snapshot, |status| {
+            status["tracks"][track]["name"] = json!(name);
+        });
         edit_items(&mut snapshot, |items| {
             items["tracks"][track]["name"] = json!(name);
         });
@@ -317,7 +331,6 @@ fn mixer_snapshot() -> Snapshot {
         items["tracks"][1]["items"][0]["takes"] = json!(["takes/bass-amp-1.wav"]);
     });
     snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
-    let status = snapshot.status.as_mut().unwrap();
     let mixer = [
         (
             json!([{"bus": 0, "level_db": -6.0, "pre": true}]),
@@ -338,21 +351,23 @@ fn mixer_snapshot() -> Snapshot {
             false,
         ),
     ];
-    for (track, (sends, peak, clip, to_master)) in mixer.into_iter().enumerate() {
-        let entry = &mut status["tracks"][track];
-        entry["sends"] = sends;
-        entry["peak_db"] = json!(peak);
-        entry["clip"] = json!(clip);
-        entry["to_master"] = json!(to_master);
-    }
-    status["buses"] = json!([
-        {"id": 0, "name": "Room", "volume_db": -4.0, "pan": 0.0, "mute": false, "solo": true,
-         "peak_db": [-14.5, -15.2], "clip": false},
-        {"id": 1, "name": "Delay", "volume_db": 0.0, "pan": 0.3, "mute": false, "solo": false,
-         "peak_db": [-120.0, -120.0], "clip": false},
-    ]);
-    status["master"] = json!({"volume_db": -1.5, "peak_db": [-6.3, -5.9], "clip": false});
-    status["render"] = json!(null);
+    edit_status(&mut snapshot, |status| {
+        for (track, (sends, peak, clip, to_master)) in mixer.into_iter().enumerate() {
+            let entry = &mut status["tracks"][track];
+            entry["sends"] = sends;
+            entry["peak_db"] = json!(peak);
+            entry["clip"] = json!(clip);
+            entry["to_master"] = json!(to_master);
+        }
+        status["buses"] = json!([
+            {"id": 0, "name": "Room", "volume_db": -4.0, "pan": 0.0, "mute": false, "solo": true,
+             "peak_db": [-14.5, -15.2], "clip": false},
+            {"id": 1, "name": "Delay", "volume_db": 0.0, "pan": 0.3, "mute": false, "solo": false,
+             "peak_db": [-120.0, -120.0], "clip": false},
+        ]);
+        status["master"] = json!({"volume_db": -1.5, "peak_db": [-6.3, -5.9], "clip": false});
+        status["render"] = json!(null);
+    });
     snapshot.params = Some(get_reply(&json!({"params": [
         param("reverb", "size", 70.0, (0.0, 100.0, 50.0, "%", false)),
         param("reverb", "damping", 40.0, (0.0, 100.0, 50.0, "%", false)),
@@ -364,27 +379,28 @@ fn mixer_snapshot() -> Snapshot {
 /// [`mixer_snapshot`] with eight Buses, Bass DI sending to each.
 fn eight_buses_snapshot() -> Snapshot {
     let mut snapshot = mixer_snapshot();
-    let status = snapshot.status.as_mut().unwrap();
     let names = [
         "Room", "Delay", "Hall", "Plate", "Echo", "Chorus", "Crush", "Sub",
     ];
-    status["buses"] = names
-        .iter()
-        .enumerate()
-        .map(|(id, name)| {
-            json!({"id": id, "name": name, "volume_db": 0.0, "pan": 0.0, "mute": false,
-                "solo": false, "peak_db": [-120.0, -120.0], "clip": false})
-        })
-        .collect();
-    status["tracks"][0]["sends"] = (0..names.len())
-        .map(|bus| json!({"bus": bus, "level_db": -6.0, "pre": false}))
-        .collect();
+    edit_status(&mut snapshot, |status| {
+        status["buses"] = names
+            .iter()
+            .enumerate()
+            .map(|(id, name)| {
+                json!({"id": id, "name": name, "volume_db": 0.0, "pan": 0.0, "mute": false,
+                    "solo": false, "peak_db": [-120.0, -120.0], "clip": false})
+            })
+            .collect();
+        status["tracks"][0]["sends"] = (0..names.len())
+            .map(|bus| json!({"bus": bus, "level_db": -6.0, "pre": false}))
+            .collect();
+    });
     snapshot
 }
 
 fn render_snapshot(render: Value) -> Snapshot {
     let mut snapshot = mixer_snapshot();
-    snapshot.status.as_mut().unwrap()["render"] = render;
+    edit_status(&mut snapshot, |status| status["render"] = render);
     snapshot
 }
 
@@ -432,10 +448,11 @@ fn bass_di_rack_snapshot() -> Snapshot {
 /// [`bass_di_rack_snapshot`] recording on the armed Bass DI past the count-in, the playhead at `frames`.
 fn recording_snapshot(frames: u64) -> Snapshot {
     let mut snapshot = bass_di_rack_snapshot();
-    let status = snapshot.status.as_mut().unwrap();
-    status["transport"] = json!("recording");
-    status["count_in_remaining"] = json!(0);
-    status["position"]["frames"] = json!(frames);
+    edit_status(&mut snapshot, |status| {
+        status["transport"] = json!("recording");
+        status["count_in_remaining"] = json!(0);
+        status["position"]["frames"] = json!(frames);
+    });
     snapshot
 }
 
@@ -1309,8 +1326,10 @@ fn closed_eq_shows_a_named_mini_curve_on_one_row() {
 
 fn metronome_snapshot() -> Snapshot {
     let mut snapshot = funk_snapshot();
-    snapshot.status.as_mut().unwrap()["metronome"] = json!({
-        "on": true, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": 1, "beats_played": 1,
+    edit_status(&mut snapshot, |status| {
+        status["metronome"] = json!({
+            "on": true, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": 1, "beats_played": 1,
+        });
     });
     snapshot
 }
@@ -1731,7 +1750,7 @@ fn both_halves_of_a_split_stay_selected_and_the_footer_shows_the_undo_label() {
     harness.key_press(Key::S);
     harness.run_steps(2);
     let mut split = snapshot;
-    split.status.as_mut().unwrap()["undo"] = json!("split Item");
+    edit_status(&mut split, |status| status["undo"] = json!("split Item"));
     edit_items(&mut split, |items| {
         items["tracks"][0]["items"] = json!([
             {"id": 1, "position": 96_000, "bars_beats": "2.1", "offset": 0, "length": 134_400,
@@ -1762,7 +1781,7 @@ fn box_over_both_items(harness: &Harness<App>) -> (Pos2, Pos2) {
 fn item_editing_snapshots() {
     for (size, suffix) in [(DEFAULT_WINDOW, "1280x800"), (MIN_WINDOW, "1024x640")] {
         let mut edited = project_snapshot("stopped");
-        edited.status.as_mut().unwrap()["undo"] = json!("move 2 Items");
+        edit_status(&mut edited, |status| status["undo"] = json!("move 2 Items"));
         let (mut selected, _, _dir) = harness_with(size, edited);
         let (from, to) = box_over_both_items(&selected);
         drag_and_release(&mut selected, from, to);
@@ -1949,7 +1968,7 @@ fn right_click_at(harness: &mut Harness<App>, pos: Pos2) {
 }
 
 fn with_clipboard(mut snapshot: Snapshot, items: u64) -> Snapshot {
-    snapshot.status.as_mut().unwrap()["clipboard"] = json!(items);
+    edit_status(&mut snapshot, |status| status["clipboard"] = json!(items));
     snapshot
 }
 
@@ -2174,7 +2193,9 @@ fn trim_menu_overlap_and_paste_snapshots() {
 
         for (clipboard, state) in [(1, "enabled"), (0, "greyed")] {
             let mut snapshot = editing_snapshot();
-            snapshot.status.as_mut().unwrap()["clipboard"] = json!(clipboard);
+            edit_status(&mut snapshot, |status| {
+                status["clipboard"] = json!(clipboard);
+            });
             let (mut menu, _, _dir) = editing(snapshot);
             let at = keys_lane_point(&menu, 2.0 * beat);
             right_click_at(&mut menu, at);

@@ -1,4 +1,4 @@
-use serde_json::Value;
+use xguitare_protocol::StatusReply;
 
 use crate::model::{Command, KeyEvent};
 use crate::project_model::project_name;
@@ -24,19 +24,16 @@ pub struct MetronomeView {
     pub beats_played: u64,
 }
 
-pub fn metronome_view(status: &Value) -> Option<MetronomeView> {
-    let metronome = &status["metronome"];
-    let meter = &metronome["meter"];
-    Some(MetronomeView {
-        on: metronome["on"].as_bool()?,
-        bpm: metronome["bpm"].as_f64()?,
-        meter: (
-            u32::try_from(meter[0].as_u64()?).ok()?,
-            u32::try_from(meter[1].as_u64()?).ok()?,
-        ),
-        volume_db: metronome["volume_db"].as_f64()?,
-        beat: u32::try_from(metronome["beat"].as_u64()?).ok()?,
-        beats_played: metronome["beats_played"].as_u64()?,
+/// `None` for a `status` without a Metronome: its tempo reads 0, which no Metronome plays at.
+pub fn metronome_view(status: &StatusReply) -> Option<MetronomeView> {
+    let metronome = &status.metronome;
+    (metronome.bpm > 0.0).then_some(MetronomeView {
+        on: metronome.on,
+        bpm: metronome.bpm,
+        meter: metronome.meter,
+        volume_db: metronome.volume_db,
+        beat: metronome.beat,
+        beats_played: metronome.beats_played,
     })
 }
 
@@ -53,8 +50,8 @@ pub enum BeatLight {
 }
 
 /// The beat light for `current`, given the status received before it.
-pub fn beat_light(previous: Option<&Value>, current: Option<&Value>) -> BeatLight {
-    let playing = |status: Option<&Value>| {
+pub fn beat_light(previous: Option<&StatusReply>, current: Option<&StatusReply>) -> BeatLight {
+    let playing = |status: Option<&StatusReply>| {
         status
             .and_then(metronome_view)
             .filter(|view| view.on && view.beat > 0)
@@ -113,7 +110,7 @@ pub fn bpm_text(bpm: f64) -> String {
 }
 
 /// M toggles the Metronome and T taps, with no Project open only: in a Project the transport's Click is the toggle.
-pub fn metronome_key_to_command(key: KeyEvent, status: &Value) -> Option<Command> {
+pub fn metronome_key_to_command(key: KeyEvent, status: &StatusReply) -> Option<Command> {
     if project_name(Some(status)).is_some() {
         return None;
     }

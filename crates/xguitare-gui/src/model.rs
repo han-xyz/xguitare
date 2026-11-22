@@ -7,7 +7,8 @@ use serde_json::Value;
 use xguitare_client::{ClientError, TakesCleanStopped};
 use xguitare_protocol::{
     BankKind, BusRef, GetReply, ItemsReply, LoopRegion, Position, RenderBits, RenderRange, Request,
-    Response, SILENCE_DB, SendLevel, TrackRef, TransportAction, is_hidden_char, shown_file_name,
+    Response, SILENCE_DB, SendLevel, StatusReply, TrackRef, TransportAction, is_hidden_char,
+    shown_file_name, to_payload,
 };
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
@@ -64,7 +65,7 @@ pub enum Link {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub link: Link,
-    pub status: Option<Value>,
+    pub status: Option<StatusReply>,
     pub bank: Option<Value>,
     pub params: Option<GetReply>,
     pub tuner: Option<Value>,
@@ -941,7 +942,7 @@ pub const UNDO_FOR: Duration = Duration::from_secs(10);
 pub struct RemovedUnit {
     pub id: String,
     pub restore: Restore,
-    preset: (Value, Value),
+    preset: (Option<String>, Option<usize>),
     since: Instant,
 }
 
@@ -949,7 +950,7 @@ impl RemovedUnit {
     /// `None` when `get` has no Module `id`, so that there is nothing to undo. While a Project is open the Restore names the selected Track, so that Undo goes back to it whichever Track is selected then.
     pub fn new(
         get: &GetReply,
-        status: Option<&Value>,
+        status: Option<&StatusReply>,
         id: &str,
         now: Instant,
     ) -> Option<RemovedUnit> {
@@ -964,7 +965,7 @@ impl RemovedUnit {
         })
     }
 
-    pub fn is_shown(&self, status: Option<&Value>, now: Instant) -> bool {
+    pub fn is_shown(&self, status: Option<&StatusReply>, now: Instant) -> bool {
         now.saturating_duration_since(self.since) < UNDO_FOR && preset_of(status) == self.preset
     }
 }
@@ -972,7 +973,7 @@ impl RemovedUnit {
 /// The Undo offer to show now; an offer not shown, because its time ran out or the active Preset changed, is dropped for good, so that it never comes back when that Preset does.
 pub fn shown_undo<'a>(
     removed: &'a mut Option<RemovedUnit>,
-    status: Option<&Value>,
+    status: Option<&StatusReply>,
     now: Instant,
 ) -> Option<&'a RemovedUnit> {
     if removed
@@ -985,16 +986,15 @@ pub fn shown_undo<'a>(
 }
 
 /// The `status` payload's Preset name and program; nulls without a status.
-fn selected_track(status: Option<&Value>) -> Option<TrackRef> {
-    let status = status.filter(|status| status["project"].is_string())?;
-    let selected = usize::try_from(status["selected"].as_u64()?).ok()?;
-    let name = status["tracks"][selected]["name"].as_str()?;
-    Some(TrackRef::Name(name.to_string()))
+fn selected_track(status: Option<&StatusReply>) -> Option<TrackRef> {
+    let status = status.filter(|status| status.project.is_some())?;
+    let name = &status.tracks.get(status.selected?)?.name;
+    Some(TrackRef::Name(name.clone()))
 }
 
-fn preset_of(status: Option<&Value>) -> (Value, Value) {
-    status.map_or((Value::Null, Value::Null), |status| {
-        (status["preset"].clone(), status["program"].clone())
+fn preset_of(status: Option<&StatusReply>) -> (Option<String>, Option<usize>) {
+    status.map_or((None, None), |status| {
+        (status.preset.clone(), status.program)
     })
 }
 
@@ -1396,7 +1396,7 @@ pub enum Outgoing {
 pub fn requests_until_quit(
     queued: Vec<Command>,
     rack: Option<MixerTarget>,
-    status: Option<&Value>,
+    status: Option<&StatusReply>,
 ) -> (Vec<Outgoing>, bool) {
     let mut requests = Vec::new();
     let mut rack = rack;
@@ -1584,7 +1584,7 @@ pub fn requests_until_quit(
             },
             Command::RenderCancel => Request::RenderCancel,
             Command::ShowRack(shown) => {
-                let column = status.and_then(|status| shown.column(status));
+                let column = status.and_then(|status| shown.column(&to_payload(status)));
                 shown_bus_gone = matches!(shown, ShownRack::Bus(_)) && column.is_none();
                 rack = column.filter(|target| !matches!(target, MixerTarget::Track(_)));
                 continue;
@@ -1755,8 +1755,8 @@ pub fn unit_style(bypassed: bool, open: bool) -> UnitStyle {
 }
 
 /// The banner text while the `status` payload says Mute is on; `muted_by_tuner` when the Tuner view turned it on, so that closing the view turns it off.
-pub fn mute_banner(status: Option<&Value>, muted_by_tuner: bool) -> Option<String> {
-    let muted = status.is_some_and(|status| status["muted"].as_bool() == Some(true));
+pub fn mute_banner(status: Option<&StatusReply>, muted_by_tuner: bool) -> Option<String> {
+    let muted = status.is_some_and(|status| status.muted);
     let how = if muted_by_tuner {
         "close the Tuner"
     } else {
@@ -1783,8 +1783,8 @@ pub fn refresh_decision(last_seen: Option<u64>, revision: u64) -> bool {
 }
 
 /// A peak the payload lacks or carries as `null` (a non-finite value serialises as `null`) reads as −120 dB.
-pub fn peak_db(status: &Value, key: &str) -> f64 {
-    status[key].as_f64().unwrap_or(SILENCE_DB)
+pub fn peak_db(peak: Option<f64>) -> f64 {
+    peak.unwrap_or(SILENCE_DB)
 }
 
 /// How long one buffer of `buffer` frames lasts at `rate` Hz.
@@ -1793,17 +1793,17 @@ pub fn latency_ms(buffer: u64, rate: u64) -> f64 {
 }
 
 /// The sidebar's label and value rows for a `status` payload; only the Daemon row without one.
-pub fn engine_readout(status: Option<&Value>) -> Vec<(String, String)> {
+pub fn engine_readout(status: Option<&StatusReply>) -> Vec<(String, String)> {
     let Some(status) = status else {
         return vec![("Daemon".to_string(), "disconnected".to_string())];
     };
-    let rate = status["sample_rate"].as_u64().unwrap_or_default();
-    let buffer = status["buffer_size"].as_u64().unwrap_or_default();
+    let rate = u64::from(status.sample_rate);
+    let buffer = u64::from(status.buffer_size);
     [
         ("Rate", format!("{} kHz", rate as f64 / 1000.0)),
         ("Buffer", format!("{buffer} frames")),
         ("Latency", format!("{:.1} ms", latency_ms(buffer, rate))),
-        ("Xruns", status["xruns"].to_string()),
+        ("Xruns", status.xruns.to_string()),
         ("Daemon", "connected".to_string()),
     ]
     .into_iter()

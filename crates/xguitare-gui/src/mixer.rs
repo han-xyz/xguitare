@@ -8,7 +8,7 @@ use egui::{
     WidgetInfo, pos2, vec2,
 };
 use serde_json::Value;
-use xguitare_protocol::{RenderBits, RenderRange, SendLevel};
+use xguitare_protocol::{RenderBits, RenderRange, SendLevel, to_payload};
 
 use crate::mixer_model::{
     Audibility, FADER_FLOOR_DB, FADER_TOP_DB, MixerColumn, MixerTarget, RenderSent, RenderView,
@@ -128,10 +128,9 @@ pub struct RenderDraft {
 
 impl RenderDraft {
     pub fn new(snapshot: &Snapshot) -> RenderDraft {
-        let name = snapshot
-            .status
-            .as_ref()
-            .and_then(|status| default_render_name(snapshot.projects.as_ref(), status));
+        let name = snapshot.status.as_ref().and_then(|status| {
+            default_render_name(snapshot.projects.as_ref(), &to_payload(status))
+        });
         RenderDraft {
             range: RenderRange::Project,
             bits: RenderBits::Pcm24,
@@ -147,6 +146,7 @@ pub fn mixer_panel(ui: &mut Ui, snapshot: &Snapshot, view: &mut MixerView) -> Ve
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
     };
+    let status = &to_payload(status);
     let columns = mixer_columns(status);
     let Some((master, strips)) = columns.split_last() else {
         return commands;
@@ -905,6 +905,7 @@ pub fn render_dialog(
     let Some(status) = snapshot.status.as_ref() else {
         return (commands, false);
     };
+    let status = &to_payload(status);
     let has_loop = transport_view(status)
         .is_some_and(|transport| transport.loop_region.start < transport.loop_region.end);
     if !has_loop {

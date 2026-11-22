@@ -5,7 +5,7 @@ use serde_json::Value;
 use xguitare_client::ClientError;
 use xguitare_protocol::{
     CODE_STILL_CLOSING, FRAMES_PER_PEAK, ItemStatus, ItemsReply, LoopRegion, Request, Response,
-    SILENCE_DB, STILL_CLOSING, TransportAction,
+    SILENCE_DB, STILL_CLOSING, StatusReply, TransportAction,
 };
 
 use crate::model::{Command, KeyEvent, KeyModifiers, shortcuts_active};
@@ -42,8 +42,12 @@ impl Tempo {
 }
 
 /// The open Project's name from a `status` payload.
-pub fn project_name(status: Option<&Value>) -> Option<&str> {
-    status.and_then(|status| status["project"].as_str())
+pub fn project_name(status: Option<&StatusReply>) -> Option<&str> {
+    status.and_then(|status| status.project.as_deref())
+}
+
+pub(crate) fn project_name_payload(status: &Value) -> Option<&str> {
+    status["project"].as_str()
 }
 
 pub fn project_tempo(status: &Value) -> Option<Tempo> {
@@ -271,7 +275,7 @@ impl TransportView {
 
 /// `None` while no Project is open.
 pub fn transport_view(status: &Value) -> Option<TransportView> {
-    project_name(Some(status))?;
+    project_name_payload(status)?;
     let state = match status["transport"].as_str()? {
         "playing" => TransportState::Playing,
         "recording" => TransportState::Recording,

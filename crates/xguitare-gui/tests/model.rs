@@ -39,7 +39,9 @@ use xguitare_gui::model::{
     open_unit_height,
 };
 use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for, palette};
-use xguitare_protocol::{BankKind, GetReply, Request, Response, SILENCE_DB, from_payload};
+use xguitare_protocol::{
+    BankKind, GetReply, Request, Response, SILENCE_DB, StatusReply, from_payload,
+};
 
 struct TempDir(PathBuf);
 
@@ -50,6 +52,10 @@ impl Drop for TempDir {
 }
 
 fn get_reply(payload: &serde_json::Value) -> GetReply {
+    from_payload(payload).unwrap()
+}
+
+fn status_reply(payload: &serde_json::Value) -> StatusReply {
     from_payload(payload).unwrap()
 }
 
@@ -202,10 +208,10 @@ fn commands_before_quit_are_sent_in_order() {
 
 #[test]
 fn null_or_missing_peak_reads_as_silence() {
-    let status = json!({"input_peak_db": null, "output_peak_db": -30.0});
-    assert_eq!(peak_db(&status, "input_peak_db"), SILENCE_DB);
-    assert_eq!(peak_db(&status, "output_peak_db"), -30.0);
-    assert_eq!(peak_db(&json!({}), "output_peak_db"), SILENCE_DB);
+    let status = status_reply(&json!({"input_peak_db": null, "output_peak_db": -30.0}));
+    assert_eq!(peak_db(status.input_peak_db), SILENCE_DB);
+    assert_eq!(peak_db(status.output_peak_db), -30.0);
+    assert_eq!(peak_db(status_reply(&json!({})).output_peak_db), SILENCE_DB);
 }
 
 #[test]
@@ -1344,7 +1350,7 @@ fn bypassed_from_get() {
 
 #[test]
 fn mute_banner_only_while_muted() {
-    let muted = json!({"muted": true});
+    let muted = status_reply(&json!({"muted": true}));
     assert_eq!(
         mute_banner(Some(&muted), false).as_deref(),
         Some("Output muted \u{2014} press Mute to unmute")
@@ -1353,7 +1359,10 @@ fn mute_banner_only_while_muted() {
         mute_banner(Some(&muted), true).as_deref(),
         Some("Output muted \u{2014} close the Tuner to unmute")
     );
-    assert_eq!(mute_banner(Some(&json!({"muted": false})), true), None);
+    assert_eq!(
+        mute_banner(Some(&status_reply(&json!({"muted": false}))), true),
+        None
+    );
     assert_eq!(mute_banner(None, false), None);
 }
 
@@ -1894,8 +1903,8 @@ fn restore_goes_out_in_queue_order() {
     );
 }
 
-fn funk_status() -> serde_json::Value {
-    json!({"preset": "Funk", "program": 2, "revision": 4})
+fn funk_status() -> StatusReply {
+    status_reply(&json!({"preset": "Funk", "program": 2, "revision": 4}))
 }
 
 #[test]
@@ -1906,7 +1915,7 @@ fn removed_unit_offers_undo_for_ten_seconds() {
         RemovedUnit::new(&get_reply(&undo_payload()), Some(&status), "lead", now).unwrap();
     assert_eq!(removed.id, "lead");
     assert_eq!(removed.restore, drive_restore());
-    let later = json!({"preset": "Funk", "program": 2, "revision": 9});
+    let later = status_reply(&json!({"preset": "Funk", "program": 2, "revision": 9}));
     assert!(removed.is_shown(Some(&later), now + Duration::from_millis(9_999)));
     assert!(!removed.is_shown(Some(&later), now + Duration::from_secs(10)));
 }
@@ -1922,8 +1931,8 @@ fn removed_unit_offers_no_undo_after_the_preset_changes() {
     )
     .unwrap();
     for other in [
-        json!({"preset": "Blues", "program": 1, "revision": 5}),
-        json!({"preset": "Funk", "program": 0, "revision": 5}),
+        status_reply(&json!({"preset": "Blues", "program": 1, "revision": 5})),
+        status_reply(&json!({"preset": "Funk", "program": 0, "revision": 5})),
     ] {
         assert!(!removed.is_shown(Some(&other), now));
     }
@@ -1940,7 +1949,7 @@ fn undo_dropped_by_a_preset_change_never_comes_back() {
         now,
     );
     assert!(shown_undo(&mut removed, Some(&funk_status()), now).is_some());
-    let blues = json!({"preset": "Blues", "program": 1, "revision": 5});
+    let blues = status_reply(&json!({"preset": "Blues", "program": 1, "revision": 5}));
     assert!(shown_undo(&mut removed, Some(&blues), now).is_none());
     assert!(shown_undo(&mut removed, Some(&funk_status()), now).is_none());
 }
@@ -2107,7 +2116,7 @@ fn latency_ms_is_one_buffer() {
 
 #[test]
 fn engine_readout_shows_the_engine_numbers() {
-    let status = json!({"sample_rate": 48000, "buffer_size": 128, "xruns": 3});
+    let status = status_reply(&json!({"sample_rate": 48000, "buffer_size": 128, "xruns": 3}));
     let rows: Vec<(String, String)> = [
         ("Rate", "48 kHz"),
         ("Buffer", "128 frames"),
@@ -2118,7 +2127,7 @@ fn engine_readout_shows_the_engine_numbers() {
     .map(|(label, value)| (label.to_string(), value.to_string()))
     .into();
     assert_eq!(engine_readout(Some(&status)), rows);
-    let status = json!({"sample_rate": 44100, "buffer_size": 64, "xruns": 0});
+    let status = status_reply(&json!({"sample_rate": 44100, "buffer_size": 64, "xruns": 0}));
     assert_eq!(engine_readout(Some(&status))[0].1, "44.1 kHz");
 }
 

@@ -5,7 +5,7 @@ use egui::{
     Stroke, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetText, pos2, vec2,
 };
 use serde_json::Value;
-use xguitare_protocol::{ItemsReply, LoopRegion, TransportAction};
+use xguitare_protocol::{ItemsReply, LoopRegion, TransportAction, to_payload};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -176,6 +176,7 @@ pub fn transport_bar(
     let Some(status) = snapshot.status.as_ref() else {
         return Vec::new();
     };
+    let status = &to_payload(status);
     let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
         return Vec::new();
     };
@@ -449,6 +450,7 @@ pub fn tracks_view(ui: &mut Ui, snapshot: &Snapshot, view: &mut ProjectView) -> 
     let Some(status) = snapshot.status.as_ref() else {
         return commands;
     };
+    let status = &to_payload(status);
     let (Some(transport), Some(tempo)) = (transport_view(status), project_tempo(status)) else {
         return commands;
     };

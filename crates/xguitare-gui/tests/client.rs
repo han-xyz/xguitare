@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use xguitare_client::ClientConfig;
 use xguitare_gui::client;
-use xguitare_gui::model::{Command, Link, Message, Restore};
+use xguitare_gui::model::{Command, Link, Message, Restore, mute_banner};
 use xguitare_gui::project_model::item_blocks;
 
 const WAIT: Duration = Duration::from_secs(2);
@@ -523,10 +523,7 @@ fn a_refused_take_is_not_asked_again_and_a_reused_file_name_is_fetched_again() {
         if lengths_seen.last() != Some(&length) {
             lengths_seen.push(length);
         }
-        let revision = snapshot
-            .status
-            .as_ref()
-            .and_then(|status| status["revision"].as_u64());
+        let revision = snapshot.status.as_ref().map(|status| status.revision);
         if revision == Some(REUSED_FRAMES.len() as u64) && snapshot.items.is_some() {
             break;
         }
@@ -589,6 +586,44 @@ fn a_reply_with_a_wrong_typed_key_is_reported() {
         .map(|item| item.file)
         .collect();
     assert_eq!(files, ["takes/a.wav"]);
+}
+
+#[test]
+fn a_status_with_a_wrong_typed_key_is_reported_and_keeps_the_last_status() {
+    let dir = temp_dir("wrong-typed-status");
+    let config = config(&dir);
+    let listener = UnixListener::bind(&config.socket).unwrap();
+    let mut statuses = 0;
+    let _received = serve_requests(listener, move |request| {
+        match request["cmd"].as_str().unwrap() {
+            "status" if statuses < 3 => {
+                statuses += 1;
+                json!({"ok": true, "preset": "Clean", "program": 0, "revision": 1, "muted": true})
+            }
+            "status" => {
+                json!({"ok": true, "preset": "Clean", "program": 0, "revision": 1, "muted": false, "xruns": "many"})
+            }
+            cmd => serde_json::from_str(reply(cmd)).unwrap(),
+        }
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let (commands, snapshots, handle) = client::spawn(config, None, stop, || {});
+    let (message, banner) = loop {
+        let snapshot = snapshots
+            .recv_timeout(WAIT)
+            .expect("no error for the status reply");
+        if let Some((message, _)) = snapshot.last_message {
+            break (message, mute_banner(snapshot.status.as_ref(), false));
+        }
+    };
+    commands.send(Command::Quit).unwrap();
+    handle.join().unwrap();
+    let Message::Error { title, detail } = message else {
+        panic!("not an error: {message:?}");
+    };
+    assert_eq!(title, "Could not read the status");
+    assert!(detail.contains("invalid type"), "{detail}");
+    assert!(banner.is_some(), "the last status, muted, is kept");
 }
 
 #[test]

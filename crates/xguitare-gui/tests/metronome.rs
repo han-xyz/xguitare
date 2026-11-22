@@ -13,20 +13,28 @@ use xguitare_gui::metronome_model::{
 };
 use xguitare_gui::model::{Command, KeyEvent, Outgoing, requests_until_quit};
 use xguitare_gui::project_model::{KeyFocus, key_active, project_key_to_command};
-use xguitare_protocol::{Request, Response};
+use xguitare_protocol::{Request, Response, StatusReply, from_payload, to_payload};
 
-fn status(on: bool, beat: u32) -> Value {
+fn status_reply(payload: &Value) -> StatusReply {
+    from_payload(payload).unwrap()
+}
+
+fn status_payload(on: bool, beat: u32) -> Value {
     json!({
         "project": null,
         "metronome": {"on": on, "bpm": 90.0, "meter": [3, 4], "volume_db": -12.0, "beat": beat, "beats_played": u64::from(beat)},
     })
 }
 
-fn project_status(on: bool, beat: u32) -> Value {
-    let mut status = status(on, beat);
+fn status(on: bool, beat: u32) -> StatusReply {
+    status_reply(&status_payload(on, beat))
+}
+
+fn project_status(on: bool, beat: u32) -> StatusReply {
+    let mut status = status_payload(on, beat);
     status["project"] = json!("Demo Song");
     status["transport"] = json!("stopped");
-    status
+    status_reply(&status)
 }
 
 fn toggle(on: bool) -> Command {
@@ -51,7 +59,10 @@ fn status_gives_the_metronome_view() {
             beats_played: 2,
         })
     );
-    assert_eq!(metronome_view(&json!({"preset": "Funk"})), None);
+    assert_eq!(
+        metronome_view(&status_reply(&json!({"preset": "Funk"}))),
+        None
+    );
 }
 
 #[test]
@@ -77,10 +88,10 @@ fn a_new_beat_flashes_and_the_same_beat_does_not() {
 #[test]
 fn a_one_beat_meter_flashes_on_every_beat() {
     let one_four = |beats_played: u64| {
-        let mut status = status(true, 1);
+        let mut status = status_payload(true, 1);
         status["metronome"]["meter"] = json!([1, 4]);
         status["metronome"]["beats_played"] = json!(beats_played);
-        status
+        status_reply(&status)
     };
     let light = |flash| BeatLight::Beat {
         beat: 1,
@@ -170,7 +181,7 @@ fn m_and_t_do_nothing_with_a_project_open() {
             None
         );
         assert_eq!(
-            project_key_to_command(key, &project_status(true, 1), &[]),
+            project_key_to_command(key, &to_payload(&project_status(true, 1)), &[]),
             None
         );
     }
@@ -260,7 +271,7 @@ fn the_daemon_status_gives_the_metronome_view() {
     );
     let status = ok(Request::Status, &mut state);
     assert_eq!(
-        metronome_view(&status),
+        metronome_view(&status_reply(&status)),
         Some(MetronomeView {
             on: true,
             bpm: 90.0,
