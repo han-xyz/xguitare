@@ -6,7 +6,7 @@ use crate::amp_model::{
 };
 use crate::fmv;
 use crate::oversample::Oversampler4x;
-use crate::smooth::{SMOOTHING_SECONDS, Smoother};
+use crate::smooth::Smoother;
 use crate::svf::{Svf, SvfCoefficients};
 use crate::{AudioBuffers, Channels, Module, ModuleSpec, ParamSpec, Unit};
 
@@ -37,6 +37,8 @@ const SAG_RELEASE_SECONDS: f32 = 0.150;
 const HARD_KNEE_LIMIT: f32 = 4.0;
 // Below 1 because the downsampler overshoots a hard-clipped bright signal by about half.
 const OUTPUT_GAIN: f32 = 0.9;
+const FADE_OUT_SECONDS: f32 = 0.002;
+const FADE_IN_SECONDS: f32 = 0.003;
 
 const fn percent(name: &'static str) -> ParamSpec {
     ParamSpec {
@@ -103,6 +105,9 @@ pub struct Amp {
     level: Smoother,
     fade: f32,
     fade_step: f32,
+    pending_model: Option<usize>,
+    fade_out_left: usize,
+    fade_out_frames: usize,
     oversampler: Oversampler4x,
 }
 
@@ -132,6 +137,9 @@ impl Amp {
             level: Smoother::new(db_to_linear(values[LEVEL])),
             fade: 1.0,
             fade_step: 1.0,
+            pending_model: None,
+            fade_out_left: 0,
+            fade_out_frames: 1,
             oversampler: Oversampler4x::new(),
         };
         amp.load_model_filters();
@@ -157,6 +165,13 @@ impl Amp {
         self.sag_envelope = 0.0;
     }
 
+    fn request_model(&mut self, number: usize) {
+        if self.pending_model.is_none() {
+            self.fade_out_left = self.fade_out_frames;
+        }
+        self.pending_model = Some(number);
+    }
+
     fn change_model(&mut self, number: usize) {
         self.model = &MODELS[number];
         self.load_model_filters();
@@ -174,84 +189,10 @@ impl Amp {
         self.oversampler.reset();
         self.fade = 0.0;
     }
-}
 
-impl Default for Amp {
-    fn default() -> Amp {
-        Amp::new()
-    }
-}
-
-impl Module for Amp {
-    fn spec(&self) -> &'static ModuleSpec {
-        &SPEC
-    }
-
-    fn prepare(&mut self, sample_rate: f32, max_frames: usize) {
-        self.oversampled_rate = OVERSAMPLING * sample_rate;
-        self.pot.prepare(self.oversampled_rate);
-        self.bright_boost.prepare(self.oversampled_rate);
-        self.master.prepare(self.oversampled_rate);
-        self.presence.prepare(sample_rate);
-        for position in &mut self.tone {
-            position.prepare(sample_rate);
-        }
-        self.level.prepare(sample_rate);
-        self.fade_step = 1.0 / (SMOOTHING_SECONDS * sample_rate);
-        self.oversampler.prepare(max_frames);
-        self.load_model_filters();
-    }
-
-    fn reset(&mut self) {
-        self.pot.snap();
-        self.bright_boost.snap();
-        self.master.snap();
-        self.presence.snap();
-        for position in &mut self.tone {
-            position.snap();
-        }
-        self.level.snap();
-        self.fade = 1.0;
-        self.oversampler.reset();
-        self.load_model_filters();
-    }
-
-    fn set_param(&mut self, idx: usize, value: f32) {
-        let spec = &SPEC.params[idx];
-        let mut value = value.clamp(spec.min, spec.max);
-        match idx {
-            MODEL => {
-                value = value.round();
-                let number = value as usize;
-                if number != self.values[MODEL] as usize {
-                    self.change_model(number);
-                }
-            }
-            GAIN => {
-                self.pot.set_target(pot_gain(self.model, value));
-                self.bright_boost
-                    .set_target(bright_boost(self.model, value));
-            }
-            BASS => self.tone[0].set_target(value / 100.0),
-            MIDDLE => self.tone[1].set_target(value / 100.0),
-            TREBLE => self.tone[2].set_target(value / 100.0),
-            PRESENCE => self.presence.set_target(value / 100.0),
-            MASTER => self.master.set_target(master_gain(self.model, value)),
-            LEVEL => self.level.set_target(db_to_linear(value)),
-            _ => unreachable!("amp has no parameter {idx}"),
-        }
-        self.values[idx] = value;
-    }
-
-    fn param(&self, idx: usize) -> f32 {
-        self.values[idx]
-    }
-
-    fn process(&mut self, io: &mut AudioBuffers) {
-        let frames = io.frames;
+    fn run_model(&mut self, mono: &mut [f32]) {
         let model = self.model;
         let feedback = model.power.feedback;
-        let mono = &mut io.mono[..frames];
         for sample in mono.iter_mut() {
             *sample *= self.fade;
             self.fade = (self.fade + self.fade_step).min(1.0);
@@ -304,6 +245,104 @@ impl Module for Amp {
         for sample in mono.iter_mut() {
             *sample *= self.level.next_value();
         }
+    }
+}
+
+impl Default for Amp {
+    fn default() -> Amp {
+        Amp::new()
+    }
+}
+
+impl Module for Amp {
+    fn spec(&self) -> &'static ModuleSpec {
+        &SPEC
+    }
+
+    fn prepare(&mut self, sample_rate: f32, max_frames: usize) {
+        self.oversampled_rate = OVERSAMPLING * sample_rate;
+        self.pot.prepare(self.oversampled_rate);
+        self.bright_boost.prepare(self.oversampled_rate);
+        self.master.prepare(self.oversampled_rate);
+        self.presence.prepare(sample_rate);
+        for position in &mut self.tone {
+            position.prepare(sample_rate);
+        }
+        self.level.prepare(sample_rate);
+        self.fade_step = 1.0 / (FADE_IN_SECONDS * sample_rate);
+        self.fade_out_frames = ((FADE_OUT_SECONDS * sample_rate).round() as usize).max(1);
+        self.oversampler.prepare(max_frames);
+        self.load_model_filters();
+    }
+
+    fn reset(&mut self) {
+        if let Some(number) = self.pending_model.take() {
+            self.change_model(number);
+        }
+        self.fade_out_left = 0;
+        self.pot.snap();
+        self.bright_boost.snap();
+        self.master.snap();
+        self.presence.snap();
+        for position in &mut self.tone {
+            position.snap();
+        }
+        self.level.snap();
+        self.fade = 1.0;
+        self.oversampler.reset();
+        self.load_model_filters();
+    }
+
+    fn set_param(&mut self, idx: usize, value: f32) {
+        let spec = &SPEC.params[idx];
+        let mut value = value.clamp(spec.min, spec.max);
+        match idx {
+            MODEL => {
+                value = value.round();
+                let number = value as usize;
+                if number != self.values[MODEL] as usize {
+                    self.request_model(number);
+                }
+            }
+            GAIN => {
+                self.pot.set_target(pot_gain(self.model, value));
+                self.bright_boost
+                    .set_target(bright_boost(self.model, value));
+            }
+            BASS => self.tone[0].set_target(value / 100.0),
+            MIDDLE => self.tone[1].set_target(value / 100.0),
+            TREBLE => self.tone[2].set_target(value / 100.0),
+            PRESENCE => self.presence.set_target(value / 100.0),
+            MASTER => self.master.set_target(master_gain(self.model, value)),
+            LEVEL => self.level.set_target(db_to_linear(value)),
+            _ => unreachable!("amp has no parameter {idx}"),
+        }
+        self.values[idx] = value;
+    }
+
+    fn param(&self, idx: usize) -> f32 {
+        self.values[idx]
+    }
+
+    fn process(&mut self, io: &mut AudioBuffers) {
+        let frames = io.frames;
+        let mut start = 0;
+        if let Some(number) = self.pending_model {
+            let end = frames.min(self.fade_out_left);
+            let fading = &mut io.mono[..end];
+            self.run_model(fading);
+            for sample in fading {
+                self.fade_out_left -= 1;
+                *sample *= self.fade_out_left as f32 / self.fade_out_frames as f32;
+            }
+            if self.fade_out_left > 0 {
+                return;
+            }
+            self.pending_model = None;
+            self.change_model(number);
+            start = end;
+        }
+        self.run_model(&mut io.mono[start..frames]);
     }
 }
 

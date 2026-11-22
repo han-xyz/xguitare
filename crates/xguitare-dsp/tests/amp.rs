@@ -311,18 +311,24 @@ fn amp_model_change_under_signal() {
     let input = sine(0.3, FUNDAMENTAL, SAMPLE_RATE, CHANGE + SETTLED + PERIODS);
     for gain in [20.0, 100.0] {
         for (from, _) in models() {
-            for (to, _) in models().filter(|&(to, _)| to != from) {
+            for (to, _) in models() {
                 let mut rack = rack_with(Box::new(Amp::new()));
                 for (idx, value) in [(MODEL, from as f32), (GAIN, gain), (LEVEL, 0.0)] {
                     rack.module_mut(0).set_param(idx, value);
                 }
-                run(&mut rack, &input[..CHANGE]);
+                let before = run(&mut rack, &input[..CHANGE]);
                 rack.module_mut(0).set_param(MODEL, to as f32);
                 let after = run(&mut rack, &input[CHANGE..]);
                 let case = format!("gain {gain}, model {from} -> {to}");
                 assert!(after.iter().all(|s| s.is_finite()), "{case}");
-                let step = largest_step(&after[..first_10_ms]);
-                let settled_step = largest_step(&after[SETTLED..]);
+                let across: Vec<f32> = before[CHANGE - 1..]
+                    .iter()
+                    .chain(&after[..first_10_ms])
+                    .copied()
+                    .collect();
+                let step = largest_step(&across);
+                let settled_step =
+                    largest_step(&before[CHANGE - SETTLED..]).max(largest_step(&after[SETTLED..]));
                 assert!(
                     step <= 3.0 * settled_step,
                     "{case}: step {step}, settled {settled_step}"
@@ -409,7 +415,7 @@ fn amp_float_parameters_glide_to_their_value() {
 fn amp_model_change_leaves_nothing_of_the_old_model() {
     const CHANGE: usize = 188 * common::BLOCK;
     let first_10_ms = (0.01 * SAMPLE_RATE) as usize;
-    let input = sine(0.1, FUNDAMENTAL, SAMPLE_RATE, CHANGE + first_10_ms);
+    let input = sine(0.1, FUNDAMENTAL, SAMPLE_RATE, CHANGE + 2 * first_10_ms);
     let after_change = |from: usize, to: usize| {
         let mut rack = rack_with(Box::new(Amp::new()));
         for (idx, value) in [(MODEL, from as f32), (GAIN, 20.0), (MASTER, 50.0)] {
@@ -417,7 +423,7 @@ fn amp_model_change_leaves_nothing_of_the_old_model() {
         }
         run(&mut rack, &input[..CHANGE]);
         rack.module_mut(0).set_param(MODEL, to as f32);
-        run(&mut rack, &input[CHANGE..])
+        run(&mut rack, &input[CHANGE..]).split_off(first_10_ms)
     };
     for (to, model) in models() {
         let mut froms = models().map(|(from, _)| from).filter(|&from| from != to);

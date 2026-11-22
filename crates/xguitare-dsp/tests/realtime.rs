@@ -198,6 +198,7 @@ fn amp_does_not_allocate() {
             for (idx, spec) in params.iter().enumerate().skip(1) {
                 module.set_param(idx, spec.min + 0.37 * (spec.max - spec.min));
             }
+            module.set_param(0, ((round + 1) % MODEL_COUNT) as f32);
             module.set_param(0, (round % MODEL_COUNT) as f32);
             for _ in 0..50 {
                 rack.process(&input, &mut left, &mut right);
