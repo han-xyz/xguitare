@@ -574,7 +574,7 @@ xguitare-gui
 
 The window has a left panel, the rack in the centre and a footer line at the bottom.
 
-The look is called the Faceplate: dark panels, each Rack unit a faceplate between steel ears, one colour per Module type (on its unit's top edge, lamp and knob arcs and on its `Add Module` tile), amber for what is lit or being edited, red for Mute, Record and errors, and a white ring around the control that has the keyboard focus. The text is set in IBM Plex Sans, Sans Condensed and Mono, built into `xguitare-gui`, so no font needs installing. The left panel scrolls when its sections do not fit: at 1280×800, with the 18 Module tiles under `Add Module`, the whole `Metronome` section is in view and `Tuner and Mute` is below the window until you scroll the panel.
+The look is called the Faceplate: dark panels, each Rack unit a faceplate between steel ears, one colour per Module type (on its unit's top edge, lamp and knob arcs and on its `Add Module` tile), amber for what is lit or being edited, red for Mute, Record and errors, and a white ring around the control that has the keyboard focus. The text is set in IBM Plex Sans, Sans Condensed and Mono, built into `xguitare-gui`, so no font needs installing. The left panel scrolls when its sections do not fit: at 1280×800, with the 19 Module tiles under `Add Module`, the whole `Metronome` section is in view and `Tuner and Mute` is below the window until you scroll the panel.
 
 The left panel has these sections, from the top, each in a framed box; click a section's title strip to close or open it (`Audio` and `Settings` start closed):
 
