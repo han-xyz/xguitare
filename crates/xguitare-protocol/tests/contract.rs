@@ -6,10 +6,10 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use xguitare_protocol::{
     BankKind, BusStatus, CODE_STILL_CLOSING, ClickStatus, GetReply, IndexOrName, ItemStatus,
-    ItemsReply, LoopRegion, LoopStatus, MasterStatus, MetronomeStatus, PROTOCOL_VERSION,
-    ParamStatus, PortConnection, Position, PositionStatus, RenderBits, RenderRange, RenderStatus,
-    Request, Response, SendLevel, SendStatus, StatusReply, TempoStatus, TrackStatus,
-    TransportAction, from_payload, position_frame, shown_file_name, to_payload,
+    ItemsReply, ItemsTrack, LoopRegion, LoopStatus, MasterStatus, MetronomeStatus,
+    PROTOCOL_VERSION, ParamStatus, PortConnection, Position, PositionStatus, RenderBits,
+    RenderRange, RenderStatus, Request, Response, SendLevel, SendStatus, StatusReply, TempoStatus,
+    TrackStatus, TransportAction, from_payload, position_frame, shown_file_name, to_payload,
 };
 
 fn name(text: &str) -> IndexOrName {
@@ -698,7 +698,7 @@ fn replies_with_extra_keys_at_top_level_and_nested_deserialise() {
     assert_eq!(reply.params[0].value, 1.5);
     let items = json!({"sample_rate": 48000, "extra": true,
         "tracks": [{"id": 0, "name": "Guitar", "colour": "red",
-            "items": [{"id": 1, "take_frames": 10, "fade": 3}]}]});
+            "items": [{"id": 1, "position": 0, "length": 10, "take": 0, "take_frames": 10, "fade": 3}]}]});
     let reply: ItemsReply = from_payload(&items).unwrap();
     assert_eq!(reply.tracks[0].items[0].take_frames, Some(10));
 }
@@ -717,7 +717,10 @@ fn a_reply_missing_keys_deserialises_to_the_defaults() {
             ..ParamStatus::default()
         }
     );
-    let items: ItemsReply = from_payload(&json!({"tracks": [{"items": [{}]}]})).unwrap();
+    let items: ItemsReply = from_payload(
+        &json!({"tracks": [{"id": 0, "items": [{"id": 0, "position": 0, "length": 0, "take": 0}]}]}),
+    )
+    .unwrap();
     assert_eq!(items.sample_rate, 0);
     assert_eq!(items.tracks[0].items[0], ItemStatus::default());
 }
@@ -761,6 +764,7 @@ fn a_status_from_an_older_daemon_without_render_and_clipboard_reads_the_defaults
     );
     let before_versioning: StatusReply = from_payload(&json!({})).unwrap();
     assert_eq!(before_versioning.protocol_version, 1);
+    assert_eq!(StatusReply::default().protocol_version, 1);
 }
 
 #[test]
@@ -789,8 +793,8 @@ fn a_status_with_empty_parts_reads_each_part_as_its_defaults() {
         "tempo": {},
         "loop": {},
         "click": {},
-        "tracks": [{"sends": [{}]}],
-        "buses": [{}],
+        "tracks": [{"id": 0, "sends": [{"bus": 0}]}],
+        "buses": [{"id": 0}],
         "master": {},
     });
     let reply: StatusReply = from_payload(&payload).unwrap();
@@ -830,4 +834,54 @@ fn a_status_without_a_project_writes_every_optional_key_as_null() {
     ] {
         assert_eq!(payload.get(key), Some(&Value::Null), "key {key}");
     }
+}
+
+fn assert_missing<T: DeserializeOwned + std::fmt::Debug>(payload: &Value, key: &str) {
+    let mut without = payload.clone();
+    without.as_object_mut().unwrap().remove(key);
+    let err = from_payload::<T>(&without).unwrap_err();
+    assert!(
+        err.to_string().contains(&format!("missing field `{key}`")),
+        "{key}: {err}"
+    );
+    from_payload::<T>(payload).unwrap();
+}
+
+#[test]
+fn an_items_track_without_its_id_is_an_error() {
+    assert_missing::<ItemsTrack>(&json!({"id": 2}), "id");
+}
+
+#[test]
+fn an_item_without_its_id_position_length_or_take_is_an_error() {
+    let item = json!({"id": 1, "position": 96000, "length": 2000, "take": 0});
+    for key in ["id", "position", "length", "take"] {
+        assert_missing::<ItemStatus>(&item, key);
+    }
+}
+
+#[test]
+fn a_status_track_without_its_id_is_an_error() {
+    assert_missing::<TrackStatus>(&json!({"id": 1}), "id");
+}
+
+#[test]
+fn a_status_bus_without_its_id_is_an_error() {
+    assert_missing::<BusStatus>(&json!({"id": 0}), "id");
+}
+
+#[test]
+fn a_send_without_its_bus_is_an_error() {
+    assert_missing::<SendStatus>(&json!({"bus": 0}), "bus");
+}
+
+#[test]
+fn a_payload_that_is_not_an_object_is_an_error() {
+    for payload in [json!([]), json!([0, "Guitar"]), json!(1), Value::Null] {
+        assert!(
+            from_payload::<StatusReply>(&payload).is_err(),
+            "{payload} read as a status"
+        );
+    }
+    assert!(from_payload::<ItemsTrack>(&json!([2, "Guitar", []])).is_err());
 }

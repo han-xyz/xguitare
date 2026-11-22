@@ -4,6 +4,8 @@ use serde_json::Value;
 
 use crate::RenderRange;
 
+const NOT_AN_OBJECT: &str = "a reply payload is not a JSON object";
+
 /// The `get` reply: one entry per Parameter asked for.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -42,30 +44,34 @@ pub struct ItemsReply {
 
 /// A Track as `items` lists it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ItemsTrack {
     pub id: u64,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub items: Vec<ItemStatus>,
 }
 
 /// An Item as `items` lists it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ItemStatus {
     pub id: u64,
     pub position: u64,
+    #[serde(default)]
     pub bars_beats: String,
+    #[serde(default)]
     pub offset: u64,
     pub length: u64,
     pub take: usize,
+    #[serde(default)]
     pub takes: Vec<String>,
     /// The active Take's frames; `null` without one.
+    #[serde(default)]
     pub take_frames: Option<u64>,
 }
 
 /// The `status` reply. The Project keys are `null`, and `tracks` and `buses` empty, while no Project is open.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StatusReply {
     pub preset: Option<String>,
@@ -85,7 +91,6 @@ pub struct StatusReply {
     pub connections: Vec<PortConnection>,
     pub metronome: MetronomeStatus,
     /// 1 when the key is missing: a Daemon from before versioning speaks version 1.
-    #[serde(default = "first_protocol_version")]
     pub protocol_version: u32,
     pub disk_overflows: u64,
     pub count_in_remaining: u32,
@@ -107,6 +112,47 @@ pub struct StatusReply {
     pub tracks: Vec<TrackStatus>,
     pub buses: Vec<BusStatus>,
     pub master: Option<MasterStatus>,
+}
+
+impl Default for StatusReply {
+    fn default() -> Self {
+        StatusReply {
+            preset: None,
+            program: None,
+            sample_rate: 0,
+            buffer_size: 0,
+            prepared_frames: 0,
+            revision: 0,
+            muted: false,
+            modified: false,
+            input_peak_db: None,
+            output_peak_db: None,
+            xruns: 0,
+            callback_max_us: 0,
+            callback_last_us: 0,
+            connections: Vec::new(),
+            metronome: MetronomeStatus::default(),
+            protocol_version: 1,
+            disk_overflows: 0,
+            count_in_remaining: 0,
+            loaded_audio_bytes: 0,
+            project_warning: None,
+            render: None,
+            project: None,
+            transport: None,
+            position: None,
+            tempo: None,
+            loop_region: None,
+            click: None,
+            selected: None,
+            undo: None,
+            redo: None,
+            clipboard: 0,
+            tracks: Vec::new(),
+            buses: Vec::new(),
+            master: None,
+        }
+    }
 }
 
 /// The Metronome as `status` shows it.
@@ -177,48 +223,66 @@ pub struct ClickStatus {
 
 /// A Track as `status` lists it; `volume_db` and each peak are `null` when off or not a finite number.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "mute, solo, armed, to_master and clip are independent Track switches"
 )]
 pub struct TrackStatus {
     pub id: u64,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub input: Option<String>,
+    #[serde(default)]
     pub volume_db: Option<f32>,
+    #[serde(default)]
     pub pan: f32,
+    #[serde(default)]
     pub mute: bool,
+    #[serde(default)]
     pub solo: bool,
+    #[serde(default)]
     pub armed: bool,
+    #[serde(default)]
     pub input_peak_db: Option<f64>,
+    #[serde(default)]
     pub to_master: bool,
+    #[serde(default)]
     pub sends: Vec<SendStatus>,
     /// Left and right.
+    #[serde(default)]
     pub peak_db: [Option<f64>; 2],
+    #[serde(default)]
     pub clip: bool,
 }
 
 /// A Send that is not off, with its Bus's index.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct SendStatus {
     pub bus: usize,
+    #[serde(default)]
     pub level_db: f32,
+    #[serde(default)]
     pub pre: bool,
 }
 
 /// A Bus as `status` lists it; `volume_db` and each peak are `null` when off or not a finite number.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct BusStatus {
     pub id: u64,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub volume_db: Option<f32>,
+    #[serde(default)]
     pub pan: f32,
+    #[serde(default)]
     pub mute: bool,
+    #[serde(default)]
     pub solo: bool,
+    #[serde(default)]
     pub peak_db: [Option<f64>; 2],
+    #[serde(default)]
     pub clip: bool,
 }
 
@@ -240,12 +304,15 @@ pub fn to_payload<T: Serialize>(reply: &T) -> Value {
     serde_json::to_value(reply).expect("a reply struct serialises to JSON")
 }
 
-/// The payload of `Response::Ok` read as a typed reply; a missing key reads as its default and an unknown key is ignored.
+/// The payload of `Response::Ok` read as a typed reply; a missing key reads as its default, except an identity or placement key (`id`, an Item's `position`, `length` and `take`, a Send's `bus`), and an unknown key is ignored.
 ///
 /// # Errors
 ///
-/// The `serde_json` error when a key holds a value of the wrong type.
+/// The `serde_json` error when `payload` is not a JSON object, a key holds a value of the wrong type, or an identity or placement key is missing.
 pub fn from_payload<T: DeserializeOwned>(payload: &Value) -> Result<T, serde_json::Error> {
+    if !payload.is_object() {
+        return Err(serde::de::Error::custom(NOT_AN_OBJECT));
+    }
     T::deserialize(payload)
 }
 
@@ -256,8 +323,4 @@ where
     T: Deserialize<'de>,
 {
     T::deserialize(deserializer).map(Some)
-}
-
-fn first_protocol_version() -> u32 {
-    1
 }
