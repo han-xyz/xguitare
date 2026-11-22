@@ -21,7 +21,7 @@ cargo install --path crates/xguitare
 
 This builds a release binary into `~/.cargo/bin/xguitare`; that directory must be on your `PATH`.
 
-For development, the `rt-check` feature aborts the Daemon on any allocation in the JACK process callback. Run it alone, as `cargo run -p xguitare --features rt-check -- …`: a cargo invocation that also builds the dev targets of `xguitare-core` or `xguitare-dsp` turns the check back off in release builds through feature unification.
+For development, the `rt-check` feature aborts the Daemon on any allocation in the JACK process callback. Run it alone, as `cargo run -p xguitare --features rt-check -- …`: a cargo invocation that also builds the dev targets of `xguitare-core` or `xguitare-dsp` fails to compile with `error[E0425]: cannot find type AllocDisabler`.
 
 ### Install from a release
 
