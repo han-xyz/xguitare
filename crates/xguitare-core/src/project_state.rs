@@ -12,6 +12,11 @@ use xguitare_protocol::{BusRef, IndexOrName, STILL_CLOSING, TrackRef};
 pub(crate) const NO_PROJECT: &str = "no project open";
 const PROJECT_IS_OPEN: &str = "a project is open; close it first";
 
+/// A Project read from disk outside the state lock for `control::handle_request`; a placeholder until the two-phase `project_open` fills it.
+pub struct ReadProject {
+    _private: (),
+}
+
 /// The open Project, if any, and what the Daemon must do outside the Engine because of it.
 #[derive(Default)]
 pub struct Projects {

@@ -397,6 +397,14 @@ impl Response {
         }
     }
 
+    #[allow(
+        clippy::missing_panics_doc,
+        reason = "the expect is an invariant: a Response always serialises"
+    )]
+    pub fn to_line(&self) -> String {
+        serde_json::to_string(self).expect("a Response always serialises to JSON")
+    }
+
     /// # Errors
     ///
     /// The JSON error when `line` is not a Response.

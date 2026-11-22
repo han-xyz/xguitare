@@ -24,7 +24,7 @@ use crate::project_control::{
     TrackChange, items, project_close, project_list, project_new, project_open, project_save,
     status_fields, target_rack, track_add, track_remove, track_select, track_set,
 };
-use crate::project_state::Projects;
+use crate::project_state::{Projects, ReadProject};
 use crate::project_sync::{rebuild_arrangement, rebuild_arrangement_slots};
 pub use crate::rack_control::passthrough_rack;
 use crate::rack_control::{
@@ -437,12 +437,32 @@ pub fn handle_line(
     connection: ConnectionId,
     line: &str,
 ) -> (String, Vec<BuildWarning>) {
-    let (response, warnings) = match serde_json::from_str(line) {
-        Ok(req) => handle_from(state, ports, connection, req),
-        Err(err) => (Response::err(format!("invalid request: {err}")), Vec::new()),
+    let (response, warnings) = match parse_line(line) {
+        Ok(request) => handle_request(state, ports, connection, request, None),
+        Err(response) => (response, Vec::new()),
     };
     let line = serde_json::to_string(&response).expect("a Response always serialises to JSON");
     (line, warnings)
+}
+
+/// Parses one request line, or returns the error Response `handle_line` answers it with; reads no state, so it runs outside the state lock.
+///
+/// # Errors
+///
+/// `invalid request: <serde error>` when the line is not a known request.
+pub fn parse_line(line: &str) -> Result<Request, Response> {
+    serde_json::from_str(line).map_err(|err| Response::err(format!("invalid request: {err}")))
+}
+
+/// Handles one parsed request from `connection` as `handle_line` does, returning the Response itself; `read` is not used yet.
+pub fn handle_request(
+    state: &mut EngineState,
+    ports: Option<&dyn AudioPorts>,
+    connection: ConnectionId,
+    request: Request,
+    _read: Option<ReadProject>,
+) -> (Response, Vec<BuildWarning>) {
+    handle_from(state, ports, connection, request)
 }
 
 /// The frame count the first Rack is prepared for: the larger of the requested and the effective buffer size, since the quantum can settle on either.

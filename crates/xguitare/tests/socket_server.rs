@@ -1,9 +1,9 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -56,23 +56,29 @@ impl Drop for Server {
 }
 
 fn server(test: &str) -> Server {
-    server_with(test, MAX_CONNECTIONS, IDLE_TIMEOUT)
+    server_with(test, MAX_CONNECTIONS, IDLE_TIMEOUT, &[])
 }
 
-fn server_with(test: &str, max_connections: usize, idle_timeout: Duration) -> Server {
+/// A Server whose Bank holds `presets`, each a file name and its TOML.
+fn server_with(
+    test: &str,
+    max_connections: usize,
+    idle_timeout: Duration,
+    presets: &[(&str, &str)],
+) -> Server {
     let dir = PathBuf::from(format!("/tmp/xguitare-srv-{}-{test}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     let path = dir.join("s.sock");
     let socket = bind(&path, max_connections, idle_timeout).unwrap();
+    for (file, toml) in presets {
+        fs::write(dir.join(file), toml).unwrap();
+    }
     let (queues, audio, tap) = engine_queues(64);
     let config = empty_config(&dir);
     let tuner = Tuner::new(tap, 48_000.0, config.tuner_reference_hz);
     let shared = Arc::new(EngineShared::default());
     let state = EngineState::new(
-        Bank {
-            dir: dir.clone(),
-            entries: Vec::new(),
-        },
+        Bank::load_dir(&dir).unwrap(),
         Arc::clone(&shared),
         queues,
         tuner,
@@ -116,6 +122,62 @@ fn over_long_line_is_refused_and_dropped() {
     assert_eq!(reply, "{\"ok\":false,\"error\":\"request too long\"}\n");
     let mut rest = Vec::new();
     assert_eq!(reader.read_to_end(&mut rest).unwrap(), 0);
+}
+
+#[test]
+fn malformed_line_gets_the_invalid_request_reply() {
+    let server = server("malformed");
+    let stream = UnixStream::connect(&server.path).unwrap();
+    assert_eq!(
+        request(&stream, "{\"cmd\":"),
+        "{\"ok\":false,\"error\":\"invalid request: EOF while parsing a value at line 1 column 7\"}\n"
+    );
+}
+
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl io::Write for LogBuffer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_load_build_warning_is_logged() {
+    let log = LogBuffer::default();
+    let sink = log.clone();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish(),
+    )
+    .unwrap();
+    let server = server_with(
+        "load-warning",
+        MAX_CONNECTIONS,
+        IDLE_TIMEOUT,
+        &[(
+            "01-cab.toml",
+            "name = \"Cab\"\n[[module]]\ntype = \"cabinet\"\nir = \"missing.wav\"\n",
+        )],
+    );
+    let stream = UnixStream::connect(&server.path).unwrap();
+    assert!(request(&stream, r#"{"cmd":"load","preset":"Cab"}"#).starts_with(r#"{"ok":true"#));
+    let logged = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    assert!(
+        logged.contains("WARN") && logged.contains("cabinet 'cabinet': "),
+        "{logged}"
+    );
 }
 
 #[test]
@@ -190,7 +252,7 @@ fn second_daemon_refused() {
 
 #[test]
 fn connection_cap_refuses_extra() {
-    let server = server_with("cap", 2, IDLE_TIMEOUT);
+    let server = server_with("cap", 2, IDLE_TIMEOUT, &[]);
     let first = UnixStream::connect(&server.path).unwrap();
     let second = UnixStream::connect(&server.path).unwrap();
     for stream in [&first, &second] {
@@ -221,7 +283,12 @@ fn connection_cap_refuses_extra() {
 
 #[test]
 fn idle_connection_closed() {
-    let server = server_with("idle-closed", MAX_CONNECTIONS, Duration::from_millis(300));
+    let server = server_with(
+        "idle-closed",
+        MAX_CONNECTIONS,
+        Duration::from_millis(300),
+        &[],
+    );
     let mut stream = UnixStream::connect(&server.path).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))

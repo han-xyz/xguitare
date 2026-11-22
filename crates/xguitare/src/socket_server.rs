@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use tracing::warn;
 use xguitare_core::control::{
-    ConnectionId, EngineState, close_connection, handle_line, open_connection,
+    ConnectionId, EngineState, close_connection, handle_request, open_connection, parse_line,
 };
 use xguitare_core::ports::AudioPorts;
 use xguitare_core::{SOCKET_DIR_MODE, SocketDirError, secure_socket_dir};
@@ -327,16 +327,19 @@ fn answer_lines(
         }
         if !line.is_empty() {
             let request = String::from_utf8_lossy(&line);
-            let (reply, warnings) = {
-                let mut state = lock(state);
-                let ports = ports.upgrade();
-                let ports = ports.as_deref().map(|ports| ports as &dyn AudioPorts);
-                handle_line(&mut state, ports, connection, request.trim_end())
+            let (response, warnings) = match parse_line(request.trim_end()) {
+                Ok(request) => {
+                    let mut state = lock(state);
+                    let ports = ports.upgrade();
+                    let ports = ports.as_deref().map(|ports| ports as &dyn AudioPorts);
+                    handle_request(&mut state, ports, connection, request, None)
+                }
+                Err(response) => (response, Vec::new()),
             };
             for warning in warnings {
                 warn!("{warning}");
             }
-            writer.write_all(format!("{reply}\n").as_bytes())?;
+            writer.write_all(format!("{}\n", response.to_line()).as_bytes())?;
             line.clear();
         }
         if !complete {

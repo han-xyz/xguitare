@@ -9,8 +9,9 @@ use std::sync::atomic::Ordering;
 use serde_json::{Value, json};
 use xguitare_core::atomic_file::write_new;
 use xguitare_core::control::{
-    EngineState, Reprepare, change_sample_rate, follow_sample_rate, handle, handle_line,
-    needs_reprepare, open_connection, passthrough_rack, prepared_max_frames, reprepare,
+    ConnectionId, EngineState, Reprepare, change_sample_rate, follow_sample_rate, handle,
+    handle_line, handle_request, needs_reprepare, open_connection, parse_line, passthrough_rack,
+    prepared_max_frames, reprepare,
 };
 use xguitare_core::engine::{
     AudioQueues, Command, EngineShared, FadeLengths, RackSwitcher, SWITCHER_MAX_FRAMES,
@@ -586,6 +587,53 @@ fn malformed_json_is_error() {
             .unwrap();
     assert_eq!(response["ok"], true);
     assert_eq!(response["preset"], "Clean");
+}
+
+type Answer = (String, Vec<BuildWarning>);
+
+fn answer_each(
+    lines: &[&str],
+    answer: impl Fn(&mut EngineState, ConnectionId, &str) -> Answer,
+) -> Vec<Answer> {
+    let (mut state, _audio, _dir) = state("handle-request");
+    fs::write(
+        state.config.bank_dir.join("04-cab.toml"),
+        "name = \"Cab\"\n[[module]]\ntype = \"cabinet\"\nir = \"missing.wav\"\n",
+    )
+    .unwrap();
+    state.bank = Bank::load_dir(&state.config.bank_dir).unwrap();
+    let connection = open_connection(&mut state);
+    lines
+        .iter()
+        .map(|line| answer(&mut state, connection, line))
+        .collect()
+}
+
+#[test]
+fn handle_request_answers_like_handle_line() {
+    let lines = [
+        r#"{"cmd":"status"}"#,
+        r#"{"cmd":"get","param":"gain.level"}"#,
+        r#"{"cmd":"set","param":"gain.level","value":-6}"#,
+        r#"{"cmd":"load","preset":"Cab"}"#,
+        r#"{"cmd":"bogus"}"#,
+        "{\"cmd\":",
+    ];
+    let by_line = answer_each(&lines, |state, connection, line| {
+        handle_line(state, None, connection, line)
+    });
+    let by_request = answer_each(&lines, |state, connection, line| {
+        let (response, warnings) = match parse_line(line) {
+            Ok(request) => handle_request(state, None, connection, request, None),
+            Err(response) => (response, Vec::new()),
+        };
+        (serde_json::to_string(&response).unwrap(), warnings)
+    });
+    assert_eq!(by_line, by_request);
+    assert!(
+        matches!(&by_line[3].1[..], [BuildWarning::Ir { .. }]),
+        "{by_line:?}"
+    );
 }
 
 #[test]
