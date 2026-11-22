@@ -16,114 +16,32 @@ use crate::control::{EngineState, MixPeaks, peak_db};
 use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
-use crate::item_control::CopiedItem;
 use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
 use crate::ports::AudioPorts;
 use crate::project::{
     AUTOSAVE_FILE, Item, LoadWarning, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track,
     autosave_due, autosave_newer, check_project, check_track, checked_name,
 };
+use crate::project_state::{
+    ClosedProject, CopiedItem, LoadedTakes, NO_PROJECT, OpenProject, ProjectEvent, check_none_open,
+    current_project, open_project, open_project_mut, resolve_bus, resolve_track,
+};
 pub use crate::project_sync::project_rate_warning;
 use crate::project_sync::{
     Layout, NOTHING_MOVED, click_commands, commit, rate_mismatch, send, start_arrangement,
     swap_project, swap_project_with_ids,
 };
-use crate::render::{RenderJob, RenderTask};
 use crate::render_control::{cancel_render, render_status};
-use crate::take_capture::{
-    FinishedTake, Latency, TrackReader, WritingTakes, add_finished_take, load_take,
-};
+use crate::take_capture::{FinishedTake, Latency, WritingTakes, add_finished_take, load_take};
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Preset, PresetModule};
-use xguitare_protocol::{BusRef, IndexOrName, LoopRegion, STILL_CLOSING, TrackRef};
+use xguitare_protocol::{BusRef, LoopRegion, TrackRef};
 
-pub(crate) const NO_PROJECT: &str = "no project open";
-const PROJECT_IS_OPEN: &str = "a project is open; close it first";
 const NO_TRACKS: &str = "the project has no tracks";
 const DEFAULT_TRACK_NAME: &str = "Track";
 const MASTER_NAME: &str = "Master";
 const ONE_TARGET: &str = "give track, bus or master, not more than one";
 const EDITING_WHILE_RECORDING: &str = "cannot edit items while recording";
-/// The open Project, if any, and what the Daemon must do outside the Engine because of it.
-#[derive(Default)]
-pub struct Projects {
-    pub(crate) open: Option<OpenProject>,
-    pub(crate) events: Vec<ProjectEvent>,
-    /// Closed Projects that recorded and whose last Takes the Daemon has not yet added and saved.
-    closing: usize,
-    /// The running Render, or the last one until the next starts.
-    pub(crate) render: Option<Arc<RenderJob>>,
-    /// Whether [`crate::render_control::finished_render`] has reported the end of `render`.
-    pub(crate) render_reported: bool,
-}
-
-pub(crate) struct OpenProject {
-    dir: PathBuf,
-    pub(crate) project: Project,
-    pub(crate) takes: HashMap<String, Arc<[f32]>>,
-    /// The peak table of each Take in `takes`, with the samples it was built from, kept by [`sync_peaks`].
-    peaks: HashMap<String, (Arc<[f32]>, Vec<i8>)>,
-    selected: usize,
-    /// Whether the last transport request was `record`; `play` and `stop` end it.
-    pub(crate) recording: bool,
-    /// Whether `record` was requested since it was opened, so Takes may still be on their way when it closes.
-    pub(crate) recorded: bool,
-    /// One id per Track, in Track order, that stays the Track's while others are added or removed; finished Takes name their Track by it.
-    pub(crate) track_ids: Vec<u64>,
-    next_track_id: u64,
-    /// Never reused, so a client holding a removed Bus's id cannot reach a new Bus by it.
-    next_bus_id: u64,
-    /// Whether the Project changed since it was opened, saved or autosaved.
-    pub(crate) changed: bool,
-    last_autosave: Instant,
-    /// Finished Takes not yet in `project` because the Engine was busy; [`add_finished_takes`] retries them.
-    unplaced: Vec<FinishedTake>,
-    pub(crate) history: History,
-    clipboard: Vec<CopiedItem>,
-    writing: WritingTakes,
-}
-
-/// The open Project's Take audio, keyed by Take file.
-pub(crate) type LoadedTakes = HashMap<String, Arc<[f32]>>;
-
-/// Take readers, one per Track in Track order.
-pub type TrackReaders = Vec<TrackReader>;
-
-/// Work for the Daemon, in the order it arose.
-#[allow(
-    clippy::large_enum_variant,
-    reason = "a few events per Control API request; boxing the closed Project saves nothing that matters"
-)]
-pub enum ProjectEvent {
-    /// Start a disk thread writing Takes under `dir` at `sample_rate` that keeps `writing` current, and log what loading the Project changed.
-    Opened {
-        dir: PathBuf,
-        sample_rate: u32,
-        writing: WritingTakes,
-        warnings: Vec<LoadWarning>,
-    },
-    /// Queue these Take readers on the disk thread.
-    Readers(TrackReaders),
-    /// Connect Track n's input port to `inputs[n]`, disconnecting the rest.
-    Inputs(Vec<Option<String>>),
-    /// Stop the disk thread and hand the Takes it still finishes to [`finish_closed`].
-    Closed(ClosedProject),
-    /// Run this Render on a thread of its own.
-    Render(RenderTask),
-}
-
-pub struct ClosedProject {
-    pub dir: PathBuf,
-    pub project: Project,
-    /// Whether it changed since it was last saved or autosaved.
-    pub changed: bool,
-    track_ids: Vec<u64>,
-    /// Whether it counts in [`Projects`]' `closing` until [`finish_closed`] adds its last Takes.
-    takes_pending: bool,
-    /// Finished Takes the Engine was too busy to take before the close; added with the last Takes.
-    unplaced: Vec<FinishedTake>,
-}
-
 /// What [`finish_closed`] and [`finish_stopped`] did, for the Daemon to log.
 #[derive(Debug, Default)]
 pub struct LastTakes {
@@ -192,19 +110,19 @@ pub fn add_finished_takes(
     let mut warnings = Vec::new();
     match swap_project(state, project, &mut warnings) {
         Ok(()) => {
-            let history = &mut open_project_mut(state).history;
+            let history = &mut open_project_mut(&mut state.projects).history;
             for entry in entries {
                 history.push(entry);
             }
         }
         Err(err) if err == ENGINE_BUSY => {
             takes.retain(|take| added.contains(&take.file));
-            open_project_mut(state).unplaced = takes;
+            open_project_mut(&mut state.projects).unplaced = takes;
         }
         Err(err) => failures.push(format!("cannot play the new takes: {err}")),
     }
     failures.extend(warnings.iter().map(ToString::to_string));
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     sync_peaks(open);
     if !open.recording {
         failures.extend(autosave_on_stop(open).map(|err| format!("cannot autosave: {err}")));
@@ -388,11 +306,11 @@ pub(crate) fn target_rack(
 ) -> Result<Option<ProjectRack>, String> {
     check_one_target(track.is_some(), bus.is_some(), master)?;
     if let Some(bus) = bus {
-        let project = current_project(state)?;
+        let project = current_project(&state.projects)?;
         return resolve_bus(project, bus).map(|bus| Some(ProjectRack::Bus(bus)));
     }
     if master {
-        current_project(state)?;
+        current_project(&state.projects)?;
         return Ok(Some(ProjectRack::Master));
     }
     Ok(target_track(state, track)?.map(ProjectRack::Track))
@@ -412,19 +330,9 @@ fn target_track(state: &EngineState, track: Option<&TrackRef>) -> Result<Option<
     }
 }
 
-/// The open Project, or `no project open`.
-pub(crate) fn current_project(state: &EngineState) -> Result<&Project, String> {
-    state
-        .projects
-        .open
-        .as_ref()
-        .map(|open| &open.project)
-        .ok_or_else(|| NO_PROJECT.to_string())
-}
-
 /// The Rack's Modules as a Preset named after its Track or Bus (or `Master`), for the Rack requests to read and edit.
 pub(crate) fn rack_preset(state: &EngineState, rack: ProjectRack) -> Preset {
-    let project = &open_project(state).project;
+    let project = &open_project(&state.projects).project;
     let (name, modules) = match rack {
         ProjectRack::Track(track) => (
             project.tracks[track].name.as_str(),
@@ -457,7 +365,7 @@ pub(crate) fn set_rack_modules(
     modules: Vec<PresetModule>,
     warnings: &mut Vec<BuildWarning>,
 ) -> Result<(), String> {
-    let mut project = open_project(state).project.clone();
+    let mut project = open_project(&state.projects).project.clone();
     *rack_modules_mut(&mut project, rack) = modules;
     swap_project(state, project, warnings)
 }
@@ -470,7 +378,7 @@ pub(crate) fn change_rack_module(
     change: impl FnOnce(&mut Vec<PresetModule>),
 ) -> Result<(), String> {
     send(state, &[command])?;
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     change(rack_modules_mut(&mut open.project, rack));
     open.changed = true;
     state.revision += 1;
@@ -513,7 +421,7 @@ pub(crate) fn bypass_command(rack: ProjectRack, module: usize, on: bool) -> Arra
 }
 
 pub(crate) fn project_new(state: &mut EngineState, name: &str) -> Result<Value, String> {
-    check_none_open(state)?;
+    check_none_open(&state.projects)?;
     let (dir, mut project) =
         Project::new(&state.config.projects_dir, name).map_err(|err| err.to_string())?;
     project.sample_rate = state.sample_rate as u32;
@@ -524,22 +432,12 @@ pub(crate) fn project_new(state: &mut EngineState, name: &str) -> Result<Value, 
     Ok(payload)
 }
 
-fn check_none_open(state: &EngineState) -> Result<(), String> {
-    if state.projects.open.is_some() {
-        return Err(PROJECT_IS_OPEN.to_string());
-    }
-    if state.projects.closing > 0 {
-        return Err(STILL_CLOSING.to_string());
-    }
-    Ok(())
-}
-
 pub(crate) fn project_open(
     state: &mut EngineState,
     name: &str,
     restore: bool,
 ) -> Result<Value, String> {
-    check_none_open(state)?;
+    check_none_open(&state.projects)?;
     let folder = slug(name);
     let dir = state.config.projects_dir.join(&folder);
     if folder.is_empty() || !dir.join(PROJECT_FILE).is_file() {
@@ -565,7 +463,7 @@ pub(crate) fn project_open(
     });
     open(state, dir, project, takes, warnings)?;
     if restore {
-        open_project_mut(state).changed = true;
+        open_project_mut(&mut state.projects).changed = true;
     }
     Ok(payload)
 }
@@ -656,7 +554,7 @@ pub(crate) fn track_add(state: &mut EngineState, name: Option<&str>) -> Result<V
     let id = open.next_track_id;
     let track = project.tracks[index].clone();
     swap_project_with_ids(state, project, track_ids, NOTHING_MOVED, &mut Vec::new())?;
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     open.next_track_id += 1;
     open.selected = index;
     open.history.push(Entry {
@@ -679,7 +577,7 @@ pub(crate) fn track_remove(state: &mut EngineState, track: &TrackRef) -> Result<
     }
     let removed = remove_track_at(state, index)?;
     let name = removed.track.name.clone();
-    open_project_mut(state).history.push(Entry {
+    open_project_mut(&mut state.projects).history.push(Entry {
         label: format!("remove Track {name}"),
         change: Change::TrackRemoved(removed),
     });
@@ -691,7 +589,7 @@ pub(crate) fn remove_track_at(
     state: &mut EngineState,
     index: usize,
 ) -> Result<PlacedTrack, String> {
-    let open = open_project(state);
+    let open = open_project(&state.projects);
     let mut project = open.project.clone();
     let track = project.tracks.remove(index);
     let mut track_ids = open.track_ids.clone();
@@ -699,7 +597,7 @@ pub(crate) fn remove_track_at(
     let selected = open.selected == index;
     let moved_from = (index, MAX_BUSES);
     swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())?;
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     if index < open.selected {
         open.selected -= 1;
     }
@@ -721,7 +619,7 @@ pub(crate) fn restore_track(
     state: &mut EngineState,
     placed: &mut PlacedTrack,
 ) -> Result<(), String> {
-    let open = open_project(state);
+    let open = open_project(&state.projects);
     let mut project = open.project.clone();
     let track = &mut placed.track;
     track
@@ -735,17 +633,17 @@ pub(crate) fn restore_track(
     let had_tracks = !open.project.tracks.is_empty();
     let missing = missing_takes(&open.dir, &open.takes, &project)?;
     let loaded: Vec<String> = missing.keys().cloned().collect();
-    open_project_mut(state).takes.extend(missing);
+    open_project_mut(&mut state.projects).takes.extend(missing);
     let moved_from = (placed.index, MAX_BUSES);
     if let Err(err) = swap_project_with_ids(state, project, track_ids, moved_from, &mut Vec::new())
     {
-        let takes = &mut open_project_mut(state).takes;
+        let takes = &mut open_project_mut(&mut state.projects).takes;
         for file in &loaded {
             takes.remove(file);
         }
         return Err(err);
     }
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     sync_peaks(open);
     if placed.selected {
         open.selected = placed.index;
@@ -842,13 +740,13 @@ pub(crate) fn track_set(
         .flatten()
         .collect();
         send(state, &commands)?;
-        let open = open_project_mut(state);
+        let open = open_project_mut(&mut state.projects);
         open.project = project;
         open.changed = true;
         state.revision += 1;
     }
     if change.input.is_some() {
-        let inputs = track_inputs(&open_project(state).project);
+        let inputs = track_inputs(&open_project(&state.projects).project);
         state.projects.events.push(ProjectEvent::Inputs(inputs));
     }
     Ok(json!({
@@ -919,7 +817,7 @@ pub(crate) fn editable_project(state: &EngineState) -> Result<(&Project, usize),
 /// Makes `project`, the open Project with its Items edited, the open one: checks it, loads each active Take not yet in memory and sends every Track whose Items changed its new Item list, which the Arrangement crossfades to; on an error nothing changes.
 pub(crate) fn apply_items(state: &mut EngineState, project: Project) -> Result<(), String> {
     check_project(&project).map_err(|err| err.to_string())?;
-    let open = open_project(state);
+    let open = open_project(&state.projects);
     let mut takes = open.takes.clone();
     takes.extend(missing_takes(&open.dir, &open.takes, &project)?);
     let mut commands = Vec::new();
@@ -946,7 +844,7 @@ pub(crate) fn apply_items(state: &mut EngineState, project: Project) -> Result<(
             .push(Command::Arrangement(command))
             .map_err(|_| ENGINE_BUSY.to_string())?;
     }
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     open.takes = takes;
     sync_peaks(open);
     commit(state, project);
@@ -959,7 +857,7 @@ pub(crate) fn edit_items(
     project: Project,
     label: String,
 ) -> Result<(), String> {
-    let open = open_project(state);
+    let open = open_project(&state.projects);
     let tracks: Vec<TrackItems> = open
         .project
         .tracks
@@ -975,7 +873,7 @@ pub(crate) fn edit_items(
         .collect();
     apply_items(state, project)?;
     if !tracks.is_empty() {
-        open_project_mut(state).history.push(Entry {
+        open_project_mut(&mut state.projects).history.push(Entry {
             label,
             change: Change::Items(tracks),
         });
@@ -993,7 +891,7 @@ pub(crate) fn clipboard(state: &EngineState) -> &[CopiedItem] {
 }
 
 pub(crate) fn fill_clipboard(state: &mut EngineState, items: Vec<CopiedItem>) {
-    open_project_mut(state).clipboard = items;
+    open_project_mut(&mut state.projects).clipboard = items;
 }
 
 /// The open Project's folder and the Take files it keeps: those its Items, active or not, and its clipboard name, finished Takes not yet placed and those the disk thread is writing.
@@ -1028,7 +926,7 @@ pub(crate) fn is_recording(state: &EngineState) -> Result<bool, String> {
 /// Before the Take `files` are deleted: saves the open Project, removes its autosave, and forgets their audio, the undo history and the clipboard.
 pub(crate) fn forget_takes(state: &mut EngineState, files: &[String]) -> Result<(), String> {
     project_save(state)?;
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     let autosave = open.dir.join(AUTOSAVE_FILE);
     match fs::remove_file(&autosave) {
         Err(err) if err.kind() != ErrorKind::NotFound => {
@@ -1051,7 +949,7 @@ pub(crate) fn gone_take_file<'a>(
     state: &EngineState,
     items: impl IntoIterator<Item = &'a Item>,
 ) -> Option<&'a str> {
-    let dir = &open_project(state).dir;
+    let dir = &open_project(&state.projects).dir;
     items
         .into_iter()
         .flat_map(|item| &item.takes)
@@ -1276,45 +1174,6 @@ fn sync_peaks(open: &mut OpenProject) {
     }
 }
 
-/// The open Project's loaded Take `file`: its frames and its peak table.
-pub(crate) fn loaded_peaks<'a>(
-    state: &'a EngineState,
-    file: &str,
-) -> Result<(usize, &'a [i8]), String> {
-    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
-    open.peaks
-        .get(file)
-        .map(|(samples, table)| (samples.len(), table.as_slice()))
-        .ok_or_else(|| format!("no such take: {file}"))
-}
-
-pub(crate) fn resolve_track(project: &Project, track: &TrackRef) -> Result<usize, String> {
-    resolve_ref(
-        "track",
-        project.tracks.iter().map(|t| t.name.as_str()),
-        track,
-    )
-}
-
-pub(crate) fn resolve_bus(project: &Project, bus: &BusRef) -> Result<usize, String> {
-    resolve_ref("bus", project.buses.iter().map(|b| b.name.as_str()), bus)
-}
-
-fn resolve_ref<'a>(
-    kind: &str,
-    mut names: impl Iterator<Item = &'a str>,
-    wanted: &IndexOrName,
-) -> Result<usize, String> {
-    let found = match wanted {
-        IndexOrName::Index(index) => names.nth(*index).map(|_| *index),
-        IndexOrName::Name(name) => names.position(|other| other == name),
-    };
-    found.ok_or_else(|| match wanted {
-        IndexOrName::Index(index) => format!("no {kind} '{index}'"),
-        IndexOrName::Name(name) => format!("no {kind} '{name}'"),
-    })
-}
-
 #[allow(
     clippy::maybe_infinite_iter,
     reason = "a Project has at most 16 Tracks, so some number is free"
@@ -1342,35 +1201,6 @@ fn bars_beats(project: &Project, frames: u64) -> String {
     let beat = (frames as f64 / frames_per_beat(project)).floor() as u64;
     let beats_per_bar = u64::from(project.meter.0);
     format!("{}.{}", beat / beats_per_bar + 1, beat % beats_per_bar + 1)
-}
-
-/// The open Project's folder, its current state and its loaded Take audio.
-pub(crate) fn open_project_state(state: &EngineState) -> Option<(&Path, &Project, &LoadedTakes)> {
-    let open = state.projects.open.as_ref()?;
-    Some((&open.dir, &open.project, &open.takes))
-}
-
-pub(crate) fn open_project(state: &EngineState) -> &OpenProject {
-    state
-        .projects
-        .open
-        .as_ref()
-        .expect("callers check that a Project is open")
-}
-
-/// An id for a new Bus of the open Project; each call gives another.
-pub(crate) fn new_bus_id(state: &mut EngineState) -> u64 {
-    let open = open_project_mut(state);
-    open.next_bus_id += 1;
-    open.next_bus_id - 1
-}
-
-pub(crate) fn open_project_mut(state: &mut EngineState) -> &mut OpenProject {
-    state
-        .projects
-        .open
-        .as_mut()
-        .expect("callers check that a Project is open")
 }
 
 /// Creates `dir` if missing; the error names it.

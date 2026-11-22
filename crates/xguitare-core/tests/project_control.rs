@@ -14,9 +14,9 @@ use xguitare_core::metronome::MetronomeSettings;
 use xguitare_core::ports::{AudioPorts, AvailablePort};
 use xguitare_core::project::{AUTOSAVE_FILE, Item, PROJECT_FILE, Project, Take};
 use xguitare_core::project_control::{
-    ProjectEvent, add_finished_takes, autosave_if_due, finish_closed, finish_stopped,
-    take_project_events,
+    add_finished_takes, autosave_if_due, finish_closed, finish_stopped, take_project_events,
 };
+use xguitare_core::project_state::ProjectEvent;
 use xguitare_core::take_capture::{FinishedTake, Latency, TakeSpan};
 use xguitare_core::tuner::Tuner;
 use xguitare_core::{Bank, BankEntry, BuildWarning, Config, Ports};

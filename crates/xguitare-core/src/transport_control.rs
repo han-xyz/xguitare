@@ -4,7 +4,8 @@ use xguitare_protocol::{LoopRegion, Position, TransportAction, position_frame};
 use crate::arrangement::ArrangementCommand;
 use crate::control::EngineState;
 use crate::project::{Item, Project, check_project};
-use crate::project_control::{NO_PROJECT, autosave_on_stop, open_project_mut};
+use crate::project_control::autosave_on_stop;
+use crate::project_state::{NO_PROJECT, open_project_mut};
 use crate::project_sync::{click_commands, commit, project_rate_warning, send};
 
 const NOTHING_ARMED: &str = "no track is armed";
@@ -40,7 +41,7 @@ pub(crate) fn transport(
         }
     };
     send(state, &[command])?;
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     match action {
         TransportAction::Record => {
             open.recording = true;

@@ -2,10 +2,8 @@ use serde_json::{Value, json};
 
 use crate::control::EngineState;
 use crate::history::{Change, Entry, History};
-use crate::project_control::{
-    NO_PROJECT, OpenProject, apply_items, open_project, open_project_mut, remove_track_at,
-    restore_track,
-};
+use crate::project_control::{apply_items, remove_track_at, restore_track};
+use crate::project_state::{NO_PROJECT, OpenProject, open_project, open_project_mut};
 
 const UNDO_WHILE_RECORDING: &str = "cannot undo while recording";
 const REDO_WHILE_RECORDING: &str = "cannot redo while recording";
@@ -21,7 +19,7 @@ pub(crate) fn project_undo(state: &mut EngineState) -> Result<Value, String> {
         NOTHING_TO_UNDO,
     )?;
     let (done, label) = apply_change(state, entry.change.inverse(), entry.label)?;
-    open_project_mut(state).history.undone(Entry {
+    open_project_mut(&mut state.projects).history.undone(Entry {
         label: label.clone(),
         change: done.inverse(),
     });
@@ -37,7 +35,7 @@ pub(crate) fn project_redo(state: &mut EngineState) -> Result<Value, String> {
         NOTHING_TO_REDO,
     )?;
     let (done, label) = apply_change(state, entry.change, entry.label)?;
-    open_project_mut(state).history.redone(Entry {
+    open_project_mut(&mut state.projects).history.redone(Entry {
         label: label.clone(),
         change: done,
     });
@@ -68,7 +66,7 @@ fn apply_change(
 ) -> Result<(Change, String), String> {
     match change {
         Change::Items(tracks) => {
-            let open = open_project(state);
+            let open = open_project(&state.projects);
             let mut project = open.project.clone();
             for items in &tracks {
                 let index = track_index(open, items.track_id)?;
@@ -87,7 +85,7 @@ fn apply_change(
             Ok((Change::TrackAdded(placed), label))
         }
         Change::TrackRemoved(placed) => {
-            let index = track_index(open_project(state), placed.id)?;
+            let index = track_index(open_project(&state.projects), placed.id)?;
             let removed = remove_track_at(state, index)?;
             Ok((Change::TrackRemoved(removed), label))
         }

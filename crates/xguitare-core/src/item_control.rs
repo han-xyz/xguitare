@@ -3,20 +3,13 @@ use serde_json::{Value, json};
 use crate::control::EngineState;
 use crate::project::{Item, Project};
 use crate::project_control::{
-    clipboard, current_project, edit_items, editable_project, fill_clipboard, gone_take_file,
-    item_json, resolve_track,
+    clipboard, edit_items, editable_project, fill_clipboard, gone_take_file, item_json,
 };
+use crate::project_state::{CopiedItem, current_project, resolve_track};
 use xguitare_protocol::TrackRef;
 
 const NO_ITEMS: &str = "give at least one item";
 const CLIPBOARD_EMPTY: &str = "clipboard is empty";
-
-/// An Item in the clipboard: `item.position` counted from the start of the group copied, `track` its Track's distance from the Track of the first Item named.
-#[derive(Clone)]
-pub(crate) struct CopiedItem {
-    pub track: isize,
-    pub item: Item,
-}
 
 /// Moves the Items `ids` by one `delta`, clamped so none starts before frame 0, onto the top of their Tracks; with `track`, the first one lands on that Track and the others keep their Track distance to it.
 pub(crate) fn item_move(
@@ -221,7 +214,7 @@ pub(crate) fn item_duplicate(state: &mut EngineState, ids: &[u64]) -> Result<Val
 
 /// Puts the Items `ids` in the open Project's clipboard, replacing what it held.
 pub(crate) fn item_copy(state: &mut EngineState, ids: &[u64]) -> Result<Value, String> {
-    let project = current_project(state)?;
+    let project = current_project(&state.projects)?;
     let ids = distinct(ids)?;
     let first = find(project, ids[0])?.0;
     let places = sorted_places(project, &ids)?;

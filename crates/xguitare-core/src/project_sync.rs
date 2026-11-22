@@ -7,7 +7,7 @@ use crate::control::EngineState;
 use crate::engine::Command;
 use crate::metronome_control::click_volume_db;
 use crate::project::{MAX_BUSES, MAX_TRACKS, Project};
-use crate::project_control::{NO_PROJECT, ProjectEvent, TrackReaders, open_project_mut};
+use crate::project_state::{NO_PROJECT, ProjectEvent, TrackReaders, open_project_mut};
 use crate::take_capture::TrackReader;
 use crate::{BuildWarning, Config};
 
@@ -65,7 +65,7 @@ pub(crate) fn swap_project_with_ids(
         warnings.extend(build_warnings);
         state.projects.events.push(ProjectEvent::Readers(readers));
     }
-    open_project_mut(state).track_ids = track_ids;
+    open_project_mut(&mut state.projects).track_ids = track_ids;
     commit(state, project);
     Ok(())
 }
@@ -87,7 +87,7 @@ pub(crate) fn rebuild_arrangement(state: &mut EngineState) -> Result<Vec<BuildWa
             .commands
             .push(Command::CloseArrangement)
             .map_err(|_| ENGINE_BUSY.to_string())?;
-        open_project_mut(state).recording = false;
+        open_project_mut(&mut state.projects).recording = false;
         return Ok(Vec::new());
     }
     let (readers, warnings) = start_arrangement(
@@ -136,7 +136,7 @@ pub(crate) fn click_commands(
 }
 
 pub(crate) fn commit(state: &mut EngineState, project: Project) {
-    let open = open_project_mut(state);
+    let open = open_project_mut(&mut state.projects);
     open.project = project;
     open.changed = true;
     state.revision += 1;

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::control::EngineState;
-use crate::project_control::{NO_PROJECT, ProjectEvent, open_project_state};
+use crate::project_state::{NO_PROJECT, ProjectEvent, open_project_state};
 use crate::render::{RENDERS_DIR, Render, RenderJob, RenderState, RenderTask};
 use xguitare_protocol::{RenderBits, RenderRange};
 
@@ -29,7 +29,7 @@ pub(crate) fn render(
     bits: Option<RenderBits>,
     name: Option<&str>,
 ) -> Result<Value, String> {
-    let (dir, project, takes) = open_project_state(state).ok_or(NO_PROJECT)?;
+    let (dir, project, takes) = open_project_state(&state.projects).ok_or(NO_PROJECT)?;
     if is_running(state) {
         return Err(RENDER_RUNNING.to_string());
     }

@@ -19,6 +19,7 @@ pub mod ports;
 mod preset;
 pub mod project;
 pub mod project_control;
+pub mod project_state;
 mod project_sync;
 mod rack_control;
 mod registry;

@@ -21,9 +21,10 @@ use crate::mixer_control::{
 use crate::ports::AudioPorts;
 use crate::project::{MAX_BUSES, MAX_TRACKS};
 use crate::project_control::{
-    Projects, TrackChange, items, project_close, project_list, project_new, project_open,
-    project_save, status_fields, target_rack, track_add, track_remove, track_select, track_set,
+    TrackChange, items, project_close, project_list, project_new, project_open, project_save,
+    status_fields, target_rack, track_add, track_remove, track_select, track_set,
 };
+use crate::project_state::Projects;
 use crate::project_sync::{rebuild_arrangement, rebuild_arrangement_slots};
 pub use crate::rack_control::passthrough_rack;
 use crate::rack_control::{

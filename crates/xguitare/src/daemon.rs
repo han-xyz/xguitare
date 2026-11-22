@@ -24,9 +24,10 @@ use xguitare_core::firstrun::ensure_bank;
 use xguitare_core::ports::{AudioPorts, capture_track_inputs};
 use xguitare_core::project::MAX_TRACKS;
 use xguitare_core::project_control::{
-    ClosedProject, LastTakes, ProjectEvent, add_finished_takes, autosave_if_due, close_for_stop,
-    finish_closed, finish_stopped, project_rate_warning, take_project_events,
+    LastTakes, add_finished_takes, autosave_if_due, close_for_stop, finish_closed, finish_stopped,
+    project_rate_warning, take_project_events,
 };
+use xguitare_core::project_state::{ClosedProject, ProjectEvent};
 use xguitare_core::render::RenderTask;
 use xguitare_core::render_control::{RenderFinished, cancel_render, finished_render};
 use xguitare_core::take_capture::Latency;

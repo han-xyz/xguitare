@@ -12,7 +12,7 @@ use crate::metronome::{
     VOLUME_DB,
 };
 use crate::project::{ProjectError, TEMPO_BPM, is_meter};
-use crate::project_control::open_project_state;
+use crate::project_state::open_project_state;
 use crate::project_sync::{CLICK_COMMANDS, send};
 use crate::settings_control::save_state;
 use crate::state::SavedMetronome;
@@ -35,7 +35,7 @@ pub(crate) fn metronome(
     if volume.is_some_and(|db| !VOLUME_DB.contains(&db)) {
         return Err(BAD_VOLUME.to_string());
     }
-    let project_open = open_project_state(state).is_some();
+    let project_open = open_project_state(&state.projects).is_some();
     let needed = if project_open {
         usize::from(bpm.is_some() || meter.is_some())
             + if on.is_some() { CLICK_COMMANDS } else { 0 }
@@ -92,7 +92,7 @@ pub(crate) fn metronome_tap(state: &mut EngineState) -> Result<Value, String> {
 /// The `metronome` field of `status`: the Project's click, tempo and meter while one is open; `beat` is 0 while `on` is false, also during a count-in with the click off.
 pub(crate) fn metronome_status(state: &EngineState) -> Value {
     let saved = &state.config.state.metronome;
-    let (on, bpm, meter) = match open_project_state(state) {
+    let (on, bpm, meter) = match open_project_state(&state.projects) {
         Some((_, project, _)) => (project.click, project.tempo_bpm, project.meter),
         None => (state.metronome.on, saved_bpm(saved), saved_meter(saved)),
     };

@@ -6,16 +6,15 @@ use crate::engine::{MeterPoint, MixMeters};
 use crate::project::{
     Bus, MAX_BUSES, MAX_TRACKS, Project, ProjectError, Send, Track, check_project, checked_bus_name,
 };
-use crate::project_control::{
-    check_one_target, current_project, new_bus_id, resolve_bus, resolve_track,
-};
+use crate::project_control::check_one_target;
+use crate::project_state::{current_project, new_bus_id, resolve_bus, resolve_track};
 use crate::project_sync::{commit, send, swap_project, swap_project_moving};
 use xguitare_protocol::{BusRef, SendLevel, TrackRef};
 
 const DEFAULT_BUS_NAME: &str = "Bus";
 
 pub(crate) fn bus_add(state: &mut EngineState, name: Option<&str>) -> Result<Value, String> {
-    let project = current_project(state)?;
+    let project = current_project(&state.projects)?;
     if project.buses.len() >= MAX_BUSES {
         return Err(ProjectError::TooManyBuses.to_string());
     }
@@ -24,7 +23,7 @@ pub(crate) fn bus_add(state: &mut EngineState, name: Option<&str>) -> Result<Val
         None => free_bus_name(project),
     };
     let mut project = project.clone();
-    let id = new_bus_id(state);
+    let id = new_bus_id(&mut state.projects);
     project.buses.push(Bus {
         id,
         name,
@@ -42,7 +41,7 @@ pub(crate) fn bus_add(state: &mut EngineState, name: Option<&str>) -> Result<Val
 
 /// Removes the Bus and every Send to it.
 pub(crate) fn bus_remove(state: &mut EngineState, bus: &BusRef) -> Result<Value, String> {
-    let project = current_project(state)?;
+    let project = current_project(&state.projects)?;
     let index = resolve_bus(project, bus)?;
     let payload = json!({"bus": bus_label(project, index)});
     let mut project = project.clone();
@@ -69,7 +68,7 @@ pub(crate) fn bus_set(
     bus: &BusRef,
     change: &BusChange,
 ) -> Result<Value, String> {
-    let project = current_project(state)?;
+    let project = current_project(&state.projects)?;
     let index = resolve_bus(project, bus)?;
     let mut project = project.clone();
     if let Some(name) = &change.name {
@@ -121,7 +120,7 @@ pub(crate) fn send_set(
     level: Option<SendLevel>,
     pre: Option<bool>,
 ) -> Result<Value, String> {
-    let project = current_project(state)?;
+    let project = current_project(&state.projects)?;
     let track_index = resolve_track(project, track)?;
     let bus_index = resolve_bus(project, bus)?;
     let bus_id = project.buses[bus_index].id;
@@ -173,7 +172,7 @@ pub(crate) fn send_set(
 }
 
 pub(crate) fn master_set(state: &mut EngineState, volume: SendLevel) -> Result<Value, String> {
-    let mut project = current_project(state)?.clone();
+    let mut project = current_project(&state.projects)?.clone();
     let volume = match volume {
         SendLevel::Db(db) if !db.is_finite() => {
             return Err(ProjectError::MasterVolume.to_string());
@@ -197,13 +196,13 @@ pub(crate) fn clip_reset(
 ) -> Result<Value, String> {
     check_one_target(track.is_some(), bus.is_some(), master)?;
     let (point, payload) = if let Some(track) = track {
-        let index = resolve_track(current_project(state)?, track)?;
+        let index = resolve_track(current_project(&state.projects)?, track)?;
         (Some(MeterPoint::Track(index)), json!({ "track": index }))
     } else if let Some(bus) = bus {
-        let index = resolve_bus(current_project(state)?, bus)?;
+        let index = resolve_bus(current_project(&state.projects)?, bus)?;
         (Some(MeterPoint::Bus(index)), json!({ "bus": index }))
     } else if master {
-        current_project(state)?;
+        current_project(&state.projects)?;
         (Some(MeterPoint::Master), json!({ "master": true }))
     } else {
         (None, json!({}))

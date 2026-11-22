@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::control::EngineState;
-use crate::project_control::loaded_peaks;
+use crate::project_state::loaded_peaks;
 use xguitare_protocol::FRAMES_PER_PEAK;
 
 /// The most pairs one `take_peaks` reply carries.
@@ -38,7 +38,7 @@ pub(crate) fn peak_page(
     first: Option<usize>,
     count: Option<usize>,
 ) -> Result<Value, String> {
-    let (frames, table) = loaded_peaks(state, file)?;
+    let (frames, table) = loaded_peaks(&state.projects, file)?;
     let total = table.len() / 2;
     let first = first.unwrap_or(0);
     let count = count
