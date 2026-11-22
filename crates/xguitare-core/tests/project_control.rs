@@ -356,6 +356,27 @@ fn project_open_refuses_a_rate_other_than_the_engine_rate() {
 }
 
 #[test]
+fn project_open_refuses_a_project_from_a_newer_format() {
+    let (mut state, _audio, _dir) = state("newer-format");
+    new_project(&mut state, "Song");
+    close(&mut state);
+    let file = state.config.projects_dir.join("song").join(PROJECT_FILE);
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(&file, text.replacen("format = 1", "format = 2", 1)).unwrap();
+    assert_eq!(
+        error(handle(
+            &mut state,
+            Request::ProjectOpen {
+                name: "Song".to_string(),
+                restore: false
+            }
+        )),
+        "project format 2 is newer than this xguitare (reads up to 1)"
+    );
+    assert_eq!(status(&mut state)["project"], Value::Null);
+}
+
+#[test]
 fn project_open_reports_a_newer_autosave_and_restores_it() {
     let (mut state, _audio, _dir) = state("restore");
     new_project(&mut state, "Song");
