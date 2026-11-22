@@ -1,3 +1,4 @@
+pub mod amp_model;
 pub mod crossfade;
 pub mod fmv;
 pub mod midi;
@@ -13,6 +14,7 @@ pub mod synth_ir;
 pub mod tuner;
 mod window_peak;
 
+pub use modules::amp::Amp;
 pub use modules::autowah::Autowah;
 pub use modules::blend::Blend;
 pub use modules::chorus::Chorus;

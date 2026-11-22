@@ -1,3 +1,4 @@
+pub mod amp;
 pub mod autowah;
 pub mod blend;
 pub mod cabinet;

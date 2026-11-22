@@ -1,9 +1,11 @@
 use assert_no_alloc::*;
+use xguitare_dsp::amp_model::MODEL_COUNT;
 use xguitare_dsp::crossfade::Crossfader;
 use xguitare_dsp::midi::program_change;
+use xguitare_dsp::modules::amp;
 use xguitare_dsp::modules::cabinet::{Cabinet, CabinetIr};
 use xguitare_dsp::{
-    Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Limiter,
+    Amp, Autowah, Blend, Chorus, Compressor, Delay, Drive, Eq, Flanger, Fuzz, Gain, Gate, Limiter,
     Module, Octave, Preamp, Rack, Reverb, Shaper, StereoRack, StereoSlot, Tonestack,
 };
 
@@ -176,6 +178,32 @@ fn tonestack_does_not_allocate() {
         Box::new(Tonestack::new()),
         &[(0, 70.0), (1, 30.0), (2, 90.0)],
     );
+}
+
+#[test]
+fn amp_does_not_allocate() {
+    let mut rack = Rack::new(vec![(
+        "amp".to_string(),
+        Box::new(Amp::new()) as Box<dyn Module>,
+    )])
+    .expect("valid layout");
+    rack.prepare(48_000.0, BLOCK);
+    let input = [0.25; BLOCK];
+    let mut left = [0.0; BLOCK];
+    let mut right = [0.0; BLOCK];
+    let params = amp::SPEC.params;
+    assert_no_alloc(|| {
+        for round in 0..2 * MODEL_COUNT {
+            let module = rack.module_mut(0);
+            for (idx, spec) in params.iter().enumerate().skip(1) {
+                module.set_param(idx, spec.min + 0.37 * (spec.max - spec.min));
+            }
+            module.set_param(0, (round % MODEL_COUNT) as f32);
+            for _ in 0..50 {
+                rack.process(&input, &mut left, &mut right);
+            }
+        }
+    });
 }
 
 #[test]
