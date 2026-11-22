@@ -282,6 +282,10 @@ fn status_replies_match_their_fixtures() {
             volume: SendLevel::Off,
         },
     );
+    s.state
+        .shared
+        .input_peak_bits
+        .store(f32::INFINITY.to_bits(), Ordering::Relaxed);
     let text = reply_text(&mut s, Request::Status);
     check_fixture("status-project-render-failed", &text);
 }
