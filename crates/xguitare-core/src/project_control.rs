@@ -544,20 +544,29 @@ pub(crate) fn project_open(
 
 pub(crate) fn project_save(state: &mut EngineState) -> Result<Value, String> {
     let open = state.projects.open.as_mut().ok_or(NO_PROJECT)?;
-    open.project
-        .save(&open.dir)
-        .map_err(|err| err.to_string())?;
+    save_and_drop_autosave(open)?;
     open.changed = false;
     open.last_autosave = Instant::now();
     Ok(json!({"path": open.dir.join(PROJECT_FILE).display().to_string()}))
 }
 
-/// Saves the Project, stops the Arrangement and hands the Project to the Daemon, which adds the Takes still being written.
-pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
-    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+fn save_and_drop_autosave(open: &OpenProject) -> Result<(), String> {
     open.project
         .save(&open.dir)
         .map_err(|err| err.to_string())?;
+    let autosave = open.dir.join(AUTOSAVE_FILE);
+    match fs::remove_file(&autosave) {
+        Err(err) if err.kind() != ErrorKind::NotFound => {
+            Err(format!("cannot remove {}: {err}", autosave.display()))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Saves the Project, stops the Arrangement and hands the Project to the Daemon, which adds the Takes still being written.
+pub(crate) fn project_close(state: &mut EngineState) -> Result<Value, String> {
+    let open = state.projects.open.as_ref().ok_or(NO_PROJECT)?;
+    save_and_drop_autosave(open)?;
     state.queues.drain_from_audio();
     state
         .queues
@@ -1005,13 +1014,6 @@ pub(crate) fn is_recording(state: &EngineState) -> Result<bool, String> {
 pub(crate) fn forget_takes(state: &mut EngineState, files: &[String]) -> Result<(), String> {
     project_save(state)?;
     let open = open_project_mut(&mut state.projects);
-    let autosave = open.dir.join(AUTOSAVE_FILE);
-    match fs::remove_file(&autosave) {
-        Err(err) if err.kind() != ErrorKind::NotFound => {
-            return Err(format!("cannot remove {}: {err}", autosave.display()));
-        }
-        _ => {}
-    }
     for file in files {
         open.takes.remove(file);
     }

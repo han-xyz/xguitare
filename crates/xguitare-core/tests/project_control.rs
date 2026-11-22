@@ -441,7 +441,9 @@ fn project_open_answers_with_the_load_warnings() {
         let text = fs::read_to_string(&path).unwrap();
         fs::write(&path, text.replace("frames = 10", "frames = 0")).unwrap();
     }
+    let autosave_text = fs::read_to_string(folder.join(AUTOSAVE_FILE)).unwrap();
     for restore in [false, true] {
+        fs::write(folder.join(AUTOSAVE_FILE), &autosave_text).unwrap();
         let opened = ok(handle(&mut state, open(restore)));
         assert_eq!(
             opened["warnings"],
@@ -2185,4 +2187,19 @@ fn a_read_made_for_another_project_is_read_again() {
     let reply = ok((response, Vec::new()));
     assert_eq!(reply["name"], "Other");
     assert_eq!(status(&mut state)["project"], "Other");
+}
+
+#[test]
+fn save_removes_the_stale_autosave() {
+    let (mut state, _audio, _dir) = state("save-autosave");
+    new_project(&mut state, "Song");
+    add_track(&mut state, "Guitar");
+    let later = Instant::now() + Duration::from_secs(61);
+    assert!(autosave_if_due(&mut state, later).unwrap().is_ok());
+    let folder = state.config.projects_dir.join("song");
+    assert!(folder.join("project.autosave.toml").is_file());
+    ok(handle(&mut state, Request::ProjectSave));
+    assert!(!folder.join("project.autosave.toml").exists());
+    assert_eq!(saved(&state, "song").tracks.len(), 1);
+    ok(handle(&mut state, Request::ProjectSave));
 }

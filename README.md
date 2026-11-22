@@ -543,7 +543,7 @@ What you play reaches the Daemon late by the input's capture latency, and you pl
 
 ### Autosave
 
-While a Project is open and changed, the Daemon writes `project.autosave.toml` every 60 seconds, and when it stops (after adding the Takes being recorded); `project.toml` changes only on `project save` and `project close`. When the autosave is newer, `project open` says `its autosave is newer; open it with --restore to load the autosave`.
+While a Project is open and changed, the Daemon writes `project.autosave.toml` every 60 seconds, and when it stops (after adding the Takes being recorded); `project.toml` changes only on `project save` and `project close`, which also remove the autosave. When the autosave is newer, `project open` says `its autosave is newer; open it with --restore to load the autosave`.
 
 ### Limits of this version
 

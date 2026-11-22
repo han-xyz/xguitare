@@ -712,7 +712,7 @@ Errors:
 
 ## project_save
 
-Writes the open Project to its `project.toml`, replacing it through a file renamed into place.
+Writes the open Project to its `project.toml`, replacing it through a file renamed into place, then removes `project.autosave.toml`, which holds nothing newer.
 
 Request:
 
@@ -726,11 +726,11 @@ Response:
 {"ok":true,"path":"/home/you/Music/xguitare/demo-song/project.toml"}
 ```
 
-Errors: `no project open`; `<path>: <reason>` when the file cannot be written.
+Errors: `no project open`; `<path>: <reason>` when the file cannot be written; `cannot remove <autosave>: <reason>` when the autosave cannot be removed (`project.toml` is already written).
 
 ## project_close
 
-Saves the open Project to `project.toml`, stops playing it, cancels a running Render and goes back to the active Preset's Rack. The Daemon then adds the Takes still being written once they are finished and saves `project.toml` again; when the Project was recorded since it was opened, `project_new` and `project_open` answer `a project is still closing; try again` until then.
+Saves the open Project to `project.toml` and removes the autosave as `project_save` does, stops playing it, cancels a running Render and goes back to the active Preset's Rack. The Daemon then adds the Takes still being written once they are finished and saves `project.toml` again; when the Project was recorded since it was opened, `project_new` and `project_open` answer `a project is still closing; try again` until then.
 
 Request:
 
