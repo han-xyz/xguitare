@@ -14,7 +14,9 @@ use xguitare_core::control::{
     ConnectionId, EngineState, close_connection, handle_request, open_connection, parse_line,
 };
 use xguitare_core::ports::AudioPorts;
-use xguitare_core::{SOCKET_DIR_MODE, SocketDirError, secure_socket_dir};
+use xguitare_core::project_control::{begin_project_read, read_project};
+use xguitare_core::{BuildWarning, SOCKET_DIR_MODE, SocketDirError, secure_socket_dir};
+use xguitare_protocol::{Request, Response};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const READ_TICK: Duration = Duration::from_secs(1);
@@ -328,12 +330,7 @@ fn answer_lines(
         if !line.is_empty() {
             let request = String::from_utf8_lossy(&line);
             let (response, warnings) = match parse_line(request.trim_end()) {
-                Ok(request) => {
-                    let mut state = lock(state);
-                    let ports = ports.upgrade();
-                    let ports = ports.as_deref().map(|ports| ports as &dyn AudioPorts);
-                    handle_request(&mut state, ports, connection, request, None)
-                }
+                Ok(request) => answer(state, ports, connection, request),
                 Err(response) => (response, Vec::new()),
             };
             for warning in warnings {
@@ -347,6 +344,29 @@ fn answer_lines(
         }
     }
     Ok(())
+}
+
+/// Answers `request` under the state lock; a `project_open` reads its files between two locks.
+fn answer(
+    state: &Mutex<EngineState>,
+    ports: &SharedPorts,
+    connection: ConnectionId,
+    request: Request,
+) -> (Response, Vec<BuildWarning>) {
+    let mut guard = lock(state);
+    let read = match begin_project_read(&guard, &request) {
+        None => None,
+        Some(Err(response)) => return (response, Vec::new()),
+        Some(Ok(ticket)) => {
+            drop(guard);
+            let read = read_project(&ticket);
+            guard = lock(state);
+            Some(read)
+        }
+    };
+    let ports = ports.upgrade();
+    let ports = ports.as_deref().map(|ports| ports as &dyn AudioPorts);
+    handle_request(&mut guard, ports, connection, request, read)
 }
 
 impl fmt::Display for SocketError {

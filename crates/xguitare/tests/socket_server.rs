@@ -389,3 +389,75 @@ fn a_full_take_peaks_reply_crosses_the_socket() {
         assert!(peaks.chunks(2).all(|pair| pair == [-127, 127]));
     }
 }
+
+#[test]
+fn status_is_answered_while_a_project_is_being_read() {
+    let server = server("read-outside-lock");
+    let dir = server.path.parent().unwrap();
+    let opener = UnixStream::connect(&server.path).unwrap();
+    assert!(
+        request(&opener, r#"{"cmd":"project_new","name":"Song"}"#).starts_with(r#"{"ok":true"#)
+    );
+    assert!(
+        request(&opener, r#"{"cmd":"track_add","name":"Guitar"}"#).starts_with(r#"{"ok":true"#)
+    );
+    assert!(request(&opener, r#"{"cmd":"project_close"}"#).starts_with(r#"{"ok":true"#));
+    let folder = dir.join("projects/song");
+    let fifo = folder.join("takes/a.wav");
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut project = Project::load(&folder).unwrap().0;
+    project.tracks[0].items = vec![Item {
+        id: 1,
+        position: 0,
+        offset: 0,
+        length: None,
+        take: 0,
+        takes: vec![Take {
+            file: "takes/a.wav".to_string(),
+            frames: 4,
+        }],
+    }];
+    project.next_item_id = 2;
+    project.save(&folder).unwrap();
+    let mut writer = &opener;
+    writer
+        .write_all(b"{\"cmd\":\"project_open\",\"name\":\"Song\"}\n")
+        .unwrap();
+    // Opening the FIFO for writing returns once the read phase has opened it for reading.
+    let mut take = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+    let watcher = UnixStream::connect(&server.path).unwrap();
+    watcher
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let status: Value = request(&watcher, r#"{"cmd":"status"}"#).parse().unwrap();
+    assert_eq!(status["project"], Value::Null);
+    take.write_all(&wav_bytes(&[0.5; 4])).unwrap();
+    drop(take);
+    let mut reply = String::new();
+    BufReader::new(&opener).read_line(&mut reply).unwrap();
+    assert!(reply.starts_with(r#"{"ok":true"#), "{reply}");
+    let status: Value = request(&watcher, r#"{"cmd":"status"}"#).parse().unwrap();
+    assert_eq!(status["project"], "Song");
+}
+
+fn wav_bytes(samples: &[f32]) -> Vec<u8> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 48_000,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut bytes = io::Cursor::new(Vec::new());
+    let mut writer = hound::WavWriter::new(&mut bytes, spec).unwrap();
+    for &sample in samples {
+        writer.write_sample(sample).unwrap();
+    }
+    writer.finalize().unwrap();
+    bytes.into_inner()
+}
