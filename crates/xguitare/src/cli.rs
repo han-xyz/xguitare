@@ -23,6 +23,7 @@ const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_LINE_COLUMNS: usize = 24;
 const BAD_DELTA: &str = "move needs <±seconds>s or <±bars>[.<beats>]";
 const NO_SAMPLE_RATE: &str = "the items answer has no sample_rate";
+const NO_TEMPO: &str = "the status answer has no tempo";
 
 /// What a client command needs from its surroundings besides the transport.
 pub struct CliEnv {
@@ -262,14 +263,15 @@ impl Timing {
     fn read(transport: &mut dyn Transport) -> Result<Timing, String> {
         let items = items_reply(&request(transport, &Request::Items)?)?;
         let status = status_reply(&request(transport, &Request::Status)?)?;
-        let tempo = status.tempo.ok_or("the status answer has no tempo")?;
+        let tempo = status.tempo.ok_or(NO_TEMPO)?;
+        let (beats_per_bar, _) = tempo.meter.ok_or(NO_TEMPO)?;
         if items.sample_rate == 0 {
             return Err(NO_SAMPLE_RATE.to_string());
         }
         Ok(Timing {
             sample_rate: items.sample_rate,
             tempo_bpm: tempo.bpm,
-            beats_per_bar: tempo.meter.0,
+            beats_per_bar,
         })
     }
 
@@ -1013,8 +1015,10 @@ fn render_get(reply: &GetReply, key: Option<&str>) -> String {
                 .map_or_else(|| "none".to_string(), without_control_chars);
             let _ = writeln!(lines, "{module}.ir = {name}");
         }
-        let answer = if param.bypass { "yes" } else { "no" };
-        let _ = writeln!(lines, "{module}.bypass = {answer}");
+        if let Some(bypass) = param.bypass {
+            let answer = if bypass { "yes" } else { "no" };
+            let _ = writeln!(lines, "{module}.bypass = {answer}");
+        }
     }
     lines
 }
@@ -1030,10 +1034,10 @@ fn render_status(status: &StatusReply) -> String {
     let _ = writeln!(lines, "buffer_size: {}", status.buffer_size);
     let _ = writeln!(lines, "prepared_frames: {}", status.prepared_frames);
     let _ = writeln!(lines, "revision: {}", status.revision);
-    let _ = writeln!(lines, "muted: {}", status.muted);
+    let _ = writeln!(lines, "muted: {}", or_dash(status.muted));
     let _ = writeln!(lines, "input_peak_db: {}", peak(status.input_peak_db));
     let _ = writeln!(lines, "output_peak_db: {}", peak(status.output_peak_db));
-    let _ = writeln!(lines, "xruns: {}", status.xruns);
+    let _ = writeln!(lines, "xruns: {}", or_dash(status.xruns));
     let _ = writeln!(lines, "callback_max_us: {}", status.callback_max_us);
     let _ = writeln!(lines, "callback_last_us: {}", status.callback_last_us);
     if let Some(version) = status.protocol_version {
@@ -1048,13 +1052,15 @@ fn render_status(status: &StatusReply) -> String {
             without_control_chars(&connection.to)
         );
     }
-    let _ = writeln!(lines, "disk_overflows: {}", status.disk_overflows);
-    let _ = writeln!(
-        lines,
-        "metronome: {}, beat {}",
-        status_metronome_text(&status.metronome),
-        status.metronome.beat
-    );
+    let _ = writeln!(lines, "disk_overflows: {}", or_dash(status.disk_overflows));
+    if let Some(metronome) = &status.metronome {
+        let _ = writeln!(
+            lines,
+            "metronome: {}, beat {}",
+            status_metronome_text(metronome),
+            metronome.beat
+        );
+    }
     let _ = writeln!(lines, "project: {}", shown(status.project.as_deref()));
     if let Some(job) = &status.render {
         let percent = (job.progress * 100.0).round();
@@ -1105,8 +1111,8 @@ fn render_project_status(lines: &mut String, status: &StatusReply) {
         "tempo: {} bpm {}",
         or_dash(tempo.map(|tempo| tempo.bpm)),
         meter_text(
-            or_dash(tempo.map(|tempo| tempo.meter.0)),
-            or_dash(tempo.map(|tempo| tempo.meter.1))
+            or_dash(tempo.and_then(|tempo| tempo.meter).map(|(beats, _)| beats)),
+            or_dash(tempo.and_then(|tempo| tempo.meter).map(|(_, note)| note))
         )
     );
     let _ = writeln!(
@@ -1185,7 +1191,7 @@ fn render_tracks(lines: &mut String, status: &StatusReply) {
                 lines,
                 "      send {}: {} dB, {}",
                 shown(bus),
-                send.level_db,
+                or_dash(send.level_db),
                 pre_text(send.pre)
             );
         }

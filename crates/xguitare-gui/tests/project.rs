@@ -77,6 +77,13 @@ fn project_items() -> ItemsReply {
 }
 
 #[test]
+fn a_tempo_without_a_meter_is_no_tempo() {
+    let mut status = project_status("stopped");
+    status["tempo"].as_object_mut().unwrap().remove("meter");
+    assert_eq!(project_tempo(&status_reply(&status)), None);
+}
+
+#[test]
 fn project_name_and_tempo_come_from_status() {
     let status = project_status("stopped");
     assert_eq!(

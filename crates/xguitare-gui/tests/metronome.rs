@@ -66,6 +66,14 @@ fn status_gives_the_metronome_view() {
 }
 
 #[test]
+fn a_metronome_at_zero_bpm_still_has_a_view() {
+    let mut payload = status_payload(false, 0);
+    payload["metronome"]["bpm"] = json!(0.0);
+    let view = metronome_view(&status_reply(&payload)).unwrap();
+    assert_eq!(view.bpm, 0.0);
+}
+
+#[test]
 fn a_new_beat_flashes_and_the_same_beat_does_not() {
     assert_eq!(
         beat_light(Some(&status(true, 1)), Some(&status(true, 2))),

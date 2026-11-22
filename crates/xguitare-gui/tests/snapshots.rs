@@ -2685,6 +2685,17 @@ fn unit_switch_sends_bypass() {
 }
 
 #[test]
+fn the_mute_button_is_disabled_for_a_status_without_muted() {
+    let mut snapshot = funk_snapshot();
+    edit_status(&mut snapshot, |status| {
+        status.as_object_mut().unwrap().remove("muted");
+    });
+    let (harness, _, _dir) = harness_with(WINDOW, snapshot);
+    let mute = harness.get_by_role_and_label(Role::Button, "Mute");
+    assert!(mute.accesskit_node().is_disabled());
+}
+
+#[test]
 fn muted_output_shows_the_banner() {
     let (harness, _, _dir) = harness_with(WINDOW, funk_snapshot());
     assert!(harness.query_by_label_contains("Output muted").is_none());

@@ -2132,6 +2132,15 @@ fn engine_readout_shows_the_engine_numbers() {
 }
 
 #[test]
+fn engine_readout_shows_null_xruns_for_a_status_without_them() {
+    let status = status_reply(&json!({"sample_rate": 48000, "buffer_size": 128}));
+    assert_eq!(
+        engine_readout(Some(&status))[3],
+        ("Xruns".to_string(), "null".to_string())
+    );
+}
+
+#[test]
 fn engine_readout_disconnected() {
     assert_eq!(
         engine_readout(None),

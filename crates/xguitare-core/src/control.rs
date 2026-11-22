@@ -606,15 +606,15 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         buffer_size: shared.buffer_size.load(Ordering::Relaxed),
         prepared_frames: state.max_frames,
         revision: state.revision,
-        muted: shared.muted.load(Ordering::Relaxed),
+        muted: Some(shared.muted.load(Ordering::Relaxed)),
         modified: state.modified,
         input_peak_db: peak_db(peaks.input),
         output_peak_db: peak_db(peaks.output),
-        xruns: shared.xruns.load(Ordering::Relaxed),
+        xruns: Some(shared.xruns.load(Ordering::Relaxed)),
         callback_max_us: shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         callback_last_us: shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
         connections,
-        metronome: metronome_status(state),
+        metronome: Some(metronome_status(state)),
         protocol_version: Some(u64::from(PROTOCOL_VERSION)),
         ..status_fields(state, &peaks.tracks, &peaks.mix)
     })

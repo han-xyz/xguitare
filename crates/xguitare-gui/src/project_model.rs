@@ -48,7 +48,7 @@ pub fn project_name(status: Option<&StatusReply>) -> Option<&str> {
 
 pub fn project_tempo(status: &StatusReply) -> Option<Tempo> {
     let tempo = status.tempo.as_ref().filter(|tempo| tempo.bpm > 0.0)?;
-    let (beats, note) = tempo.meter;
+    let (beats, note) = tempo.meter?;
     Some(Tempo {
         bpm: tempo.bpm,
         beats_per_bar: beats.max(1),
@@ -290,7 +290,7 @@ pub fn transport_view(status: &StatusReply) -> Option<TransportView> {
         click: click.on,
         count_in: click.count_in,
         count_in_remaining: u64::from(status.count_in_remaining),
-        disk_overflows: status.disk_overflows,
+        disk_overflows: status.disk_overflows.unwrap_or_default(),
         loaded_audio_bytes: status.loaded_audio_bytes as u64,
     })
 }

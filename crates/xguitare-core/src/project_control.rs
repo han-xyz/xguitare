@@ -39,8 +39,8 @@ use crate::take_capture::{FinishedTake, Latency, WritingTakes, add_finished_take
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Preset, PresetModule};
 use xguitare_protocol::{
-    BusRef, ClickStatus, LoopRegion, LoopStatus, PositionStatus, Request, Response, StatusReply,
-    TempoStatus, TrackRef, TrackStatus,
+    BusRef, ClickStatus, ItemStatus, ItemsReply, ItemsTrack, LoopRegion, LoopStatus,
+    PositionStatus, Request, Response, StatusReply, TempoStatus, TrackRef, TrackStatus, to_payload,
 };
 
 const NO_TRACKS: &str = "the project has no tracks";
@@ -851,7 +851,7 @@ pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
         .tracks
         .iter()
         .zip(&open.track_ids)
-        .map(|(track, id)| xguitare_protocol::ItemsTrack {
+        .map(|(track, id)| ItemsTrack {
             id: *id,
             name: track.name.clone(),
             items: track
@@ -861,17 +861,15 @@ pub(crate) fn items(state: &EngineState) -> Result<Value, String> {
                 .collect(),
         })
         .collect();
-    Ok(xguitare_protocol::to_payload(
-        &xguitare_protocol::ItemsReply {
-            sample_rate: project.sample_rate,
-            tracks,
-        },
-    ))
+    Ok(to_payload(&ItemsReply {
+        sample_rate: project.sample_rate,
+        tracks,
+    }))
 }
 
 /// An Item as `items` lists it.
-pub(crate) fn item_json(project: &Project, item: &Item) -> xguitare_protocol::ItemStatus {
-    xguitare_protocol::ItemStatus {
+pub(crate) fn item_json(project: &Project, item: &Item) -> ItemStatus {
+    ItemStatus {
         id: item.id,
         position: item.position,
         bars_beats: bars_beats(project, item.position),
@@ -1067,7 +1065,7 @@ pub(crate) fn status_fields(
             .sum()
     });
     let fields = StatusReply {
-        disk_overflows: shared.disk_overflows.load(Ordering::Relaxed),
+        disk_overflows: Some(shared.disk_overflows.load(Ordering::Relaxed)),
         count_in_remaining: shared.count_in_remaining.load(Ordering::Relaxed),
         loaded_audio_bytes,
         project_warning: project_rate_warning(state),
@@ -1095,7 +1093,7 @@ pub(crate) fn status_fields(
         }),
         tempo: Some(TempoStatus {
             bpm: project.tempo_bpm,
-            meter: project.meter,
+            meter: Some(project.meter),
         }),
         loop_region: Some(LoopStatus { start, end, on }),
         click: Some(ClickStatus {

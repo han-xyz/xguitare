@@ -221,7 +221,7 @@ pub(crate) fn sends_status(project: &Project, track: &Track) -> Vec<SendStatus> 
             let bus = project.buses.iter().position(|bus| bus.id == send.bus)?;
             Some(SendStatus {
                 bus,
-                level_db: on_wire(send.level_db),
+                level_db: Some(on_wire(send.level_db)),
                 pre: send.pre,
             })
         })

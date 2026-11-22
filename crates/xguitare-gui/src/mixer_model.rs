@@ -146,7 +146,7 @@ fn track_sends(track: &TrackStatus, bus_count: usize) -> Vec<SendView> {
             let on = track.sends.iter().find(|send| send.bus == bus);
             SendView {
                 bus,
-                level_db: on.map(|send| send.level_db),
+                level_db: on.and_then(|send| send.level_db),
                 pre: on.is_some_and(|send| send.pre),
             }
         })

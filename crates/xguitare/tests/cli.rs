@@ -106,18 +106,18 @@ fn status_format() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","program":0,"modified":true,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"muted":false,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"protocol_version":1,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}],"disk_overflows":0,"metronome":{"on":false,"bpm":120.0,"meter":[4,4],"volume_db":-12.0,"beats_played":0,"beat":0},"project":null}"#,
+            r#"{"ok":true,"preset":"Clean","program":0,"modified":true,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":7,"muted":false,"input_peak_db":-120.0,"output_peak_db":-3.5,"xruns":2,"callback_max_us":310,"callback_last_us":95,"connections":[{"from":"Scarlett:capture_FL","to":"xguitare:in"},{"from":"xguitare:out_l","to":"Scarlett:playback_FL"}],"disk_overflows":0,"project":null}"#,
         ),
     );
     assert_eq!(out.requests, [Request::Status]);
     assert_eq!(
         out.stdout,
-        "preset: Clean\nprogram: 0\nmodified: yes\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nprotocol_version: 1\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\ndisk_overflows: 0\nmetronome: off, 120 bpm 4/4, volume -12 dB, beat 0\nproject: -\n"
+        "preset: Clean\nprogram: 0\nmodified: yes\nsample_rate: 48000\nbuffer_size: 128\nprepared_frames: 128\nrevision: 7\nmuted: false\ninput_peak_db: -120.0\noutput_peak_db: -3.5\nxruns: 2\ncallback_max_us: 310\ncallback_last_us: 95\nprotocol_version: 1\nconnections:\n  Scarlett:capture_FL -> xguitare:in\n  xguitare:out_l -> Scarlett:playback_FL\ndisk_overflows: 0\nproject: -\n"
     );
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":null,"program":null,"modified":false,"sample_rate":48000,"buffer_size":128,"prepared_frames":128,"revision":1,"muted":false,"input_peak_db":-120.0,"output_peak_db":-120.0,"xruns":0,"callback_max_us":0,"callback_last_us":0,"protocol_version":1,"connections":[],"disk_overflows":0,"metronome":{"on":false,"bpm":120.0,"meter":[4,4],"volume_db":-12.0,"beats_played":0,"beat":0},"project":null}"#,
+            r#"{"ok":true,"preset":null,"program":null,"modified":false,"sample_rate":48000,"buffer_size":128,"xruns":0,"callback_max_us":0,"callback_last_us":0,"connections":[]}"#,
         ),
     );
     assert!(
@@ -128,7 +128,7 @@ fn status_format() {
     );
     assert!(
         out.stdout
-            .ends_with("connections:\ndisk_overflows: 0\nmetronome: off, 120 bpm 4/4, volume -12 dB, beat 0\nproject: -\n"),
+            .ends_with("connections:\ndisk_overflows: -\nproject: -\n"),
         "{}",
         out.stdout
     );
@@ -139,7 +139,7 @@ fn get_format() {
     let out = cli(
         &["get", "gain"],
         reply(
-            r#"{"ok":true,"params":[{"module":"gain","type":"gain","param":"level","value":-3.5,"unit":"dB","min":-60.0,"max":20.0,"default":0.0,"integer":false,"labels":[],"bypass":false},{"module":"delay","type":"delay","param":"mix","value":25.0,"unit":"%","min":0.0,"max":100.0,"default":25.0,"integer":false,"labels":[],"bypass":false},{"module":"preamp","type":"preamp","param":"bright","value":1.0,"unit":"","min":0.0,"max":1.0,"default":0.0,"integer":true,"labels":[],"bypass":false}]}"#,
+            r#"{"ok":true,"params":[{"module":"gain","param":"level","value":-3.5,"unit":"dB","min":-60.0,"max":20.0},{"module":"delay","param":"mix","value":25.0,"unit":"%","min":0.0,"max":100.0},{"module":"preamp","param":"bright","value":1.0,"unit":"","min":0.0,"max":1.0}]}"#,
         ),
     );
     assert_eq!(
@@ -153,7 +153,7 @@ fn get_format() {
     );
     assert_eq!(
         out.stdout,
-        "gain.level = -3.5 dB\ngain.bypass = no\ndelay.mix = 25 %\ndelay.bypass = no\npreamp.bright = 1\npreamp.bypass = no\n"
+        "gain.level = -3.5 dB\ndelay.mix = 25 %\npreamp.bright = 1\n"
     );
     let out = cli(&["get"], reply(r#"{"ok":true,"params":[]}"#));
     assert_eq!(
@@ -684,12 +684,12 @@ fn get_cabinet_prints_ir() {
     let out = cli(
         &["get", "cabinet"],
         reply(
-            r#"{"ok":true,"params":[{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","min":-20.0,"max":20.0,"default":0.0,"integer":false,"labels":[],"bypass":false,"ir":"celestion/v30.wav"},{"module":"cabinet","type":"cabinet","param":"low_cut","value":80.0,"unit":"Hz","min":20.0,"max":500.0,"default":80.0,"integer":false,"labels":[],"bypass":false,"ir":"celestion/v30.wav"},{"module":"cab-2","type":"cabinet","param":"level","value":-1.0,"unit":"dB","min":-20.0,"max":20.0,"default":0.0,"integer":false,"labels":[],"bypass":false,"ir":null}]}"#,
+            r#"{"ok":true,"params":[{"module":"cabinet","type":"cabinet","param":"level","value":0.0,"unit":"dB","ir":"celestion/v30.wav"},{"module":"cabinet","type":"cabinet","param":"low_cut","value":80.0,"unit":"Hz","ir":"celestion/v30.wav"},{"module":"cab-2","type":"cabinet","param":"level","value":-1.0,"unit":"dB","ir":null}]}"#,
         ),
     );
     assert_eq!(
         out.stdout,
-        "cabinet.level = 0 dB\ncabinet.low_cut = 80 Hz\ncabinet.ir = celestion/v30.wav\ncabinet.bypass = no\ncab-2.level = -1 dB\ncab-2.ir = none\ncab-2.bypass = no\n"
+        "cabinet.level = 0 dB\ncabinet.low_cut = 80 Hz\ncabinet.ir = celestion/v30.wav\ncab-2.level = -1 dB\ncab-2.ir = none\n"
     );
 }
 
@@ -786,12 +786,12 @@ fn status_prints_the_open_project() {
     let out = cli(
         &["status"],
         reply(
-            r#"{"ok":true,"preset":"Clean","protocol_version":1,"connections":[],"disk_overflows":1,"metronome":{"on":false,"bpm":120.0,"meter":[4,4],"volume_db":-12.0,"beats_played":0,"beat":0},"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"undo":"trim","redo":null,"tracks":[{"id":0,"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04,"to_master":true,"sends":[{"bus":1,"level_db":-6.0,"pre":false},{"bus":0,"level_db":-12.5,"pre":true}],"peak_db":[-12.04,-12.0],"clip":false},{"id":1,"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0,"to_master":false,"sends":[],"peak_db":[-120.0,-120.0],"clip":true}],"buses":[{"id":3,"name":"Verb","volume_db":-3.0,"pan":0.0,"mute":false,"solo":true,"peak_db":[-20.0,-21.5],"clip":false},{"id":1,"name":"Delay","volume_db":0.0,"pan":0.25,"mute":false,"solo":false,"peak_db":[0.0,-0.4],"clip":true}],"master":{"volume_db":-1.5,"peak_db":[-9.0,-9.24],"clip":false}}"#,
+            r#"{"ok":true,"preset":"Clean","connections":[],"disk_overflows":1,"project":"Song","transport":"recording","position":{"frames":216000,"bars_beats":"3.2"},"tempo":{"bpm":120.0,"meter":[3,4]},"loop":{"start":0,"end":96000,"on":true},"click":{"on":true,"count_in":1},"selected":1,"undo":"trim","redo":null,"tracks":[{"id":0,"name":"Guitar","input":"card:capture_1","volume_db":-6.0,"pan":0.0,"mute":false,"solo":true,"armed":true,"input_peak_db":-42.04,"to_master":true,"sends":[{"bus":1,"level_db":-6.0,"pre":false},{"bus":0,"level_db":-12.5,"pre":true}],"peak_db":[-12.04,-12.0],"clip":false},{"id":1,"name":"Bass","input":null,"volume_db":0.0,"pan":-0.5,"mute":true,"solo":false,"armed":false,"input_peak_db":-120.0,"to_master":false,"sends":[],"peak_db":[-120.0,-120.0],"clip":true}],"buses":[{"id":3,"name":"Verb","volume_db":-3.0,"pan":0.0,"mute":false,"solo":true,"peak_db":[-20.0,-21.5],"clip":false},{"id":1,"name":"Delay","volume_db":0.0,"pan":0.25,"mute":false,"solo":false,"peak_db":[0.0,-0.4],"clip":true}],"master":{"volume_db":-1.5,"peak_db":[-9.0,-9.24],"clip":false}}"#,
         ),
     );
     assert!(
         out.stdout.ends_with(
-            "connections:\ndisk_overflows: 1\nmetronome: off, 120 bpm 4/4, volume -12 dB, beat 0\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\nundo: trim, redo: -\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB; out -12.0/-12.0 dB\n      send Delay: -6 dB, post\n      send Verb: -12.5 dB, pre\n  1* Bass: muted, not to master; input -; 0 dB, pan -0.5; peak -120.0 dB; out -120.0/-120.0 dB, clip\nbuses:\n  0 Verb: solo; -3 dB, pan 0; out -20.0/-21.5 dB\n  1 Delay: -; 0 dB, pan 0.25; out 0.0/-0.4 dB, clip\nmaster: -1.5 dB; out -9.0/-9.2 dB\n"
+            "connections:\ndisk_overflows: 1\nproject: Song\ntransport: recording\nposition: 3.2 (frame 216000)\ntempo: 120 bpm 3/4\nloop: on 0..96000\nclick on, count-in 1 bars\nundo: trim, redo: -\ntracks:\n  0  Guitar: armed, solo; input card:capture_1; -6 dB, pan 0; peak -42.0 dB; out -12.0/-12.0 dB\n      send Delay: -6 dB, post\n      send Verb: -12.5 dB, pre\n  1* Bass: muted, not to master; input -; 0 dB, pan -0.5; peak -120.0 dB; out -120.0/-120.0 dB, clip\nbuses:\n  0 Verb: solo; -3 dB, pan 0; out -20.0/-21.5 dB\n  1 Delay: -; 0 dB, pan 0.25; out 0.0/-0.4 dB, clip\nmaster: -1.5 dB; out -9.0/-9.2 dB\n"
         ),
         "{}",
         out.stdout

@@ -342,6 +342,17 @@ fn volumes_pans_sends_and_progress_read_as_the_wire_wrote_them() {
 }
 
 #[test]
+fn a_send_without_a_level_is_off() {
+    let mut guitar = track("Guitar", false, false, &[0]);
+    guitar["sends"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("level_db");
+    let status = status_reply(&status(&[guitar], &[bus(0, "Verb", false, false)]));
+    assert_eq!(mixer_columns(&status)[0].sends[0].level_db, None);
+}
+
+#[test]
 fn render_dialog_follows_status_render() {
     let mut status = status(&[], &[]);
     assert_eq!(

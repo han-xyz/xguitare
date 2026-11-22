@@ -536,7 +536,7 @@ fn param_status(module: &PresetModule, param: usize) -> ParamStatus {
         default: shortest_f64(spec.default),
         integer: spec.integer,
         labels: spec.labels.iter().map(ToString::to_string).collect(),
-        bypass: module.bypass,
+        bypass: Some(module.bypass),
         ir: (module.type_name == CABINET_TYPE).then(|| module.ir.clone()),
     }
 }

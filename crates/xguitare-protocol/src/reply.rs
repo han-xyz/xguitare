@@ -28,7 +28,8 @@ pub struct ParamStatus {
     pub default: f64,
     pub integer: bool,
     pub labels: Vec<String>,
-    pub bypass: bool,
+    /// `None` when the key is missing: a Daemon that does not send it says nothing about the Bypass.
+    pub bypass: Option<bool>,
     /// `None` on a Module that is not a cabinet (no `ir` key); `Some(None)` on a cabinet without a Cabinet IR (`"ir": null`).
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "present")]
     pub ir: Option<Option<String>>,
@@ -80,20 +81,21 @@ pub struct StatusReply {
     pub buffer_size: u32,
     pub prepared_frames: usize,
     pub revision: u64,
-    pub muted: bool,
+    /// `None` when the key is missing, here and in `xruns`, `metronome` and `disk_overflows`: an older Daemon did not send it, so the client shows no value.
+    pub muted: Option<bool>,
     pub modified: bool,
     /// `null` when the peak is not a finite number.
     pub input_peak_db: Option<f64>,
     pub output_peak_db: Option<f64>,
-    pub xruns: u64,
+    pub xruns: Option<u64>,
     pub callback_max_us: u64,
     pub callback_last_us: u64,
     pub connections: Vec<PortConnection>,
-    pub metronome: MetronomeStatus,
+    pub metronome: Option<MetronomeStatus>,
     /// `Some(1)` when the key is missing: a Daemon from before versioning speaks version 1. `None` when it holds anything but a non-negative whole number; the version must never make a `status` unreadable.
     #[serde(deserialize_with = "version_or_unknown")]
     pub protocol_version: Option<u64>,
-    pub disk_overflows: u64,
+    pub disk_overflows: Option<u64>,
     pub count_in_remaining: u32,
     pub loaded_audio_bytes: usize,
     pub project_warning: Option<String>,
@@ -124,17 +126,17 @@ impl Default for StatusReply {
             buffer_size: 0,
             prepared_frames: 0,
             revision: 0,
-            muted: false,
+            muted: None,
             modified: false,
             input_peak_db: None,
             output_peak_db: None,
-            xruns: 0,
+            xruns: None,
             callback_max_us: 0,
             callback_last_us: 0,
             connections: Vec::new(),
-            metronome: MetronomeStatus::default(),
+            metronome: None,
             protocol_version: Some(1),
-            disk_overflows: 0,
+            disk_overflows: None,
             count_in_remaining: 0,
             loaded_audio_bytes: 0,
             project_warning: None,
@@ -203,7 +205,8 @@ pub struct PositionStatus {
 #[serde(default)]
 pub struct TempoStatus {
     pub bpm: f64,
-    pub meter: (u32, u32),
+    /// `None` when the key is missing.
+    pub meter: Option<(u32, u32)>,
 }
 
 /// The loop region of the open Project, start and end in frames.
@@ -282,8 +285,9 @@ impl Default for TrackStatus {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SendStatus {
     pub bus: usize,
+    /// `None` when the key is missing, which a client shows as a Send that is off.
     #[serde(default)]
-    pub level_db: f64,
+    pub level_db: Option<f64>,
     #[serde(default)]
     pub pre: bool,
 }

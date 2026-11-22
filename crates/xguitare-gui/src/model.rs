@@ -290,7 +290,7 @@ pub fn bypassed(get: &GetReply, id: &str) -> bool {
     get.params
         .iter()
         .find(|entry| entry.module == id)
-        .is_some_and(|entry| entry.bypass)
+        .is_some_and(|entry| entry.bypass == Some(true))
 }
 
 pub fn module_types(modules_payload: &Value) -> Vec<ModuleType> {
@@ -1755,7 +1755,7 @@ pub fn unit_style(bypassed: bool, open: bool) -> UnitStyle {
 
 /// The banner text while the `status` payload says Mute is on; `muted_by_tuner` when the Tuner view turned it on, so that closing the view turns it off.
 pub fn mute_banner(status: Option<&StatusReply>, muted_by_tuner: bool) -> Option<String> {
-    let muted = status.is_some_and(|status| status.muted);
+    let muted = status.is_some_and(|status| status.muted == Some(true));
     let how = if muted_by_tuner {
         "close the Tuner"
     } else {
@@ -1802,7 +1802,13 @@ pub fn engine_readout(status: Option<&StatusReply>) -> Vec<(String, String)> {
         ("Rate", format!("{} kHz", rate as f64 / 1000.0)),
         ("Buffer", format!("{buffer} frames")),
         ("Latency", format!("{:.1} ms", latency_ms(buffer, rate))),
-        ("Xruns", status.xruns.to_string()),
+        // A status without `xruns` shows the JSON text the untyped reader showed for it.
+        (
+            "Xruns",
+            status
+                .xruns
+                .map_or_else(|| "null".to_string(), |xruns| xruns.to_string()),
+        ),
         ("Daemon", "connected".to_string()),
     ]
     .into_iter()

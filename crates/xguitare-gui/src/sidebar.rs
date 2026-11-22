@@ -695,7 +695,7 @@ fn paint_fixed_chip(painter: &Painter, rect: Rect, unit: FixedUnit, shown: bool,
 
 /// Whether the Daemon reports Mute on; `None` while no status arrives.
 pub fn muted_now(snapshot: &Snapshot) -> Option<bool> {
-    snapshot.status.as_ref().map(|status| status.muted)
+    snapshot.status.as_ref().and_then(|status| status.muted)
 }
 
 /// Turning Mute off by hand means closing the Tuner view leaves it off.

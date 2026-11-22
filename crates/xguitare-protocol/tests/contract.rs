@@ -781,6 +781,27 @@ fn null_peaks_and_volumes_read_as_none_and_are_written_as_null() {
 }
 
 #[test]
+fn keys_an_older_daemon_leaves_out_read_as_none() {
+    let mut payload = status_with_a_project();
+    let fields = payload.as_object_mut().unwrap();
+    for key in ["metronome", "disk_overflows", "muted", "xruns"] {
+        fields.remove(key);
+    }
+    let track = &mut payload["tracks"][0];
+    track["sends"][0].as_object_mut().unwrap().remove("level_db");
+    payload["tempo"].as_object_mut().unwrap().remove("meter");
+    let reply: StatusReply = from_payload(&payload).unwrap();
+    assert_eq!(reply.metronome, None);
+    assert_eq!(reply.disk_overflows, None);
+    assert_eq!(reply.muted, None);
+    assert_eq!(reply.xruns, None);
+    assert_eq!(reply.tracks[0].sends[0].level_db, None);
+    assert_eq!(reply.tempo.unwrap().meter, None);
+    let param: ParamStatus = from_payload(&json!({"module": "gain"})).unwrap();
+    assert_eq!(param.bypass, None);
+}
+
+#[test]
 fn a_track_from_a_daemon_before_buses_goes_to_master() {
     let track: TrackStatus = from_payload(&json!({"id": 0})).unwrap();
     assert!(track.to_master);
@@ -802,7 +823,7 @@ fn a_status_with_empty_parts_reads_each_part_as_its_defaults() {
     });
     let reply: StatusReply = from_payload(&payload).unwrap();
     assert_eq!(reply.connections, [PortConnection::default()]);
-    assert_eq!(reply.metronome, MetronomeStatus::default());
+    assert_eq!(reply.metronome, Some(MetronomeStatus::default()));
     assert_eq!(reply.render, Some(RenderStatus::default()));
     assert_eq!(reply.position, Some(PositionStatus::default()));
     assert_eq!(reply.tempo, Some(TempoStatus::default()));

@@ -24,10 +24,10 @@ pub struct MetronomeView {
     pub beats_played: u64,
 }
 
-/// `None` for a `status` without a Metronome: its tempo reads 0, which no Metronome plays at.
+/// `None` for a `status` without a Metronome.
 pub fn metronome_view(status: &StatusReply) -> Option<MetronomeView> {
-    let metronome = &status.metronome;
-    (metronome.bpm > 0.0).then_some(MetronomeView {
+    let metronome = status.metronome.as_ref()?;
+    Some(MetronomeView {
         on: metronome.on,
         bpm: metronome.bpm,
         meter: metronome.meter,
