@@ -17,6 +17,7 @@ use crate::project_sync::{CLICK_COMMANDS, send};
 use crate::settings_control::save_state;
 use crate::state::SavedMetronome;
 use crate::transport_control::{click, tempo};
+use xguitare_protocol::{MetronomeStatus, to_payload};
 
 /// Changes the Metronome and returns its state. With no Project open it plays its own tempo and meter, saved in `state.toml` with the volume; with one open `on` is the Project's click and `bpm` and `meter` its tempo and meter.
 pub(crate) fn metronome(
@@ -77,7 +78,7 @@ pub(crate) fn metronome(
         state.metronome.on = on;
     }
     state.revision += 1;
-    Ok(metronome_status(state))
+    Ok(to_payload(&metronome_status(state)))
 }
 
 /// Taps the tempo; from the second tap of a series sets it as `metronome` does with `bpm`.
@@ -90,20 +91,24 @@ pub(crate) fn metronome_tap(state: &mut EngineState) -> Result<Value, String> {
 }
 
 /// The `metronome` field of `status`: the Project's click, tempo and meter while one is open; `beat` is 0 while `on` is false, also during a count-in with the click off.
-pub(crate) fn metronome_status(state: &EngineState) -> Value {
+pub(crate) fn metronome_status(state: &EngineState) -> MetronomeStatus {
     let saved = &state.config.state.metronome;
     let (on, bpm, meter) = match open_project_state(&state.projects) {
         Some((_, project, _)) => (project.click, project.tempo_bpm, project.meter),
         None => (state.metronome.on, saved_bpm(saved), saved_meter(saved)),
     };
-    json!({
-        "on": on,
-        "bpm": bpm,
-        "meter": [meter.0, meter.1],
-        "volume_db": saved_volume_db(saved),
-        "beats_played": state.shared.metronome_beats_played.load(Ordering::Relaxed),
-        "beat": if on { state.shared.metronome_beat.load(Ordering::Relaxed) } else { 0 },
-    })
+    MetronomeStatus {
+        on,
+        bpm,
+        meter,
+        volume_db: saved_volume_db(saved),
+        beats_played: state.shared.metronome_beats_played.load(Ordering::Relaxed),
+        beat: if on {
+            state.shared.metronome_beat.load(Ordering::Relaxed)
+        } else {
+            0
+        },
+    }
 }
 
 /// What the switcher needs to play the Metronome with no Project open, at the Engine's sample rate.

@@ -41,6 +41,7 @@ use crate::undo_control::{project_redo, project_undo};
 use crate::{Bank, BuildWarning, Config, Ports, Preset};
 use xguitare_protocol::{CODE_STILL_CLOSING, PROTOCOL_VERSION, STILL_CLOSING};
 use xguitare_protocol::{LoopRegion, Request, Response, SILENCE_DB, Value};
+use xguitare_protocol::{PortConnection, StatusReply, to_payload};
 
 const NANOS_PER_MICRO: u64 = 1_000;
 const NO_AUDIO_PORTS: &str = "audio ports are not available";
@@ -590,33 +591,33 @@ fn rebuild(
 fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
     let peaks = take_peaks(state, connection);
     let shared = &state.shared;
-    let connections: Vec<Value> = state
+    let connections = state
         .connections
         .iter()
-        .map(|(from, to)| json!({"from": from, "to": to}))
+        .map(|(from, to)| PortConnection {
+            from: from.clone(),
+            to: to.clone(),
+        })
         .collect();
-    let mut payload = json!({
-        "preset": state.active.as_ref().map(|(_, preset)| &preset.name),
-        "program": active_program(state),
-        "sample_rate": shared.sample_rate.load(Ordering::Relaxed),
-        "buffer_size": shared.buffer_size.load(Ordering::Relaxed),
-        "prepared_frames": state.max_frames,
-        "revision": state.revision,
-        "muted": shared.muted.load(Ordering::Relaxed),
-        "modified": state.modified,
-        "input_peak_db": peak_db(peaks.input),
-        "output_peak_db": peak_db(peaks.output),
-        "xruns": shared.xruns.load(Ordering::Relaxed),
-        "callback_max_us": shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
-        "callback_last_us": shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
-        "connections": connections,
-        "metronome": metronome_status(state),
-        "protocol_version": PROTOCOL_VERSION,
-    });
-    if let Some(fields) = payload.as_object_mut() {
-        fields.extend(status_fields(state, &peaks.tracks, &peaks.mix));
-    }
-    payload
+    to_payload(&StatusReply {
+        preset: state.active.as_ref().map(|(_, preset)| preset.name.clone()),
+        program: active_program(state),
+        sample_rate: shared.sample_rate.load(Ordering::Relaxed),
+        buffer_size: shared.buffer_size.load(Ordering::Relaxed),
+        prepared_frames: state.max_frames,
+        revision: state.revision,
+        muted: shared.muted.load(Ordering::Relaxed),
+        modified: state.modified,
+        input_peak_db: peak_db(peaks.input),
+        output_peak_db: peak_db(peaks.output),
+        xruns: shared.xruns.load(Ordering::Relaxed),
+        callback_max_us: shared.callback_ns_max.load(Ordering::Relaxed) / NANOS_PER_MICRO,
+        callback_last_us: shared.callback_ns_last.load(Ordering::Relaxed) / NANOS_PER_MICRO,
+        connections,
+        metronome: metronome_status(state),
+        protocol_version: PROTOCOL_VERSION,
+        ..status_fields(state, &peaks.tracks, &peaks.mix)
+    })
 }
 
 fn tuner(state: &EngineState) -> Value {
@@ -636,7 +637,9 @@ fn mute(state: &EngineState, on: bool) -> Value {
     json!({ "muted": on })
 }
 
-pub(crate) fn peak_db(peak: f32) -> f64 {
+/// `peak` in dB as `status` shows it, one decimal; `None` when that is not a finite number.
+pub(crate) fn peak_db(peak: f32) -> Option<f64> {
     let db = (20.0 * f64::from(peak).log10()).max(SILENCE_DB);
-    (db * 10.0).round() / 10.0
+    let db = (db * 10.0).round() / 10.0;
+    db.is_finite().then_some(db)
 }

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
 use std::time::Instant;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::arrangement::ArrangementCommand;
 use crate::arrangement::Transport;
@@ -16,7 +16,7 @@ use crate::control::{EngineState, MixPeaks, error_response, peak_db};
 use crate::engine::{Command, MeterPoint, MixMeters, transport_from_code};
 use crate::flatten::{flatten, item_fade_frames};
 use crate::history::{Change, Entry, History, PlacedTrack, TrackItems};
-use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status};
+use crate::mixer_control::{buses_status, master_status, peaks_db, sends_status, volume_status};
 use crate::ports::AudioPorts;
 use crate::project::{
     AUTOSAVE_FILE, Item, LoadWarning, MAX_BUSES, MAX_TRACKS, PROJECT_FILE, Project, Track,
@@ -36,7 +36,10 @@ use crate::render_control::{cancel_render, render_status};
 use crate::take_capture::{FinishedTake, Latency, WritingTakes, add_finished_take, load_take};
 use crate::take_peaks::peak_table;
 use crate::{BuildWarning, Preset, PresetModule};
-use xguitare_protocol::{BusRef, LoopRegion, Request, Response, TrackRef};
+use xguitare_protocol::{
+    BusRef, ClickStatus, LoopRegion, LoopStatus, PositionStatus, Request, Response, StatusReply,
+    TempoStatus, TrackRef, TrackStatus,
+};
 
 const NO_TRACKS: &str = "the project has no tracks";
 const DEFAULT_TRACK_NAME: &str = "Track";
@@ -1048,52 +1051,28 @@ fn missing_takes(
     Ok(missing)
 }
 
-/// The Project fields of `status`, with `track_peaks` the input peaks of each Track and `mix` the post-fader peaks since this connection's last `status`.
+/// The Project fields of `status`, the others at their default, with `track_peaks` the input peaks of each Track and `mix` the post-fader peaks since this connection's last `status`.
 pub(crate) fn status_fields(
     state: &EngineState,
     track_peaks: &[f32],
     mix: &MixPeaks,
-) -> Map<String, Value> {
+) -> StatusReply {
     let shared = &state.shared;
-    let mut fields = Map::new();
-    fields.insert(
-        "disk_overflows".to_string(),
-        json!(shared.disk_overflows.load(Ordering::Relaxed)),
-    );
-    fields.insert(
-        "count_in_remaining".to_string(),
-        json!(shared.count_in_remaining.load(Ordering::Relaxed)),
-    );
     let loaded_audio_bytes: usize = state.projects.open.as_ref().map_or(0, |open| {
         open.takes
             .values()
             .map(|samples| size_of_val(&**samples))
             .sum()
     });
-    fields.insert("loaded_audio_bytes".to_string(), json!(loaded_audio_bytes));
-    fields.insert(
-        "project_warning".to_string(),
-        json!(project_rate_warning(state)),
-    );
-    fields.insert("render".to_string(), render_status(state));
+    let fields = StatusReply {
+        disk_overflows: shared.disk_overflows.load(Ordering::Relaxed),
+        count_in_remaining: shared.count_in_remaining.load(Ordering::Relaxed),
+        loaded_audio_bytes,
+        project_warning: project_rate_warning(state),
+        render: render_status(state),
+        ..StatusReply::default()
+    };
     let Some(open) = state.projects.open.as_ref() else {
-        for key in [
-            "project",
-            "transport",
-            "position",
-            "tempo",
-            "loop",
-            "click",
-            "selected",
-            "undo",
-            "redo",
-        ] {
-            fields.insert(key.to_string(), Value::Null);
-        }
-        fields.insert("clipboard".to_string(), json!(0));
-        fields.insert("tracks".to_string(), json!([]));
-        fields.insert("buses".to_string(), json!([]));
-        fields.insert("master".to_string(), Value::Null);
         return fields;
     };
     let project = &open.project;
@@ -1104,35 +1083,32 @@ pub(crate) fn status_fields(
         Transport::Recording => "recording",
     };
     let meters = &shared.mix_meters;
-    let tracks = tracks_status(open, track_peaks, mix, meters);
     let LoopRegion { start, end, on } = project.loop_region;
-    for (key, value) in [
-        ("project", json!(project.name)),
-        ("transport", json!(transport)),
-        (
-            "position",
-            json!({"frames": frames, "bars_beats": bars_beats(project, frames)}),
-        ),
-        (
-            "tempo",
-            json!({"bpm": project.tempo_bpm, "meter": [project.meter.0, project.meter.1]}),
-        ),
-        ("loop", json!({"start": start, "end": end, "on": on})),
-        (
-            "click",
-            json!({"on": project.click, "count_in": project.count_in}),
-        ),
-        ("selected", json!(open.selected)),
-        ("undo", json!(open.history.undo_label())),
-        ("redo", json!(open.history.redo_label())),
-        ("clipboard", json!(open.clipboard.len())),
-        ("tracks", json!(tracks)),
-        ("buses", buses_status(project, mix, meters)),
-        ("master", master_status(project, mix, meters)),
-    ] {
-        fields.insert(key.to_string(), value);
+    StatusReply {
+        project: Some(project.name.clone()),
+        transport: Some(transport.to_string()),
+        position: Some(PositionStatus {
+            frames,
+            bars_beats: bars_beats(project, frames),
+        }),
+        tempo: Some(TempoStatus {
+            bpm: project.tempo_bpm,
+            meter: project.meter,
+        }),
+        loop_region: Some(LoopStatus { start, end, on }),
+        click: Some(ClickStatus {
+            on: project.click,
+            count_in: project.count_in,
+        }),
+        selected: Some(open.selected),
+        undo: open.history.undo_label().map(str::to_string),
+        redo: open.history.redo_label().map(str::to_string),
+        clipboard: open.clipboard.len(),
+        tracks: tracks_status(open, track_peaks, mix, meters),
+        buses: buses_status(project, mix, meters),
+        master: Some(master_status(project, mix, meters)),
+        ..fields
     }
-    fields
 }
 
 /// Each Track of the open Project as `status` lists it, with its input peak from `track_peaks` and its post-fader peak from `mix`.
@@ -1141,29 +1117,27 @@ fn tracks_status(
     track_peaks: &[f32],
     mix: &MixPeaks,
     meters: &MixMeters,
-) -> Vec<Value> {
+) -> Vec<TrackStatus> {
     let project = &open.project;
     project
         .tracks
         .iter()
         .zip(track_peaks)
         .enumerate()
-        .map(|(index, (track, &peak))| {
-            json!({
-                "id": open.track_ids[index],
-                "name": track.name,
-                "input": track.input,
-                "volume_db": track.volume_db,
-                "pan": track.pan,
-                "mute": track.mute,
-                "solo": track.solo,
-                "armed": track.arm,
-                "input_peak_db": peak_db(peak),
-                "to_master": track.to_master,
-                "sends": sends_status(project, track),
-                "peak_db": peaks_db(mix.tracks[index]),
-                "clip": meters.clip(MeterPoint::Track(index)),
-            })
+        .map(|(index, (track, &peak))| TrackStatus {
+            id: open.track_ids[index],
+            name: track.name.clone(),
+            input: track.input.clone(),
+            volume_db: volume_status(track.volume_db),
+            pan: track.pan,
+            mute: track.mute,
+            solo: track.solo,
+            armed: track.arm,
+            input_peak_db: peak_db(peak),
+            to_master: track.to_master,
+            sends: sends_status(project, track),
+            peak_db: peaks_db(mix.tracks[index]),
+            clip: meters.clip(MeterPoint::Track(index)),
         })
         .collect()
 }

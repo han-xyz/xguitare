@@ -9,7 +9,7 @@ use crate::project::{
 use crate::project_control::check_one_target;
 use crate::project_state::{current_project, new_bus_id, resolve_bus, resolve_track};
 use crate::project_sync::{commit, send, swap_project, swap_project_moving};
-use xguitare_protocol::{BusRef, SendLevel, TrackRef};
+use xguitare_protocol::{BusRef, BusStatus, MasterStatus, SendLevel, SendStatus, TrackRef};
 
 const DEFAULT_BUS_NAME: &str = "Bus";
 
@@ -212,51 +212,60 @@ pub(crate) fn clip_reset(
 }
 
 /// The Track's Sends that are not off, each with its Bus's index.
-pub(crate) fn sends_status(project: &Project, track: &Track) -> Value {
-    let sends: Vec<Value> = track
+pub(crate) fn sends_status(project: &Project, track: &Track) -> Vec<SendStatus> {
+    track
         .sends
         .iter()
         .filter(|send| send.level_db != f32::NEG_INFINITY)
         .filter_map(|send| {
             let bus = project.buses.iter().position(|bus| bus.id == send.bus)?;
-            Some(json!({"bus": bus, "level_db": send.level_db, "pre": send.pre}))
+            Some(SendStatus {
+                bus,
+                level_db: send.level_db,
+                pre: send.pre,
+            })
         })
-        .collect();
-    json!(sends)
+        .collect()
 }
 
-pub(crate) fn buses_status(project: &Project, mix: &MixPeaks, meters: &MixMeters) -> Value {
-    let buses: Vec<Value> = project
+pub(crate) fn buses_status(
+    project: &Project,
+    mix: &MixPeaks,
+    meters: &MixMeters,
+) -> Vec<BusStatus> {
+    project
         .buses
         .iter()
         .enumerate()
-        .map(|(index, bus)| {
-            json!({
-                "id": bus.id,
-                "name": bus.name,
-                "volume_db": bus.volume_db,
-                "pan": bus.pan,
-                "mute": bus.mute,
-                "solo": bus.solo,
-                "peak_db": peaks_db(mix.buses[index]),
-                "clip": meters.clip(MeterPoint::Bus(index)),
-            })
+        .map(|(index, bus)| BusStatus {
+            id: bus.id,
+            name: bus.name.clone(),
+            volume_db: volume_status(bus.volume_db),
+            pan: bus.pan,
+            mute: bus.mute,
+            solo: bus.solo,
+            peak_db: peaks_db(mix.buses[index]),
+            clip: meters.clip(MeterPoint::Bus(index)),
         })
-        .collect();
-    json!(buses)
+        .collect()
 }
 
-pub(crate) fn master_status(project: &Project, mix: &MixPeaks, meters: &MixMeters) -> Value {
-    json!({
-        "volume_db": project.master.volume_db,
-        "peak_db": peaks_db(mix.master),
-        "clip": meters.clip(MeterPoint::Master),
-    })
+pub(crate) fn master_status(project: &Project, mix: &MixPeaks, meters: &MixMeters) -> MasterStatus {
+    MasterStatus {
+        volume_db: volume_status(project.master.volume_db),
+        peak_db: peaks_db(mix.master),
+        clip: meters.clip(MeterPoint::Master),
+    }
 }
 
 /// Left and right peaks in dB, as `peak_db`.
-pub(crate) fn peaks_db([left, right]: [f32; 2]) -> Value {
-    json!([peak_db(left), peak_db(right)])
+pub(crate) fn peaks_db([left, right]: [f32; 2]) -> [Option<f64>; 2] {
+    [peak_db(left), peak_db(right)]
+}
+
+/// A volume in dB as `status` shows it: `None` when off or not a finite number.
+pub(crate) fn volume_status(volume_db: f32) -> Option<f32> {
+    volume_db.is_finite().then_some(volume_db)
 }
 
 fn level_on_wire(level_db: f32) -> SendLevel {

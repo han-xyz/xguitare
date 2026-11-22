@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::control::EngineState;
 use crate::project_state::{NO_PROJECT, ProjectEvent, open_project_state};
 use crate::render::{RENDERS_DIR, Render, RenderJob, RenderState, RenderTask};
-use xguitare_protocol::{RenderBits, RenderRange};
+use xguitare_protocol::{RenderBits, RenderRange, RenderStatus};
 
 const RENDER_RUNNING: &str = "a render is already running";
 const NO_RENDER_RUNNING: &str = "no render running";
@@ -93,21 +93,22 @@ pub fn finished_render(state: &mut EngineState) -> Option<RenderFinished> {
 }
 
 /// The status `render` field: `null` until a Render starts after `project_new` or `project_open`, then the running one or the last finished.
-pub(crate) fn render_status(state: &EngineState) -> Value {
-    let Some(job) = &state.projects.render else {
-        return Value::Null;
+pub(crate) fn render_status(state: &EngineState) -> Option<RenderStatus> {
+    let job = state.projects.render.as_ref()?;
+    let render_state = match job.state() {
+        RenderState::Running => "running",
+        RenderState::Done => "done",
+        RenderState::Cancelled => "cancelled",
+        RenderState::Failed => "failed",
     };
-    let mut status = json!({
-        "name": job.name,
-        "range": job.range,
-        "progress": job.progress(),
-        "state": job.state(),
-        "file": job.file().display().to_string(),
-    });
-    if let Some(error) = job.error() {
-        status["error"] = json!(error);
-    }
-    status
+    Some(RenderStatus {
+        name: job.name.clone(),
+        range: job.range,
+        progress: job.progress(),
+        state: render_state.to_string(),
+        file: job.file().display().to_string(),
+        error: job.error(),
+    })
 }
 
 fn is_running(state: &EngineState) -> bool {
