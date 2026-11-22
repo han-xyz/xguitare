@@ -1,0 +1,26 @@
+name = "Amp American"
+
+[[module]]
+type = "amp"
+[module.params]
+model = 1
+gain = 25
+bass = 55
+middle = 45
+treble = 60
+presence = 50
+master = 50
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "cab-2x12-open.wav"
+
+[module.params]
+level = 7.8
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 12

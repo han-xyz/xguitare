@@ -1,0 +1,31 @@
+name = "Amp Lead"
+
+[[module]]
+type = "gate"
+[module.params]
+threshold = -55
+
+[[module]]
+type = "amp"
+[module.params]
+model = 4
+gain = 80
+bass = 55
+middle = 55
+treble = 55
+presence = 55
+master = 50
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "cab-4x12.wav"
+
+[module.params]
+level = -4.5
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 12

@@ -1,0 +1,20 @@
+name = "Amp Bass Valve"
+
+[[module]]
+type = "amp"
+[module.params]
+model = 6
+gain = 40
+bass = 60
+middle = 50
+treble = 45
+presence = 50
+master = 50
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab-8x10.wav"
+
+[module.params]
+level = -0.5

@@ -1,0 +1,26 @@
+name = "Amp Chime"
+
+[[module]]
+type = "amp"
+[module.params]
+model = 2
+gain = 40
+bass = 45
+middle = 50
+treble = 65
+presence = 50
+master = 55
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "cab-2x12-alnico.wav"
+
+[module.params]
+level = 1.6
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 12

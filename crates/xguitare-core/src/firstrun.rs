@@ -4,12 +4,20 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use xguitare_dsp::synth_ir::{bass_cabinet, default_cabinet};
+use xguitare_dsp::synth_ir::{
+    bass_cabinet, bass_cabinet_8x10, cabinet_2x12_alnico, cabinet_2x12_open, cabinet_4x10,
+    cabinet_4x12, default_cabinet,
+};
 
 use xguitare_protocol::BankKind;
 
 pub(crate) const DEFAULT_IR: &str = "default-cab.wav";
 pub(crate) const BASS_IR: &str = "bass-cab.wav";
+pub(crate) const CAB_4X10_IR: &str = "cab-4x10.wav";
+pub(crate) const CAB_2X12_OPEN_IR: &str = "cab-2x12-open.wav";
+pub(crate) const CAB_2X12_ALNICO_IR: &str = "cab-2x12-alnico.wav";
+pub(crate) const CAB_4X12_IR: &str = "cab-4x12.wav";
+pub(crate) const BASS_CAB_8X10_IR: &str = "bass-cab-8x10.wav";
 const STAGING_SUFFIX: &str = ".xguitare-staging";
 const STARTER_PRESETS: &[(&str, &str)] = &[
     ("01-clean.toml", include_str!("../bank/01-clean.toml")),
@@ -35,6 +43,27 @@ const STARTER_PRESETS: &[(&str, &str)] = &[
     (
         "15-distortion.toml",
         include_str!("../bank/15-distortion.toml"),
+    ),
+    (
+        "16-amp-tweed.toml",
+        include_str!("../bank/16-amp-tweed.toml"),
+    ),
+    (
+        "17-amp-american.toml",
+        include_str!("../bank/17-amp-american.toml"),
+    ),
+    (
+        "18-amp-chime.toml",
+        include_str!("../bank/18-amp-chime.toml"),
+    ),
+    (
+        "19-amp-crunch.toml",
+        include_str!("../bank/19-amp-crunch.toml"),
+    ),
+    ("20-amp-lead.toml", include_str!("../bank/20-amp-lead.toml")),
+    (
+        "21-amp-modern.toml",
+        include_str!("../bank/21-amp-modern.toml"),
     ),
 ];
 const BASS_PRESETS: &[(&str, &str)] = &[
@@ -83,7 +112,45 @@ const BASS_PRESETS: &[(&str, &str)] = &[
         "15-distortion.toml",
         include_str!("../bank-bass/15-distortion.toml"),
     ),
+    (
+        "16-amp-bass-valve.toml",
+        include_str!("../bank-bass/16-amp-bass-valve.toml"),
+    ),
+    (
+        "17-amp-bass-solid.toml",
+        include_str!("../bank-bass/17-amp-bass-solid.toml"),
+    ),
 ];
+const STARTER_IRS: &[StarterIr] = &[
+    (DEFAULT_IR, default_cabinet),
+    (CAB_4X10_IR, cabinet_4x10),
+    (CAB_2X12_OPEN_IR, cabinet_2x12_open),
+    (CAB_2X12_ALNICO_IR, cabinet_2x12_alnico),
+    (CAB_4X12_IR, cabinet_4x12),
+];
+const BASS_IRS: &[StarterIr] = &[
+    (BASS_IR, bass_cabinet),
+    (BASS_CAB_8X10_IR, bass_cabinet_8x10),
+];
+
+/// A Cabinet IR's file name and the function that synthesizes its samples at a sample rate.
+pub(crate) type StarterIr = (&'static str, fn(u32) -> Vec<f32>);
+
+/// The starter Presets of `kind` as (file name, TOML text), in Bank order.
+pub(crate) fn starter_presets(kind: BankKind) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        BankKind::Guitar => STARTER_PRESETS,
+        BankKind::Bass => BASS_PRESETS,
+    }
+}
+
+/// The Cabinet IRs the starter Presets of `kind` name.
+pub(crate) fn starter_irs(kind: BankKind) -> &'static [StarterIr] {
+    match kind {
+        BankKind::Guitar => STARTER_IRS,
+        BankKind::Bass => BASS_IRS,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Created {
@@ -91,11 +158,11 @@ pub struct Created {
     pub ir: bool,
 }
 
-/// Creates `bank_dir` with the starter Presets of `kind` and their cabinet IR synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `.<bank name>.xguitare-staging` beside it (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
+/// Creates `bank_dir` with the starter Presets of `kind` and the Cabinet IRs they name, synthesized at `sample_rate`, unless `bank_dir` already exists; an existing directory is left untouched and the result is all zeros. The files are written into `.<bank name>.xguitare-staging` beside it (a stale one is replaced) and renamed into place, so an interrupted first run leaves no partial Bank.
 ///
 /// # Errors
 ///
-/// The I/O error when `bank_dir` has no final name or the staging directory, a Preset, the Cabinet IR or the final rename cannot be written.
+/// The I/O error when `bank_dir` has no final name or the staging directory, a Preset, a Cabinet IR or the final rename cannot be written.
 pub fn ensure_bank(
     bank_dir: &Path,
     kind: BankKind,
@@ -112,14 +179,14 @@ pub fn ensure_bank(
         fs::remove_dir_all(&staging)?;
     }
     fs::create_dir_all(&staging)?;
-    let (presets, ir_file, ir) = match kind {
-        BankKind::Guitar => (STARTER_PRESETS, DEFAULT_IR, default_cabinet(sample_rate)),
-        BankKind::Bass => (BASS_PRESETS, BASS_IR, bass_cabinet(sample_rate)),
-    };
+    let presets = starter_presets(kind);
     for (file, text) in presets {
         fs::write(staging.join(file), text)?;
     }
-    write_ir(&staging.join(ir_file), &ir, sample_rate).map_err(io::Error::other)?;
+    for (file, synthesize) in starter_irs(kind) {
+        write_ir(&staging.join(file), &synthesize(sample_rate), sample_rate)
+            .map_err(io::Error::other)?;
+    }
     fs::rename(&staging, bank_dir)?;
     Ok(Created {
         presets: presets.len(),

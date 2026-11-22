@@ -1,0 +1,26 @@
+name = "Amp Tweed"
+
+[[module]]
+type = "amp"
+[module.params]
+model = 0
+gain = 30
+bass = 50
+middle = 55
+treble = 60
+presence = 50
+master = 50
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "cab-4x10.wav"
+
+[module.params]
+level = 4.9
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 12

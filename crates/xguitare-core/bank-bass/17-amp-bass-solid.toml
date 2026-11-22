@@ -1,0 +1,20 @@
+name = "Amp Bass Solid"
+
+[[module]]
+type = "amp"
+[module.params]
+model = 7
+gain = 35
+bass = 55
+middle = 50
+treble = 55
+presence = 50
+master = 50
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "bass-cab.wav"
+
+[module.params]
+level = -2.4

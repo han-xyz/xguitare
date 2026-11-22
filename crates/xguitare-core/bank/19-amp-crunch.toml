@@ -1,0 +1,26 @@
+name = "Amp Crunch"
+
+[[module]]
+type = "amp"
+[module.params]
+model = 3
+gain = 60
+bass = 55
+middle = 60
+treble = 55
+presence = 50
+master = 55
+level = -12
+
+[[module]]
+type = "cabinet"
+ir = "cab-4x12.wav"
+
+[module.params]
+level = -3.9
+
+[[module]]
+type = "reverb"
+[module.params]
+size = 30
+mix = 12
