@@ -10,7 +10,7 @@ use egui::{CentralPanel, Event, Frame, Key, Margin, Modifiers, Panel, RichText, 
 use serde_json::Value;
 use tracing::{error, info};
 use xguitare_client::ClientConfig;
-use xguitare_protocol::{BankKind, BusRef, TrackRef};
+use xguitare_protocol::{BankKind, BusRef, GetReply, TrackRef};
 
 use crate::client::{self, TICK};
 use crate::metronome_model::{BeatLight, beat_light, metronome_key_to_command};
@@ -421,7 +421,7 @@ impl eframe::App for App {
             {
                 forget_removed_units(&mut self.open_units, &mut self.removing, params);
                 if let Some(previous) = &self.snapshot.params {
-                    let ids = |params: &Value| -> Vec<String> {
+                    let ids = |params: &GetReply| -> Vec<String> {
                         param_rows(params).into_iter().map(|(id, _)| id).collect()
                     };
                     let (previous, ids) = (ids(previous), ids(params));

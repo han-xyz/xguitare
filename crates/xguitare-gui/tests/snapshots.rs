@@ -23,7 +23,7 @@ use xguitare_gui::model::{Command, Link, Message, ModuleType, Restore, Snapshot,
 use xguitare_gui::project_model::AutosaveOffer;
 use xguitare_gui::theme::palette;
 use xguitare_protocol::{
-    BankKind, FRAMES_PER_PEAK, ItemsReply, LoopRegion, RenderBits, RenderRange, TrackRef,
+    BankKind, FRAMES_PER_PEAK, GetReply, ItemsReply, LoopRegion, RenderBits, RenderRange, TrackRef,
     TransportAction, from_payload, to_payload,
 };
 
@@ -149,7 +149,7 @@ fn funk_snapshot() -> Snapshot {
             "input_peak_db": -14.0, "output_peak_db": -6.0, "xruns": 0,
         })),
         bank: Some(json!({"active": 2, "entries": entries})),
-        params: Some(funk_params()),
+        params: Some(get_reply(&funk_params())),
         tuner: Some(json!({"confident": true, "note": "A1", "hz": 55.1, "cents": 4})),
         ports: Some(json!({
             "capture": [CAPTURE, "Scarlett Solo 4th Gen Input 1 Inst/Line:capture_FL"],
@@ -181,13 +181,12 @@ fn funk_snapshot() -> Snapshot {
 
 fn bypassed_snapshot(modules: &[&str]) -> Snapshot {
     let mut snapshot = funk_snapshot();
-    let params = snapshot.params.as_mut().unwrap()["params"]
-        .as_array_mut()
-        .unwrap();
-    for param in params {
-        let bypass = modules.contains(&param["module"].as_str().unwrap());
-        param["bypass"] = json!(bypass);
-    }
+    edit_params(&mut snapshot, |params| {
+        for param in params {
+            let bypass = modules.contains(&param["module"].as_str().unwrap());
+            param["bypass"] = json!(bypass);
+        }
+    });
     snapshot
 }
 
@@ -231,6 +230,17 @@ fn project_snapshot(transport: &str) -> Snapshot {
     ]})));
     snapshot.peaks = fixture_peaks(snapshot.items.as_ref().unwrap());
     snapshot
+}
+
+fn get_reply(payload: &Value) -> GetReply {
+    from_payload(payload).unwrap()
+}
+
+/// `edit` applied to the `params` of `snapshot`'s `get` reply as JSON.
+fn edit_params(snapshot: &mut Snapshot, edit: impl FnOnce(&mut Vec<Value>)) {
+    let mut payload = to_payload(snapshot.params.as_ref().unwrap());
+    edit(payload["params"].as_array_mut().unwrap());
+    snapshot.params = Some(get_reply(&payload));
 }
 
 fn items_reply(payload: &Value) -> ItemsReply {
@@ -343,11 +353,11 @@ fn mixer_snapshot() -> Snapshot {
     ]);
     status["master"] = json!({"volume_db": -1.5, "peak_db": [-6.3, -5.9], "clip": false});
     status["render"] = json!(null);
-    snapshot.params = Some(json!({"params": [
+    snapshot.params = Some(get_reply(&json!({"params": [
         param("reverb", "size", 70.0, (0.0, 100.0, 50.0, "%", false)),
         param("reverb", "damping", 40.0, (0.0, 100.0, 50.0, "%", false)),
         param("reverb", "mix", 100.0, (0.0, 100.0, 30.0, "%", false)),
-    ]}));
+    ]})));
     snapshot
 }
 
@@ -415,7 +425,7 @@ fn bass_di_rack_snapshot() -> Snapshot {
         .chain(of("cabinet"))
         .chain(limiter)
         .collect();
-    snapshot.params = Some(json!({ "params": params }));
+    snapshot.params = Some(get_reply(&json!({ "params": params })));
     snapshot
 }
 
@@ -732,14 +742,13 @@ fn autowah_snapshot() -> Snapshot {
         param("autowah", "dry", 50.0, (0.0, 100.0, 50.0, "%", false)),
         param("autowah", "wet", 100.0, (0.0, 100.0, 100.0, "%", false)),
     ];
-    let params = snapshot.params.as_mut().unwrap()["params"]
-        .as_array_mut()
-        .unwrap();
-    let after_compressor = params
-        .iter()
-        .position(|param| param["module"] == "preamp")
-        .unwrap();
-    params.splice(after_compressor..after_compressor, autowah);
+    edit_params(&mut snapshot, |params| {
+        let after_compressor = params
+            .iter()
+            .position(|param| param["module"] == "preamp")
+            .unwrap();
+        params.splice(after_compressor..after_compressor, autowah);
+    });
     snapshot
 }
 
@@ -1042,14 +1051,13 @@ fn blend_snapshot() -> Snapshot {
         param("blend", "presence", 50.0, (0.0, 100.0, 50.0, "%", false)),
         param("blend", "crossover", 20.0, (20.0, 400.0, 20.0, "Hz", false)),
     ];
-    let params = snapshot.params.as_mut().unwrap()["params"]
-        .as_array_mut()
-        .unwrap();
-    let after_compressor = params
-        .iter()
-        .position(|param| param["module"] == "preamp")
-        .unwrap();
-    params.splice(after_compressor..after_compressor, blend);
+    edit_params(&mut snapshot, |params| {
+        let after_compressor = params
+            .iter()
+            .position(|param| param["module"] == "preamp")
+            .unwrap();
+        params.splice(after_compressor..after_compressor, blend);
+    });
     snapshot
 }
 
@@ -1067,14 +1075,13 @@ fn blend_snapshots() {
 /// The Funk Rack with `module` spliced in before the first Parameter of `before`.
 fn with_module(module: Vec<Value>, before: &str) -> Snapshot {
     let mut snapshot = funk_snapshot();
-    let params = snapshot.params.as_mut().unwrap()["params"]
-        .as_array_mut()
-        .unwrap();
-    let at = params
-        .iter()
-        .position(|param| param["module"] == before)
-        .unwrap();
-    params.splice(at..at, module);
+    edit_params(&mut snapshot, |params| {
+        let at = params
+            .iter()
+            .position(|param| param["module"] == before)
+            .unwrap();
+        params.splice(at..at, module);
+    });
     snapshot
 }
 
@@ -1186,14 +1193,13 @@ fn eq_snapshot(values: &[(&str, f64)]) -> Snapshot {
             .map_or(default, |(_, value)| *value);
         param("eq", name, value, (min, max, default, unit, false))
     });
-    let params = snapshot.params.as_mut().unwrap()["params"]
-        .as_array_mut()
-        .unwrap();
-    let before_preamp = params
-        .iter()
-        .position(|param| param["module"] == "preamp")
-        .unwrap();
-    params.splice(before_preamp..before_preamp, eq);
+    edit_params(&mut snapshot, |params| {
+        let before_preamp = params
+            .iter()
+            .position(|param| param["module"] == "preamp")
+            .unwrap();
+        params.splice(before_preamp..before_preamp, eq);
+    });
     snapshot
 }
 
@@ -1249,12 +1255,11 @@ fn eq_snapshots() {
     flat.get_by_label("flat");
     write_png(&mut flat, "eq-closed-flat");
     let mut bypassed = eq_snapshot(&EQ_EXAMPLE);
-    for param in bypassed.params.as_mut().unwrap()["params"]
-        .as_array_mut()
-        .unwrap()
-    {
-        param["bypass"] = json!(param["module"] == "eq");
-    }
+    edit_params(&mut bypassed, |params| {
+        for param in params {
+            param["bypass"] = json!(param["module"] == "eq");
+        }
+    });
     let (mut bypassed, _, _dir) = harness_with(DEFAULT_WINDOW, bypassed);
     assert!(!switch_is_on(&bypassed, "EQ"));
     write_png(&mut bypassed, "eq-closed-bypassed");

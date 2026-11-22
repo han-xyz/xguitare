@@ -39,7 +39,7 @@ use xguitare_gui::model::{
     open_unit_height,
 };
 use xguitare_gui::theme::{NEUTRAL_ACCENT, accent_for, palette};
-use xguitare_protocol::{BankKind, Request, Response, SILENCE_DB};
+use xguitare_protocol::{BankKind, GetReply, Request, Response, SILENCE_DB, from_payload};
 
 struct TempDir(PathBuf);
 
@@ -47,6 +47,10 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+fn get_reply(payload: &serde_json::Value) -> GetReply {
+    from_payload(payload).unwrap()
 }
 
 fn registry_modules(test: &str) -> serde_json::Value {
@@ -684,7 +688,7 @@ fn param_rows_in_rack_order_with_units() {
         }
     };
     assert_eq!(
-        param_rows(&two_module_get()),
+        param_rows(&get_reply(&two_module_get())),
         vec![
             (
                 "preamp".to_string(),
@@ -702,7 +706,7 @@ fn param_rows_in_rack_order_with_units() {
             ),
         ]
     );
-    assert_eq!(param_rows(&json!({})), []);
+    assert_eq!(param_rows(&get_reply(&json!({}))), []);
 }
 
 #[test]
@@ -711,7 +715,7 @@ fn integer_flag_from_payload() {
         {"module": "preamp", "type": "preamp", "param": "bias", "value": 0.0, "unit": "", "min": -1.0, "max": 1.0, "integer": false},
         {"module": "preamp", "type": "preamp", "param": "stages", "value": 3.0, "unit": "", "min": 1.0, "max": 4.0, "integer": true},
     ]});
-    let flags: Vec<bool> = param_rows(&bias)[0]
+    let flags: Vec<bool> = param_rows(&get_reply(&bias))[0]
         .1
         .iter()
         .map(|row| row.integer)
@@ -1053,7 +1057,7 @@ fn rack_channels_by_module_type() {
         {"type": "delay", "channels": "stereo", "params": []},
     ]}));
     assert_eq!(
-        rack_channels(&param_rows(&get), &types),
+        rack_channels(&param_rows(&get_reply(&get)), &types),
         vec![
             ("amp".to_string(), "mono".to_string()),
             ("delay-2".to_string(), "stereo".to_string()),
@@ -1333,9 +1337,9 @@ fn bypassed_from_get() {
         {"module": "chorus", "type": "chorus", "param": "rate", "value": 1.0, "bypass": true},
         {"module": "chorus", "type": "chorus", "param": "mix", "value": 0.4, "bypass": true},
     ]});
-    assert!(bypassed(&payload, "chorus"));
-    assert!(!bypassed(&payload, "preamp"));
-    assert!(!bypassed(&payload, "delay"));
+    assert!(bypassed(&get_reply(&payload), "chorus"));
+    assert!(!bypassed(&get_reply(&payload), "preamp"));
+    assert!(!bypassed(&get_reply(&payload), "delay"));
 }
 
 #[test]
@@ -1382,12 +1386,12 @@ fn cabinet_ir_from_get() {
         {"module": "cab2", "type": "cabinet", "param": "mix", "value": 1.0, "ir": null},
     ]});
     assert_eq!(
-        cabinet_ir(&payload, "cabinet"),
+        cabinet_ir(&get_reply(&payload), "cabinet"),
         Some("cabs/x.wav".to_string())
     );
-    assert_eq!(cabinet_ir(&payload, "cab2"), None);
-    assert_eq!(cabinet_ir(&payload, "preamp"), None);
-    assert_eq!(cabinet_ir(&payload, "delay"), None);
+    assert_eq!(cabinet_ir(&get_reply(&payload), "cab2"), None);
+    assert_eq!(cabinet_ir(&get_reply(&payload), "preamp"), None);
+    assert_eq!(cabinet_ir(&get_reply(&payload), "delay"), None);
 }
 
 #[test]
@@ -1773,17 +1777,20 @@ fn drive_restore() -> Restore {
 
 #[test]
 fn restore_keeps_type_the_module_above_values_and_bypass() {
-    assert_eq!(restore(&undo_payload(), "lead"), Some(drive_restore()));
     assert_eq!(
-        restore(&undo_payload(), "drive").map(|restore| restore.after),
+        restore(&get_reply(&undo_payload()), "lead"),
+        Some(drive_restore())
+    );
+    assert_eq!(
+        restore(&get_reply(&undo_payload()), "drive").map(|restore| restore.after),
         Some(None)
     );
-    assert_eq!(restore(&undo_payload(), "reverb"), None);
+    assert_eq!(restore(&get_reply(&undo_payload()), "reverb"), None);
 }
 
 #[test]
 fn restore_of_a_cabinet_keeps_its_ir() {
-    let cabinet = restore(&undo_payload(), "cabinet").unwrap();
+    let cabinet = restore(&get_reply(&undo_payload()), "cabinet").unwrap();
     assert_eq!(cabinet.ir.as_deref(), Some("bass-cab.wav"));
     assert_eq!(
         cabinet.follow_up_requests("cabinet"),
@@ -1895,7 +1902,8 @@ fn funk_status() -> serde_json::Value {
 fn removed_unit_offers_undo_for_ten_seconds() {
     let now = Instant::now();
     let status = funk_status();
-    let removed = RemovedUnit::new(&undo_payload(), Some(&status), "lead", now).unwrap();
+    let removed =
+        RemovedUnit::new(&get_reply(&undo_payload()), Some(&status), "lead", now).unwrap();
     assert_eq!(removed.id, "lead");
     assert_eq!(removed.restore, drive_restore());
     let later = json!({"preset": "Funk", "program": 2, "revision": 9});
@@ -1906,7 +1914,13 @@ fn removed_unit_offers_undo_for_ten_seconds() {
 #[test]
 fn removed_unit_offers_no_undo_after_the_preset_changes() {
     let now = Instant::now();
-    let removed = RemovedUnit::new(&undo_payload(), Some(&funk_status()), "lead", now).unwrap();
+    let removed = RemovedUnit::new(
+        &get_reply(&undo_payload()),
+        Some(&funk_status()),
+        "lead",
+        now,
+    )
+    .unwrap();
     for other in [
         json!({"preset": "Blues", "program": 1, "revision": 5}),
         json!({"preset": "Funk", "program": 0, "revision": 5}),
@@ -1919,7 +1933,12 @@ fn removed_unit_offers_no_undo_after_the_preset_changes() {
 #[test]
 fn undo_dropped_by_a_preset_change_never_comes_back() {
     let now = Instant::now();
-    let mut removed = RemovedUnit::new(&undo_payload(), Some(&funk_status()), "lead", now);
+    let mut removed = RemovedUnit::new(
+        &get_reply(&undo_payload()),
+        Some(&funk_status()),
+        "lead",
+        now,
+    );
     assert!(shown_undo(&mut removed, Some(&funk_status()), now).is_some());
     let blues = json!({"preset": "Blues", "program": 1, "revision": 5});
     assert!(shown_undo(&mut removed, Some(&blues), now).is_none());
@@ -1930,7 +1949,12 @@ fn undo_dropped_by_a_preset_change_never_comes_back() {
 fn removed_unit_absent_from_the_payload_offers_no_undo() {
     let status = funk_status();
     assert_eq!(
-        RemovedUnit::new(&undo_payload(), Some(&status), "reverb", Instant::now()),
+        RemovedUnit::new(
+            &get_reply(&undo_payload()),
+            Some(&status),
+            "reverb",
+            Instant::now()
+        ),
         None
     );
 }
@@ -2141,7 +2165,7 @@ fn open_units_keep_a_refused_remove_open() {
     forget_removed_units(
         &mut open,
         &mut removing,
-        &get_with_modules(&["preamp", "cabinet"]),
+        &get_reply(&get_with_modules(&["preamp", "cabinet"])),
     );
     assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
 }
@@ -2159,9 +2183,13 @@ fn open_units_stay_open_when_a_later_preset_lacks_a_refused_remove() {
     forget_removed_units(
         &mut open,
         &mut removing,
-        &get_with_modules(&["preamp", "cabinet"]),
+        &get_reply(&get_with_modules(&["preamp", "cabinet"])),
     );
-    forget_removed_units(&mut open, &mut removing, &get_with_modules(&["gate"]));
+    forget_removed_units(
+        &mut open,
+        &mut removing,
+        &get_reply(&get_with_modules(&["gate"])),
+    );
     assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
 }
 
@@ -2195,7 +2223,11 @@ fn open_units_drop_a_confirmed_remove() {
             },
         ],
     );
-    forget_removed_units(&mut open, &mut removing, &get_with_modules(&["cabinet"]));
+    forget_removed_units(
+        &mut open,
+        &mut removing,
+        &get_reply(&get_with_modules(&["cabinet"])),
+    );
     assert_eq!(open, ["cabinet"].map(str::to_string).into());
     assert!(removing.is_empty());
 }
@@ -2205,7 +2237,11 @@ fn open_units_keep_a_module_another_preset_lacks() {
     let mut open: BTreeSet<String> = ["cabinet", "preamp"].map(str::to_string).into();
     let mut removing = BTreeSet::new();
     remember_removes(&mut removing, &[Command::Load("lead".into())]);
-    forget_removed_units(&mut open, &mut removing, &get_with_modules(&["gate"]));
+    forget_removed_units(
+        &mut open,
+        &mut removing,
+        &get_reply(&get_with_modules(&["gate"])),
+    );
     assert_eq!(open, ["cabinet", "preamp"].map(str::to_string).into());
 }
 
@@ -2586,7 +2622,7 @@ fn param_rows_carry_labels() {
         {"module": "autowah", "type": "autowah", "param": "mode", "value": 1.0, "unit": "", "min": 0.0, "max": 2.0, "default": 0.0, "integer": true, "labels": ["lp", "bp", "hp"]},
         {"module": "autowah", "type": "autowah", "param": "q", "value": 3.0, "unit": "", "min": 0.5, "max": 12.0, "default": 3.0, "integer": false, "labels": []},
     ]});
-    let rows = &param_rows(&get)[0].1;
+    let rows = &param_rows(&get_reply(&get))[0].1;
     assert_eq!(rows[0].labels, ["lp", "bp", "hp"]);
     assert_eq!(rows[1].labels, Vec::<String>::new());
 }

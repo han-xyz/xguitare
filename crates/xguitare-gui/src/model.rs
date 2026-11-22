@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use xguitare_client::{ClientError, TakesCleanStopped};
 use xguitare_protocol::{
-    BankKind, BusRef, ItemsReply, LoopRegion, Position, RenderBits, RenderRange, Request, Response,
-    SILENCE_DB, SendLevel, TrackRef, TransportAction, is_hidden_char, shown_file_name,
+    BankKind, BusRef, GetReply, ItemsReply, LoopRegion, Position, RenderBits, RenderRange, Request,
+    Response, SILENCE_DB, SendLevel, TrackRef, TransportAction, is_hidden_char, shown_file_name,
 };
 
 use crate::mixer_model::{MixerTarget, ShownRack, rack_selectors};
@@ -66,7 +66,7 @@ pub struct Snapshot {
     pub link: Link,
     pub status: Option<Value>,
     pub bank: Option<Value>,
-    pub params: Option<Value>,
+    pub params: Option<GetReply>,
     pub tuner: Option<Value>,
     pub ports: Option<Value>,
     pub settings: Option<Value>,
@@ -274,26 +274,22 @@ pub fn ir_names(ir_list_payload: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The Cabinet IR name of Module `id` in a `get` payload, read from its first entry.
-pub fn cabinet_ir(get_payload: &Value, id: &str) -> Option<String> {
-    get_payload["params"]
-        .as_array()?
+/// The Cabinet IR name of Module `id` in a `get` reply, read from its first entry.
+pub fn cabinet_ir(get: &GetReply, id: &str) -> Option<String> {
+    get.params
         .iter()
-        .find(|entry| entry["module"].as_str() == Some(id))?["ir"]
-        .as_str()
-        .map(str::to_string)
+        .find(|entry| entry.module == id)?
+        .ir
+        .clone()
+        .flatten()
 }
 
-/// Whether Module `id` in a `get` payload is bypassed, read from its first entry.
-pub fn bypassed(get_payload: &Value, id: &str) -> bool {
-    get_payload["params"]
-        .as_array()
-        .and_then(|params| {
-            params
-                .iter()
-                .find(|entry| entry["module"].as_str() == Some(id))
-        })
-        .is_some_and(|entry| entry["bypass"].as_bool() == Some(true))
+/// Whether Module `id` in a `get` reply is bypassed, read from its first entry.
+pub fn bypassed(get: &GetReply, id: &str) -> bool {
+    get.params
+        .iter()
+        .find(|entry| entry.module == id)
+        .is_some_and(|entry| entry.bypass)
 }
 
 pub fn module_types(modules_payload: &Value) -> Vec<ModuleType> {
@@ -872,9 +868,9 @@ pub struct Restore {
     pub master: bool,
 }
 
-/// The [`Restore`] of Module `id`, for the Rack `get_payload` shows; `None` when the payload has no such Module.
-pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
-    let modules = param_rows(get_payload);
+/// The [`Restore`] of Module `id`, for the Rack `get` shows; `None` when the reply has no such Module.
+pub fn restore(get: &GetReply, id: &str) -> Option<Restore> {
+    let modules = param_rows(get);
     let index = modules.iter().position(|(module, _)| module == id)?;
     let rows = &modules[index].1;
     Some(Restore {
@@ -888,8 +884,8 @@ pub fn restore(get_payload: &Value, id: &str) -> Option<Restore> {
             .iter()
             .map(|row| (row.param.clone(), row.value))
             .collect(),
-        bypass: bypassed(get_payload, id),
-        ir: cabinet_ir(get_payload, id),
+        bypass: bypassed(get, id),
+        ir: cabinet_ir(get, id),
         track: None,
         bus: None,
         master: false,
@@ -950,9 +946,9 @@ pub struct RemovedUnit {
 }
 
 impl RemovedUnit {
-    /// `None` when `get_payload` has no Module `id`, so that there is nothing to undo. While a Project is open the Restore names the selected Track, so that Undo goes back to it whichever Track is selected then.
+    /// `None` when `get` has no Module `id`, so that there is nothing to undo. While a Project is open the Restore names the selected Track, so that Undo goes back to it whichever Track is selected then.
     pub fn new(
-        get_payload: &Value,
+        get: &GetReply,
         status: Option<&Value>,
         id: &str,
         now: Instant,
@@ -961,7 +957,7 @@ impl RemovedUnit {
             id: id.to_string(),
             restore: Restore {
                 track: selected_track(status),
-                ..restore(get_payload, id)?
+                ..restore(get, id)?
             },
             preset: preset_of(status),
             since: now,
@@ -1048,16 +1044,13 @@ pub fn remember_removes(removing: &mut BTreeSet<String>, commands: &[Command]) {
     }
 }
 
-/// Settles every id in `removing` against the first `get` payload after its Remove: the open state of an id the payload no longer has is dropped, a Module still there means the Remove was refused and keeps its unit open. Another Preset lacking an id that was never removed keeps it.
+/// Settles every id in `removing` against the first `get` reply after its Remove: the open state of an id the reply no longer has is dropped, a Module still there means the Remove was refused and keeps its unit open. Another Preset lacking an id that was never removed keeps it.
 pub fn forget_removed_units(
     open: &mut BTreeSet<String>,
     removing: &mut BTreeSet<String>,
-    get_payload: &Value,
+    get: &GetReply,
 ) {
-    let present: BTreeSet<String> = param_rows(get_payload)
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect();
+    let present: BTreeSet<String> = param_rows(get).into_iter().map(|(id, _)| id).collect();
     for id in std::mem::take(removing) {
         if !present.contains(&id) {
             open.remove(&id);
@@ -1942,33 +1935,26 @@ pub struct ParamRow {
     pub labels: Vec<String>,
 }
 
-/// Groups the `get` payload's `params` per Module, keeping Rack order.
-pub fn param_rows(get_payload: &Value) -> Vec<(String, Vec<ParamRow>)> {
+/// Groups the `get` reply's `params` per Module, keeping Rack order.
+pub fn param_rows(get: &GetReply) -> Vec<(String, Vec<ParamRow>)> {
     let mut modules: Vec<(String, Vec<ParamRow>)> = Vec::new();
-    for param in get_payload["params"].as_array().into_iter().flatten() {
-        let module = param["module"].as_str().unwrap_or_default().to_string();
-        let name = param["param"].as_str().unwrap_or_default().to_string();
+    for param in &get.params {
         let row = ParamRow {
-            address: format!("{module}.{name}"),
-            module: module.clone(),
-            module_type: param["type"].as_str().unwrap_or_default().to_string(),
-            param: name,
-            value: param["value"].as_f64().unwrap_or_default(),
-            min: param["min"].as_f64().unwrap_or_default(),
-            max: param["max"].as_f64().unwrap_or_default(),
-            default: param["default"].as_f64().unwrap_or_default(),
-            unit: param["unit"].as_str().unwrap_or_default().to_string(),
-            integer: param["integer"].as_bool().unwrap_or_default(),
-            labels: param["labels"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|label| label.as_str().map(ToString::to_string))
-                .collect(),
+            address: format!("{}.{}", param.module, param.param),
+            module: param.module.clone(),
+            module_type: param.type_name.clone(),
+            param: param.param.clone(),
+            value: param.value,
+            min: param.min,
+            max: param.max,
+            default: param.default,
+            unit: param.unit.clone(),
+            integer: param.integer,
+            labels: param.labels.clone(),
         };
         match modules.last_mut() {
-            Some((id, rows)) if *id == module => rows.push(row),
-            _ => modules.push((module, vec![row])),
+            Some((id, rows)) if *id == param.module => rows.push(row),
+            _ => modules.push((param.module.clone(), vec![row])),
         }
     }
     modules

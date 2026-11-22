@@ -234,7 +234,8 @@ impl Client {
             self.snapshot.unused_takes = Some((reply, Instant::now()));
         }
         if rack_moved && !quit {
-            self.snapshot.params = self.payload(&self.rack_get());
+            let previous = self.snapshot.params.take();
+            self.snapshot.params = self.reply(&self.rack_get(), previous, from_payload);
         }
         !quit && !ui_gone
     }
@@ -306,12 +307,13 @@ impl Client {
     fn restore(&mut self, restore: &Restore) {
         let named = restore.track.is_some() || restore.bus.is_some() || restore.master;
         let rack = if named {
-            self.payload(&Request::Get {
+            let get = Request::Get {
                 param: None,
                 track: restore.track.clone(),
                 bus: restore.bus.clone(),
                 master: restore.master,
-            })
+            };
+            self.reply(&get, None, from_payload)
         } else {
             self.snapshot.params.clone()
         };
@@ -570,7 +572,8 @@ impl Client {
                 warn!("list: skipped {skipped} entries without an integer program");
             }
         }
-        self.snapshot.params = self.payload(&self.rack_get());
+        let previous = self.snapshot.params.take();
+        self.snapshot.params = self.reply(&self.rack_get(), previous, from_payload);
         let project_open = project_name(self.snapshot.status.as_ref()).is_some();
         self.snapshot.items = if project_open {
             let previous = self.snapshot.items.take();

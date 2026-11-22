@@ -22,8 +22,8 @@ use xguitare_gui::project_model::{
     visible_stretches, waveform_columns,
 };
 use xguitare_protocol::{
-    BusRef, ItemsReply, LoopRegion, Position, Request, Response, TrackRef, TransportAction,
-    from_payload,
+    BusRef, GetReply, ItemsReply, LoopRegion, Position, Request, Response, TrackRef,
+    TransportAction, from_payload,
 };
 
 const RATE: f64 = 48_000.0;
@@ -49,6 +49,10 @@ fn project_status(transport: &str) -> Value {
              "solo": false, "armed": false, "input_peak_db": -120.0},
         ],
     })
+}
+
+fn get_reply(payload: &Value) -> GetReply {
+    from_payload(payload).unwrap()
 }
 
 fn items_reply(payload: &Value) -> ItemsReply {
@@ -847,8 +851,13 @@ fn undo_goes_back_to_the_track_the_module_left() {
          "ir": "guitar-cab.wav"},
     ]});
     let status = project_status("stopped");
-    let removed =
-        RemovedUnit::new(&rack, Some(&status), "cabinet", std::time::Instant::now()).unwrap();
+    let removed = RemovedUnit::new(
+        &get_reply(&rack),
+        Some(&status),
+        "cabinet",
+        std::time::Instant::now(),
+    )
+    .unwrap();
     let bass = Some(TrackRef::Name("Bass".to_string()));
     assert_eq!(removed.restore.track, bass);
     assert_eq!(
@@ -872,7 +881,7 @@ fn undo_goes_back_to_the_track_the_module_left() {
         })
         .collect();
     assert_eq!(tracks, [bass.clone(), bass]);
-    let preset_rack = restore(&rack, "cabinet").unwrap();
+    let preset_rack = restore(&get_reply(&rack), "cabinet").unwrap();
     assert_eq!(preset_rack.track, None);
 }
 
