@@ -1,7 +1,7 @@
 use serde_json::json;
 use xguitare_protocol::{
     BankKind, BusRef, IndexOrName, LoopRegion, Position, RenderBits, RenderRange, Request,
-    SendLevel, TrackRef, TransportAction,
+    Response, SendLevel, TrackRef, TransportAction,
 };
 
 fn assert_round_trip(line: &str, expected: &Request) {
@@ -148,4 +148,19 @@ fn mixer_requests_write_the_documented_lines() {
         level.to_line(),
         r#"{"cmd":"send_set","track":1,"bus":0,"level":-6.0,"pre":true}"#
     );
+}
+
+#[test]
+fn response_to_line_writes_the_documented_wire_lines() {
+    assert_eq!(
+        Response::err("invalid request").to_line(),
+        r#"{"ok":false,"error":"invalid request"}"#
+    );
+    assert_eq!(
+        Response::err_code("a project is still closing; try again", "still_closing").to_line(),
+        r#"{"ok":false,"error":"a project is still closing; try again","code":"still_closing"}"#
+    );
+    let ok = Response::Ok(json!({"name": "Crunch", "program": 1}));
+    assert_eq!(ok.to_line(), r#"{"ok":true,"name":"Crunch","program":1}"#);
+    assert_eq!(Response::from_line(&ok.to_line()).unwrap(), ok);
 }
