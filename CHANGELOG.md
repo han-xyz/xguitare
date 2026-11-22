@@ -45,6 +45,9 @@ All notable changes to xguitare are listed here. The format follows [Keep a Chan
 
 ### Changed
 
+- Opening a Project no longer blocks other clients: the Daemon reads `project.toml` and decodes the Takes without holding its state lock, so `status` and other requests are answered meanwhile; one `project open` is read at a time (`docs/adr/0009-thread-model.md`, Control API `project_open`).
+- The `status`, `items` and `get` replies of the Control API are typed in `xguitare-protocol` (`StatusReply`, `ItemsReply`, `GetReply`); the wire format is unchanged and `protocol_version` stays 1. `xguitare status` shows a reply that carries no `protocol_version` as `protocol_version: 1`.
+- For development, the opt-in `rt-check` cargo feature aborts the Daemon on any allocation in the JACK process callback (`README.md`).
 - Starter Presets: the cabinet `level` of all 26 starter Presets is retuned so that on a plucked test signal at −18 dB RMS none has a true peak above −1 dBTP and the Presets of a Bank play at one BS.1770 loudness (−13 LUFS guitar, −14 LUFS bass; bass Primus Flange and Envelope Funk sit lower, at the ceiling); an existing Bank is not touched, copy the files from `crates/xguitare-core/bank/` or `bank-bass/` to take the new levels.
 - Starter Presets: guitar Stoner has an `octave` adding the octave below before its `drive`, bass Stoner one adding the octave up before its `blend`; bass Stoner's cabinet `level` is −18.0 dB (was −17.9).
 - GUI: the meter bridge and the Tuner unit can be dragged to any gap of the Rack, moved with their `↑` `↓`, or hidden with `Hide` or by dragging them out (the footer offers Undo); the `Tuner` and `Meters` chips under `Add Module` show them again. Their places are kept across restarts and shared by every Rack the window shows.
