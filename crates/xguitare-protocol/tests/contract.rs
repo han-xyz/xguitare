@@ -787,8 +787,10 @@ fn keys_an_older_daemon_leaves_out_read_as_none() {
     for key in ["metronome", "disk_overflows", "muted", "xruns"] {
         fields.remove(key);
     }
-    let track = &mut payload["tracks"][0];
-    track["sends"][0].as_object_mut().unwrap().remove("level_db");
+    payload["tracks"][0]["sends"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("level_db");
     payload["tempo"].as_object_mut().unwrap().remove("meter");
     let reply: StatusReply = from_payload(&payload).unwrap();
     assert_eq!(reply.metronome, None);

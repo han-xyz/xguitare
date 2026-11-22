@@ -2131,7 +2131,8 @@ fn real_daemon_replies_print_their_pinned_text() {
                 "11",
                 "render: song (project) failed 0% <temp>/projects/song/renders/song.wav: disk full\n",
                 "-",
-            ),
+            )
+            .replacen("input_peak_db: -120.0", "input_peak_db: -", 1),
         ),
         (
             &["item", "list"],
