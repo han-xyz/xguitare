@@ -58,6 +58,28 @@ fn middle_knob_moves_mids() {
 }
 
 #[test]
+fn tonestack_response_is_pinned() {
+    let pinned: [((f32, f32, f32), [f32; 3]); 3] = [
+        (
+            (50.0, 50.0, 50.0),
+            [-2.795_754_4, -12.416_411, -5.685_587_4],
+        ),
+        ((20.0, 80.0, 65.0), [-3.517_594_3, -9.783_085, -3.650_813_3]),
+        ((90.0, 10.0, 35.0), [-2.316_338_8, -16.981_604, -10.082_473]),
+    ];
+    for ((bass, middle, treble), expected) in pinned {
+        let settings = [(BASS, bass), (MIDDLE, middle), (TREBLE, treble)];
+        let measured = [100.0, 700.0, 4_000.0].map(|freq| response_db(&settings, freq));
+        for (measured, expected) in measured.iter().zip(expected) {
+            assert!(
+                (measured - expected).abs() <= 0.01,
+                "settings {settings:?}: measured {measured:?}, pinned {expected:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn stable_under_noise() {
     let input = noise(1.0, 10 * SAMPLE_RATE as usize);
     for corner in 0..8 {
