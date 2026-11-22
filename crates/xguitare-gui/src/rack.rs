@@ -1185,7 +1185,6 @@ struct OpenRows<'a> {
 fn open_params(ui: &mut Ui, rows: &OpenRows, accent: Color32, knobs: &mut Knobs) -> Vec<Command> {
     let mut commands = Vec::new();
     ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = f32::from(UNIT_MARGIN);
         ui.spacing_mut().item_spacing.y = CHOICE_ROW_GAP;
         for row in rows.choice_rows {
             commands.extend(choice_row(ui, row, knobs));
