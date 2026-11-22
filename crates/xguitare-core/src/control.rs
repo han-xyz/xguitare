@@ -607,7 +607,7 @@ fn status(state: &mut EngineState, connection: ConnectionId) -> Value {
         prepared_frames: state.max_frames,
         revision: state.revision,
         muted: Some(shared.muted.load(Ordering::Relaxed)),
-        modified: state.modified,
+        modified: Some(state.modified),
         input_peak_db: peak_db(peaks.input),
         output_peak_db: peak_db(peaks.output),
         xruns: Some(shared.xruns.load(Ordering::Relaxed)),

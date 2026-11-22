@@ -1026,7 +1026,9 @@ fn render_get(reply: &GetReply, key: Option<&str>) -> String {
 fn render_status(status: &StatusReply) -> String {
     let mut lines = String::new();
     let peak = |db: Option<f64>| db.map_or_else(|| "-".to_string(), |db| format!("{db:.1}"));
-    let modified = if status.modified { "yes" } else { "no" };
+    let modified = status
+        .modified
+        .map_or("-", |modified| if modified { "yes" } else { "no" });
     let _ = writeln!(lines, "preset: {}", shown(status.preset.as_deref()));
     let _ = writeln!(lines, "program: {}", or_dash(status.program));
     let _ = writeln!(lines, "modified: {modified}");

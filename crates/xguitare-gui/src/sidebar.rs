@@ -418,7 +418,7 @@ fn preset_heading(ui: &mut Ui, snapshot: &Snapshot) {
     let program = status
         .and_then(|status| status.program)
         .map(|program| format!("Program {program}"));
-    let modified = status.is_some_and(|status| status.modified);
+    let modified = status.is_some_and(|status| status.modified == Some(true));
     let line: Vec<String> = program
         .into_iter()
         .chain(modified.then(|| UNSAVED.to_string()))

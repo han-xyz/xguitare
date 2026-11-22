@@ -135,6 +135,20 @@ fn status_format() {
 }
 
 #[test]
+fn a_status_without_modified_prints_a_dash() {
+    let out = cli(
+        &["status"],
+        reply(r#"{"ok":true,"preset":"Clean","program":0,"connections":[]}"#),
+    );
+    assert!(
+        out.stdout
+            .starts_with("preset: Clean\nprogram: 0\nmodified: -\n"),
+        "{}",
+        out.stdout
+    );
+}
+
+#[test]
 fn get_format() {
     let out = cli(
         &["get", "gain"],

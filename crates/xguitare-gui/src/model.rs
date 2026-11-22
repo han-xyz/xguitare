@@ -1802,7 +1802,6 @@ pub fn engine_readout(status: Option<&StatusReply>) -> Vec<(String, String)> {
         ("Rate", format!("{} kHz", rate as f64 / 1000.0)),
         ("Buffer", format!("{buffer} frames")),
         ("Latency", format!("{:.1} ms", latency_ms(buffer, rate))),
-        // A status without `xruns` shows the JSON text the untyped reader showed for it.
         (
             "Xruns",
             status

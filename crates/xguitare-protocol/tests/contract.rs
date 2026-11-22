@@ -784,7 +784,7 @@ fn null_peaks_and_volumes_read_as_none_and_are_written_as_null() {
 fn keys_an_older_daemon_leaves_out_read_as_none() {
     let mut payload = status_with_a_project();
     let fields = payload.as_object_mut().unwrap();
-    for key in ["metronome", "disk_overflows", "muted", "xruns"] {
+    for key in ["metronome", "disk_overflows", "muted", "modified", "xruns"] {
         fields.remove(key);
     }
     payload["tracks"][0]["sends"][0]
@@ -796,6 +796,7 @@ fn keys_an_older_daemon_leaves_out_read_as_none() {
     assert_eq!(reply.metronome, None);
     assert_eq!(reply.disk_overflows, None);
     assert_eq!(reply.muted, None);
+    assert_eq!(reply.modified, None);
     assert_eq!(reply.xruns, None);
     assert_eq!(reply.tracks[0].sends[0].level_db, None);
     assert_eq!(reply.tempo.unwrap().meter, None);

@@ -81,9 +81,9 @@ pub struct StatusReply {
     pub buffer_size: u32,
     pub prepared_frames: usize,
     pub revision: u64,
-    /// `None` when the key is missing, here and in `xruns`, `metronome` and `disk_overflows`: an older Daemon did not send it, so the client shows no value.
+    /// `None` when the key is missing, here and in `modified`, `xruns`, `metronome` and `disk_overflows`: an older Daemon did not send it, so the client shows no value.
     pub muted: Option<bool>,
-    pub modified: bool,
+    pub modified: Option<bool>,
     /// `null` when the peak is not a finite number.
     pub input_peak_db: Option<f64>,
     pub output_peak_db: Option<f64>,
@@ -127,7 +127,7 @@ impl Default for StatusReply {
             prepared_frames: 0,
             revision: 0,
             muted: None,
-            modified: false,
+            modified: None,
             input_peak_db: None,
             output_peak_db: None,
             xruns: None,
